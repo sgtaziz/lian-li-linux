@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { useDeviceStore } from "../stores/devices";
 import { useConfigStore } from "../stores/config";
-import { Monitor, Image, Fan, Settings, Sun, Moon } from "lucide-vue-next";
+import { Monitor, Image, Fan, Palette, Settings, Sun, Moon } from "lucide-vue-next";
 
 const deviceStore = useDeviceStore();
 const configStore = useConfigStore();
@@ -19,6 +19,7 @@ const navItems = [
   { path: "/", label: "Devices", icon: Monitor },
   { path: "/lcd", label: "LCD", icon: Image },
   { path: "/fans", label: "Fans", icon: Fan },
+  { path: "/rgb", label: "RGB", icon: Palette },
   { path: "/settings", label: "Settings", icon: Settings },
 ];
 </script>

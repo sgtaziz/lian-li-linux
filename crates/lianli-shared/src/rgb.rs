@@ -261,6 +261,9 @@ pub struct RgbZoneConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RgbDeviceConfig {
     pub device_id: String,
+    /// Use motherboard ARGB header instead of software-controlled effects.
+    #[serde(default)]
+    pub mb_rgb_sync: bool,
     pub zones: Vec<RgbZoneConfig>,
 }
 
@@ -286,7 +289,7 @@ fn default_true() -> bool {
 }
 
 fn default_openrgb_port() -> u16 {
-    6742
+    6743
 }
 
 impl Default for RgbAppConfig {
@@ -316,6 +319,8 @@ pub struct RgbDeviceCapabilities {
     pub zones: Vec<RgbZoneInfo>,
     /// Whether this device supports per-LED direct color control.
     pub supports_direct: bool,
+    /// Whether this device supports motherboard ARGB sync.
+    pub supports_mb_rgb_sync: bool,
     /// Total number of LEDs across all zones.
     pub total_led_count: u16,
 }

@@ -41,6 +41,12 @@ const temp = computed(() => deviceStore.telemetry.coolant_temps[props.device.dev
         >
           Pump
         </span>
+        <span
+          v-if="device.has_rgb"
+          class="px-1.5 py-0.5 text-xs rounded bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300"
+        >
+          RGB
+        </span>
       </div>
     </div>
 

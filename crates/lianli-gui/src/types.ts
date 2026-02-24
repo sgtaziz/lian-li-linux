@@ -29,9 +29,11 @@ export interface DeviceInfo {
   has_lcd: boolean;
   has_fan: boolean;
   has_pump: boolean;
+  has_rgb: boolean;
   fan_count: number | null;
   per_fan_control: boolean | null;
   mb_sync_support: boolean;
+  rgb_zone_count: number | null;
   screen_width: number | null;
   screen_height: number | null;
 }
@@ -107,7 +109,105 @@ export interface AppConfig {
   lcds: LcdConfig[];
   fan_curves: FanCurve[];
   fans?: FanConfig;
+  rgb?: RgbAppConfig;
 }
+
+// ─── RGB Types ───
+
+export type RgbMode =
+  | "Off" | "Direct" | "Static" | "Rainbow" | "RainbowMorph"
+  | "Breathing" | "Runway" | "Meteor" | "ColorCycle" | "Staggered"
+  | "Tide" | "Mixing" | "Voice" | "Door" | "Render"
+  | "Ripple" | "Reflect" | "TailChasing" | "Paint" | "PingPong"
+  | "Stack" | "CoverCycle" | "Wave" | "Racing" | "Lottery"
+  | "Intertwine" | "MeteorShower" | "Collide" | "ElectricCurrent" | "Kaleidoscope"
+  | "BigBang" | "Vortex" | "Pump" | "ColorsMorph";
+
+export type RgbDirection =
+  | "Clockwise" | "CounterClockwise" | "Up" | "Down" | "Spread" | "Gather";
+
+export type RgbScope = "All" | "Top" | "Bottom" | "Inner" | "Outer";
+
+export interface RgbEffect {
+  mode: RgbMode;
+  colors: [number, number, number][];
+  speed: number;
+  brightness: number;
+  direction: RgbDirection;
+  scope: RgbScope;
+}
+
+export interface RgbZoneConfig {
+  zone_index: number;
+  effect: RgbEffect;
+  swap_lr: boolean;
+  swap_tb: boolean;
+}
+
+export interface RgbDeviceConfig {
+  device_id: string;
+  mb_rgb_sync: boolean;
+  zones: RgbZoneConfig[];
+}
+
+export interface RgbAppConfig {
+  enabled: boolean;
+  openrgb_server: boolean;
+  openrgb_port: number;
+  devices: RgbDeviceConfig[];
+}
+
+export interface RgbZoneInfo {
+  name: string;
+  led_count: number;
+}
+
+export interface RgbDeviceCapabilities {
+  device_id: string;
+  device_name: string;
+  supported_modes: RgbMode[];
+  zones: RgbZoneInfo[];
+  supports_direct: boolean;
+  supports_mb_rgb_sync: boolean;
+  total_led_count: number;
+}
+
+export const RGB_MODE_NAMES: Record<RgbMode, string> = {
+  Off: "Off",
+  Direct: "Direct",
+  Static: "Static",
+  Rainbow: "Rainbow",
+  RainbowMorph: "Rainbow Morph",
+  Breathing: "Breathing",
+  Runway: "Runway",
+  Meteor: "Meteor",
+  ColorCycle: "Color Cycle",
+  Staggered: "Staggered",
+  Tide: "Tide",
+  Mixing: "Mixing",
+  Voice: "Voice",
+  Door: "Door",
+  Render: "Render",
+  Ripple: "Ripple",
+  Reflect: "Reflect",
+  TailChasing: "Tail Chasing",
+  Paint: "Paint",
+  PingPong: "Ping Pong",
+  Stack: "Stack",
+  CoverCycle: "Cover Cycle",
+  Wave: "Wave",
+  Racing: "Racing",
+  Lottery: "Lottery",
+  Intertwine: "Intertwine",
+  MeteorShower: "Meteor Shower",
+  Collide: "Collide",
+  ElectricCurrent: "Electric Current",
+  Kaleidoscope: "Kaleidoscope",
+  BigBang: "Big Bang",
+  Vortex: "Vortex",
+  Pump: "Pump",
+  ColorsMorph: "Colors Morph",
+};
 
 export interface TelemetrySnapshot {
   fan_rpms: Record<string, number[]>;

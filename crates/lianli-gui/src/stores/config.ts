@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, LcdConfig, FanConfig, FanCurve } from "../types";
+import type { AppConfig, LcdConfig, FanConfig, FanCurve, RgbAppConfig } from "../types";
 
 export const useConfigStore = defineStore("config", () => {
   const config = ref<AppConfig | null>(null);
@@ -12,6 +12,7 @@ export const useConfigStore = defineStore("config", () => {
   const lcds = computed(() => config.value?.lcds ?? []);
   const fanCurves = computed(() => config.value?.fan_curves ?? []);
   const fanConfig = computed(() => config.value?.fans ?? null);
+  const rgbConfig = computed(() => config.value?.rgb ?? null);
 
   async function load() {
     try {
@@ -76,6 +77,12 @@ export const useConfigStore = defineStore("config", () => {
     dirty.value = true;
   }
 
+  function updateRgbConfig(rgb: RgbAppConfig) {
+    if (!config.value) return;
+    config.value.rgb = rgb;
+    dirty.value = true;
+  }
+
   return {
     config,
     loading,
@@ -84,6 +91,7 @@ export const useConfigStore = defineStore("config", () => {
     lcds,
     fanCurves,
     fanConfig,
+    rgbConfig,
     load,
     save,
     updateLcd,
@@ -92,5 +100,6 @@ export const useConfigStore = defineStore("config", () => {
     updateFanCurves,
     updateFanConfig,
     setDefaultFps,
+    updateRgbConfig,
   };
 });

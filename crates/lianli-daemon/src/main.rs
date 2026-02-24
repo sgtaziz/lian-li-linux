@@ -1,6 +1,7 @@
 mod config_watcher;
 mod fan_controller;
 mod ipc_server;
+mod openrgb_server;
 mod rgb_controller;
 mod service;
 

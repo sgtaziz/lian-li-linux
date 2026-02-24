@@ -57,6 +57,9 @@ pub trait AioDevice: FanDevice {
 /// - **Direct mode**: Set per-LED colors directly. Used by OpenRGB `UpdateLEDs`.
 ///   For wired devices, maps to Static mode. For wireless, streams RGB frames via RF.
 pub trait RgbDevice: Send + Sync {
+    /// Human-readable device name (e.g., "UNI FAN TL Controller").
+    fn device_name(&self) -> String;
+
     /// Supported LED effect modes for this device.
     fn supported_modes(&self) -> Vec<RgbMode>;
 
@@ -97,5 +100,17 @@ pub trait RgbDevice: Send + Sync {
     /// When false, `set_direct_colors` maps to Static mode with the first color.
     fn supports_direct(&self) -> bool {
         false
+    }
+
+    /// Whether this device supports motherboard ARGB sync (passthrough from MB header).
+    fn supports_mb_rgb_sync(&self) -> bool {
+        false
+    }
+
+    /// Enable or disable motherboard ARGB sync.
+    /// When enabled, the device reads ARGB from the motherboard header instead of using
+    /// software-controlled effects.
+    fn set_mb_rgb_sync(&self, _enabled: bool) -> Result<()> {
+        anyhow::bail!("MB RGB sync not supported by this device")
     }
 }

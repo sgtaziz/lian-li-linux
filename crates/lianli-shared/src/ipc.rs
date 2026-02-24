@@ -1,7 +1,7 @@
 use crate::config::{AppConfig, LcdConfig};
 use crate::device_id::DeviceFamily;
 use crate::fan::FanConfig;
-use crate::rgb::{RgbAppConfig, RgbDeviceCapabilities, RgbEffect};
+use crate::rgb::{RgbAppConfig, RgbEffect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -41,6 +41,11 @@ pub enum IpcRequest {
         zone: u8,
         /// RGB triplets, one per LED.
         colors: Vec<[u8; 3]>,
+    },
+    /// Enable/disable motherboard ARGB sync for a device.
+    SetMbRgbSync {
+        device_id: String,
+        enabled: bool,
     },
     /// Update the RGB configuration section.
     SetRgbConfig {

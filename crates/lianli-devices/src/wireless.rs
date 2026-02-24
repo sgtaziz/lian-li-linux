@@ -90,6 +90,19 @@ impl WirelessFanType {
         }
     }
 
+    /// Human-readable display name for this fan type.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Slv3Led => "UNI FAN SL V3 Wireless",
+            Self::Slv3Lcd => "UNI FAN SL V3 Wireless LCD",
+            Self::Tlv2Lcd => "UNI FAN TL Wireless LCD",
+            Self::Tlv2Led => "UNI FAN TL Wireless",
+            Self::SlInf => "UNI FAN SL-INF Wireless",
+            Self::Clv1 => "UNI FAN CL Wireless",
+            Self::Unknown => "Wireless Fan",
+        }
+    }
+
     /// Number of addressable LEDs per fan for this device type.
     ///
     /// From L-Connect 3 decompiled source (RfDevice.cs rgb data arrays):

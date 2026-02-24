@@ -313,6 +313,10 @@ impl AioDevice for Galahad2TrinityController {
 ///   Zone 0 = Pump head (inner + outer LEDs)
 ///   Zone 1 = Radiator fans
 impl RgbDevice for Galahad2TrinityController {
+    fn device_name(&self) -> String {
+        "Galahad II Trinity AIO".to_string()
+    }
+
     fn supported_modes(&self) -> Vec<RgbMode> {
         vec![
             RgbMode::Off,
@@ -358,5 +362,21 @@ impl RgbDevice for Galahad2TrinityController {
             1 => self.set_fan_light(effect, true, false),
             _ => bail!("Galahad2 Trinity: zone {zone} out of range (0-1)"),
         }
+    }
+
+    fn supports_mb_rgb_sync(&self) -> bool {
+        true
+    }
+
+    fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
+        // From decompiled Galahad2TrinityDevice.cs:
+        // Pump: byte[18] = ARGBSignalSource (0=MCU, 1=Motherboard)
+        // Fan:  byte[17] = ARGBSignalSource (0=MCU, 1=Motherboard)
+        let source_mcu = !enabled;
+        let dummy = RgbEffect::default();
+        self.set_pump_light(&dummy, source_mcu)?;
+        self.set_fan_light(&dummy, source_mcu, false)?;
+        debug!("Set MB RGB sync: enabled={enabled}");
+        Ok(())
     }
 }

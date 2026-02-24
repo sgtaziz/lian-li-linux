@@ -1,6 +1,7 @@
 use crate::config_watcher::ConfigWatcher;
 use crate::fan_controller::FanController;
 use crate::ipc_server::{self, DaemonState};
+use crate::openrgb_server;
 use crate::rgb_controller::RgbController;
 use anyhow::Result;
 use lianli_devices::crypto::PacketBuilder;
@@ -50,6 +51,8 @@ pub struct ServiceManager {
     ipc_state: Arc<Mutex<DaemonState>>,
     ipc_stop: Arc<AtomicBool>,
     ipc_thread: Option<JoinHandle<()>>,
+    openrgb_stop: Arc<AtomicBool>,
+    openrgb_thread: Option<JoinHandle<()>>,
 }
 
 impl ServiceManager {
@@ -73,6 +76,8 @@ impl ServiceManager {
             ipc_state,
             ipc_stop: Arc::new(AtomicBool::new(false)),
             ipc_thread: None,
+            openrgb_stop: Arc::new(AtomicBool::new(false)),
+            openrgb_thread: None,
         })
     }
 
@@ -115,6 +120,7 @@ impl ServiceManager {
         self.try_wireless();
         self.open_wired_fan_devices();
         self.init_rgb_controller();
+        self.start_openrgb_server();
         self.start_fan_control();
 
         while self.running {
@@ -302,6 +308,12 @@ impl ServiceManager {
 
         self.wireless.stop();
 
+        // Stop OpenRGB server
+        self.openrgb_stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.openrgb_thread.take() {
+            let _ = thread.join();
+        }
+
         // Stop IPC server
         self.ipc_stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.ipc_thread.take() {
@@ -406,6 +418,33 @@ impl ServiceManager {
             if let Some(ref rgb_cfg) = cfg.rgb {
                 rgb.lock().apply_config(rgb_cfg);
             }
+        }
+    }
+
+    /// Start the OpenRGB SDK server if enabled in config and we have an RGB controller.
+    fn start_openrgb_server(&mut self) {
+        if self.openrgb_thread.is_some() {
+            return; // Already running
+        }
+
+        let (enabled, port) = self
+            .config
+            .as_ref()
+            .and_then(|c| c.rgb.as_ref())
+            .map(|rgb| (rgb.openrgb_server, rgb.openrgb_port))
+            .unwrap_or((false, 6742));
+
+        if !enabled {
+            return;
+        }
+
+        if let Some(ref rgb) = self.rgb_controller {
+            self.openrgb_stop.store(false, Ordering::Relaxed);
+            self.openrgb_thread = Some(openrgb_server::start_openrgb_server(
+                Arc::clone(rgb),
+                port,
+                Arc::clone(&self.openrgb_stop),
+            ));
         }
     }
 

@@ -17,6 +17,10 @@ fn main() {
             commands::set_config,
             commands::set_lcd_media,
             commands::set_fan_config,
+            commands::get_rgb_capabilities,
+            commands::set_rgb_effect,
+            commands::set_mb_rgb_sync,
+            commands::set_rgb_config,
             commands::pick_media_file,
         ])
         .run(tauri::generate_context!())

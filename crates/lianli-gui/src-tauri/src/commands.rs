@@ -4,6 +4,7 @@ use crate::ipc_client;
 use lianli_shared::config::{AppConfig, LcdConfig};
 use lianli_shared::fan::FanConfig;
 use lianli_shared::ipc::{DeviceInfo, IpcRequest, TelemetrySnapshot};
+use lianli_shared::rgb::{RgbAppConfig, RgbDeviceCapabilities, RgbEffect};
 
 #[tauri::command]
 pub fn connect_daemon() -> Result<bool, String> {
@@ -50,6 +51,35 @@ pub fn set_lcd_media(device_id: String, config: LcdConfig) -> Result<(), String>
 #[tauri::command]
 pub fn set_fan_config(config: FanConfig) -> Result<(), String> {
     let resp = ipc_client::send_request(&IpcRequest::SetFanConfig { config })?;
+    ipc_client::unwrap_response::<serde_json::Value>(resp)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_rgb_capabilities() -> Result<Vec<RgbDeviceCapabilities>, String> {
+    let resp = ipc_client::send_request(&IpcRequest::GetRgbCapabilities)?;
+    ipc_client::unwrap_response(resp)
+}
+
+#[tauri::command]
+pub fn set_rgb_effect(device_id: String, zone: u8, effect: RgbEffect) -> Result<(), String> {
+    let resp =
+        ipc_client::send_request(&IpcRequest::SetRgbEffect { device_id, zone, effect })?;
+    ipc_client::unwrap_response::<serde_json::Value>(resp)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_mb_rgb_sync(device_id: String, enabled: bool) -> Result<(), String> {
+    let resp =
+        ipc_client::send_request(&IpcRequest::SetMbRgbSync { device_id, enabled })?;
+    ipc_client::unwrap_response::<serde_json::Value>(resp)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_rgb_config(config: RgbAppConfig) -> Result<(), String> {
+    let resp = ipc_client::send_request(&IpcRequest::SetRgbConfig { config })?;
     ipc_client::unwrap_response::<serde_json::Value>(resp)?;
     Ok(())
 }

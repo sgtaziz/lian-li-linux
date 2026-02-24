@@ -5,7 +5,7 @@
 //! compressed per-LED frames via the `WirelessController`.
 
 use lianli_devices::traits::RgbDevice;
-use lianli_devices::wireless::WirelessController;
+use lianli_devices::wireless::{WirelessController, WirelessFanType};
 use lianli_shared::rgb::{RgbAppConfig, RgbDeviceCapabilities, RgbEffect, RgbMode, RgbZoneInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,8 +16,27 @@ struct WirelessRgbState {
     mac: [u8; 6],
     fan_count: u8,
     leds_per_fan: u8,
+    fan_type: WirelessFanType,
+    /// Per-LED color buffer — the full device LED state.
+    /// Updated per-zone, then the whole buffer is sent via RF.
+    led_state: Vec<[u8; 3]>,
     /// Monotonically increasing effect index (4 bytes, sent in RF header).
     effect_counter: u32,
+}
+
+impl WirelessRgbState {
+    fn new(mac: [u8; 6], fan_count: u8, fan_type: WirelessFanType) -> Self {
+        let leds_per_fan = fan_type.leds_per_fan();
+        let total_leds = fan_count as usize * leds_per_fan as usize;
+        Self {
+            mac,
+            fan_count,
+            leds_per_fan,
+            fan_type,
+            led_state: vec![[0, 0, 0]; total_leds],
+            effect_counter: 0,
+        }
+    }
 }
 
 pub struct RgbController {
@@ -46,12 +65,7 @@ impl RgbController {
                 let device_id = format!("wireless:{}", dev.mac_str());
                 wireless_state.insert(
                     device_id,
-                    WirelessRgbState {
-                        mac: dev.mac,
-                        fan_count: dev.fan_count,
-                        leds_per_fan: dev.fan_type.leds_per_fan(),
-                        effect_counter: 0,
-                    },
+                    WirelessRgbState::new(dev.mac, dev.fan_count, dev.fan_type),
                 );
             }
         }
@@ -113,20 +127,36 @@ impl RgbController {
             return Ok(());
         }
 
-        // Try wireless
+        // Try wireless — update only the target zone's LEDs, then send the full buffer
         if let (Some(ref wireless), Some(state)) =
             (&self.wireless, self.wireless_state.get_mut(device_id))
         {
-            let total_leds = state.fan_count as usize * state.leds_per_fan as usize;
-            let colors = render_solid_colors(effect, total_leds);
+            let lpf = state.leds_per_fan as usize;
+            let zone_idx = zone as usize;
 
+            if zone_idx >= state.fan_count as usize {
+                anyhow::bail!(
+                    "Zone {zone} out of range (device has {} fans)",
+                    state.fan_count
+                );
+            }
+
+            // Render this zone's LED colors
+            let zone_color = render_zone_color(effect, lpf);
+
+            // Update only this zone's slice in the full LED state buffer
+            let start = zone_idx * lpf;
+            let end = start + lpf;
+            state.led_state[start..end].copy_from_slice(&zone_color);
+
+            // Send the full device LED state
             state.effect_counter = state.effect_counter.wrapping_add(1);
             let idx = state.effect_counter.to_be_bytes();
 
-            wireless.send_rgb_direct(&state.mac, &colors, &idx)?;
+            wireless.send_rgb_direct(&state.mac, &state.led_state, &idx)?;
             debug!(
-                "Set wireless RGB on {device_id}: {:?}, {} LEDs",
-                effect.mode, total_leds
+                "Set wireless RGB on {device_id} zone {zone}: {:?}, {} LEDs/fan",
+                effect.mode, lpf
             );
             return Ok(());
         }
@@ -147,13 +177,27 @@ impl RgbController {
             return Ok(());
         }
 
-        // Try wireless — direct color is the native mode
+        // Try wireless — update zone's LEDs and send full buffer
         if let (Some(ref wireless), Some(state)) =
             (&self.wireless, self.wireless_state.get_mut(device_id))
         {
+            let lpf = state.leds_per_fan as usize;
+            let zone_idx = zone as usize;
+
+            if zone_idx >= state.fan_count as usize {
+                anyhow::bail!(
+                    "Zone {zone} out of range (device has {} fans)",
+                    state.fan_count
+                );
+            }
+
+            let start = zone_idx * lpf;
+            let copy_len = colors.len().min(lpf);
+            state.led_state[start..start + copy_len].copy_from_slice(&colors[..copy_len]);
+
             state.effect_counter = state.effect_counter.wrapping_add(1);
             let idx = state.effect_counter.to_be_bytes();
-            wireless.send_rgb_direct(&state.mac, colors, &idx)?;
+            wireless.send_rgb_direct(&state.mac, &state.led_state, &idx)?;
             return Ok(());
         }
 
@@ -168,10 +212,11 @@ impl RgbController {
         for (device_id, dev) in &self.wired {
             caps.push(RgbDeviceCapabilities {
                 device_id: device_id.clone(),
-                device_name: device_id.clone(),
+                device_name: dev.device_name(),
                 supported_modes: dev.supported_modes(),
                 zones: dev.zone_info(),
                 supports_direct: dev.supports_direct(),
+                supports_mb_rgb_sync: dev.supports_mb_rgb_sync(),
                 total_led_count: dev.total_led_count(),
             });
         }
@@ -189,15 +234,33 @@ impl RgbController {
 
             caps.push(RgbDeviceCapabilities {
                 device_id: device_id.clone(),
-                device_name: device_id.clone(),
+                device_name: state.fan_type.display_name().to_string(),
                 supported_modes: vec![RgbMode::Static, RgbMode::Direct],
                 zones,
                 supports_direct: true,
+                supports_mb_rgb_sync: false,
                 total_led_count: total_leds,
             });
         }
 
         caps
+    }
+
+    /// Enable or disable motherboard ARGB sync for a device.
+    pub fn set_mb_rgb_sync(
+        &self,
+        device_id: &str,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        if let Some(dev) = self.wired.get(device_id) {
+            if !dev.supports_mb_rgb_sync() {
+                anyhow::bail!("Device {device_id} does not support MB RGB sync");
+            }
+            dev.set_mb_rgb_sync(enabled)?;
+            info!("MB RGB sync {}: {device_id}", if enabled { "enabled" } else { "disabled" });
+            return Ok(());
+        }
+        anyhow::bail!("RGB device not found: {device_id}");
     }
 
     /// Called when OpenRGB connects — suppress native config.
@@ -215,36 +278,37 @@ impl RgbController {
         }
     }
 
-    /// Refresh wireless device list (call after rediscovery).
+    /// Refresh wireless device list (call after rediscovery / hot-plug).
+    #[allow(dead_code)]
     pub fn refresh_wireless_devices(&mut self) {
         if let Some(ref w) = self.wireless {
             let mut new_state = HashMap::new();
             for dev in w.devices() {
                 let device_id = format!("wireless:{}", dev.mac_str());
-                // Preserve existing effect counter if device was already known
-                let counter = self
+                // Preserve existing LED state and effect counter if device was already known
+                let (counter, led_state) = self
                     .wireless_state
                     .get(&device_id)
-                    .map(|s| s.effect_counter)
-                    .unwrap_or(0);
-                new_state.insert(
-                    device_id,
-                    WirelessRgbState {
-                        mac: dev.mac,
-                        fan_count: dev.fan_count,
-                        leds_per_fan: dev.fan_type.leds_per_fan(),
-                        effect_counter: counter,
-                    },
-                );
+                    .map(|s| (s.effect_counter, Some(s.led_state.clone())))
+                    .unwrap_or((0, None));
+
+                let mut state = WirelessRgbState::new(dev.mac, dev.fan_count, dev.fan_type);
+                state.effect_counter = counter;
+                if let Some(leds) = led_state {
+                    if leds.len() == state.led_state.len() {
+                        state.led_state = leds;
+                    }
+                }
+
+                new_state.insert(device_id, state);
             }
             self.wireless_state = new_state;
         }
     }
 }
 
-/// Render a solid color array from an RgbEffect for the given LED count.
-/// For Static mode, all LEDs get the first color. For Off, all LEDs are black.
-fn render_solid_colors(effect: &RgbEffect, total_leds: usize) -> Vec<[u8; 3]> {
+/// Render a solid color array for a single zone from an RgbEffect.
+fn render_zone_color(effect: &RgbEffect, led_count: usize) -> Vec<[u8; 3]> {
     let color = match effect.mode {
         RgbMode::Off => [0, 0, 0],
         _ => {
@@ -258,5 +322,5 @@ fn render_solid_colors(effect: &RgbEffect, total_leds: usize) -> Vec<[u8; 3]> {
             ]
         }
     };
-    vec![color; total_leds]
+    vec![color; led_count]
 }

@@ -429,6 +429,10 @@ impl FanDevice for Ene6k77Controller {
 
 /// ENE 6K77 LED zones: one zone per group (4 groups).
 impl RgbDevice for Ene6k77Controller {
+    fn device_name(&self) -> String {
+        "UNI FAN SL/AL Controller".to_string()
+    }
+
     fn supported_modes(&self) -> Vec<RgbMode> {
         vec![
             RgbMode::Off,
@@ -461,5 +465,26 @@ impl RgbDevice for Ene6k77Controller {
 
     fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
         self.set_group_effect(zone, effect)
+    }
+
+    fn supports_mb_rgb_sync(&self) -> bool {
+        true
+    }
+
+    fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
+        // From decompiled L-Connect 3 SetLightingMotherboardSync():
+        //   SL/SL Redragon:        [0xE0, 0x10, 0x30, isSync, 0, 0]  (SLFanDevice.cs:151)
+        //   AL:                    [0xE0, 0x10, 0x41, isSync, 0, 0]  (ALFanDevice.cs:151)
+        //   SLV2/ALV2/SL Infinity: [0xE0, 0x10, 0x61, isSync, 0, 0]  (SLV2FanDevice.cs:160)
+        let sub_cmd = match self.model {
+            Ene6k77Model::SlFan | Ene6k77Model::SlRedragon => 0x30,
+            Ene6k77Model::AlFan => 0x41,
+            Ene6k77Model::SlV2Fan | Ene6k77Model::SlV2aFan
+            | Ene6k77Model::AlV2Fan | Ene6k77Model::SlInfinity => 0x61,
+        };
+        self.send_feature(&[REPORT_ID, 0x10, sub_cmd, enabled as u8, 0, 0])?;
+        thread::sleep(CMD_DELAY);
+        debug!("Set MB RGB sync: enabled={enabled} (model={:?}, sub_cmd=0x{sub_cmd:02x})", self.model);
+        Ok(())
     }
 }

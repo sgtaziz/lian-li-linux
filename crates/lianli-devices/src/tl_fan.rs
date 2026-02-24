@@ -32,7 +32,6 @@ const CMD_SET_MB_RPM_SYNC: u8 = 0xB1;
 // Commands — LED control (from decompiled L-Connect 3 LEDCommands.cs)
 const CMD_SET_FAN_LIGHT: u8 = 0xA3;
 const CMD_SET_FAN_GROUP_LIGHT: u8 = 0xB0;
-const CMD_SET_FAN_GROUP: u8 = 0xAD;
 const CMD_SET_FAN_DIRECTION: u8 = 0xAE;
 const CMD_SET_PORT_DIRECTION: u8 = 0xAF;
 
@@ -525,6 +524,10 @@ impl FanDevice for TlFanController {
 /// TL Fan LED zones: one zone per active port (port with detected fans).
 /// Each zone covers all fans on that port via SetFanGroupLight.
 impl RgbDevice for TlFanController {
+    fn device_name(&self) -> String {
+        "UNI FAN TL Controller".to_string()
+    }
+
     fn supported_modes(&self) -> Vec<RgbMode> {
         vec![
             RgbMode::Off,
@@ -599,5 +602,33 @@ impl RgbDevice for TlFanController {
 
         // Use group 0 for the port (SetFanGroupLight targets all fans in the group)
         self.set_group_light(port, effect)
+    }
+
+    fn supports_mb_rgb_sync(&self) -> bool {
+        true
+    }
+
+    fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
+        // From decompiled TLFanDevice.cs: SetFanLight(port, fanIndex, config, isSync, disable)
+        // is called with isSync=true for each fan.
+        // The isSync flag is in data byte 0, bit 0: (port << 4) | isSync
+        // Command: 0xA3 (SetFanLight)
+        let port_fan_counts = {
+            let guard = self.last_handshake.lock();
+            guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("No handshake data"))?
+                .port_fan_counts
+        };
+
+        let dummy_effect = RgbEffect::default();
+        for (port, &fan_count) in port_fan_counts.iter().enumerate() {
+            for fan in 0..fan_count {
+                self.set_fan_light(port as u8, fan, &dummy_effect, enabled)?;
+            }
+        }
+
+        debug!("Set MB RGB sync: enabled={enabled}");
+        Ok(())
     }
 }
