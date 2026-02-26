@@ -25,8 +25,9 @@ const USB_CMD_GET_MAC: u8 = 0x11; // USB_GetMac
 
 // ── RF command codes (from L-Connect 3 RF_CMD enum) ──────────────────────────
 
-const RF_SELECT: u8 = 18; // RF_Select — carries fan PWM data
-const RF_SET_RGB: u8 = 32; // RF_SetRGB (0x20) — carries LED frame data
+const RF_SELECT: u8 = 0x12; // RF_Select — envelope/routing command
+const RF_PWM_CMD: u8 = 0x10; // RF_Bind — PWM sub-command (byte[1] for fan speed)
+const RF_SET_RGB: u8 = 0x20; // RF_SetRGB — carries LED frame data (byte[1] for RGB)
 
 // ── RF packet geometry ───────────────────────────────────────────────────────
 
@@ -580,15 +581,15 @@ impl WirelessController {
     /// Uses the device's own rx_type and channel from discovery, not a global
     /// value. This matches L-Connect 3's SyncPwm behavior.
     ///
-    /// ## RF_Select packet layout (240 bytes):
+    /// ## RF PWM packet layout (240 bytes):
     /// ```text
-    /// [0]     = 18 (RF_Select)
-    /// [1]     = 18 (RF_Select, repeated per L-Connect 3)
+    /// [0]     = 0x12 (RF_Select — envelope command)
+    /// [1]     = 0x10 (RF_Bind — PWM sub-command)
     /// [2-7]   = Device (slave) MAC address
     /// [8-13]  = Master MAC address
     /// [14]    = Target RX type (from device discovery)
     /// [15]    = Target channel (master channel)
-    /// [16]    = Bind/group flag
+    /// [16]    = Sequence index (1 for one-shot commands)
     /// [17-20] = Fan PWM values (4 bytes, one per fan slot)
     /// [21-239]= Reserved
     /// ```
@@ -612,15 +613,15 @@ impl WirelessController {
         let mut pwm = *fan_pwm;
         apply_pwm_constraints(&mut pwm, &device);
 
-        // Build RF_Select packet (240 bytes)
+        // Build RF PWM packet (240 bytes)
         let mut rf_data = vec![0u8; RF_DATA_SIZE];
-        rf_data[0] = RF_SELECT;            // RF_Select command
-        rf_data[1] = RF_SELECT;            // Repeated (L-Connect 3 convention)
+        rf_data[0] = RF_SELECT;            // RF_Select envelope command
+        rf_data[1] = RF_PWM_CMD;           // PWM sub-command (0x10)
         rf_data[2..8].copy_from_slice(&device.mac);
         rf_data[8..14].copy_from_slice(&master_mac);
         rf_data[14] = device.rx_type;      // Per-device RX type from discovery
         rf_data[15] = master_ch;           // Target channel = master channel
-        rf_data[16] = 0;                   // Bind/group flag
+        rf_data[16] = 1;                   // Sequence index (1 for one-shot)
         rf_data[17..21].copy_from_slice(&pwm);
 
         // Send as 4 USB packets (60-byte chunks)
