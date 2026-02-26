@@ -430,7 +430,7 @@ impl FanDevice for Ene6k77Controller {
 /// ENE 6K77 LED zones: one zone per group (4 groups).
 impl RgbDevice for Ene6k77Controller {
     fn device_name(&self) -> String {
-        "UNI FAN SL/AL Controller".to_string()
+        format!("UNI FAN {}", self.model.name())
     }
 
     fn supported_modes(&self) -> Vec<RgbMode> {
