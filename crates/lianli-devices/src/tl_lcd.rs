@@ -152,12 +152,9 @@ impl TlLcdDevice {
     pub fn apply_lcd_settings(&self) -> Result<()> {
         let mut payload = [0u8; 11];
         payload[0] = LcdControlMode::LcdSetting as u8;
-        // payload[1-2] = JPG index (0)
-        // payload[3] = reserved
         payload[4] = self.brightness;
         payload[5] = 30; // fps
         payload[6] = self.rotation as u8;
-        // payload[7-10] = test mode off
 
         self.send_command_with_response(CMD_LCD_CONTROL, &payload)?;
         debug!(
@@ -186,8 +183,6 @@ impl TlLcdDevice {
         self.identity.as_ref().map(|i| i.serial.as_str())
     }
 
-    // -- Internal helpers --
-
     /// Send data in 501-byte chunks as multiple 512-byte HID packets.
     fn send_chunked(&self, cmd: u8, data: &[u8], read_response: bool) -> Result<()> {
         let total_size = data.len();
@@ -206,7 +201,6 @@ impl TlLcdDevice {
             packet_num += 1;
         }
 
-        // Handle empty data (send one empty packet)
         if total_size == 0 {
             let pkt = build_packet(cmd, 0, 0, &[]);
             dev.write(&pkt).context("TLLCD: write empty packet")?;
@@ -307,8 +301,6 @@ impl LcdDevice for TlLcdDevice {
         Ok(())
     }
 }
-
-// -- Packet construction --
 
 /// Build a 512-byte TLLCD HID packet.
 fn build_packet(cmd: u8, total_data_size: u32, packet_num: u32, payload: &[u8]) -> [u8; PACKET_SIZE] {

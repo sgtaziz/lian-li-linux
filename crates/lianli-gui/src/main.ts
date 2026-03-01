@@ -4,7 +4,6 @@ import { router } from "./router";
 import App from "./App.vue";
 import "./style.css";
 
-// Apply dark mode from localStorage (default: dark)
 const isDark = localStorage.getItem("theme") !== "light";
 document.documentElement.classList.toggle("dark", isDark);
 

@@ -11,31 +11,21 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
-// ── USB VID/PID ──────────────────────────────────────────────────────────────
-
 const TX_VENDOR: u16 = 0x0416;
 const TX_PRODUCT: u16 = 0x8040;
 const RX_VENDOR: u16 = 0x0416;
 const RX_PRODUCT: u16 = 0x8041;
 
-// ── USB command codes ────────────────────────
+const USB_CMD_SEND_RF: u8 = 0x10;
+const USB_CMD_GET_MAC: u8 = 0x11;
 
-const USB_CMD_SEND_RF: u8 = 0x10; // Usb_SendRf
-const USB_CMD_GET_MAC: u8 = 0x11; // USB_GetMac
+const RF_SELECT: u8 = 0x12;
+const RF_PWM_CMD: u8 = 0x10;
+const RF_SET_RGB: u8 = 0x20;
 
-// ── RF command codes ──────────────────────────
-
-const RF_SELECT: u8 = 0x12; // RF_Select — envelope/routing command
-const RF_PWM_CMD: u8 = 0x10; // RF_Bind — PWM sub-command (byte[1] for fan speed)
-const RF_SET_RGB: u8 = 0x20; // RF_SetRGB — carries LED frame data (byte[1] for RGB)
-
-// ── RF packet geometry ───────────────────────────────────────────────────────
-
-const RF_DATA_SIZE: usize = 240; // Total RF payload
-const RF_CHUNK_SIZE: usize = 60; // Payload per USB packet (64 - 4 header)
-const RF_CHUNKS: usize = RF_DATA_SIZE / RF_CHUNK_SIZE; // 4
-
-// ── Prebuilt USB commands ────────────────────────────────────────────────────
+const RF_DATA_SIZE: usize = 240;
+const RF_CHUNK_SIZE: usize = 60;
+const RF_CHUNKS: usize = RF_DATA_SIZE / RF_CHUNK_SIZE;
 
 static CMD_RESET: Lazy<Vec<u8>> = Lazy::new(|| decode_command("11080000"));
 static CMD_VIDEO_START: Lazy<Vec<u8>> = Lazy::new(|| decode_command("11010000"));
@@ -49,10 +39,9 @@ fn decode_command(prefix: &str) -> Vec<u8> {
     bytes
 }
 
-// ── Fan type classification ──────
-
 /// Wireless fan device type, determines minimum duty and RPM curves.
 ///
+/// Byte ranges for classifying fan type:
 /// ```text
 /// SLV3  (base 20): 20-26  (LED: 20-23, LCD: 24-26)
 /// TLV2  (base 27): 27-35  (LCD: 27,32-35, LED: 28-31)
@@ -105,6 +94,7 @@ impl WirelessFanType {
 
     /// Number of addressable LEDs per fan for this device type.
     ///
+    /// LED counts per device type:
     /// - TLV2: 104 LEDs per zone (UP/DOWN combined, ~26 per fan)
     /// - SLV3: 160 LEDs per zone (inner + outer rings, ~40 per fan)
     /// - SL-INF: 176 LEDs total across all fans (~44 per fan)
@@ -130,8 +120,9 @@ impl WirelessFanType {
 
     /// Classify fan type from the fan-type byte in the device record.
     ///
-    ///   `RecType[k] = (num < 27) ? SLV3Fan : (num < 36) ? TLV2Fan : SLINF`
-    /// Within SLV3/TLV2, bytes base+4..base+7 have LCD (BindLcd=true).
+    /// Byte ranges for classifying fan type:
+    ///   `(num < 27) ? SLV3Fan : (num < 36) ? TLV2Fan : SLINF`
+    /// Within SLV3/TLV2, bytes base+4..base+7 have LCD.
     fn from_fan_type_byte(b: u8) -> Self {
         match b {
             20..=23 => Self::Slv3Led,          // SLV3 LED (120/140, normal/reverse)
@@ -145,8 +136,6 @@ impl WirelessFanType {
         }
     }
 }
-
-// ── Device record parsed from GetDev response ────────────────────────────────
 
 /// A wireless device discovered via the RX GetDev command.
 /// Parsed from the 42-byte device record in the response.
@@ -205,6 +194,7 @@ impl fmt::Display for DiscoveredDevice {
 
 /// Parse a 42-byte device record from GetDev response.
 ///
+/// Record layout:
 /// ```text
 /// [0-5]   Device MAC (6 bytes)
 /// [6-11]  Master MAC (6 bytes)
@@ -250,7 +240,7 @@ fn parse_device_record(data: &[u8], list_index: u8) -> Option<DiscoveredDevice> 
 
     let channel = data[12];
     let rx_type = data[13];
-    let fan_count = data[19].min(4); // Cap at 4
+    let fan_count = data[19].min(4);
 
     let mut fan_types = [0u8; 4];
     fan_types.copy_from_slice(&data[24..28]);
@@ -290,8 +280,6 @@ fn parse_device_record(data: &[u8], list_index: u8) -> Option<DiscoveredDevice> 
         list_index,
     })
 }
-
-// ── WirelessController ───────────────────────────────────────────────────────
 
 pub struct WirelessController {
     tx: Option<Arc<Mutex<UsbTransport>>>,
@@ -383,8 +371,8 @@ impl WirelessController {
 
     /// Discovers master MAC address and channel by querying TX with USB_GetMac.
     ///
-    /// Tries the configured channel first, then scans.
-    /// Channels should be even numbers
+    /// Tries the default channel first, then scans.
+    /// Channels should be even numbers.
     fn discover_master_mac(&self) -> Result<()> {
         let tx = self.tx.as_ref().context("TX device not available")?;
         info!("Discovering master MAC address and wireless channel...");
@@ -889,12 +877,10 @@ impl Drop for WirelessController {
     }
 }
 
-// ── PWM constraints ──────────────────────────────────────────────────────────
-
 /// Apply minimum duty enforcement and CLV1 PWM filter.
 ///
-/// Enforces per-fan-type minimums and has special PWM
-/// remapping for CLV1 devices (values 153-155 → 152/156).
+/// Enforces per-fan-type minimums and special PWM remapping
+/// for CLV1 devices (values 153-155 → 152/156).
 fn apply_pwm_constraints(pwm: &mut [u8; 4], device: &DiscoveredDevice) {
     let min_pwm = ((device.fan_type.min_duty_percent() as f32 / 100.0) * 255.0) as u8;
 
@@ -920,8 +906,6 @@ fn apply_pwm_constraints(pwm: &mut [u8; 4], device: &DiscoveredDevice) {
         }
     }
 }
-
-// ── Discovery polling ────────────────────────────────────────────────────────
 
 /// Polls the RX device for the current device list.
 ///
@@ -1004,7 +988,6 @@ fn poll_and_discover(
                 offset += 42;
             }
 
-            // Update the shared device list
             let mut devices = discovered_devices.lock();
             if !found.is_empty() {
                 let old_count = devices.len();

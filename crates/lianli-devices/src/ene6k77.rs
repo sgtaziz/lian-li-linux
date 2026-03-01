@@ -270,8 +270,6 @@ impl Ene6k77Controller {
         self.firmware.as_ref()
     }
 
-    // -- LED control methods --
-
     /// Number of LEDs per fan for this model.
     pub fn leds_per_fan(&self) -> u16 {
         match self.model {
@@ -284,9 +282,6 @@ impl Ene6k77Controller {
     }
 
     /// Set LED effect for a group.
-    ///
-    /// From decompiled SLFanDevice.cs / ALFanDevice.cs.
-    /// Two-step: SetColorSetting (output report) then SetEffectSetting (feature report).
     ///
     /// **NOTE**: ENE uses R,B,G byte order (not R,G,B)!
     pub fn set_group_effect(&self, group: u8, effect: &RgbEffect) -> Result<()> {
@@ -334,8 +329,6 @@ impl Ene6k77Controller {
 
     /// Map RgbMode to ENE mode byte.
     fn map_mode_to_ene(&self, mode: RgbMode) -> u8 {
-        // ENE mode mapping (from decompiled LightingMode.cs)
-        // The ENE controllers share similar mode numbering to TL for basic effects
         match mode {
             RgbMode::Off => 0,
             RgbMode::Static => 1,
@@ -376,8 +369,6 @@ impl Ene6k77Controller {
             _ => 2,
         }
     }
-
-    // -- Low-level HID helpers --
 
     fn send_feature(&self, data: &[u8]) -> Result<()> {
         let dev = self.device.lock();
@@ -472,9 +463,8 @@ impl RgbDevice for Ene6k77Controller {
     }
 
     fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
-        //   SL/SL Redragon:        [0xE0, 0x10, 0x30, isSync, 0, 0]  (SLFanDevice.cs:151)
-        //   AL:                    [0xE0, 0x10, 0x41, isSync, 0, 0]  (ALFanDevice.cs:151)
-        //   SLV2/ALV2/SL Infinity: [0xE0, 0x10, 0x61, isSync, 0, 0]  (SLV2FanDevice.cs:160)
+        // Sub-command varies by model:
+        //   SL/SL Redragon: 0x30, AL: 0x41, SLV2/ALV2/SL Infinity: 0x61
         let sub_cmd = match self.model {
             Ene6k77Model::SlFan | Ene6k77Model::SlRedragon => 0x30,
             Ene6k77Model::AlFan => 0x41,

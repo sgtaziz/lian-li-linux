@@ -17,7 +17,7 @@ extern "C" {
     fn tuz_max_compressed_size(input_len: usize) -> usize;
 }
 
-/// Default dictionary size matching
+/// Default dictionary size (4KB).
 const DICT_SIZE_4K: usize = 4096;
 
 /// Compress data using tinyuz with a 4KB dictionary.

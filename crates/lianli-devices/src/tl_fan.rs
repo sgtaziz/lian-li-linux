@@ -109,7 +109,6 @@ impl TlFanController {
 
                 // Set up fan groups so the firmware recognizes all fans for LED control.
                 // Without this, only fan 0 on each port responds to SetFanLight (0xA3).
-                // From decompiled TLFanController.cs: setLightGroup() always precedes setLighting().
                 if let Err(e) = self.setup_fan_groups(&hs.port_fan_counts) {
                     warn!("  Failed to set up fan groups: {e}");
                 }
@@ -293,12 +292,9 @@ impl TlFanController {
             .unwrap_or(0)
     }
 
-    // -- LED control methods --
-
     /// Set LED effect for a fan group on a port.
     ///
     /// Uses SetFanGroupLight (0xB0) command with 20-byte payload.
-    /// From decompiled TLFanDevice.cs SetGroupLight().
     ///
     /// Payload layout:
     /// ```text
@@ -349,7 +345,6 @@ impl TlFanController {
     /// Set LED effect for a specific fan on a port.
     ///
     /// Uses SetFanLight (0xA3) command with 20-byte payload.
-    /// From decompiled TLFanDevice.cs SetFanLight().
     ///
     /// Payload layout:
     /// ```text
@@ -401,7 +396,6 @@ impl TlFanController {
 
     /// Set fan direction flags for a specific fan.
     ///
-    /// From decompiled TLFanDevice.cs SetFanDirection().
     /// Data: `[(port<<4)|fanIndex, (swapTopBot<<1)|swapLR]`
     pub fn set_fan_direction(&self, port: u8, fan_index: u8, swap_lr: bool, swap_tb: bool) -> Result<()> {
         let addr = (port << 4) | (fan_index & 0x0F);
@@ -413,15 +407,12 @@ impl TlFanController {
 
     /// Set port-level direction swap.
     ///
-    /// From decompiled TLFanDevice.cs SetPortDirection().
     /// Data: `[(port<<4), isSwap]`
     pub fn set_port_direction(&self, port: u8, swap: bool) -> Result<()> {
         self.send_command_quiet(CMD_SET_PORT_DIRECTION, &[port << 4, swap as u8])?;
         debug!("Set port {port} direction swap={swap}");
         Ok(())
     }
-
-    // -- Low-level packet helpers --
 
     /// Build a TL Fan packet.
     fn build_packet(cmd: u8, data: &[u8]) -> [u8; PACKET_SIZE] {
@@ -497,7 +488,6 @@ impl FanDevice for TlFanController {
     }
 
     fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
-        // Set speed per port
         for (port, &duty) in duties.iter().take(4).enumerate() {
             self.set_port_speed(port as u8, duty)?;
         }
@@ -505,13 +495,11 @@ impl FanDevice for TlFanController {
     }
 
     fn read_fan_rpm(&self) -> Result<Vec<u16>> {
-        // Refresh handshake for live RPM data
         let _ = self.handshake();
 
         let guard = self.last_handshake.lock();
         match guard.as_ref() {
             Some(hs) => {
-                // Return per-fan RPMs ordered by port then fan_index
                 let mut rpms = Vec::new();
                 for port in 0..4u8 {
                     for fan_idx in 0..hs.port_fan_counts[port as usize] {
@@ -531,7 +519,7 @@ impl FanDevice for TlFanController {
     }
 
     fn fan_slot_count(&self) -> u8 {
-        4 // 4 ports
+        4
     }
 
     fn fan_port_info(&self) -> Vec<(u8, u8)> {
@@ -549,7 +537,7 @@ impl FanDevice for TlFanController {
     }
 
     fn per_fan_control(&self) -> bool {
-        false // all fans on a port share the same speed
+        false
     }
 
     fn supports_mb_sync(&self) -> bool {

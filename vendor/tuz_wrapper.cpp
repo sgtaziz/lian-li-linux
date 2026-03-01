@@ -7,7 +7,6 @@
 #include <cstring>
 #include <cstdlib>
 
-// ── Memory-backed stream adapters for tuz_compress ──────────────────────────
 
 struct MemStreamInput {
     const unsigned char* data;
@@ -44,7 +43,6 @@ static hpatch_BOOL mem_write(const hpatch_TStreamOutput* stream,
     return hpatch_TRUE;
 }
 
-// ── Public C API ────────────────────────────────────────────────────────────
 
 extern "C" {
 

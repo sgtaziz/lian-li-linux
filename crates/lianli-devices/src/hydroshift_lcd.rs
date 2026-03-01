@@ -222,8 +222,6 @@ impl HydroShiftLcdController {
         payload[0] = LcdControlMode::Application as u8;
         payload[1] = self.brightness;
         payload[2] = self.rotation as u8;
-        // payload[3] = EnableTest (0)
-        // payload[4-6] = TestColor RGB (0)
         payload[7] = 24; // fps
 
         self.send_b_command(CMD_LCD_CONTROL, &payload)?;
@@ -267,8 +265,6 @@ impl HydroShiftLcdController {
             .to_string())
     }
 
-    // -- A-Command (64-byte) --
-
     fn send_a_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
         let mut pkt = [0u8; A_PACKET_SIZE];
         pkt[0] = REPORT_ID_A;
@@ -291,8 +287,6 @@ impl HydroShiftLcdController {
 
         Ok(buf[..n].to_vec())
     }
-
-    // -- B-Command (1024-byte) --
 
     fn send_b_command(&self, cmd: u8, data: &[u8]) -> Result<()> {
         self.send_b_command_chunked(cmd, data)
@@ -329,7 +323,6 @@ impl HydroShiftLcdController {
             }
         }
 
-        // Read acknowledgment (may be empty, that's fine)
         let mut buf = [0u8; 512];
         let _ = dev.read_timeout(&mut buf, 20);
 
@@ -431,8 +424,6 @@ impl LcdDevice for HydroShiftLcdController {
     }
 }
 
-// -- B-command packet construction --
-
 fn build_b_packet(cmd: u8, total_data_size: u32, packet_num: u32, payload: &[u8]) -> Vec<u8> {
     let mut pkt = vec![0u8; B_PACKET_SIZE];
 
@@ -462,12 +453,6 @@ fn build_b_packet(cmd: u8, total_data_size: u32, packet_num: u32, payload: &[u8]
 
     pkt
 }
-
-// ── AIO LCD RGB controller ─────────────────────────────────────────────────
-//
-// Lightweight RGB-only controller for AIO LCD devices.
-// Uses a separate HID handle from the LCD/PWM controller so both can coexist.
-// Commands are identical to Galahad2 Trinity (SetPumpLighting 0x83, SetFanLighting 0x85).
 
 const CMD_SET_PUMP_LIGHT: u8 = 0x83;
 const CMD_SET_FAN_LIGHT: u8 = 0x85;

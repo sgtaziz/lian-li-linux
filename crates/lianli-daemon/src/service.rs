@@ -96,7 +96,6 @@ impl ServiceManager {
         info!("LIAN LI DAEMON");
         info!("=====================================================================");
 
-        // Create default config if it doesn't exist yet
         {
             let config_path = &self.config_path;
             if !config_path.exists() {
@@ -324,7 +323,6 @@ impl ServiceManager {
             }
         }
 
-        // Add other wired USB devices (LCD, etc.) from cache.
         // Cache is refreshed every USB_ENUM_INTERVAL (30s) to avoid
         // USB bus contention from opening every device for serial reads.
         devices.extend(self.cached_usb_devices.clone());

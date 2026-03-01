@@ -227,7 +227,6 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
             device_index,
             fan_pwm,
         } => {
-            // TODO: direct fan speed override (bypasses config)
             debug!("SetFanSpeed for device {device_index}: {fan_pwm:?}");
             IpcResponse::ok(serde_json::json!(null))
         }
@@ -318,7 +317,6 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
         }
 
         IpcRequest::Subscribe => {
-            // TODO: long-lived subscription for events
             IpcResponse::error("Subscribe not yet implemented; use polling via GetTelemetry")
         }
     }

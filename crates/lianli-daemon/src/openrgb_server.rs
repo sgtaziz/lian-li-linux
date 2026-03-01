@@ -738,8 +738,6 @@ impl ClientHandler {
     }
 }
 
-// ──────────── Wire format helpers ────────────
-
 /// Write an OpenRGB-format string: u16 length (includes null) + bytes + null.
 fn write_string(buf: &mut Vec<u8>, s: &str) {
     let len = s.len() as u16 + 1; // +1 for null terminator

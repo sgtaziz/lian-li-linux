@@ -386,8 +386,6 @@ fn render_zone_color(effect: &RgbEffect, led_count: usize) -> Vec<[u8; 3]> {
     vec![color; led_count]
 }
 
-// ── Direct color buffer for async OpenRGB streaming ────────────────────────
-
 /// Buffers per-device, per-zone direct color updates for async flushing.
 ///
 /// The OpenRGB TCP handler writes latest colors here (fast, no device I/O).

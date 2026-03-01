@@ -112,7 +112,7 @@ export interface AppConfig {
   rgb?: RgbAppConfig;
 }
 
-// ─── RGB Types ───
+
 
 export type RgbMode =
   | "Off" | "Direct" | "Static" | "Rainbow" | "RainbowMorph"

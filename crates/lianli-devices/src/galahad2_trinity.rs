@@ -25,7 +25,7 @@ const CMD_GET_FIRMWARE: u8 = 0x86;
 const CMD_SET_PUMP_PWM: u8 = 0x8A;
 const CMD_SET_FAN_PWM: u8 = 0x8B;
 
-// A-Commands — LED (from decompiled Galahad2TrinityDevice.cs)
+// A-Commands — LED
 const CMD_SET_PUMP_LIGHT: u8 = 0x83;
 const CMD_SET_FAN_LIGHT: u8 = 0x85;
 
@@ -144,11 +144,8 @@ impl Galahad2TrinityController {
         self.model
     }
 
-    // -- LED control methods --
-
     /// Set pump LED effect.
     ///
-    /// From decompiled Galahad2TrinityDevice.cs SetPumpLighting().
     /// Uses CMD_SET_PUMP_LIGHT (0x83) with 19-byte payload:
     /// ```text
     /// [0]  = scope (0=Inner, 1=Outer, 2=All)
@@ -193,7 +190,6 @@ impl Galahad2TrinityController {
 
     /// Set radiator fan LED effect.
     ///
-    /// From decompiled Galahad2TrinityDevice.cs SetFanLighting().
     /// Uses CMD_SET_FAN_LIGHT (0x85) with 20-byte payload:
     /// ```text
     /// [0]  = mode % 1000
@@ -231,8 +227,6 @@ impl Galahad2TrinityController {
         debug!("Set fan light: mode={mode_byte} sync_to_pump={sync_to_pump}");
         Ok(())
     }
-
-    // -- Packet helpers --
 
     fn send_a_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
         let mut pkt = [0u8; PACKET_SIZE];
@@ -304,7 +298,6 @@ impl AioDevice for Galahad2TrinityController {
     }
 
     fn read_coolant_temp(&self) -> Result<f32> {
-        // Trinity has NO coolant temperature sensor
         bail!("Galahad2 Trinity does not have a coolant temperature sensor")
     }
 }
@@ -335,7 +328,6 @@ impl RgbDevice for Galahad2TrinityController {
             RgbMode::TailChasing,
             RgbMode::Paint,
             RgbMode::PingPong,
-            // Pump-specific modes
             RgbMode::BigBang,
             RgbMode::Vortex,
             RgbMode::Pump,
