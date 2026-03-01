@@ -472,7 +472,6 @@ impl RgbDevice for Ene6k77Controller {
     }
 
     fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
-        // From decompiled L-Connect 3 SetLightingMotherboardSync():
         //   SL/SL Redragon:        [0xE0, 0x10, 0x30, isSync, 0, 0]  (SLFanDevice.cs:151)
         //   AL:                    [0xE0, 0x10, 0x41, isSync, 0, 0]  (ALFanDevice.cs:151)
         //   SLV2/ALV2/SL Infinity: [0xE0, 0x10, 0x61, isSync, 0, 0]  (SLV2FanDevice.cs:160)

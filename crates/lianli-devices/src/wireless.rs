@@ -18,12 +18,12 @@ const TX_PRODUCT: u16 = 0x8040;
 const RX_VENDOR: u16 = 0x0416;
 const RX_PRODUCT: u16 = 0x8041;
 
-// ── USB command codes (from L-Connect 3 USB_CMD enum) ────────────────────────
+// ── USB command codes ────────────────────────
 
 const USB_CMD_SEND_RF: u8 = 0x10; // Usb_SendRf
 const USB_CMD_GET_MAC: u8 = 0x11; // USB_GetMac
 
-// ── RF command codes (from L-Connect 3 RF_CMD enum) ──────────────────────────
+// ── RF command codes ──────────────────────────
 
 const RF_SELECT: u8 = 0x12; // RF_Select — envelope/routing command
 const RF_PWM_CMD: u8 = 0x10; // RF_Bind — PWM sub-command (byte[1] for fan speed)
@@ -49,11 +49,10 @@ fn decode_command(prefix: &str) -> Vec<u8> {
     bytes
 }
 
-// ── Fan type classification (from L-Connect 3 device type byte parsing) ──────
+// ── Fan type classification ──────
 
 /// Wireless fan device type, determines minimum duty and RPM curves.
 ///
-/// Byte ranges from L-Connect 3 `RfDevice.cs`:
 /// ```text
 /// SLV3  (base 20): 20-26  (LED: 20-23, LCD: 24-26)
 /// TLV2  (base 27): 27-35  (LCD: 27,32-35, LED: 28-31)
@@ -80,7 +79,7 @@ pub enum WirelessFanType {
 }
 
 impl WirelessFanType {
-    /// Minimum duty percentage for this fan type (from L-Connect 3 source).
+    /// Minimum duty percentage for this fan type.
     pub fn min_duty_percent(self) -> u8 {
         match self {
             Self::Slv3Led | Self::Slv3Lcd => 14,
@@ -106,7 +105,6 @@ impl WirelessFanType {
 
     /// Number of addressable LEDs per fan for this device type.
     ///
-    /// From L-Connect 3 decompiled source (RfDevice.cs rgb data arrays):
     /// - TLV2: 104 LEDs per zone (UP/DOWN combined, ~26 per fan)
     /// - SLV3: 160 LEDs per zone (inner + outer rings, ~40 per fan)
     /// - SL-INF: 176 LEDs total across all fans (~44 per fan)
@@ -132,7 +130,6 @@ impl WirelessFanType {
 
     /// Classify fan type from the fan-type byte in the device record.
     ///
-    /// Byte ranges from L-Connect 3 `RfDevice.cs`:
     ///   `RecType[k] = (num < 27) ? SLV3Fan : (num < 36) ? TLV2Fan : SLINF`
     /// Within SLV3/TLV2, bytes base+4..base+7 have LCD (BindLcd=true).
     fn from_fan_type_byte(b: u8) -> Self {
@@ -208,7 +205,6 @@ impl fmt::Display for DiscoveredDevice {
 
 /// Parse a 42-byte device record from GetDev response.
 ///
-/// Record layout (from L-Connect 3 RefreshList):
 /// ```text
 /// [0-5]   Device MAC (6 bytes)
 /// [6-11]  Master MAC (6 bytes)
@@ -387,8 +383,8 @@ impl WirelessController {
 
     /// Discovers master MAC address and channel by querying TX with USB_GetMac.
     ///
-    /// L-Connect 3 tries the configured channel first, then scans.
-    /// Channels should be even numbers (L-Connect constraint).
+    /// Tries the configured channel first, then scans.
+    /// Channels should be even numbers
     fn discover_master_mac(&self) -> Result<()> {
         let tx = self.tx.as_ref().context("TX device not available")?;
         info!("Discovering master MAC address and wireless channel...");
@@ -611,7 +607,7 @@ impl WirelessController {
     /// Set fan PWM values for a specific device identified by MAC address.
     ///
     /// Uses the device's own rx_type and channel from discovery, not a global
-    /// value. This matches L-Connect 3's SyncPwm behavior.
+    /// value.
     ///
     /// ## RF PWM packet layout (240 bytes):
     /// ```text
@@ -897,7 +893,7 @@ impl Drop for WirelessController {
 
 /// Apply minimum duty enforcement and CLV1 PWM filter.
 ///
-/// L-Connect 3 enforces per-fan-type minimums and has special PWM
+/// Enforces per-fan-type minimums and has special PWM
 /// remapping for CLV1 devices (values 153-155 → 152/156).
 fn apply_pwm_constraints(pwm: &mut [u8; 4], device: &DiscoveredDevice) {
     let min_pwm = ((device.fan_type.min_duty_percent() as f32 / 100.0) * 255.0) as u8;
@@ -914,7 +910,7 @@ fn apply_pwm_constraints(pwm: &mut [u8; 4], device: &DiscoveredDevice) {
             *val = min_pwm;
         }
 
-        // CLV1 special PWM filter (from L-Connect 3 NeedSyncPwm)
+        // CLV1 special PWM filter
         if device.fan_type == WirelessFanType::Clv1 {
             match *val {
                 153 | 154 => *val = 152,

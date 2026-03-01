@@ -17,7 +17,7 @@ extern "C" {
     fn tuz_max_compressed_size(input_len: usize) -> usize;
 }
 
-/// Default dictionary size matching L-Connect 3's `-c-4k` flag.
+/// Default dictionary size matching
 const DICT_SIZE_4K: usize = 4096;
 
 /// Compress data using tinyuz with a 4KB dictionary.

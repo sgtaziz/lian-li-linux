@@ -30,7 +30,7 @@ const CMD_GET_PRODUCT_INFO: u8 = 0xA6;
 const CMD_SET_FAN_SPEED: u8 = 0xAA;
 const CMD_SET_MB_RPM_SYNC: u8 = 0xB1;
 
-// Commands — LED control (from decompiled L-Connect 3 LEDCommands.cs)
+// Commands — LED control
 const CMD_SET_FAN_LIGHT: u8 = 0xA3;
 const CMD_SET_FAN_GROUP: u8 = 0xAD;
 const CMD_SET_FAN_GROUP_LIGHT: u8 = 0xB0;
@@ -445,7 +445,6 @@ impl TlFanController {
     }
 
     /// Send a command, try to read a response but ignore failure.
-    /// Matches L-Connect 3 behavior where readPacket() result is discarded.
     fn send_command_quiet(&self, cmd: u8, data: &[u8]) -> Result<()> {
         let pkt = Self::build_packet(cmd, data);
         let dev = self.device.lock();
