@@ -1,7 +1,7 @@
 //! Generic WinUSB LCD driver for all VID=0x1CBE direct-connect LCD devices.
 //!
 //! Shared protocol for:
-//!   - HydroShift II LCD Circle (0x1CBE:0xA001) — 480x480
+//!   - HydroShift II LCD Circle (0x1CBE:0xA021) — 480x480
 //!   - Lancool 207 Digital      (0x1CBE:0xA065) — 1472x720
 //!   - Universal Screen 8.8"    (0x1CBE:0xA088) — 1920x480
 //!

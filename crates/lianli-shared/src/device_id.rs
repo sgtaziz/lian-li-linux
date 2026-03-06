@@ -196,7 +196,7 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         hid_usage_page: None,
     },
     DeviceEntry {
-        id: UsbId::new(0x1CBE, 0xA001),
+        id: UsbId::new(0x1CBE, 0xA021),
         family: DeviceFamily::HydroShift2Lcd,
         name: "HydroShift II LCD Circle",
         hid_usage_page: None,
