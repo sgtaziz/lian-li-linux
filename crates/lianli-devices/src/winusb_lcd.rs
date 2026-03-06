@@ -5,8 +5,9 @@
 //!   - Lancool 207 Digital      (0x1CBE:0xA065) — 1472x720
 //!   - Universal Screen 8.8"    (0x1CBE:0xA088) — 1920x480
 //!
-//! All use the same DES-CBC encrypted 512-byte command header + raw JPEG payload,
-//! identical to the SLV3/TLV2 wireless LCD protocol but without the wireless dongle.
+//! All use a DES-CBC encrypted 512-byte command header + raw JPEG payload.
+//! The H2 packet format differs from SLV3: 500-byte plaintext (vs 504), and
+//! the 512-byte header has fixed trailer bytes [510]=0xa1, [511]=0x1a.
 
 use crate::crypto::PacketBuilder;
 use crate::traits::LcdDevice;
@@ -92,7 +93,7 @@ impl WinUsbLcdDevice {
             self.do_init()?;
         }
 
-        let header = self.builder.jpeg_header(frame.len());
+        let header = self.builder.jpeg_header_h2(frame.len());
         let total = 512 + frame.len();
         let mut packet = vec![0u8; total];
         packet[..512].copy_from_slice(&header);
@@ -111,7 +112,7 @@ impl WinUsbLcdDevice {
 
     /// Set LCD brightness (0-100).
     pub fn set_brightness_val(&mut self, brightness: u8) -> Result<()> {
-        let header = self.builder.brightness_header(brightness);
+        let header = self.builder.brightness_header_h2(brightness);
         self.transport
             .write_bulk(&header, LCD_WRITE_TIMEOUT)
             .context("setting brightness")?;
@@ -123,7 +124,7 @@ impl WinUsbLcdDevice {
 
     /// Set LCD rotation (0=0°, 1=90°, 2=180°, 3=270°).
     pub fn set_rotation_val(&mut self, rotation: u8) -> Result<()> {
-        let header = self.builder.rotation_header(rotation);
+        let header = self.builder.rotation_header_h2(rotation);
         self.transport
             .write_bulk(&header, LCD_WRITE_TIMEOUT)
             .context("setting rotation")?;
@@ -135,7 +136,7 @@ impl WinUsbLcdDevice {
 
     /// Set frame rate.
     pub fn set_frame_rate(&mut self, fps: u8) -> Result<()> {
-        let header = self.builder.frame_rate_header(fps);
+        let header = self.builder.frame_rate_header_h2(fps);
         self.transport
             .write_bulk(&header, LCD_WRITE_TIMEOUT)
             .context("setting frame rate")?;
@@ -146,16 +147,8 @@ impl WinUsbLcdDevice {
     }
 
     fn do_init(&mut self) -> Result<()> {
-        // Send rotation command as init (same as SLV3 0x0D init)
-        let header = self.builder.rotation_header(0);
-        self.transport
-            .write_bulk(&header, LCD_WRITE_TIMEOUT)
-            .context("writing LCD init")?;
-        let mut buf = [0u8; 512];
-        let _ = self.transport.read_bulk(&mut buf, USB_TIMEOUT);
-
-        // Set default frame rate
-        self.set_frame_rate(self.screen.max_fps as u8)?;
+        // H2 init (WinUsbH2.cs::InitDev): only set frame rate, no rotation header.
+        self.set_frame_rate(30)?;
 
         self.initialized = true;
         Ok(())
