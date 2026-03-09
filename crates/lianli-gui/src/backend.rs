@@ -89,10 +89,10 @@ fn run_backend(
     let mut pending: HashMap<String, IpcRequest> = HashMap::new();
     let mut last_queue_time: Option<Instant> = None;
     let mut last_poll = Instant::now();
-
     // Initial load
     poll_daemon(&window, &shared);
     load_config(&window, &shared);
+    let mut was_connected = ipc_client::is_daemon_running();
 
     loop {
         let timeout = if pending.is_empty() {
@@ -140,7 +140,13 @@ fn run_backend(
                 }
                 // Regular daemon poll
                 if last_poll.elapsed() >= poll_interval {
+                    let is_connected = ipc_client::is_daemon_running();
                     poll_daemon(&window, &shared);
+                    if is_connected && !was_connected {
+                        tracing::info!("Daemon reconnected, reloading config");
+                        load_config(&window, &shared);
+                    }
+                    was_connected = is_connected;
                     last_poll = Instant::now();
                 }
             }
