@@ -5,7 +5,8 @@ use crate::rgb_controller::RgbController;
 use anyhow::Result;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::{
-    enumerate_devices, enumerate_hid_devices, open_fan_device, open_rgb_devices,
+    enumerate_devices, enumerate_hid_devices, open_ene6k77_rgb_via_rusb, open_ene6k77_via_rusb,
+    open_fan_device, open_rgb_devices,
 };
 use lianli_devices::hydroshift_lcd::HydroShiftLcdController;
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
@@ -435,6 +436,38 @@ impl ServiceManager {
             }
         }
 
+        // ENE 6K77 RGB: fall back to rusb if hidapi found nothing (no hidraw node).
+        if let Ok(usb_devices) = enumerate_devices() {
+            for det in usb_devices {
+                if det.family != DeviceFamily::Ene6k77 {
+                    continue;
+                }
+                let base_id = det
+                    .serial
+                    .clone()
+                    .unwrap_or_else(|| format!("usb:{}:{}", det.bus, det.address));
+                if wired_rgb.contains_key(&base_id) {
+                    continue; // Already opened via hidapi
+                }
+                if let Some(result) = open_ene6k77_rgb_via_rusb(&det) {
+                    match result {
+                        Ok(devices) => {
+                            for (suffix, ctrl) in devices {
+                                let device_id = if suffix.is_empty() {
+                                    base_id.clone()
+                                } else {
+                                    format!("{base_id}:{suffix}")
+                                };
+                                info!("Opened {} (rusb) as RGB device: {device_id}", det.name);
+                                wired_rgb.insert(device_id, ctrl);
+                            }
+                        }
+                        Err(err) => warn!("Failed to init RGB for {} (rusb): {err}", det.name),
+                    }
+                }
+            }
+        }
+
         let wireless = if self.wireless.has_discovered_devices() {
             Some(Arc::new(self.wireless.clone()))
         } else {
@@ -580,6 +613,68 @@ impl ServiceManager {
                     Err(err) => warn!("Failed to init {}: {err}", det.name),
                 }
             }
+        }
+
+        // ENE 6K77 devices: open via rusb (bypasses usbhid/hidraw requirement).
+        // On some kernels the usbhid driver refuses to bind to the ENE HID descriptor,
+        // leaving no hidraw node for hidapi to use. RusbHidTransport talks directly
+        // to the USB device via interrupt + control transfers.
+        match enumerate_devices() {
+            Ok(usb_devices) => {
+                for det in usb_devices {
+                    if det.family != DeviceFamily::Ene6k77 {
+                        continue;
+                    }
+                    let base_id = det
+                        .serial
+                        .clone()
+                        .unwrap_or_else(|| format!("usb:{}:{}", det.bus, det.address));
+                    if devices.contains_key(&base_id) {
+                        continue; // Already opened via hidapi
+                    }
+                    if let Some(result) = open_ene6k77_via_rusb(&det) {
+                        match result {
+                            Ok(ctrl) => {
+                                info!("Opened {} (rusb) as fan device: {base_id}", det.name);
+                                let ports = ctrl.fan_port_info();
+                                let per_fan = ctrl.per_fan_control();
+                                let mb_sync = ctrl.supports_mb_sync();
+                                for &(port, fan_count) in &ports {
+                                    let device_id = if ports.len() > 1 {
+                                        format!("{base_id}:port{port}")
+                                    } else {
+                                        base_id.clone()
+                                    };
+                                    let name = if ports.len() > 1 {
+                                        format!("{} Port {port}", det.name)
+                                    } else {
+                                        det.name.to_string()
+                                    };
+                                    self.wired_fan_device_info.push(DeviceInfo {
+                                        device_id,
+                                        family: det.family,
+                                        name,
+                                        serial: det.serial.clone(),
+                                        has_lcd: false,
+                                        has_fan: true,
+                                        has_pump: false,
+                                        has_rgb: det.family.has_rgb(),
+                                        fan_count: Some(fan_count),
+                                        per_fan_control: Some(per_fan),
+                                        mb_sync_support: mb_sync,
+                                        rgb_zone_count: None,
+                                        screen_width: None,
+                                        screen_height: None,
+                                    });
+                                }
+                                devices.insert(base_id, ctrl);
+                            }
+                            Err(err) => warn!("Failed to init {} (rusb): {err}", det.name),
+                        }
+                    }
+                }
+            }
+            Err(e) => warn!("USB enumeration for ENE 6K77 failed: {e}"),
         }
 
         let arc = Arc::new(devices);

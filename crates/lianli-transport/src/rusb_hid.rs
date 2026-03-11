@@ -77,6 +77,36 @@ impl RusbHidTransport {
         None
     }
 
+    /// Send a HID Feature report via SET_REPORT control transfer (report type 0x03).
+    /// Does not require an interrupt OUT endpoint — works with control-transfer-only devices.
+    pub fn send_feature(&self, data: &[u8]) -> Result<usize, TransportError> {
+        let report_id = data.first().copied().unwrap_or(0) as u16;
+        let w_value = (0x03u16 << 8) | report_id; // 0x03 = Feature report type
+        let n = self.handle.write_control(
+            0x21, // Host-to-device, Class, Interface
+            0x09, // SET_REPORT
+            w_value,
+            self.iface as u16,
+            data,
+            Duration::from_millis(5000),
+        )?;
+        Ok(n)
+    }
+
+    /// Read a HID Feature report via GET_REPORT control transfer (report type 0x03).
+    pub fn get_feature(&self, report_id: u8, buf: &mut [u8]) -> Result<usize, TransportError> {
+        let w_value = (0x03u16 << 8) | report_id as u16; // 0x03 = Feature report type
+        let n = self.handle.read_control(
+            0xA1, // Device-to-host, Class, Interface
+            0x01, // GET_REPORT
+            w_value,
+            self.iface as u16,
+            buf,
+            Duration::from_millis(5000),
+        )?;
+        Ok(n)
+    }
+
     pub fn write(&self, data: &[u8]) -> Result<usize, TransportError> {
         if let Some(ep_out) = self.ep_out {
             let n = self

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use hidapi::HidApi;
 use lianli_shared::device_id::{uses_hid, DeviceFamily, KNOWN_DEVICES, UsbId};
+use lianli_transport::RusbHidTransport;
 use rusb::{Device, GlobalContext};
 use std::collections::HashSet;
 use tracing::debug;
@@ -203,16 +204,8 @@ pub fn open_fan_device(
                     .map(|c| Box::new(c) as Box<dyn crate::traits::FanDevice>),
             )
         }
-        DeviceFamily::Ene6k77 => {
-            let hid_dev = match api.open_path(&det.path) {
-                Ok(d) => d,
-                Err(e) => return Some(Err(anyhow::anyhow!("HID open: {e}"))),
-            };
-            Some(
-                crate::ene6k77::Ene6k77Controller::new(hid_dev, det.pid)
-                    .map(|c| Box::new(c) as Box<dyn crate::traits::FanDevice>),
-            )
-        }
+        // ENE 6K77: handled via open_ene6k77_via_rusb() — usbhid may not bind on some kernels.
+        DeviceFamily::Ene6k77 => None,
         // Wireless fan devices are handled separately (not HID-based)
         _ => None,
     }
@@ -249,16 +242,8 @@ pub fn open_rgb_devices(
                 }),
             )
         }
-        DeviceFamily::Ene6k77 => {
-            let hid_dev = match api.open_path(&det.path) {
-                Ok(d) => d,
-                Err(e) => return Some(Err(anyhow::anyhow!("HID open for RGB: {e}"))),
-            };
-            Some(
-                crate::ene6k77::Ene6k77Controller::new(hid_dev, det.pid)
-                    .map(|c| vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)]),
-            )
-        }
+        // ENE 6K77: handled via open_ene6k77_rgb_via_rusb() — usbhid may not bind on some kernels.
+        DeviceFamily::Ene6k77 => None,
         DeviceFamily::Galahad2Trinity => {
             let hid_dev = match api.open_path(&det.path) {
                 Ok(d) => d,
@@ -301,6 +286,48 @@ pub fn open_hid_lcd_device(
         }
         _ => None,
     }
+}
+
+/// Open a detected USB device as an ENE 6K77 fan controller via rusb.
+///
+/// Bypasses hidapi/hidraw entirely — works even when the kernel's `usbhid`
+/// driver refuses to bind to the device (e.g. on newer kernels that reject
+/// the ENE HID descriptor). Uses direct USB interrupt + control transfers.
+///
+/// Returns `None` if the device is not an ENE 6K77 family or has no HID interface.
+pub fn open_ene6k77_via_rusb(
+    det: &DetectedDevice,
+) -> Option<Result<Box<dyn crate::traits::FanDevice>>> {
+    if det.family != DeviceFamily::Ene6k77 {
+        return None;
+    }
+    let iface = RusbHidTransport::find_hid_interface(&det.device)?;
+    Some(
+        RusbHidTransport::open(det.device.clone(), iface)
+            .map_err(|e| anyhow::anyhow!("rusb HID open: {e}"))
+            .and_then(|transport| crate::ene6k77::Ene6k77Controller::new(transport, det.pid))
+            .map(|c| Box::new(c) as Box<dyn crate::traits::FanDevice>),
+    )
+}
+
+/// Open a detected USB device as ENE 6K77 RGB controller(s) via rusb.
+///
+/// Returns `None` if the device is not an ENE 6K77 family or has no HID interface.
+/// Note: sharing a device between fan and RGB requires separate rusb handles.
+/// This is only safe to call when no fan handle is already open on the same interface.
+pub fn open_ene6k77_rgb_via_rusb(
+    det: &DetectedDevice,
+) -> Option<Result<Vec<(String, Box<dyn crate::traits::RgbDevice>)>>> {
+    if det.family != DeviceFamily::Ene6k77 {
+        return None;
+    }
+    let iface = RusbHidTransport::find_hid_interface(&det.device)?;
+    Some(
+        RusbHidTransport::open(det.device.clone(), iface)
+            .map_err(|e| anyhow::anyhow!("rusb HID open: {e}"))
+            .and_then(|transport| crate::ene6k77::Ene6k77Controller::new(transport, det.pid))
+            .map(|c| vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)]),
+    )
 }
 
 /// Find LCD devices (SLV3/TLV2 wireless LCD fans via USB bulk).

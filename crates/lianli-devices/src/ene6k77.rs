@@ -8,8 +8,8 @@
 
 use crate::traits::{FanDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
-use hidapi::HidDevice;
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_transport::RusbHidTransport;
 use parking_lot::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -107,10 +107,11 @@ impl std::fmt::Display for Ene6k77Firmware {
 
 /// ENE 6K77 fan controller.
 ///
-/// Wraps an opened HID device and provides fan speed control, RPM reading,
-/// and RGB/LED effects.
+/// Wraps a rusb HID transport and provides fan speed control, RPM reading,
+/// and RGB/LED effects. Uses direct USB interrupt/control transfers, so it
+/// does not require the kernel's usbhid driver or a hidraw node.
 pub struct Ene6k77Controller {
-    device: Mutex<HidDevice>,
+    device: Mutex<RusbHidTransport>,
     model: Ene6k77Model,
     pid: u16,
     firmware: Option<Ene6k77Firmware>,
@@ -119,8 +120,8 @@ pub struct Ene6k77Controller {
 }
 
 impl Ene6k77Controller {
-    /// Open an ENE 6K77 controller by HID device handle and PID.
-    pub fn new(device: HidDevice, pid: u16) -> Result<Self> {
+    /// Open an ENE 6K77 controller via rusb HID transport.
+    pub fn new(device: RusbHidTransport, pid: u16) -> Result<Self> {
         let model = Ene6k77Model::from_pid(pid)
             .ok_or_else(|| anyhow::anyhow!("Unknown ENE 6K77 PID: {pid:#06x}"))?;
 
@@ -372,7 +373,7 @@ impl Ene6k77Controller {
 
     fn send_feature(&self, data: &[u8]) -> Result<()> {
         let dev = self.device.lock();
-        dev.send_feature_report(data)
+        dev.send_feature(data)
             .context("ENE 6K77: send feature report")?;
         Ok(())
     }
@@ -380,19 +381,35 @@ impl Ene6k77Controller {
     fn read_input(&self, expected_len: usize) -> Result<Vec<u8>> {
         let dev = self.device.lock();
         let mut buf = vec![0u8; expected_len + 1]; // +1 for report ID
+
+        // Try interrupt IN first (fast path, 100ms).
+        // If the device doesn't push data on the interrupt endpoint,
+        // fall back to GET_REPORT (control transfer).
         let n = dev
             .read_timeout(&mut buf, 100)
             .context("ENE 6K77: read input report")?;
-        if n < expected_len {
-            bail!(
-                "ENE 6K77: expected {expected_len} bytes, got {n}"
-            );
+
+        if n >= expected_len {
+            return if buf[0] == REPORT_ID && n > expected_len {
+                Ok(buf[1..=expected_len].to_vec())
+            } else {
+                Ok(buf[..expected_len].to_vec())
+            };
         }
-        // Skip report ID byte if present
-        if buf[0] == REPORT_ID && n > expected_len {
-            Ok(buf[1..=expected_len].to_vec())
+
+        // Interrupt IN returned nothing — try GET_REPORT control transfer.
+        let mut feat_buf = vec![0u8; expected_len + 1];
+        let n = dev
+            .get_feature(REPORT_ID, &mut feat_buf)
+            .context("ENE 6K77: GET_REPORT")?;
+
+        if n < expected_len {
+            bail!("ENE 6K77: expected {expected_len} bytes, got {n}");
+        }
+        if feat_buf[0] == REPORT_ID && n > expected_len {
+            Ok(feat_buf[1..=expected_len].to_vec())
         } else {
-            Ok(buf[..expected_len].to_vec())
+            Ok(feat_buf[..expected_len].to_vec())
         }
     }
 }
