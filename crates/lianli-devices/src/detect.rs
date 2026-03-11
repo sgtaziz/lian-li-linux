@@ -288,16 +288,17 @@ pub fn open_hid_lcd_device(
     }
 }
 
-/// Open a detected USB device as an ENE 6K77 fan controller via rusb.
+/// Open a detected ENE 6K77 device via rusb, returning both a fan handle and
+/// an RGB handle that share the same underlying USB transport.
 ///
 /// Bypasses hidapi/hidraw entirely — works even when the kernel's `usbhid`
-/// driver refuses to bind to the device (e.g. on newer kernels that reject
-/// the ENE HID descriptor). Uses direct USB interrupt + control transfers.
+/// driver refuses to bind to the device. Uses direct USB interrupt + control
+/// transfers via a single claimed interface shared via `Arc<Mutex<...>>`.
 ///
 /// Returns `None` if the device is not an ENE 6K77 family or has no HID interface.
 pub fn open_ene6k77_via_rusb(
     det: &DetectedDevice,
-) -> Option<Result<Box<dyn crate::traits::FanDevice>>> {
+) -> Option<Result<(Box<dyn crate::traits::FanDevice>, Box<dyn crate::traits::RgbDevice>)>> {
     if det.family != DeviceFamily::Ene6k77 {
         return None;
     }
@@ -306,27 +307,13 @@ pub fn open_ene6k77_via_rusb(
         RusbHidTransport::open(det.device.clone(), iface)
             .map_err(|e| anyhow::anyhow!("rusb HID open: {e}"))
             .and_then(|transport| crate::ene6k77::Ene6k77Controller::new(transport, det.pid))
-            .map(|c| Box::new(c) as Box<dyn crate::traits::FanDevice>),
-    )
-}
-
-/// Open a detected USB device as ENE 6K77 RGB controller(s) via rusb.
-///
-/// Returns `None` if the device is not an ENE 6K77 family or has no HID interface.
-/// Note: sharing a device between fan and RGB requires separate rusb handles.
-/// This is only safe to call when no fan handle is already open on the same interface.
-pub fn open_ene6k77_rgb_via_rusb(
-    det: &DetectedDevice,
-) -> Option<Result<Vec<(String, Box<dyn crate::traits::RgbDevice>)>>> {
-    if det.family != DeviceFamily::Ene6k77 {
-        return None;
-    }
-    let iface = RusbHidTransport::find_hid_interface(&det.device)?;
-    Some(
-        RusbHidTransport::open(det.device.clone(), iface)
-            .map_err(|e| anyhow::anyhow!("rusb HID open: {e}"))
-            .and_then(|transport| crate::ene6k77::Ene6k77Controller::new(transport, det.pid))
-            .map(|c| vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)]),
+            .map(|fan_ctrl| {
+                let rgb_ctrl = fan_ctrl.clone_shared();
+                (
+                    Box::new(fan_ctrl) as Box<dyn crate::traits::FanDevice>,
+                    Box::new(rgb_ctrl) as Box<dyn crate::traits::RgbDevice>,
+                )
+            }),
     )
 }
 

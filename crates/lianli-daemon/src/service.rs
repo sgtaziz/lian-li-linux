@@ -10,7 +10,7 @@ use lianli_devices::detect::{
 };
 use lianli_devices::hydroshift_lcd::HydroShiftLcdController;
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
-use lianli_devices::traits::FanDevice;
+use lianli_devices::traits::{FanDevice, RgbDevice};
 use lianli_devices::winusb_lcd::WinUsbLcdDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_shared::device_id::DeviceFamily;
@@ -49,6 +49,9 @@ pub struct ServiceManager {
     wired_fan_device_info: Vec<DeviceInfo>,
     /// Shared reference to wired fan device handles (for RPM reading).
     wired_fan_devices: Arc<HashMap<String, Box<dyn FanDevice>>>,
+    /// ENE 6K77 RGB handles staged by open_wired_fan_devices, consumed by init_rgb_controller.
+    /// Shared transport with the fan handle via Arc<Mutex<RusbHidTransport>>.
+    ene6k77_rgb_pending: HashMap<String, Box<dyn RgbDevice>>,
     last_device_scan: Instant,
     last_usb_enum: Instant,
     /// Cached USB device list from enumerate_devices() — refreshed every USB_ENUM_INTERVAL.
@@ -79,6 +82,7 @@ impl ServiceManager {
             rgb_controller: None,
             wired_fan_device_info: Vec::new(),
             wired_fan_devices: Arc::new(HashMap::new()),
+            ene6k77_rgb_pending: HashMap::new(),
             last_device_scan: Instant::now() - DEVICE_POLL_INTERVAL,
             last_usb_enum: Instant::now() - USB_ENUM_INTERVAL,
             cached_usb_devices: Vec::new(),
@@ -436,9 +440,13 @@ impl ServiceManager {
             }
         }
 
-        // TODO: ENE 6K77 RGB via rusb — requires shared transport with fan device.
-        // The fan handle claims the HID interface exclusively, so a second open fails.
-        // Needs Arc<Mutex<RusbHidTransport>> shared between FanDevice and RgbDevice.
+        // ENE 6K77 RGB: drain handles staged by open_wired_fan_devices.
+        // These share the same Arc<Mutex<RusbHidTransport>> as the fan handles,
+        // so no second USB interface claim is needed.
+        for (device_id, ctrl) in self.ene6k77_rgb_pending.drain() {
+            info!("Registering ENE 6K77 (rusb) as RGB device: {device_id}");
+            wired_rgb.insert(device_id, ctrl);
+        }
 
         let wireless = if self.wireless.has_discovered_devices() {
             Some(Arc::new(self.wireless.clone()))
@@ -606,11 +614,11 @@ impl ServiceManager {
                     }
                     if let Some(result) = open_ene6k77_via_rusb(&det) {
                         match result {
-                            Ok(ctrl) => {
-                                info!("Opened {} (rusb) as fan device: {base_id}", det.name);
-                                let ports = ctrl.fan_port_info();
-                                let per_fan = ctrl.per_fan_control();
-                                let mb_sync = ctrl.supports_mb_sync();
+                            Ok((fan_ctrl, rgb_ctrl)) => {
+                                info!("Opened {} (rusb) as fan+RGB device: {base_id}", det.name);
+                                let ports = fan_ctrl.fan_port_info();
+                                let per_fan = fan_ctrl.per_fan_control();
+                                let mb_sync = fan_ctrl.supports_mb_sync();
                                 for &(port, fan_count) in &ports {
                                     let device_id = if ports.len() > 1 {
                                         format!("{base_id}:port{port}")
@@ -639,7 +647,8 @@ impl ServiceManager {
                                         screen_height: None,
                                     });
                                 }
-                                devices.insert(base_id, ctrl);
+                                devices.insert(base_id.clone(), fan_ctrl);
+                                self.ene6k77_rgb_pending.insert(base_id, rgb_ctrl);
                             }
                             Err(err) => warn!("Failed to init {} (rusb): {err}", det.name),
                         }

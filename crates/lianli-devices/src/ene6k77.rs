@@ -11,6 +11,7 @@ use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use lianli_transport::RusbHidTransport;
 use parking_lot::Mutex;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info};
@@ -111,7 +112,7 @@ impl std::fmt::Display for Ene6k77Firmware {
 /// and RGB/LED effects. Uses direct USB interrupt/control transfers, so it
 /// does not require the kernel's usbhid driver or a hidraw node.
 pub struct Ene6k77Controller {
-    device: Mutex<RusbHidTransport>,
+    device: Arc<Mutex<RusbHidTransport>>,
     model: Ene6k77Model,
     pid: u16,
     firmware: Option<Ene6k77Firmware>,
@@ -126,7 +127,7 @@ impl Ene6k77Controller {
             .ok_or_else(|| anyhow::anyhow!("Unknown ENE 6K77 PID: {pid:#06x}"))?;
 
         let mut ctrl = Self {
-            device: Mutex::new(device),
+            device: Arc::new(Mutex::new(device)),
             model,
             pid,
             firmware: None,
@@ -135,6 +136,21 @@ impl Ene6k77Controller {
 
         ctrl.initialize()?;
         Ok(ctrl)
+    }
+
+    /// Clone this controller sharing the same USB transport.
+    ///
+    /// Used to hand off an RGB handle while the fan controller retains its handle.
+    /// Both instances share the same underlying `RusbHidTransport` via `Arc<Mutex<...>>`,
+    /// so only one USB interface claim is held.
+    pub fn clone_shared(&self) -> Self {
+        Self {
+            device: Arc::clone(&self.device),
+            model: self.model,
+            pid: self.pid,
+            firmware: self.firmware.clone(),
+            fan_quantities: self.fan_quantities,
+        }
     }
 
     /// Initialize the controller: read firmware version.
@@ -382,11 +398,11 @@ impl Ene6k77Controller {
         let dev = self.device.lock();
         let mut buf = vec![0u8; expected_len + 1]; // +1 for report ID
 
-        // Try interrupt IN first (fast path, 100ms).
-        // If the device doesn't push data on the interrupt endpoint,
-        // fall back to GET_REPORT (control transfer).
+        // Try interrupt IN (500ms). The ENE 6K77 pushes the response on the
+        // interrupt IN endpoint after a SET_REPORT command; GET_REPORT is a
+        // fallback for devices that respond via the control pipe instead.
         let n = dev
-            .read_timeout(&mut buf, 100)
+            .read_timeout(&mut buf, 500)
             .context("ENE 6K77: read input report")?;
 
         if n >= expected_len {
