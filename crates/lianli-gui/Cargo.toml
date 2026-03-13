@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 lianli-shared = { path = "../lianli-shared" }
-slint = { git = "https://github.com/slint-ui/slint" }
+slint = { git = "https://github.com/slint-ui/slint", default-features = false, features = ["compat-1-2", "backend-winit", "renderer-femtovg"] }
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
