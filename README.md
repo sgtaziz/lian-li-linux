@@ -17,7 +17,7 @@
 
 | Device | Fan Control | RGB | LCD | Pump | Tested |
 |--------|:-----------:|:---:|:---:|:----:|:------:|
-| UNI FAN SL / AL / SL Infinity / SL V2 / AL V2 (ENE 6K77) | 4 groups | Yes | - | - | Yes |
+| UNI FAN SL / AL / SL Infinity / SL V2 / AL V2 | 4 groups | Yes | - | - | Yes |
 | UNI FAN TL Controller | 4 ports | Yes | - | - | Yes |
 | UNI FAN TL LCD | 4 ports | Yes | 400x400 | - | Yes |
 | Galahad II Trinity AIO | Yes | Yes | - | Yes | - |
