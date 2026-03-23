@@ -40,6 +40,8 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="0005", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="0006", MODE="0666"
 # HydroShift II LCD Circle
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a021", MODE="0666"
+# HydroShift II LCD Square (H2S)
+SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a034", MODE="0666"
 # Lancool 207 Digital
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a065", MODE="0666"
 # Universal Screen 8.8"

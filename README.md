@@ -38,6 +38,7 @@
 | Device | LCD | Tested | Notes |
 |--------|:---:|:------:|-------|
 | HydroShift II LCD Circle | 480x480 | Yes | LCD Supports Background image only |
+| HydroShift II LCD Square | 480x480 | Yes | LCD Supports Background image only |
 | Lancool 207 Digital | 1472x720 | Yes | LCD Supports Background image only |
 | Universal Screen 8.8" | 1920x480 | - | LCD Supports Background image only |
 
