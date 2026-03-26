@@ -69,9 +69,9 @@ impl Ene6k77Model {
         matches!(self, Self::SlV2Fan | Self::AlV2Fan | Self::SlV2aFan)
     }
 
-    /// Whether this is an AL-style model (different set-quantity command format).
-    pub fn is_al(&self) -> bool {
-        matches!(self, Self::AlFan | Self::AlV2Fan)
+    /// Whether this model uses doubled port encoding (0x10|(group*2) for effects).
+    pub fn uses_double_port(&self) -> bool {
+        matches!(self, Self::AlFan | Self::AlV2Fan | Self::SlInfinity)
     }
 
     /// Max fans per group.
@@ -182,20 +182,19 @@ impl Ene6k77Controller {
         let max = self.model.max_fans_per_group();
         let qty = quantity.min(max);
 
-        let cmd = if self.model.is_v2() {
-            if self.model.is_al() {
-                // ALV2: [0xE0, 0x10, 0x60, groupIndex+1, quantity, 0x00]
+        let cmd = match self.model {
+            Ene6k77Model::AlFan => {
+                vec![REPORT_ID, 0x10, 0x40, group + 1, qty, 0x00]
+            }
+            Ene6k77Model::AlV2Fan | Ene6k77Model::SlInfinity => {
                 vec![REPORT_ID, 0x10, 0x60, group + 1, qty, 0x00]
-            } else {
-                // SLV2/SLV2A: [0xE0, 0x10, 0x60, (groupIndex << 4) | quantity]
+            }
+            Ene6k77Model::SlV2Fan | Ene6k77Model::SlV2aFan => {
                 vec![REPORT_ID, 0x10, 0x60, (group << 4) | (qty & 0x0F)]
             }
-        } else if self.model.is_al() {
-            // AL: [0xE0, 0x10, 0x40, groupIndex+1, quantity, 0x00]
-            vec![REPORT_ID, 0x10, 0x40, group + 1, qty, 0x00]
-        } else {
-            // SL/SL Infinity/Redragon: [0xE0, 0x10, 0x32, (groupIndex << 4) | quantity]
-            vec![REPORT_ID, 0x10, 0x32, (group << 4) | (qty & 0x0F)]
+            _ => {
+                vec![REPORT_ID, 0x10, 0x32, (group << 4) | (qty & 0x0F)]
+            }
         };
 
         self.send_feature(&cmd)?;
@@ -302,13 +301,11 @@ impl Ene6k77Controller {
         while color_cmd.len() < 14 {
             color_cmd.push(0);
         }
-        self.send_feature(&color_cmd)?;
+        self.send_output(&color_cmd)?;
         thread::sleep(CMD_DELAY);
 
         // Step 2: Set effect via feature report
-        // SL: [0xE0, 0x10|port, mode, speed, direction, brightness]
-        // AL: [0xE0, 0x10|(port*2), mode, speed, direction, brightness]
-        let port_byte = if self.model.is_al() {
+        let port_byte = if self.model.uses_double_port() {
             0x10 | (group * 2)
         } else {
             0x10 | group
@@ -320,6 +317,10 @@ impl Ene6k77Controller {
         let brightness_byte = self.map_brightness(effect.brightness);
 
         self.send_feature(&[REPORT_ID, port_byte, mode_byte, speed_byte, dir_byte, brightness_byte])?;
+        thread::sleep(CMD_DELAY);
+
+        // Step 3: Commit frame to display changes
+        self.send_feature(&[REPORT_ID, 0x60, 0x00, 0x01])?;
         thread::sleep(CMD_DELAY);
 
         debug!(
@@ -375,6 +376,13 @@ impl Ene6k77Controller {
         let dev = self.device.lock();
         dev.send_feature_report(data)
             .context("ENE 6K77: send feature report")?;
+        Ok(())
+    }
+
+    fn send_output(&self, data: &[u8]) -> Result<()> {
+        let dev = self.device.lock();
+        dev.write(data)
+            .context("ENE 6K77: send output report")?;
         Ok(())
     }
 
