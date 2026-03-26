@@ -8,7 +8,7 @@
 
 use crate::traits::{FanDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_transport::HidBackend;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -289,47 +289,62 @@ impl Ene6k77Controller {
             bail!("Group index {group} out of range (0-3)");
         }
 
-        // Step 1: Set colors via output report
-        // [0xE0, 0x30|port, R,B,G, R,B,G, ...]  — NOTE R,B,G order!
-        let mut color_cmd = vec![REPORT_ID, 0x30 | group];
-        for color in effect.colors.iter().take(4) {
-            color_cmd.push(color[0]); // R
-            color_cmd.push(color[2]); // B (swapped!)
-            color_cmd.push(color[1]); // G (swapped!)
-        }
-        // Pad to at least 12 color bytes (4 colors × 3 bytes)
-        while color_cmd.len() < 14 {
-            color_cmd.push(0);
-        }
-        match self.send_output(&color_cmd) {
-            Ok(()) => debug!("Group {group} color: wrote {} bytes via output report", color_cmd.len()),
-            Err(e) => warn!("Group {group} color output report failed: {e}, falling back to feature report"),
-        }
-        thread::sleep(CMD_DELAY);
-
-        // Step 2: Set effect via feature report
-        let port_byte = if self.model.uses_double_port() {
-            0x10 | (group * 2)
-        } else {
-            0x10 | group
-        };
-
         let mode_byte = self.map_mode_to_ene(effect.mode);
         let speed_byte = self.map_speed(effect.speed);
         let dir_byte = effect.direction.to_ene_byte();
         let brightness_byte = self.map_brightness(effect.brightness);
 
-        self.send_feature(&[REPORT_ID, port_byte, mode_byte, speed_byte, dir_byte, brightness_byte])?;
-        thread::sleep(CMD_DELAY);
+        if self.model.uses_double_port() {
+            let inner_port = group * 2;
+            let outer_port = group * 2 + 1;
+            match effect.scope {
+                RgbScope::Inner => {
+                    self.send_port_effect(inner_port, effect, mode_byte, speed_byte, dir_byte, brightness_byte)?;
+                }
+                RgbScope::Outer => {
+                    self.send_port_effect(outer_port, effect, mode_byte, speed_byte, dir_byte, brightness_byte)?;
+                }
+                _ => {
+                    self.send_port_effect(inner_port, effect, mode_byte, speed_byte, dir_byte, brightness_byte)?;
+                    self.send_port_effect(outer_port, effect, mode_byte, speed_byte, dir_byte, brightness_byte)?;
+                }
+            }
+        } else {
+            self.send_port_effect(group, effect, mode_byte, speed_byte, dir_byte, brightness_byte)?;
+        }
 
-        // Step 3: Commit frame to display changes
+        // Commit frame to display changes
         self.send_feature(&[REPORT_ID, 0x60, 0x00, 0x01])?;
         thread::sleep(CMD_DELAY);
 
         debug!(
-            "Set group {group}: colors={:?} mode={mode_byte} speed={speed_byte} dir={dir_byte} brightness={brightness_byte}",
-            &effect.colors
+            "Set group {group}: colors={:?} mode={mode_byte} speed={speed_byte} dir={dir_byte} brightness={brightness_byte} scope={:?}",
+            &effect.colors, effect.scope
         );
+        Ok(())
+    }
+
+    /// Send color + effect to a single port (inner or outer ring, or single-ring group).
+    fn send_port_effect(&self, port: u8, effect: &RgbEffect, mode: u8, speed: u8, dir: u8, brightness: u8) -> Result<()> {
+        // Color via output report: [0xE0, 0x30|port, R,B,G, ...] — R,B,G order!
+        let mut color_cmd = vec![REPORT_ID, 0x30 | port];
+        for color in effect.colors.iter().take(4) {
+            color_cmd.push(color[0]); // R
+            color_cmd.push(color[2]); // B
+            color_cmd.push(color[1]); // G
+        }
+        while color_cmd.len() < 14 {
+            color_cmd.push(0);
+        }
+        match self.send_output(&color_cmd) {
+            Ok(()) => debug!("Port {port}: wrote {} color bytes", color_cmd.len()),
+            Err(e) => warn!("Port {port}: color output report failed: {e}"),
+        }
+        thread::sleep(CMD_DELAY);
+
+        // Effect via feature report: [0xE0, 0x10|port, mode, speed, dir, brightness]
+        self.send_feature(&[REPORT_ID, 0x10 | port, mode, speed, dir, brightness])?;
+        thread::sleep(CMD_DELAY);
         Ok(())
     }
 
@@ -469,6 +484,14 @@ impl RgbDevice for Ene6k77Controller {
 
     fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
         self.set_group_effect(zone, effect)
+    }
+
+    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
+        if self.model.uses_double_port() {
+            vec![vec![RgbScope::All, RgbScope::Inner, RgbScope::Outer]; 4]
+        } else {
+            vec![]
+        }
     }
 
     fn supports_mb_rgb_sync(&self) -> bool {
