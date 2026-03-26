@@ -168,6 +168,7 @@ impl Ene6k77Controller {
     /// Read firmware version from the device.
     fn read_firmware(&self) -> Result<Ene6k77Firmware> {
         self.send_feature(&[REPORT_ID, 0x50, 0x01])?;
+        thread::sleep(CMD_DELAY);
         let data = self.read_input(5)?;
         Ok(Ene6k77Firmware {
             customer_id: data[0],
@@ -219,6 +220,7 @@ impl Ene6k77Controller {
     /// Returns [group0_rpm, group1_rpm, group2_rpm, group3_rpm].
     pub fn read_rpms(&self) -> Result<[u16; 4]> {
         self.send_feature(&[REPORT_ID, 0x50, 0x00])?;
+        thread::sleep(CMD_DELAY);
 
         let mut rpms = [0u16; 4];
 
@@ -439,7 +441,7 @@ impl Ene6k77Controller {
 
     fn read_input(&self, expected_len: usize) -> Result<Vec<u8>> {
         let dev = self.device.lock();
-        let mut buf = vec![0u8; expected_len + 1]; // +1 for report ID
+        let mut buf = vec![0u8; 65];
         buf[0] = REPORT_ID;
         let n = dev
             .get_input_report(&mut buf)
@@ -449,7 +451,6 @@ impl Ene6k77Controller {
                 "ENE 6K77: expected {expected_len} bytes, got {n}"
             );
         }
-        // Skip report ID byte
         Ok(buf[1..=expected_len].to_vec())
     }
 }
