@@ -15,6 +15,7 @@ export component SettingsPage inherits VerticalLayout {
     in property <int> openrgb-port: 6743;
     in property <string> openrgb-error: "";
     in property <string> hid-driver: "HIDAPI";
+    in property <string> app-version: "";
 
     callback toggle-openrgb(bool);
     callback set-default-fps(int);
@@ -220,7 +221,7 @@ export component SettingsPage inherits VerticalLayout {
                     }
 
                     Text {
-                        text: "Lian Li Linux v0.1.0";
+                        text: "Lian Li Linux v\{root.app-version}";
                         font-size: 14px;
                         color: Theme.text-primary;
                     }

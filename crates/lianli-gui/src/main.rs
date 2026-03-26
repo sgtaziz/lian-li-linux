@@ -26,6 +26,7 @@ fn main() {
         .init();
 
     let window = MainWindow::new().expect("Failed to create main window");
+    window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Shared state — backend will populate on first load
     let shared: Shared = Arc::new(Mutex::new(state::SharedState::default()));

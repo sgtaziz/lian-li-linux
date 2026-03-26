@@ -35,6 +35,7 @@ export component MainWindow inherits Window {
     in property <int> openrgb-port: 6743;
     in property <string> openrgb-error: "";
     in property <string> hid-driver: "HIDAPI";
+    in property <string> app-version: "";
 
     // LCD properties
     in property <[LcdEntryData]> lcd-entries: [];
@@ -179,6 +180,7 @@ export component MainWindow inherits Window {
                 openrgb-port: root.openrgb-port;
                 openrgb-error: root.openrgb-error;
                 hid-driver: root.hid-driver;
+                app-version: root.app-version;
                 toggle-openrgb(enabled) => { root.toggle-openrgb(enabled); }
                 set-default-fps(fps) => { root.set-default-fps(fps); }
                 set-openrgb-port(port) => { root.set-openrgb-port(port); }
