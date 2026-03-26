@@ -301,7 +301,10 @@ impl Ene6k77Controller {
         while color_cmd.len() < 14 {
             color_cmd.push(0);
         }
-        self.send_output(&color_cmd)?;
+        match self.send_output(&color_cmd) {
+            Ok(()) => debug!("Group {group} color: wrote {} bytes via output report", color_cmd.len()),
+            Err(e) => warn!("Group {group} color output report failed: {e}, falling back to feature report"),
+        }
         thread::sleep(CMD_DELAY);
 
         // Step 2: Set effect via feature report
@@ -324,7 +327,8 @@ impl Ene6k77Controller {
         thread::sleep(CMD_DELAY);
 
         debug!(
-            "Set group {group} effect: mode={mode_byte} speed={speed_byte} dir={dir_byte} brightness={brightness_byte}"
+            "Set group {group}: colors={:?} mode={mode_byte} speed={speed_byte} dir={dir_byte} brightness={brightness_byte}",
+            &effect.colors
         );
         Ok(())
     }
