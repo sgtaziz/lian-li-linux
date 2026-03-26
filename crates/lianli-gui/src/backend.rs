@@ -284,10 +284,8 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 w.set_fan_update_interval(fan_update_interval);
 
                 // Fan groups
-                if let Some(ref fan_cfg) = config.fans {
-                    let groups_model = conversions::fan_groups_to_model(fan_cfg, &devices);
-                    w.set_fan_groups(groups_model);
-                }
+                let fan_cfg = config.fans.clone().unwrap_or_default();
+                w.set_fan_groups(conversions::fan_groups_to_model(&fan_cfg, &devices));
 
                 // RGB devices
                 let rgb_model = conversions::rgb_devices_to_model(&rgb_caps, &config);

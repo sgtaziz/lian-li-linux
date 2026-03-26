@@ -432,17 +432,11 @@ impl ServiceManager {
             controller.stop();
         }
 
-        let (fan_config, fan_curves) = if let Some(cfg) = &self.config {
-            match (&cfg.fans, &cfg.fan_curves) {
-                (Some(fans), curves) => (fans.clone(), curves.clone()),
-                (None, _) => {
-                    info!("No fan configuration found in config");
-                    return;
-                }
-            }
-        } else {
+        let Some(cfg) = &self.config else {
             return;
         };
+        let fan_config = cfg.fans.clone().unwrap_or_default();
+        let fan_curves = cfg.fan_curves.clone();
 
         // Reuse the already-opened wired fan device handles (populated at startup).
         let wired_devices = Arc::clone(&self.wired_fan_devices);

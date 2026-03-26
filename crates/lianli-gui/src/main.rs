@@ -699,11 +699,13 @@ fn wire_fan_callbacks(
             {
                 let mut state = shared.lock().unwrap();
                 if let Some(ref mut c) = state.config {
-                    if let Some(fc) = &mut c.fans {
-                        if let Some(group) = fc.speeds.iter_mut().find(|g| g.device_id.as_deref() == Some(&dev_id)) {
-                            if slot < 4 {
-                                group.speeds[slot] = FanSpeed::Constant(((percent as f32 / 100.0) * 255.0).round() as u8);
-                            }
+                    let fc = c.fans.get_or_insert_with(|| FanConfig {
+                        speeds: vec![],
+                        update_interval_ms: 1000,
+                    });
+                    if let Some(group) = fc.speeds.iter_mut().find(|g| g.device_id.as_deref() == Some(&dev_id)) {
+                        if slot < 4 {
+                            group.speeds[slot] = FanSpeed::Constant(((percent as f32 / 100.0) * 255.0).round() as u8);
                         }
                     }
                 }
@@ -985,9 +987,8 @@ fn refresh_fan_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
             w.set_curve_names(conversions::curve_names_to_model(&curves));
             w.set_fan_speed_options(conversions::speed_options_model(&curves, true));
             w.set_config_dirty(true);
-            if let Some(ref fc) = fans {
-                w.set_fan_groups(conversions::fan_groups_to_model(fc, &devices));
-            }
+            let fc = fans.unwrap_or_default();
+            w.set_fan_groups(conversions::fan_groups_to_model(&fc, &devices));
         }
     })
     .ok();
