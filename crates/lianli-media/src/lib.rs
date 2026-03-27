@@ -19,7 +19,6 @@ pub struct MediaAsset {
     pub kind: MediaAssetKind, // the contents (originally the enum MediaAsset, now in MediaAssetKind)
 }
 
-
 #[derive(Debug, Clone)]
 pub enum MediaAssetKind {
     Static {
