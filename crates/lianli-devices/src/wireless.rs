@@ -145,9 +145,9 @@ impl WirelessFanType {
     pub fn total_led_count_override(self) -> Option<u16> {
         match self {
             Self::Strimer(dt) => Some(match dt {
-                1 | 2 => 116,
-                3 | 4 => 132,
-                5 | 6 => 174,
+                1 => 116,
+                2 => 132,
+                3 => 174,
                 _ => 88,
             }),
             Self::Lc217 => Some(96),
