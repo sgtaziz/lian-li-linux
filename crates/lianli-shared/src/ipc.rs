@@ -58,6 +58,10 @@ pub enum IpcRequest {
     SetRgbConfig {
         config: RgbAppConfig,
     },
+    /// Switch a WinUSB LCD device between LCD mode and desktop mode.
+    SwitchDisplayMode {
+        device_id: String,
+    },
     Subscribe,
     Ping,
 }
@@ -112,6 +116,10 @@ pub struct DeviceInfo {
     pub family: DeviceFamily,
     pub name: String,
     pub serial: Option<String>,
+    #[serde(default)]
+    pub vid: u16,
+    #[serde(default)]
+    pub pid: u16,
     pub has_lcd: bool,
     pub has_fan: bool,
     pub has_pump: bool,

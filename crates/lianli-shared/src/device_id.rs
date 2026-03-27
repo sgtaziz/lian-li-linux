@@ -37,8 +37,12 @@ pub enum DeviceFamily {
     Lancool207,
     /// Universal Screen 8.8" — WinUSB 1920x480
     UniversalScreen,
-    /// Display mode switcher (VID=0x1A86)
-    DisplaySwitcher,
+    /// HydroShift II LCD in desktop mode (CH340, 0x1A86:0xAD20)
+    HydroShift2LcdDesktop,
+    /// Lancool 207 in desktop mode (CH340, 0x1A86:0xACD1 / 0xAD11)
+    Lancool207Desktop,
+    /// Universal Screen 8.8" in desktop mode (CH340, 0x1A86:0xACE1 / 0xAD21)
+    UniversalScreenDesktop,
     /// Wireless AIO (WaterBlock/WaterBlock2) — pump + fans via RF dongle
     WirelessAio,
     /// Wireless Strimer LED strip — RGB only via RF dongle
@@ -236,11 +240,35 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         name: "Universal Screen 8.8\"",
         hid_usage_page: None,
     },
-    // Display mode switchers (VID=0x1A86)
+    // Desktop-mode variants (CH340, VID=0x1A86) — same physical device as 0x1CBE LCD
     DeviceEntry {
-        id: UsbId::new(0x1A86, 0x7523),
-        family: DeviceFamily::DisplaySwitcher,
-        name: "Display Mode Switcher",
+        id: UsbId::new(0x1A86, 0xAD20),
+        family: DeviceFamily::HydroShift2LcdDesktop,
+        name: "HydroShift II LCD (Desktop Mode)",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1A86, 0xACD1),
+        family: DeviceFamily::Lancool207Desktop,
+        name: "Lancool 207 Digital (Desktop Mode)",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1A86, 0xAD11),
+        family: DeviceFamily::Lancool207Desktop,
+        name: "Lancool 207 Digital (Desktop Mode)",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1A86, 0xACE1),
+        family: DeviceFamily::UniversalScreenDesktop,
+        name: "Universal Screen 8.8\" (Desktop Mode)",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1A86, 0xAD21),
+        family: DeviceFamily::UniversalScreenDesktop,
+        name: "Universal Screen 8.8\" (Desktop Mode)",
         hid_usage_page: None,
     },
 ];
@@ -299,6 +327,28 @@ impl DeviceFamily {
                 | Self::Galahad2Lcd
         )
     }
+
+    /// Whether this device is in desktop/display mode (CH340 firmware).
+    /// These devices can be switched back to LCD mode via a button in the GUI.
+    pub fn is_desktop_mode(self) -> bool {
+        matches!(
+            self,
+            Self::HydroShift2LcdDesktop
+                | Self::Lancool207Desktop
+                | Self::UniversalScreenDesktop
+        )
+    }
+
+    /// Whether this device supports switching to desktop mode.
+    /// Only WinUSB LCD devices that have a CH340 display-mode counterpart.
+    pub fn supports_display_mode_switch(self) -> bool {
+        matches!(
+            self,
+            Self::HydroShift2Lcd
+                | Self::Lancool207
+                | Self::UniversalScreen
+        ) || self.is_desktop_mode()
+    }
 }
 
 /// Look up a device family by VID/PID.
@@ -332,6 +382,5 @@ pub fn uses_usb_bulk(family: DeviceFamily) -> bool {
             | DeviceFamily::HydroShift2Lcd
             | DeviceFamily::Lancool207
             | DeviceFamily::UniversalScreen
-            | DeviceFamily::DisplaySwitcher
     )
 }

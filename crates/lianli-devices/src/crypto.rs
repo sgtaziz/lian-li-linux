@@ -17,6 +17,7 @@ pub const CMD_PUSH_JPG: u8 = 0x65;
 pub const CMD_START_PLAY: u8 = 0x79;
 pub const CMD_QUERY_BLOCK: u8 = 0x7A;
 pub const CMD_STOP_PLAY: u8 = 0x7B;
+pub const CMD_SWITCH_TO_DESKTOP: u8 = 0x96;
 
 /// Builds DES-CBC encrypted command headers for VID=0x1CBE LCD devices.
 ///
@@ -161,6 +162,10 @@ impl PacketBuilder {
 
     pub fn stop_clock_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_STOP_CLOCK, &[0])
+    }
+
+    pub fn switch_to_desktop_header_winusb(&mut self) -> Vec<u8> {
+        self.build_winusb(CMD_SWITCH_TO_DESKTOP, &[])
     }
 }
 

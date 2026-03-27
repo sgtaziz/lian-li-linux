@@ -163,6 +163,24 @@ impl WinUsbLcdDevice {
         Ok(())
     }
 
+    /// Switch the device from LCD mode to desktop mode.
+    ///
+    /// Sends StopPlay + SwitchToDesktop (0x96). The device reboots and
+    /// re-enumerates as a CH340 device (VID=0x1A86).
+    pub fn switch_to_desktop_mode(&mut self) -> Result<()> {
+        let stop = self.builder.stop_play_header_winusb();
+        self.send_command(stop, "StopPlay");
+
+        let switch = self.builder.switch_to_desktop_header_winusb();
+        self.transport
+            .write(&switch, LCD_WRITE_TIMEOUT)
+            .context("sending SwitchToDesktop command")?;
+
+        info!("Sent SwitchToDesktop — device will reboot into desktop mode");
+        self.initialized = false;
+        Ok(())
+    }
+
     fn do_init(&mut self) -> Result<()> {
         self.transport.read_flush();
 

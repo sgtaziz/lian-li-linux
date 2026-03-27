@@ -193,7 +193,6 @@ fn poll_daemon(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
         d.family,
         lianli_shared::device_id::DeviceFamily::WirelessTx
         | lianli_shared::device_id::DeviceFamily::WirelessRx
-        | lianli_shared::device_id::DeviceFamily::DisplaySwitcher
     )).count() as i32;
 
     let streaming_active = telemetry.streaming_active;

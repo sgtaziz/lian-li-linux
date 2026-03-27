@@ -220,6 +220,15 @@ impl ServiceManager {
                 }
             }
 
+            // Check for IPC-triggered display mode switch (LCD -> Desktop)
+            {
+                let mut ipc_state = self.ipc_state.lock();
+                if let Some(device_id) = ipc_state.pending_display_switch.take() {
+                    drop(ipc_state);
+                    self.handle_display_switch_to_desktop(&device_id);
+                }
+            }
+
             if now.duration_since(self.last_device_scan) >= DEVICE_POLL_INTERVAL {
                 self.last_device_scan = Instant::now();
                 self.refresh_targets();
@@ -261,7 +270,6 @@ impl ServiceManager {
                         det.family,
                         lianli_shared::device_id::DeviceFamily::WirelessTx
                             | lianli_shared::device_id::DeviceFamily::WirelessRx
-                            | lianli_shared::device_id::DeviceFamily::DisplaySwitcher
                             | lianli_shared::device_id::DeviceFamily::TlFan
                             | lianli_shared::device_id::DeviceFamily::Ene6k77
                     ) {
@@ -275,6 +283,8 @@ impl ServiceManager {
                         family: det.family,
                         name: det.name.to_string(),
                         serial: Some(device_id),
+                        vid: det.vid,
+                        pid: det.pid,
                         has_lcd: det.family.has_lcd(),
                         has_fan: det.family.has_fan(),
                         has_pump: det.family.has_pump(),
@@ -362,6 +372,8 @@ impl ServiceManager {
                 family,
                 name: dev.fan_type.display_name().to_string(),
                 serial: Some(dev.mac_str()),
+                vid: 0,
+                pid: 0,
                 has_lcd: false,
                 has_fan: dev.fan_count > 0 || is_aio,
                 has_pump: is_aio,
@@ -510,7 +522,8 @@ impl ServiceManager {
                 };
                 if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
                     self.register_wired_controllers(
-                        &base_id, det.name, det.family, det.serial.as_deref(),
+                        &base_id, det.name, det.family, det.vid, det.pid,
+                        det.serial.as_deref(),
                         result, &mut fan_devices, &mut wired_rgb,
                     );
                 }
@@ -536,7 +549,8 @@ impl ServiceManager {
                 };
                 if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
                     self.register_wired_controllers(
-                        &base_id, det.name, det.family, det.serial.as_deref(),
+                        &base_id, det.name, det.family, det.vid, det.pid,
+                        det.serial.as_deref(),
                         result, &mut fan_devices, &mut wired_rgb,
                     );
                 }
@@ -554,6 +568,8 @@ impl ServiceManager {
         base_id: &str,
         name: &str,
         family: DeviceFamily,
+        vid: u16,
+        pid: u16,
         serial: Option<&str>,
         result: anyhow::Result<lianli_devices::detect::WiredControllerSet>,
         fan_devices: &mut HashMap<String, Box<dyn FanDevice>>,
@@ -582,6 +598,8 @@ impl ServiceManager {
                             family,
                             name: dev_name,
                             serial: serial.map(|s| s.to_string()),
+                            vid,
+                            pid,
                             has_lcd: false,
                             has_fan: true,
                             has_pump: false,
@@ -964,6 +982,58 @@ impl ServiceManager {
         }
 
         self.targets = new_targets;
+    }
+
+    fn handle_display_switch_to_desktop(&mut self, device_id: &str) {
+        // Find and remove the active LCD target for this device
+        let target_idx = self.targets.iter().find_map(|(&idx, t)| {
+            if t.device_identity == *device_id {
+                Some(idx)
+            } else {
+                None
+            }
+        });
+
+        if let Some(idx) = target_idx {
+            if let Some(mut target) = self.targets.remove(&idx) {
+                target.stop();
+                if let LcdBackend::WinUsb(ref mut lcd) = target.lcd {
+                    match lcd.switch_to_desktop_mode() {
+                        Ok(()) => info!("Switched {device_id} to desktop mode"),
+                        Err(e) => warn!("Failed to switch {device_id} to desktop mode: {e}"),
+                    }
+                } else {
+                    warn!("Device {device_id} is not a WinUSB LCD, cannot switch to desktop mode");
+                }
+            }
+        } else {
+            // No active target — try opening a temporary connection
+            info!("No active LCD target for {device_id}, opening temporary connection");
+            let det = self.cached_usb_devices.iter().find(|d| d.device_id == *device_id);
+            if let Some(det) = det {
+                let family = det.family;
+                if let Ok(usb_devs) = lianli_devices::detect::enumerate_devices() {
+                    for usb_det in usb_devs {
+                        if usb_det.family == family && usb_det.device_id() == *device_id {
+                            let screen = lianli_shared::screen::screen_info_for(family)
+                                .unwrap_or(lianli_shared::screen::ScreenInfo::AIO_LCD_480);
+                            match WinUsbLcdDevice::new(usb_det.device, screen, det.name.as_str()) {
+                                Ok(mut lcd) => {
+                                    match lcd.switch_to_desktop_mode() {
+                                        Ok(()) => info!("Switched {device_id} to desktop mode"),
+                                        Err(e) => warn!("Switch to desktop failed: {e}"),
+                                    }
+                                }
+                                Err(e) => warn!("Failed to open {device_id} for mode switch: {e}"),
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else {
+                warn!("Device {device_id} not found in cached devices");
+            }
+        }
     }
 
     fn stream_targets(&mut self) {

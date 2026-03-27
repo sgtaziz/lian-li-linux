@@ -31,6 +31,8 @@ pub struct DaemonState {
     pub config_reload_pending: bool,
     /// RGB controller, set once devices are opened.
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
+    /// Device ID pending display mode switch (LCD→Desktop). Handled by service main loop.
+    pub pending_display_switch: Option<String>,
 }
 
 impl DaemonState {
@@ -42,6 +44,7 @@ impl DaemonState {
             telemetry: TelemetrySnapshot::default(),
             config_reload_pending: false,
             rgb_controller: None,
+            pending_display_switch: None,
         }
     }
 }
@@ -316,11 +319,53 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
             }
         }
 
+        IpcRequest::SwitchDisplayMode { device_id } => {
+            let (family, pid) = {
+                let state = state.lock();
+                match state.devices.iter().find(|d| d.device_id == device_id) {
+                    Some(d) => (Some(d.family), d.pid),
+                    None => (None, 0),
+                }
+            };
+            match family {
+                Some(f) if f.is_desktop_mode() => {
+                    // Desktop -> LCD: send switch bytes via HID to CH340
+                    if pid == 0 {
+                        return IpcResponse::error("device PID not available");
+                    }
+                    match hidapi::HidApi::new() {
+                        Ok(api) => {
+                            match lianli_devices::display_switcher::switch_to_lcd_mode(&api, pid) {
+                                Ok(()) => IpcResponse::ok(serde_json::json!({
+                                    "switched": "to_lcd",
+                                    "message": "Device is rebooting into LCD mode. It will appear shortly."
+                                })),
+                                Err(e) => IpcResponse::error(format!("switch failed: {e}")),
+                            }
+                        }
+                        Err(e) => IpcResponse::error(format!("failed to open HID: {e}")),
+                    }
+                }
+                Some(f) if f.supports_display_mode_switch() => {
+                    // LCD -> Desktop: service loop owns the WinUSB transport
+                    let mut state = state.lock();
+                    state.pending_display_switch = Some(device_id);
+                    IpcResponse::ok(serde_json::json!({
+                        "switched": "to_desktop",
+                        "message": "Device is switching to desktop mode. It will reboot shortly."
+                    }))
+                }
+                Some(_) => IpcResponse::error("device does not support display mode switching"),
+                None => IpcResponse::error(format!("device not found: {device_id}")),
+            }
+        }
+
         IpcRequest::Subscribe => {
             IpcResponse::error("Subscribe not yet implemented; use polling via GetTelemetry")
         }
     }
 }
+
 
 fn write_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {

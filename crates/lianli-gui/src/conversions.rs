@@ -27,7 +27,9 @@ fn family_display_name(f: DeviceFamily) -> &'static str {
         DeviceFamily::HydroShift2Lcd => "HydroShift II LCD Circle",
         DeviceFamily::Lancool207 => "Lancool 207 Digital",
         DeviceFamily::UniversalScreen => "Universal Screen 8.8\"",
-        DeviceFamily::DisplaySwitcher => "Display Mode Switcher",
+        DeviceFamily::HydroShift2LcdDesktop => "HydroShift II LCD (Desktop Mode)",
+        DeviceFamily::Lancool207Desktop => "Lancool 207 Digital (Desktop Mode)",
+        DeviceFamily::UniversalScreenDesktop => "Universal Screen 8.8\" (Desktop Mode)",
         DeviceFamily::WirelessAio => "HydroShift Wireless AIO",
         DeviceFamily::WirelessStrimer => "Strimer Plus Wireless",
         DeviceFamily::WirelessLc217 => "Lancool 217 Wireless",
@@ -76,6 +78,8 @@ pub fn device_to_slint(
         fan_rpms: SharedString::from(&fan_rpms),
         coolant_temp: SharedString::from(&coolant_temp),
         resolution: SharedString::from(&resolution),
+        in_desktop_mode: device.family.is_desktop_mode(),
+        in_lcd_mode: device.family.supports_display_mode_switch() && !device.family.is_desktop_mode(),
     }
 }
 
@@ -89,7 +93,6 @@ pub fn devices_to_model(
             d.family,
             lianli_shared::device_id::DeviceFamily::WirelessTx
             | lianli_shared::device_id::DeviceFamily::WirelessRx
-            | lianli_shared::device_id::DeviceFamily::DisplaySwitcher
         ))
         .map(|d| device_to_slint(d, telemetry))
         .collect();

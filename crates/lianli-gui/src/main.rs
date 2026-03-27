@@ -40,6 +40,18 @@ fn main() {
         });
     }
 
+    // ── Switch display mode ──
+    {
+        let tx = backend.tx.clone();
+        window.on_switch_display_mode(move |device_id| {
+            let _ = tx.send(backend::BackendCommand::IpcRequest(
+                lianli_shared::ipc::IpcRequest::SwitchDisplayMode {
+                    device_id: device_id.to_string(),
+                },
+            ));
+        });
+    }
+
     // ── Save config ──
     {
         let tx = backend.tx.clone();
