@@ -3,7 +3,6 @@
 //! Protocol: newline-delimited JSON (one request is one response per connection).
 //! The GUI polls periodically for telemetry. Config writes go through IPC.
 
-
 use crate::rgb_controller::RgbController;
 use crate::service::DaemonEvent;
 use lianli_shared::config::AppConfig;
