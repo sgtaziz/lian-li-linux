@@ -36,6 +36,7 @@ fn family_display_name(f: DeviceFamily) -> &'static str {
         DeviceFamily::WirelessLed88 => "Universal Screen 8.8\" Wireless",
         DeviceFamily::WirelessV150 => "Lancool V150 Wireless",
         DeviceFamily::StrimerPlus => "Strimer Plus",
+        DeviceFamily::UniversalScreenLighting => "Universal Screen 8.8\" LED Ring",
     }
 }
 

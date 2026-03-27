@@ -41,6 +41,9 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="739a", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7391", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7395", MODE="0666"
 
+# Universal Screen 8.8" LED Ring
+SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="8050", MODE="0666"
+
 # SLV3 wireless LCD fan
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="0005", MODE="0666"
 # TLV2 wireless LCD fan
@@ -75,6 +78,9 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="739a"
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7391", RUN+="/bin/sh -c 'echo 0416 7391 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7395", RUN+="/bin/sh -c 'echo 0416 7395 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
 
+# Universal Screen 8.8" LED Ring
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="8050", RUN+="/bin/sh -c 'echo 0416 8050 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
+
 # Strimer Plus LED strip
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a200", RUN+="/bin/sh -c 'echo 0cf2 a200 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
 
@@ -105,6 +111,9 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="739a", MODE="06
 # Galahad II LCD / Vision AIO
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7391", MODE="0666"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7395", MODE="0666"
+
+# Universal Screen 8.8" LED Ring
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="8050", MODE="0666"
 
 # Strimer Plus LED strip
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a200", MODE="0666"

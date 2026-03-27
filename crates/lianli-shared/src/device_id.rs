@@ -55,6 +55,8 @@ pub enum DeviceFamily {
     WirelessV150,
     /// Strimer Plus wired LED strip (0x0CF2:0xA200) — RGB only via HID
     StrimerPlus,
+    /// Universal Screen 8.8" LED Ring — HID RGB controller (0x0416:0x8050)
+    UniversalScreenLighting,
 }
 
 /// USB Vendor/Product ID pair.
@@ -107,6 +109,13 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         id: UsbId::new(0x1A86, 0xE305),
         family: DeviceFamily::WirelessRx,
         name: "Wireless RX Dongle V2",
+        hid_usage_page: None,
+    },
+    // Universal Screen 8.8" LED Ring
+    DeviceEntry {
+        id: UsbId::new(0x0416, 0x8050),
+        family: DeviceFamily::UniversalScreenLighting,
+        name: "Universal Screen 8.8\" LED Ring",
         hid_usage_page: None,
     },
     // ENE 6K77 wired fans (SL/AL series)
@@ -346,6 +355,7 @@ impl DeviceFamily {
                 | Self::Galahad2Trinity
                 | Self::HydroShiftLcd
                 | Self::Galahad2Lcd
+                | Self::UniversalScreenLighting
         )
     }
 
@@ -389,6 +399,7 @@ pub fn uses_hid(family: DeviceFamily) -> bool {
             | DeviceFamily::Galahad2Trinity
             | DeviceFamily::HydroShiftLcd
             | DeviceFamily::Galahad2Lcd
+            | DeviceFamily::UniversalScreenLighting
     )
 }
 
