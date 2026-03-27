@@ -244,7 +244,13 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
     DeviceEntry {
         id: UsbId::new(0x1A86, 0xAD20),
         family: DeviceFamily::HydroShift2LcdDesktop,
-        name: "HydroShift II LCD (Desktop Mode)",
+        name: "HydroShift II LCD Circle (Desktop Mode)",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1A86, 0xAD22),
+        family: DeviceFamily::HydroShift2LcdDesktop,
+        name: "HydroShift II LCD Square (Desktop Mode)",
         hid_usage_page: None,
     },
     DeviceEntry {
