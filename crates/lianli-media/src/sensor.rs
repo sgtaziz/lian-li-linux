@@ -144,7 +144,6 @@ impl SensorAsset {
             return Ok(None);
         }
 
-
         let gauge_color = self.color_for_value(value);
         let w = self.screen.width;
         let h = self.screen.height;
