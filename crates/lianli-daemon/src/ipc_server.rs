@@ -100,7 +100,7 @@ fn run_server(state: Arc<Mutex<DaemonState>>, stop_flag: Arc<AtomicBool>, tx: Se
                 let state = Arc::clone(&state);
                 let tx_for_client = tx.clone();
                 thread::spawn(move || {
-                    if let Err(e) = handle_connection(stream, state,tx_for_client) {
+                    if let Err(e) = handle_connection(stream, state, tx_for_client) {
                         debug!("IPC connection error: {e}");
                     }
                 });
