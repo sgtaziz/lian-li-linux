@@ -146,7 +146,7 @@ fn handle_connection(
         };
 
         debug!("IPC request: {request:?}");
-        let response = handle_request(request, &state,tx.clone());
+        let response = handle_request(request, &state, tx.clone());
         write_response(&mut writer, &response)?;
     }
 
