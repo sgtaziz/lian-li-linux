@@ -18,8 +18,10 @@ pub const SWITCHER_VID: u16 = 0x1A86;
 /// Known display mode switcher PIDs.
 pub const SWITCHER_PIDS: &[(u16, &str)] = &[
     (0x7523, "Generic CH340"),
-    (0xACD1, "Lancool 207 Display Mode"),
-    (0xACE1, "Universal Screen 8.8\" Display Mode"),
+    (0xACD1, "Lancool 207 Display Mode (rev1)"),
+    (0xAD11, "Lancool 207 Display Mode (rev2)"),
+    (0xACE1, "Universal Screen 8.8\" Display Mode (rev1)"),
+    (0xAD21, "Universal Screen 8.8\" Display Mode (rev2)"),
     (0xAD20, "HydroShift II LCD Circle Display Mode"),
 ];
 

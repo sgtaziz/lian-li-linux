@@ -47,6 +47,8 @@ pub enum DeviceFamily {
     WirelessLc217,
     /// Wireless Universal Screen 8.8" LED ring — RGB only via RF dongle
     WirelessLed88,
+    /// Strimer Plus wired LED strip (0x0CF2:0xA200) — RGB only via HID
+    StrimerPlus,
 }
 
 /// USB Vendor/Product ID pair.
@@ -129,6 +131,13 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         id: UsbId::new(0x0CF2, 0xA106),
         family: DeviceFamily::Ene6k77,
         name: "ENE 6K77 SL/AL Fan Controller",
+        hid_usage_page: None,
+    },
+    // Strimer Plus wired LED strip
+    DeviceEntry {
+        id: UsbId::new(0x0CF2, 0xA200),
+        family: DeviceFamily::StrimerPlus,
+        name: "Strimer Plus",
         hid_usage_page: None,
     },
     // TL Fan controller — usage page 0xFF1B selects the control interface
