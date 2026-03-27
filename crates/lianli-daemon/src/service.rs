@@ -719,10 +719,10 @@ impl ServiceManager {
             if self.direct_color_writer.is_none() {
                 self.direct_color_writer =
                     Some(crate::rgb_controller::start_direct_color_writer(
-                    Arc::clone(rgb),
-                    Arc::clone(&self.direct_color_buffer),
-                    Arc::clone(&self.openrgb_stop),
-                ));
+                        Arc::clone(rgb),
+                        Arc::clone(&self.direct_color_buffer),
+                        Arc::clone(&self.openrgb_stop),
+                    ));
             }
         }
     }
@@ -733,11 +733,11 @@ impl ServiceManager {
         match self.wireless.connect() {
             Ok(()) => {
                 match self.wireless.start_polling() {
-                Ok(()) => {
-                    let _ = self.wireless.send_rx_sequence();
-                    info!("Wireless links active");
-                }
-                Err(err) => warn!("[wireless] polling start failed: {err}"),
+                    Ok(()) => {
+                        let _ = self.wireless.send_rx_sequence();
+                        info!("Wireless links active");
+                    }
+                    Err(err) => warn!("[wireless] polling start failed: {err}"),
                 }
             }
             Err(_) => {
@@ -807,28 +807,14 @@ impl ServiceManager {
                         self.media_assets.insert(idx, Arc::clone(&asset_arc));
 
                         match device.media_type {
-                            MediaType::Image => {
-                                info!("Prepared image for LCD[{device_id}]");
-                            }
-                            MediaType::Video => {
-                                info!("Prepared video for LCD[{device_id}]");
-                            }
-                            MediaType::Gif => {
-                                info!("Prepared GIF for LCD[{device_id}]");
-                            }
-                            MediaType::Color => {
-                                info!("Prepared color frame for LCD[{device_id}]");
-                            }
-                            MediaType::Sensor => {
-                                info!(
-                                    "Prepared sensor for LCD[{device_id}]: {}",
-                                    device
-                                        .sensor
-                                        .as_ref()
-                                        .map(|s| s.label.as_str())
-                                        .unwrap_or("<unknown>")
-                                );
-                            }
+                            MediaType::Image => info!("Prepared image for LCD[{device_id}]"),
+                            MediaType::Video => info!("Prepared video for LCD[{device_id}]"),
+                            MediaType::Gif => info!("Prepared GIF for LCD[{device_id}]"),
+                            MediaType::Color => info!("Prepared color frame for LCD[{device_id}]"),
+                            MediaType::Sensor => info!(
+                                "Prepared sensor for LCD[{device_id}]: {}",
+                                device.sensor.as_ref().map(|s| s.label.as_str()).unwrap_or("<unknown>")
+                            ),
                         }
                         tx.send(DaemonEvent::FrameFinished { asset: asset_arc })
                             .ok();
@@ -979,7 +965,7 @@ impl ServiceManager {
                                 candidate.pid,
                                 candidate.family,
                             )
-                                .map(LcdBackend::HidLcd)
+                            .map(LcdBackend::HidLcd)
                         }
                     }
                     _ => unreachable!(),
