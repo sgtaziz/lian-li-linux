@@ -42,7 +42,6 @@ impl PartialEq for MediaAsset {
 
 impl Eq for MediaAsset {}
 
-
 /// Prepare a media asset for a given LCD config and screen info.
 pub fn prepare_media_asset(
     cfg: &LcdConfig,
