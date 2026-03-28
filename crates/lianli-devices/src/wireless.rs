@@ -526,11 +526,12 @@ impl WirelessController {
         let stop_flag = self.poll_stop.clone();
         let discovered_devices = Arc::clone(&self.discovered_devices);
         let mobo_pwm = Arc::clone(&self.mobo_pwm);
+        let master_mac = Arc::clone(&self.master_mac);
 
         self.poll_thread = Some(thread::spawn(move || {
             let mut found_devices = false;
             while !stop_flag.load(Ordering::SeqCst) {
-                if let Err(err) = poll_and_discover(&rx, &discovered_devices, &mobo_pwm) {
+                if let Err(err) = poll_and_discover(&rx, &discovered_devices, &mobo_pwm, &master_mac) {
                     warn!("RX polling error: {err:?}");
                     break;
                 }
@@ -998,6 +999,7 @@ fn poll_and_discover(
     rx: &Arc<Mutex<UsbTransport>>,
     discovered_devices: &Arc<Mutex<Vec<DiscoveredDevice>>>,
     mobo_pwm: &Arc<AtomicU16>,
+    master_mac: &Arc<Mutex<[u8; 6]>>,
 ) -> Result<()> {
     // GetDev command: [0x10, page_number, ...pad...]
     let mut cmd = vec![0u8; 64];
@@ -1076,10 +1078,13 @@ fn poll_and_discover(
                 let old_count = devices.len();
                 *devices = found;
                 if old_count != devices.len() {
-                    info!(
-                        "Discovered {} wireless device(s)",
-                        devices.len()
-                    );
+                    let local_mac = *master_mac.lock();
+                    let bound = devices.iter().filter(|d| d.master_mac == local_mac).count();
+                    let unbound = devices.len() - bound;
+                    info!("Discovered {} wireless device(s) ({bound} bound, {unbound} unbound)", devices.len());
+                    for d in devices.iter().filter(|d| d.master_mac != local_mac) {
+                        info!("  {} ({}) not bound to this dongle", d.mac_str(), d.fan_type.display_name());
+                    }
                 }
             }
         }
