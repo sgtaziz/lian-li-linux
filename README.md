@@ -24,28 +24,46 @@
 | HydroShift LCD AIO | Yes | Yes | 480x480 | Yes | Yes |
 | Galahad II LCD / Vision AIO | Yes | Yes | 480x480 | Yes | -* |
 
+\* Galahad II LCD / Vision uses the same driver as HydroShift LCD AIO.
+
 ### Wireless (via TX/RX dongle)
 
-| Device | RGB | LCD | Tested |
-|--------|:---:|:---:|:------:|
-| UNI FAN TL V2 (LCD / LED) | Yes | 480x480 | Yes |
-| UNI FAN SL V3 (LCD / LED) | Yes | 480x480 | - |
-| UNI FAN SL-INF | Yes | - | - |
-| UNI FAN CL / RL120 | Yes | - | - |
+| Device | Fan Control | RGB | LCD | Pump | Tested |
+|--------|:-----------:|:---:|:---:|:----:|:------:|
+| UNI FAN TL V2 (LCD / LED) | Yes | Yes | 400x400 | - | Yes |
+| UNI FAN SL V3 (LCD / LED) | Yes | Yes | 400x400 | - | Yes |
+| UNI FAN SL-INF | Yes | Yes | - | - | - |
+| UNI FAN CL / RL120 | Yes | Yes | - | - | - |
+| HydroShift Wireless AIO | Yes | Yes | - | Yes | - |
+| HydroShift II Wireless AIO | Yes | Yes | - | Yes | - |
+| Strimer Plus Wireless | - | Yes | - | - | - |
+| Lancool 217 Wireless | - | Yes | - | - | - |
+| Lancool V150 Wireless | Yes | Yes | - | - | - |
+| Universal Screen 8.8" Wireless | - | Yes | - | - | - |
+
+Both V1 (VID 0x0416) and V2 (VID 0x1A86) wireless dongles are supported.
 
 > **Note:** Wireless fans must be bound to a Wireless dongle using L-Connect 3 on Windows before they can be used here. If you don't have a Windows install, you can run L-Connect 3 in a VM and pass the USB dongle through to pair your devices. This is only required 1 time if you have never configured your fans on Windows.
 
-### USB (Standalone)
+> **Note 2:** Wireless devices with LCDs still need to be plugged in via USB to control the LCD. LCD cannot be controlled through wireless dongle alone.
+
+### USB (Standalone LCD)
 
 | Device | LCD | Tested | Notes |
 |--------|:---:|:------:|-------|
-| HydroShift II LCD Circle | 480x480 | Yes | LCD Supports Background image only |
-| HydroShift II LCD Square | 480x480 | Yes | LCD Supports Background image only |
-| Lancool 207 Digital | 1472x720 | Yes | LCD Supports Background image only |
-| Universal Screen 8.8" | 1920x480 | - | LCD Supports Background image only |
+| HydroShift II LCD Circle | 480x480 | Yes | |
+| HydroShift II LCD Square | 480x480 | Yes | |
+| Lancool 207 Digital | 1472x720 | Yes | |
+| Universal Screen 8.8" | 1920x480 | - | |
+| Universal Screen 8.8" LED Ring | - | - | RGB detection only (control TBD) |
 
+Devices stuck in desktop/display mode are detected and can be switched back to LCD mode via the GUI.
 
-\* Galahad II LCD / Vision uses the same driver as HydroShift LCD AIO.
+### Other
+
+| Device | RGB | Tested |
+|--------|:---:|:------:|
+| Strimer Plus (wired) | Yes | - |
 
 If you've tested a device that isn't marked above, please [open an issue or PR](https://github.com/sgtaziz/lian-li-linux/issues) to update this table.
 
