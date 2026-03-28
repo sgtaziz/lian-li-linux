@@ -10,6 +10,7 @@ use lianli_devices::detect::{
     open_hid_backend_hidapi, open_hid_backend_rusb, open_hid_lcd_by_vid_pid,
     open_hid_lcd_device_rusb,
 };
+use lianli_media::sensor::FrameInfo;
 use lianli_shared::config::HidDriver;
 use lianli_transport::HidBackend;
 use lianli_devices::hydroshift_lcd::HydroShiftLcdController;
@@ -27,12 +28,12 @@ use parking_lot::Mutex;
 use rusb::Device;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// Full USB bus enumeration interval — only needed for hot-plug detection of
@@ -75,7 +76,6 @@ pub struct ServiceManager {
     direct_color_buffer: Arc<Mutex<crate::rgb_controller::DirectColorBuffer>>,
     direct_color_writer: Option<JoinHandle<()>>,
     tx: Option<Sender<DaemonEvent>>,
-    is_busy: Arc<AtomicBool>, // Is the main event loop busy (e.g. while loading config?) If yes, event sending threads should sent at most one event during that period.
 }
 
 impl ServiceManager {
@@ -105,18 +105,9 @@ impl ServiceManager {
             direct_color_buffer: Arc::new(Mutex::new(crate::rgb_controller::DirectColorBuffer::new())),
             direct_color_writer: None,
             tx: None,
-            is_busy: Arc::new(AtomicBool::new(false)),
         })
     }
 
-    // helper function in order to create new assets
-    fn create_asset(&self, kind: MediaAssetKind, device_id: String) -> MediaAsset {
-        let asset = MediaAsset {
-            device_id: device_id,
-            kind,
-        };
-        asset
-    }
 
     /// Check if the configured HID driver is rusb.
     fn use_rusb(&self) -> bool {
@@ -251,7 +242,6 @@ impl ServiceManager {
                     self.device_poll();
                 }
                 DaemonEvent::IpcUpdate => {
-                    self.is_busy.store(true, Ordering::SeqCst);
                     // Check for IPC-triggered config reload
                     let ipc_state = self.ipc_state.lock();
                     info!("Config reload triggered via IPC");
@@ -272,7 +262,6 @@ impl ServiceManager {
 
                         self.device_poll();
                     }
-                    self.is_busy.store(false, Ordering::SeqCst);
                 }
                 DaemonEvent::FrameFinished { asset } => {
                     // which worker has a new image to send?
@@ -802,7 +791,7 @@ impl ServiceManager {
                 match prepare_media_asset(device, cfg.default_fps, &screen) {
                     Ok(asset_kind) => {
                         let device_id = device.device_id();
-                        let asset = self.create_asset(asset_kind, device_id.clone());
+                        let asset = MediaAsset{kind: asset_kind, config_key: cfg_key};
                         let asset_arc = Arc::new(asset);
                         self.media_assets.insert(idx, Arc::clone(&asset_arc));
 
@@ -979,7 +968,6 @@ impl ServiceManager {
                             candidate.device_id,
                             device_cfg.orientation
                         );
-                        let is_busy_clone = Arc::clone(&self.is_busy);
                         let target = ActiveTarget::new(
                             cfg_idx,
                             cfg_key,
@@ -987,7 +975,6 @@ impl ServiceManager {
                             lcd,
                             asset,
                             self.tx.clone(),
-                            is_busy_clone,
                         );
                         new_targets.insert(cfg_idx, target);
                     }
@@ -1013,7 +1000,7 @@ impl ServiceManager {
         let target_id = self
             .targets
             .iter()
-            .find(|(_, t)| t.asset.device_id == this_asset.device_id)
+            .find(|(_, t)| t.asset.config_key == this_asset.config_key)
             .map(|(id, _)| *id);
 
         if let Some(id) = target_id {
@@ -1107,14 +1094,13 @@ impl ActiveTarget {
         lcd: LcdBackend,
         asset: Arc<MediaAsset>,
         tx: Option<Sender<DaemonEvent>>,
-        service_manager_is_busy: Arc<AtomicBool>,
     ) -> Self {
         Self {
             index,
             key,
             device_identity,
             lcd,
-            media: MediaRuntime::from_asset(Arc::clone(&asset), tx,Arc::clone(&service_manager_is_busy)),
+            media: MediaRuntime::from_asset(Arc::clone(&asset), tx),
             asset: asset,
             frame_counter: 0,
         }
@@ -1162,18 +1148,19 @@ enum MediaRuntime {
         #[allow(dead_code)] // We do not read the player, we only store it
         player: Arc<AsyncVideoPlayer>,
         frames: Arc<Vec<Vec<u8>>>,
-        cursor: usize,
+        sent_frame_index: usize,
     },
     Sensor {
         renderer: Arc<AsyncSensorRenderer>,
         cached_frame: Vec<u8>,
+        sent_frame_index: usize,
     },
 }
 
 struct AsyncSensorRenderer {
     #[allow(dead_code)] // We'd like to keep the SensorAsset, who knows if we'll need it
     asset: Arc<SensorAsset>,
-    current_frame: Arc<Mutex<Vec<u8>>>,
+    current_frame: Arc<Mutex<FrameInfo>>,
     stop_flag: Arc<AtomicBool>,
     _thread: Option<JoinHandle<()>>,
 }
@@ -1183,7 +1170,6 @@ impl AsyncSensorRenderer {
         tx: Option<Sender<DaemonEvent>>,
         asset: Arc<SensorAsset>,
         baseasset: Arc<MediaAsset>,
-        service_manager_is_busy: Arc<AtomicBool>,
     ) -> Self {
         let initial = match asset.render_frame(true) {
             Ok(frame) => frame.unwrap(),
@@ -1205,7 +1191,6 @@ impl AsyncSensorRenderer {
         let tx_for_thread = tx.clone();
 
         let thread = thread::spawn(move || {
-            let mut send_single_while_busy = false;
 
             while !stop_clone.load(Ordering::Relaxed) {
                 thread::sleep(update_interval);
@@ -1220,17 +1205,7 @@ impl AsyncSensorRenderer {
                                     asset: Arc::clone(&asset_for_thread),
                                 };
 
-                                if !service_manager_is_busy.load(Ordering::Relaxed) {
-                                    tx.send(event).ok();
-                                    send_single_while_busy=false;
-                                } else {
-                                    // Main event loop is busy reloading config, so do not send events as events will pile up in the queue.
-                                    if !send_single_while_busy {
-                                        // Only send a single event during that period, so after the period there is a refresh.
-                                        tx.send(event).ok();
-                                        send_single_while_busy=true;
-                                    }
-                                }
+                                tx.send(event).ok();
                             }
                             *frame_clone.lock() = new_frame.unwrap();
                         }
@@ -1250,9 +1225,14 @@ impl AsyncSensorRenderer {
         }
     }
 
-    fn get_frame(&self) -> Vec<u8> {
-        self.current_frame.lock().clone()
+    fn get_frame_index(&self) -> usize {
+        self.current_frame.lock().frame_index
     }
+
+    fn get_current_frame(&self) -> Vec<u8> {
+        self.current_frame.lock().data.clone()
+    }
+
 }
 
 impl Drop for AsyncSensorRenderer {
@@ -1264,12 +1244,11 @@ impl Drop for AsyncSensorRenderer {
 struct AsyncVideoPlayer {
     stop_flag: Arc<AtomicBool>,
     _thread: Option<JoinHandle<()>>,
+    frame_index: Arc<AtomicUsize>,
 }
 
 impl AsyncVideoPlayer {
-    fn new(tx: Option<Sender<DaemonEvent>>, asset: Arc<MediaAsset>, service_manager_is_busy: Arc<AtomicBool>) -> Self {
-        // Spanne einen Thread auf, der das tx-Kommando alle x ms verschickt.
-        // Ich brauche also den Sender (tx) und die Häufigkeit
+    fn new(tx: Option<Sender<DaemonEvent>>, asset: Arc<MediaAsset>) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop_flag);
 
@@ -1277,52 +1256,54 @@ impl AsyncVideoPlayer {
 
         let asset_for_thread = Arc::clone(&asset);
 
-        let first_millis = if let MediaAssetKind::Video {
+        let min_dur = Duration::from_millis(10);
+        let std_dur = Duration::from_millis(100);
+
+        let frame_durations: Vec<Duration> = if let MediaAssetKind::Video {
             frame_durations, ..
         } = &asset.kind
         {
-            frame_durations
-                .get(0)
-                .map(|d| d.as_millis() as u64) // Retrieve milliseconds as u64
-                .filter(|&ms| ms > 0) // prevent 0ms
-                .unwrap_or(100) // Fallback, if list is empty
+            frame_durations.iter().map(|&d| d.max(min_dur)).collect()
+
         } else {
-            100 // Fallback for non-video assets
+            vec![min_dur; 1]
         };
 
-        let thread = thread::spawn(move || {
-            let mut send_single_while_busy = false;
-            while !stop_clone.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(first_millis));
+        let frame_index: Arc<AtomicUsize> = Arc::new(0.into());
+        let frame_index_cloned= frame_index.clone();
 
+        let thread = thread::spawn(move || {
+            while !stop_clone.load(Ordering::Relaxed) {
+                let mut frame_cnt=0;
                 if let Some(ref tx) = tx_for_thread {
+                    frame_cnt = frame_index.fetch_add(1, Ordering::SeqCst);
                     let event = DaemonEvent::FrameFinished {
                         asset: Arc::clone(&asset_for_thread),
                     };
-                    if !service_manager_is_busy.load(Ordering::Relaxed) {
-                        tx.send(event).ok();
-                        send_single_while_busy=false;
-                    } else {
-                        // Main event loop is busy reloading config, so do not send events as events will pile up in the queue.
-                        if !send_single_while_busy {
-                            // Only send a single event during that period, so after the period there is a refresh.
-                            tx.send(event).ok();
-                            send_single_while_busy=true;
-                        }
-                    }
+                    
+                    tx.send(event).ok();
                 }
 
                 if stop_clone.load(Ordering::Relaxed) {
                     break;
                 }
+
+                let millis = frame_durations.get(frame_cnt%frame_durations.len());
+                thread::sleep(*millis.unwrap_or(&std_dur));
             }
         });
 
         Self {
             stop_flag,
             _thread: Some(thread),
+            frame_index: frame_index_cloned,
         }
     }
+
+    fn get_frame_index(&self) -> usize {
+        self.frame_index.load(Ordering::SeqCst)
+    }
+
 }
 
 impl Drop for AsyncVideoPlayer {
@@ -1332,18 +1313,18 @@ impl Drop for AsyncVideoPlayer {
 }
 
 impl MediaRuntime {
-    fn from_asset(asset: Arc<MediaAsset>, tx: Option<Sender<DaemonEvent>>,sm_is_busy: Arc<AtomicBool>) -> Self {
+    fn from_asset(asset: Arc<MediaAsset>, tx: Option<Sender<DaemonEvent>>) -> Self {
         match &asset.kind {
             MediaAssetKind::Static { frame } => Self::Static {
                 frame: Arc::clone(frame),
             },
             MediaAssetKind::Video { frames, .. } => {
-                let player = Arc::new(AsyncVideoPlayer::new(tx, Arc::clone(&asset), sm_is_busy));
+                let player = Arc::new(AsyncVideoPlayer::new(tx, Arc::clone(&asset)));
 
                 Self::Video {
                     player,
                     frames: Arc::clone(frames),
-                    cursor: 0,
+                    sent_frame_index: 0,
                 }
             }
 
@@ -1354,12 +1335,12 @@ impl MediaRuntime {
                     tx,
                     Arc::clone(sensor_asset),
                     Arc::clone(&asset),
-                    sm_is_busy,
                 ));
-                let cached_frame = renderer.get_frame();
+                let cached_frame = renderer.get_current_frame();
                 Self::Sensor {
                     renderer,
                     cached_frame,
+                    sent_frame_index: 0,
                 }
             }
         }
@@ -1368,23 +1349,36 @@ impl MediaRuntime {
     fn next_frame_bytes(&mut self) -> Option<&[u8]> {
         match self {
             MediaRuntime::Static { frame } => Some(frame.as_slice()),
-            MediaRuntime::Video { frames, cursor, .. } => {
-                if frames.is_empty() {
-                    None
+            MediaRuntime::Video { player,  frames, sent_frame_index, .. } => {
+                let rendered_frame_index = player.get_frame_index();
+                trace!("Last sent frame index: {}, most recent rendered frame index : {}", *sent_frame_index,rendered_frame_index);
+                if rendered_frame_index<=*sent_frame_index {
+                    trace!("==> nothing new, most recent rendered frame already sent to LCD");
+                    return None;
+                } else if frames.is_empty() {
+                    return None
                 } else {
-                    *cursor += 1;
-                    if *cursor >= frames.len() {
-                        *cursor = 0;
-                    }
-                    Some(frames[*cursor].as_slice())
+                    trace!("==> Ok, a new frame has been rendered, so we sent out this one.");
+                    let ret = Some(frames[rendered_frame_index % frames.len()].as_slice());
+                    *sent_frame_index=rendered_frame_index;
+                    return ret;
                 }
             }
             MediaRuntime::Sensor {
                 renderer,
                 cached_frame,
+                sent_frame_index,
                 ..
             } => {
-                *cached_frame = renderer.get_frame();
+                let rendered_frame_index = renderer.get_frame_index();
+                trace!("Last sent frame index: {}, most recent rendered frame index : {}", *sent_frame_index,rendered_frame_index);
+                if rendered_frame_index<=*sent_frame_index {
+                    trace!("==> nothing new, most recent rendered frame already sent to LCD");
+                    return None;
+                }
+                trace!("==> Ok, a new frame has been rendered, so we sent out this one.");
+                *cached_frame = renderer.get_current_frame();
+                *sent_frame_index=rendered_frame_index;
                 Some(cached_frame.as_slice())
             }
         }

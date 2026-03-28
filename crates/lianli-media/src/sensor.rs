@@ -6,8 +6,14 @@ use rusttype::{point, Font, Scale};
 use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use parking_lot::Mutex;
+
+pub struct FrameInfo {
+    pub data: Vec<u8>,
+    pub frame_index: usize,
+}
 
 #[derive(Debug)]
 pub struct SensorAsset {
@@ -36,6 +42,8 @@ pub struct SensorAsset {
     screen: ScreenInfo,
      // We store the previous value as displayed on the LCD in order to be able to compare whether we need to update the frame
     previous_value: Mutex<String>,
+    // Each time a frame gets redrawn this index is "assigned" to the frame.
+    frame_index: AtomicUsize,
 }
 
 impl SensorAsset {
@@ -115,6 +123,7 @@ impl SensorAsset {
             label_offset: descriptor.label_offset,
             screen: *screen,
             previous_value: Mutex::new("N/A".into()),
+            frame_index: 0.into(),
         }))
     }
 
@@ -123,9 +132,9 @@ impl SensorAsset {
     }
 
     /// Force flag: if true, frame gets rendered even if value has not changed. For example when we render the first frame, we set force=true
-    /// Returns OK(Empty) in case of "nothing changed", OK(Vec<u8>) in case a new frame has been rendered, and Error in case of an error
-    pub fn render_frame(&self, force:bool) -> Result<Option<Vec<u8>>, MediaError> {
-        
+    /// Returns OK(Empty) in case of "nothing changed", OK(FrameInfo) in case a new frame has been rendered, and Error in case of an error
+    pub fn render_frame(&self, force: bool) -> Result<Option<FrameInfo>, MediaError> {
+
         // First of all, let's check whether we need to render a new frame:
         // if the value to display has not changed, we omit frame rendering
 
@@ -188,18 +197,28 @@ impl SensorAsset {
         *prev = value_text; // set the previous value
 
         let oriented = apply_orientation(image, self.orientation);
-        let result: Result<Option<Vec<u8>>, MediaError> = encode_jpeg(oriented, &self.screen).map(Some);
-        return result;
+        let encoded_jpeg_result: Result<Option<Vec<u8>>, MediaError> = encode_jpeg(oriented, &self.screen).map(Some);
+
+        let frame_result: Result<Option<FrameInfo>, MediaError> = encoded_jpeg_result.map(|opt| {
+            opt.map(|data| FrameInfo {
+                data,
+                frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
+            })
+        });
+        return frame_result;
     }
 
-    pub fn blank_frame(&self) -> Vec<u8> {
+    pub fn blank_frame(&self) -> FrameInfo {
         let image = ImageBuffer::from_pixel(
             self.screen.width,
             self.screen.height,
             Rgb(self.background_color),
         );
         let oriented = apply_orientation(image, self.orientation);
-        encode_jpeg(oriented, &self.screen).unwrap_or_default()
+        let frame_ret = FrameInfo{data: encode_jpeg(oriented, &self.screen).unwrap_or_default(), 
+                        frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst) };
+
+        return frame_ret;
     }
 
     fn color_for_value(&self, value: f32) -> [u8; 3] {

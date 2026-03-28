@@ -6,7 +6,7 @@ pub mod video;
 pub use common::MediaError;
 pub use sensor::SensorAsset;
 
-use lianli_shared::config::LcdConfig;
+use lianli_shared::config::{ConfigKey, LcdConfig};
 use lianli_shared::media::MediaType;
 use lianli_shared::screen::ScreenInfo;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct MediaAsset {
-    pub device_id: String, // unique ID, using the config key
+    pub config_key: ConfigKey, // unique ID, using the config key
     pub kind: MediaAssetKind, // the contents (originally the enum MediaAsset, now in MediaAssetKind)
 }
 
@@ -36,7 +36,7 @@ pub enum MediaAssetKind {
 // Implementation for comparison for MediaAsset
 impl PartialEq for MediaAsset {
     fn eq(&self, other: &Self) -> bool {
-        self.device_id == other.device_id
+        self.config_key == other.config_key
     }
 }
 
