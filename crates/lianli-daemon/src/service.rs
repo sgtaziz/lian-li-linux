@@ -229,6 +229,21 @@ impl ServiceManager {
                 }
             }
 
+            // Check for IPC-triggered wireless device bind
+            {
+                let mut ipc_state = self.ipc_state.lock();
+                if let Some(mac_str) = ipc_state.pending_bind.take() {
+                    drop(ipc_state);
+                    if let Some(mac) = parse_mac_str(&mac_str) {
+                        if let Err(e) = self.wireless.bind_device(&mac) {
+                            warn!("Failed to bind wireless device {mac_str}: {e}");
+                        }
+                    } else {
+                        warn!("Invalid MAC address for bind: {mac_str}");
+                    }
+                }
+            }
+
             if now.duration_since(self.last_device_scan) >= DEVICE_POLL_INTERVAL {
                 self.last_device_scan = Instant::now();
                 self.refresh_targets();
@@ -296,6 +311,7 @@ impl ServiceManager {
                         rgb_zone_count: None,
                         screen_width: screen.map(|s| s.width),
                         screen_height: screen.map(|s| s.height),
+                        is_unbound_wireless: false,
                     });
                 }
 
@@ -384,6 +400,7 @@ impl ServiceManager {
                 rgb_zone_count: Some(rgb_zone_count),
                 screen_width: None,
                 screen_height: None,
+                is_unbound_wireless: false,
             });
 
             // Update RPM telemetry keyed by device_id
@@ -393,6 +410,50 @@ impl ServiceManager {
                 rpms.push(dev.fan_rpms[3]); // pump RPM
             }
             ipc_state.telemetry.fan_rpms.insert(device_id, rpms);
+        }
+
+        // Add unbound wireless devices (visible but not controllable until bound)
+        for dev in self.wireless.unbound_devices() {
+            use lianli_devices::wireless::WirelessFanType;
+            use lianli_shared::device_id::DeviceFamily;
+
+            let family = match dev.fan_type {
+                WirelessFanType::Slv3Led => DeviceFamily::Slv3Led,
+                WirelessFanType::Slv3Lcd => DeviceFamily::Slv3Lcd,
+                WirelessFanType::Tlv2Lcd => DeviceFamily::Tlv2Lcd,
+                WirelessFanType::Tlv2Led => DeviceFamily::Tlv2Led,
+                WirelessFanType::SlInf => DeviceFamily::SlInf,
+                WirelessFanType::Clv1 => DeviceFamily::Clv1,
+                WirelessFanType::WaterBlock | WirelessFanType::WaterBlock2 => {
+                    DeviceFamily::WirelessAio
+                }
+                WirelessFanType::Strimer(_) => DeviceFamily::WirelessStrimer,
+                WirelessFanType::Lc217 => DeviceFamily::WirelessLc217,
+                WirelessFanType::Led88 => DeviceFamily::WirelessLed88,
+                WirelessFanType::V150 => DeviceFamily::WirelessV150,
+                WirelessFanType::Unknown => DeviceFamily::Slv3Led,
+            };
+
+            devices.push(DeviceInfo {
+                device_id: format!("wireless-unbound:{}", dev.mac_str()),
+                family,
+                name: dev.fan_type.display_name().to_string(),
+                serial: Some(dev.mac_str()),
+                vid: 0,
+                pid: 0,
+                has_lcd: false,
+                has_fan: false,
+                has_pump: false,
+                has_rgb: false,
+                has_pump_control: false,
+                fan_count: Some(dev.fan_count),
+                per_fan_control: None,
+                mb_sync_support: false,
+                rgb_zone_count: None,
+                screen_width: None,
+                screen_height: None,
+                is_unbound_wireless: true,
+            });
         }
 
         // Add wired USB/HID fan devices (per-port entries from open_wired_fan_devices)
@@ -612,6 +673,7 @@ impl ServiceManager {
                             rgb_zone_count: None,
                             screen_width: None,
                             screen_height: None,
+                            is_unbound_wireless: false,
                         });
                     }
                     fan_devices.insert(base_id.to_string(), fan_ctrl);
@@ -1384,4 +1446,16 @@ impl MediaRuntime {
 enum SendError {
     Usb(lianli_transport::TransportError),
     Other(anyhow::Error),
+}
+
+fn parse_mac_str(s: &str) -> Option<[u8; 6]> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    let mut mac = [0u8; 6];
+    for (i, part) in parts.iter().enumerate() {
+        mac[i] = u8::from_str_radix(part, 16).ok()?;
+    }
+    Some(mac)
 }

@@ -52,6 +52,20 @@ fn main() {
         });
     }
 
+    // ── Bind wireless device ──
+    {
+        let tx = backend.tx.clone();
+        window.on_bind_wireless_device(move |device_id| {
+            let mac = device_id.to_string()
+                .strip_prefix("wireless-unbound:")
+                .unwrap_or(&device_id)
+                .to_string();
+            let _ = tx.send(backend::BackendCommand::IpcRequest(
+                lianli_shared::ipc::IpcRequest::BindWirelessDevice { mac },
+            ));
+        });
+    }
+
     // ── Save config ──
     {
         let tx = backend.tx.clone();

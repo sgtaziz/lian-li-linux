@@ -653,6 +653,102 @@ impl WirelessController {
             .collect()
     }
 
+    /// Get a snapshot of discovered devices NOT bound to this dongle.
+    pub fn unbound_devices(&self) -> Vec<DiscoveredDevice> {
+        let local_mac = *self.master_mac.lock();
+        self.discovered_devices
+            .lock()
+            .iter()
+            .filter(|d| d.master_mac != local_mac && d.device_type != 255)
+            .cloned()
+            .collect()
+    }
+
+    /// Bind a wireless device to this dongle by sending an RF bind packet.
+    ///
+    /// The device firmware updates its stored master MAC and RX endpoint.
+    /// A SaveConfig broadcast is sent afterwards to persist the binding.
+    pub fn bind_device(&self, mac: &[u8; 6]) -> Result<()> {
+        let tx = self.tx.as_ref().context("TX not connected")?;
+        let device = self.discovered_devices.lock()
+            .iter()
+            .find(|d| &d.mac == mac)
+            .cloned()
+            .context("device not found in discovery")?;
+
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+        let new_rx = self.get_rx_unused();
+
+        let mut rf_data = vec![0u8; RF_DATA_SIZE];
+        rf_data[0] = RF_SELECT;
+        rf_data[1] = RF_PWM_CMD;
+        rf_data[2..8].copy_from_slice(&device.mac);
+        rf_data[8..14].copy_from_slice(&master_mac);
+        rf_data[14] = new_rx;
+        rf_data[15] = master_ch;
+        rf_data[16] = new_rx;
+
+        let handle = tx.lock();
+        for _ in 0..3 {
+            self.send_rf_packet(&handle, &device, &rf_data)?;
+            thread::sleep(Duration::from_millis(50));
+        }
+        drop(handle);
+
+        self.save_rf_config()?;
+
+        info!(
+            "Bind sent to {} ({}) rx={} ch={}",
+            device.mac_str(), device.fan_type.display_name(), new_rx, master_ch
+        );
+        Ok(())
+    }
+
+    /// Find an unused RX endpoint (1-14) for a new device binding.
+    fn get_rx_unused(&self) -> u8 {
+        let devices = self.discovered_devices.lock();
+        let local_mac = *self.master_mac.lock();
+        for rx in 1..15u8 {
+            let in_use = devices.iter().any(|d| d.master_mac == local_mac && d.rx_type == rx);
+            if !in_use {
+                return rx;
+            }
+        }
+        1
+    }
+
+    /// Broadcast SaveConfig command to persist device bindings to flash.
+    fn save_rf_config(&self) -> Result<()> {
+        let tx = self.tx.as_ref().context("TX not connected")?;
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+
+        let mut rf_data = vec![0u8; RF_DATA_SIZE];
+        rf_data[0] = RF_SELECT;
+        rf_data[1] = 0x15; // SaveConfig
+        rf_data[2..8].copy_from_slice(&[0xFF; 6]);
+        rf_data[8..14].copy_from_slice(&master_mac);
+        rf_data[14] = 0xFF;
+
+        let handle = tx.lock();
+        for _ in 0..3 {
+            for chunk_idx in 0..RF_CHUNKS as u8 {
+                let mut packet = vec![0u8; 64];
+                packet[0] = USB_CMD_SEND_RF;
+                packet[1] = chunk_idx;
+                packet[2] = master_ch;
+                packet[3] = 0xFF;
+                let start = chunk_idx as usize * RF_CHUNK_SIZE;
+                packet[4..64].copy_from_slice(&rf_data[start..start + RF_CHUNK_SIZE]);
+                handle.write(&packet, USB_TIMEOUT).context("sending SaveConfig")?;
+                thread::sleep(Duration::from_millis(1));
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+        Ok(())
+    }
+
     /// Get a snapshot of a single device by its MAC address.
     pub fn device_by_mac(&self, mac: &[u8; 6]) -> Option<DiscoveredDevice> {
         self.discovered_devices

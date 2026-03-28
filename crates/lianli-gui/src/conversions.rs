@@ -82,6 +82,7 @@ pub fn device_to_slint(
         resolution: SharedString::from(&resolution),
         in_desktop_mode: device.family.is_desktop_mode(),
         in_lcd_mode: device.family.supports_display_mode_switch() && !device.family.is_desktop_mode(),
+        is_unbound_wireless: device.is_unbound_wireless,
     }
 }
 

@@ -33,6 +33,8 @@ pub struct DaemonState {
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
     /// Device ID pending display mode switch (LCD→Desktop). Handled by service main loop.
     pub pending_display_switch: Option<String>,
+    /// MAC address pending wireless device bind. Handled by service main loop.
+    pub pending_bind: Option<String>,
 }
 
 impl DaemonState {
@@ -45,6 +47,7 @@ impl DaemonState {
             config_reload_pending: false,
             rgb_controller: None,
             pending_display_switch: None,
+            pending_bind: None,
         }
     }
 }
@@ -358,6 +361,14 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
                 Some(_) => IpcResponse::error("device does not support display mode switching"),
                 None => IpcResponse::error(format!("device not found: {device_id}")),
             }
+        }
+
+        IpcRequest::BindWirelessDevice { mac } => {
+            let mut state = state.lock();
+            state.pending_bind = Some(mac);
+            IpcResponse::ok(serde_json::json!({
+                "message": "Bind command queued. Device should appear shortly."
+            }))
         }
 
         IpcRequest::Subscribe => {

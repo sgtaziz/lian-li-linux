@@ -62,6 +62,10 @@ pub enum IpcRequest {
     SwitchDisplayMode {
         device_id: String,
     },
+    /// Bind an unbound wireless device to this dongle.
+    BindWirelessDevice {
+        mac: String,
+    },
     Subscribe,
     Ping,
 }
@@ -133,6 +137,8 @@ pub struct DeviceInfo {
     pub rgb_zone_count: Option<u8>,
     pub screen_width: Option<u32>,
     pub screen_height: Option<u32>,
+    #[serde(default)]
+    pub is_unbound_wireless: bool,
 }
 
 /// Status of the OpenRGB SDK server.

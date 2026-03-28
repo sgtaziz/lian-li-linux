@@ -55,6 +55,7 @@ export component MainWindow inherits Window {
     // Callbacks for Rust backend
     callback refresh-devices();
     callback switch-display-mode(string);
+    callback bind-wireless-device(string);
     callback save-config();
     callback toggle-openrgb(bool);
     callback set-default-fps(int);
@@ -115,6 +116,7 @@ export component MainWindow inherits Window {
                 devices: root.devices;
                 refresh => { root.refresh-devices(); }
                 switch-display-mode(id) => { root.switch-display-mode(id); }
+                bind-wireless-device(id) => { root.bind-wireless-device(id); }
             }
 
             if root.current-page == 1: LcdPage {
