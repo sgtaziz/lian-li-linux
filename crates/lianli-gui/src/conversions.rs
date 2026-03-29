@@ -27,7 +27,16 @@ fn family_display_name(f: DeviceFamily) -> &'static str {
         DeviceFamily::HydroShift2Lcd => "HydroShift II LCD Circle",
         DeviceFamily::Lancool207 => "Lancool 207 Digital",
         DeviceFamily::UniversalScreen => "Universal Screen 8.8\"",
-        DeviceFamily::DisplaySwitcher => "Display Mode Switcher",
+        DeviceFamily::HydroShift2LcdDesktop => "HydroShift II LCD (Desktop Mode)",
+        DeviceFamily::Lancool207Desktop => "Lancool 207 Digital (Desktop Mode)",
+        DeviceFamily::UniversalScreenDesktop => "Universal Screen 8.8\" (Desktop Mode)",
+        DeviceFamily::WirelessAio => "HydroShift Wireless AIO",
+        DeviceFamily::WirelessStrimer => "Strimer Plus Wireless",
+        DeviceFamily::WirelessLc217 => "Lancool 217 Wireless",
+        DeviceFamily::WirelessLed88 => "Universal Screen 8.8\" Wireless",
+        DeviceFamily::WirelessV150 => "Lancool V150 Wireless",
+        DeviceFamily::StrimerPlus => "Strimer Plus",
+        DeviceFamily::UniversalScreenLighting => "Universal Screen 8.8\" LED Ring",
     }
 }
 
@@ -71,6 +80,9 @@ pub fn device_to_slint(
         fan_rpms: SharedString::from(&fan_rpms),
         coolant_temp: SharedString::from(&coolant_temp),
         resolution: SharedString::from(&resolution),
+        in_desktop_mode: device.family.is_desktop_mode(),
+        in_lcd_mode: device.family.supports_display_mode_switch() && !device.family.is_desktop_mode(),
+        is_unbound_wireless: device.is_unbound_wireless,
     }
 }
 
@@ -84,7 +96,6 @@ pub fn devices_to_model(
             d.family,
             lianli_shared::device_id::DeviceFamily::WirelessTx
             | lianli_shared::device_id::DeviceFamily::WirelessRx
-            | lianli_shared::device_id::DeviceFamily::DisplaySwitcher
         ))
         .map(|d| device_to_slint(d, telemetry))
         .collect();
@@ -338,7 +349,7 @@ pub fn fan_groups_to_model(
     // Iterate live devices, look up config group for each.
     let fan_devices: Vec<&DeviceInfo> = devices
         .iter()
-        .filter(|d| d.has_fan && d.fan_count.unwrap_or(0) > 0)
+        .filter(|d| (d.has_fan && d.fan_count.unwrap_or(0) > 0) || d.has_pump_control)
         .collect();
 
     let items: Vec<super::FanGroupData> = fan_devices
@@ -355,12 +366,20 @@ pub fn fan_groups_to_model(
 
             let slots: Vec<super::FanSpeedSlot> = speeds.iter().map(fan_speed_to_slot).collect();
 
+            let pump_slot = if dev.has_pump_control {
+                fan_speed_to_slot(speeds.get(3).unwrap_or(&FanSpeed::Constant(0)))
+            } else {
+                fan_speed_to_slot(&FanSpeed::Constant(0))
+            };
+
             super::FanGroupData {
                 device_id: SharedString::from(&dev.device_id),
                 device_name: SharedString::from(&device_name),
                 fan_count: dev.fan_count.unwrap_or(4) as i32,
                 per_fan_control: dev.per_fan_control.unwrap_or(false),
                 mb_sync_support: dev.mb_sync_support,
+                has_pump_control: dev.has_pump_control,
+                pump_slot,
                 slots: ModelRc::new(VecModel::from(slots)),
             }
         })
@@ -387,9 +406,9 @@ pub fn rgb_devices_to_model(
 
             let mb_rgb_sync = dev_cfg.map(|d| d.mb_rgb_sync).unwrap_or(false);
 
-            // Determine if device has group zones (Top/Bottom scopes)
+            // Determine if device has group zones (scoped: Top/Bottom or Inner/Outer)
             let has_group_zones = cap.supported_scopes.iter().any(|scopes| {
-                scopes.iter().any(|s| matches!(s, RgbScope::Top | RgbScope::Bottom))
+                scopes.iter().any(|s| matches!(s, RgbScope::Top | RgbScope::Bottom | RgbScope::Inner | RgbScope::Outer))
             });
 
             // Check zone 0 config to determine synced state

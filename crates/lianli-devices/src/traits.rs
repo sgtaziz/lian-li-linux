@@ -31,6 +31,16 @@ pub trait FanDevice: Send + Sync {
     fn set_mb_rpm_sync(&self, _port: u8, _sync: bool) -> Result<()> {
         anyhow::bail!("MB RPM sync not supported by this device")
     }
+
+    /// Whether this device has a controllable pump.
+    fn has_pump_control(&self) -> bool {
+        false
+    }
+
+    /// Set pump speed (0-100% duty). Only for devices where `has_pump_control()` is true.
+    fn set_pump_speed(&self, _duty: u8) -> Result<()> {
+        anyhow::bail!("Pump speed control not supported by this device")
+    }
 }
 
 /// A device with an LCD screen.
@@ -44,7 +54,6 @@ pub trait LcdDevice: Send + Sync {
 
 /// An AIO device with pump, fans, and optionally LCD.
 pub trait AioDevice: FanDevice {
-    fn set_pump_speed(&self, duty: u8) -> Result<()>;
     fn read_pump_rpm(&self) -> Result<u16>;
     fn read_coolant_temp(&self) -> Result<f32>;
 }

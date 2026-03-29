@@ -196,6 +196,20 @@ impl RusbHidTransport {
         Ok(n)
     }
 
+    pub fn get_input_report(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        let report_id = buf.first().copied().unwrap_or(0) as u16;
+        let w_value = (0x01u16 << 8) | report_id;
+        let n = self.handle.read_control(
+            0xA1,
+            0x01, // GET_REPORT
+            w_value,
+            self.iface as u16,
+            buf,
+            Duration::from_millis(5000),
+        )?;
+        Ok(n)
+    }
+
     pub fn write(&self, data: &[u8]) -> Result<usize, TransportError> {
         if let Some(ep_out) = self.ep_out {
             let n = self

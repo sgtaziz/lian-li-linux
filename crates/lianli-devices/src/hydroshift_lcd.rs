@@ -168,6 +168,9 @@ impl HydroShiftLcdController {
     }
 
     fn init(&mut self) -> Result<()> {
+        if self.initialized {
+            return Ok(());
+        }
         info!("Initializing {}", self.variant.name());
 
         match self.read_firmware_internal(INIT_READ_TIMEOUT_MS) {
@@ -198,12 +201,14 @@ impl HydroShiftLcdController {
 
         std::thread::sleep(std::time::Duration::from_secs(2));
 
+        self.initialized = true;
         Ok(())
     }
 
     /// Perform handshake to read RPM and temperature.
     pub fn handshake(&mut self) -> Result<AioHandshake> {
-        let resp = self.send_a_command(CMD_HANDSHAKE, &[])?;
+        let timeout = if self.initialized { READ_TIMEOUT_MS } else { INIT_READ_TIMEOUT_MS };
+        let resp = self.send_a_command(CMD_HANDSHAKE, &[], timeout)?;
         let data = &resp[A_HEADER_LEN..];
         let data_len = resp[5] as usize;
 
@@ -251,12 +256,8 @@ impl HydroShiftLcdController {
         Ok(())
     }
 
-    /// Send a JPEG frame to the LCD (with lazy initialization on first call).
+    /// Send a JPEG frame to the LCD.
     pub fn send_frame(&mut self, frame: &[u8]) -> Result<()> {
-        if !self.initialized {
-            self.apply_lcd_settings()?;
-            self.initialized = true;
-        }
         self.send_chunked(CMD_SEND_JPEG, frame)
     }
 
@@ -296,7 +297,7 @@ impl HydroShiftLcdController {
             .to_string())
     }
 
-    fn send_a_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
+    fn send_a_command(&self, cmd: u8, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
         let mut pkt = [0u8; A_PACKET_SIZE];
         pkt[0] = REPORT_ID_A;
         pkt[1] = cmd;
@@ -310,13 +311,13 @@ impl HydroShiftLcdController {
 
         let mut buf = [0u8; A_PACKET_SIZE];
         let n = dev
-            .read_timeout(&mut buf, READ_TIMEOUT_MS)
+            .read_timeout(&mut buf, timeout_ms)
             .context("AIO LCD: read A-response")?;
 
         debug!("A-cmd {cmd:#04x}: response {n} bytes, raw={:02x?}", &buf[..n.min(20)]);
 
         if n == 0 {
-            bail!("AIO LCD: no response to A-command {cmd:#04x} (timeout after {READ_TIMEOUT_MS}ms)");
+            bail!("AIO LCD: no response to A-command {cmd:#04x} (timeout after {timeout_ms}ms)");
         }
 
         Ok(buf[..n].to_vec())
@@ -375,7 +376,7 @@ impl HydroShiftLcdController {
 impl FanDevice for HydroShiftLcdController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
         let pwm = duty.min(100);
-        self.send_a_command(CMD_SET_FAN_PWM, &[0x00, pwm])?;
+        self.send_a_command(CMD_SET_FAN_PWM, &[0x00, pwm], READ_TIMEOUT_MS)?;
         debug!("Set fan PWM to {pwm}%");
         Ok(())
     }
@@ -398,16 +399,41 @@ impl FanDevice for HydroShiftLcdController {
     fn fan_slot_count(&self) -> u8 {
         1
     }
-}
 
-impl AioDevice for HydroShiftLcdController {
+    fn has_pump_control(&self) -> bool {
+        true
+    }
+
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         let pwm = duty.min(100);
-        self.send_a_command(CMD_SET_PUMP_PWM, &[0x00, pwm])?;
+        self.send_a_command(CMD_SET_PUMP_PWM, &[0x00, pwm], READ_TIMEOUT_MS)?;
         debug!("Set pump PWM to {pwm}%");
         Ok(())
     }
+}
 
+impl FanDevice for Arc<HydroShiftLcdController> {
+    fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()> {
+        (**self).set_fan_speed(slot, duty)
+    }
+    fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
+        (**self).set_fan_speeds(duties)
+    }
+    fn read_fan_rpm(&self) -> Result<Vec<u16>> {
+        (**self).read_fan_rpm()
+    }
+    fn fan_slot_count(&self) -> u8 {
+        (**self).fan_slot_count()
+    }
+    fn has_pump_control(&self) -> bool {
+        (**self).has_pump_control()
+    }
+    fn set_pump_speed(&self, duty: u8) -> Result<()> {
+        (**self).set_pump_speed(duty)
+    }
+}
+
+impl AioDevice for HydroShiftLcdController {
     fn read_pump_rpm(&self) -> Result<u16> {
         Ok(self
             .last_handshake
@@ -459,9 +485,7 @@ impl LcdDevice for HydroShiftLcdController {
         if self.initialized {
             return Ok(());
         }
-
-        self.apply_lcd_settings()?;
-        self.initialized = true;
+        self.init()?;
         Ok(())
     }
 }
@@ -507,13 +531,20 @@ fn build_lcd_packet(
     pkt
 }
 
-/// Parse a firmware version string like "1.2" or "V1.3" into (major, minor).
+/// Parse firmware version from strings like "1.2", "V1.3", or "N9,01,HS,SQ,HydroShift,V3.0C.013,1.3".
+/// Scans for the last "major.minor" pattern where both are numeric.
 fn parse_firmware_version(fw: &str) -> Option<(u32, u32)> {
-    let s = fw.trim().trim_start_matches(|c: char| !c.is_ascii_digit());
-    let mut parts = s.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    Some((major, minor))
+    // Split by comma and check segments from the end for "X.Y" patterns
+    for segment in fw.rsplit(',') {
+        let s = segment.trim().trim_start_matches(|c: char| !c.is_ascii_digit());
+        let mut parts = s.split('.');
+        if let (Some(maj_s), Some(min_s)) = (parts.next(), parts.next()) {
+            if let (Ok(major), Ok(minor)) = (maj_s.parse::<u32>(), min_s.parse::<u32>()) {
+                return Some((major, minor));
+            }
+        }
+    }
+    None
 }
 
 const CMD_SET_PUMP_LIGHT: u8 = 0x83;

@@ -280,16 +280,20 @@ impl FanDevice for Galahad2TrinityController {
     fn fan_slot_count(&self) -> u8 {
         1
     }
-}
 
-impl AioDevice for Galahad2TrinityController {
+    fn has_pump_control(&self) -> bool {
+        true
+    }
+
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         let pwm = duty.min(100);
         self.send_a_command(CMD_SET_PUMP_PWM, &[0x00, pwm])?;
         debug!("Set pump PWM to {pwm}%");
         Ok(())
     }
+}
 
+impl AioDevice for Galahad2TrinityController {
     fn read_pump_rpm(&self) -> Result<u16> {
         Ok(self
             .last_handshake

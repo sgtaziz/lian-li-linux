@@ -318,11 +318,59 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>, tx: Send
             }
         }
 
+        IpcRequest::SwitchDisplayMode { device_id } => {
+            let (family, pid) = {
+                let state = state.lock();
+                match state.devices.iter().find(|d| d.device_id == device_id) {
+                    Some(d) => (Some(d.family), d.pid),
+                    None => (None, 0),
+                }
+            };
+            match family {
+                Some(f) if f.is_desktop_mode() => {
+                    // Desktop -> LCD: send switch bytes via HID to CH340
+                    if pid == 0 {
+                        return IpcResponse::error("device PID not available");
+                    }
+                    match hidapi::HidApi::new() {
+                        Ok(api) => {
+                            match lianli_devices::display_switcher::switch_to_lcd_mode(&api, pid) {
+                                Ok(()) => IpcResponse::ok(serde_json::json!({
+                                    "switched": "to_lcd",
+                                    "message": "Device is rebooting into LCD mode. It will appear shortly."
+                                })),
+                                Err(e) => IpcResponse::error(format!("switch failed: {e}")),
+                            }
+                        }
+                        Err(e) => IpcResponse::error(format!("failed to open HID: {e}")),
+                    }
+                }
+                Some(f) if f.supports_display_mode_switch() => {
+                    // LCD -> Desktop: service loop owns the WinUSB transport
+                    tx.send(DaemonEvent::DisplaySwitch { device_id}).ok();
+                    IpcResponse::ok(serde_json::json!({
+                        "switched": "to_desktop",
+                        "message": "Device is switching to desktop mode. It will reboot shortly."
+                    }))
+                }
+                Some(_) => IpcResponse::error("device does not support display mode switching"),
+                None => IpcResponse::error(format!("device not found: {device_id}")),
+            }
+        }
+
+        IpcRequest::BindWirelessDevice { mac } => {
+            tx.send(DaemonEvent::Bind {mac_address: mac}).ok();
+            IpcResponse::ok(serde_json::json!({
+                "message": "Bind command queued. Device should appear shortly."
+            }))
+        }
+
         IpcRequest::Subscribe => {
             IpcResponse::error("Subscribe not yet implemented; use polling via GetTelemetry")
         }
     }
 }
+
 
 fn write_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {

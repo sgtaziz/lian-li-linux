@@ -195,6 +195,11 @@ fn fan_control_thread(
                     if let Err(err) = dev.set_fan_speeds(&speeds) {
                         warn!("Failed to set fan speeds for {device_id}: {err}");
                     }
+                    if dev.has_pump_control() {
+                        if let Err(err) = dev.set_pump_speed(speeds[3]) {
+                            warn!("Failed to set pump speed for {device_id}: {err}");
+                        }
+                    }
                 } else {
                     warn!("Fan group {group_idx}: device '{device_id}' not found");
                 }

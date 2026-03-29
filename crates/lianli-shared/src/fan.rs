@@ -43,6 +43,15 @@ pub struct FanConfig {
     pub update_interval_ms: u64,
 }
 
+impl Default for FanConfig {
+    fn default() -> Self {
+        Self {
+            speeds: vec![],
+            update_interval_ms: default_update_interval(),
+        }
+    }
+}
+
 fn default_update_interval() -> u64 {
     1000
 }

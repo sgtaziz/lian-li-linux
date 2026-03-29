@@ -26,6 +26,7 @@ fn main() {
         .init();
 
     let window = MainWindow::new().expect("Failed to create main window");
+    window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Shared state — backend will populate on first load
     let shared: Shared = Arc::new(Mutex::new(state::SharedState::default()));
@@ -36,6 +37,32 @@ fn main() {
         let tx = backend.tx.clone();
         window.on_refresh_devices(move || {
             let _ = tx.send(backend::BackendCommand::RefreshDevices);
+        });
+    }
+
+    // ── Switch display mode ──
+    {
+        let tx = backend.tx.clone();
+        window.on_switch_display_mode(move |device_id| {
+            let _ = tx.send(backend::BackendCommand::IpcRequest(
+                lianli_shared::ipc::IpcRequest::SwitchDisplayMode {
+                    device_id: device_id.to_string(),
+                },
+            ));
+        });
+    }
+
+    // ── Bind wireless device ──
+    {
+        let tx = backend.tx.clone();
+        window.on_bind_wireless_device(move |device_id| {
+            let mac = device_id.to_string()
+                .strip_prefix("wireless-unbound:")
+                .unwrap_or(&device_id)
+                .to_string();
+            let _ = tx.send(backend::BackendCommand::IpcRequest(
+                lianli_shared::ipc::IpcRequest::BindWirelessDevice { mac },
+            ));
         });
     }
 
@@ -699,11 +726,13 @@ fn wire_fan_callbacks(
             {
                 let mut state = shared.lock().unwrap();
                 if let Some(ref mut c) = state.config {
-                    if let Some(fc) = &mut c.fans {
-                        if let Some(group) = fc.speeds.iter_mut().find(|g| g.device_id.as_deref() == Some(&dev_id)) {
-                            if slot < 4 {
-                                group.speeds[slot] = FanSpeed::Constant(((percent as f32 / 100.0) * 255.0).round() as u8);
-                            }
+                    let fc = c.fans.get_or_insert_with(|| FanConfig {
+                        speeds: vec![],
+                        update_interval_ms: 1000,
+                    });
+                    if let Some(group) = fc.speeds.iter_mut().find(|g| g.device_id.as_deref() == Some(&dev_id)) {
+                        if slot < 4 {
+                            group.speeds[slot] = FanSpeed::Constant(((percent as f32 / 100.0) * 255.0).round() as u8);
                         }
                     }
                 }
@@ -985,9 +1014,8 @@ fn refresh_fan_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
             w.set_curve_names(conversions::curve_names_to_model(&curves));
             w.set_fan_speed_options(conversions::speed_options_model(&curves, true));
             w.set_config_dirty(true);
-            if let Some(ref fc) = fans {
-                w.set_fan_groups(conversions::fan_groups_to_model(fc, &devices));
-            }
+            let fc = fans.unwrap_or_default();
+            w.set_fan_groups(conversions::fan_groups_to_model(&fc, &devices));
         }
     })
     .ok();
@@ -1071,12 +1099,12 @@ fn with_zone_effect(
     zcfg.effect.clone()
 }
 
-/// Check if a device has group zones (Top/Bottom scopes) and return zone count.
+/// Check if a device has group zones (scoped: Top/Bottom or Inner/Outer) and return zone count.
 fn device_group_zone_count(shared: &Shared, dev_id: &str) -> Option<usize> {
     let state = shared.lock().unwrap();
     let cap = state.rgb_caps.iter().find(|c| c.device_id == dev_id)?;
     let has_group = cap.supported_scopes.iter().any(|scopes| {
-        scopes.iter().any(|s| matches!(s, RgbScope::Top | RgbScope::Bottom))
+        scopes.iter().any(|s| matches!(s, RgbScope::Top | RgbScope::Bottom | RgbScope::Inner | RgbScope::Outer))
     });
     if has_group { Some(cap.zones.len()) } else { None }
 }

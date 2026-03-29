@@ -45,6 +45,8 @@ pub enum DaemonEvent {
     IpcUpdate, // Somebody changed the DaemonState in the mutex
     USBCheck,
     DevicePoll,
+    DisplaySwitch{device_id: String}, // Device ID pending display mode switch (LCD→Desktop). Handled by main event loop.
+    Bind{mac_address: String}, // MAC address pending wireless device bind. Handled by main event loop.
     FrameFinished { asset: Arc<MediaAsset> }, // A device has calculated a new frame, let's update the display
 }
 
@@ -241,6 +243,18 @@ impl ServiceManager {
                     // Wireless discovery is handled by its own RX polling thread.
                     self.device_poll();
                 }
+                DaemonEvent::DisplaySwitch{ device_id } => {
+                    self.handle_display_switch_to_desktop(&device_id);
+                }
+                DaemonEvent::Bind { mac_address: mac_str } => {
+                    if let Some(mac) = parse_mac_str(&mac_str) {
+                        if let Err(e) = self.wireless.bind_device(&mac) {
+                            warn!("Failed to bind wireless device {mac_str}: {e}");
+                        }
+                    } else {
+                        warn!("Invalid MAC address for bind: {mac_str}");
+                    }
+                }
                 DaemonEvent::IpcUpdate => {
                     // Check for IPC-triggered config reload
                     let ipc_state = self.ipc_state.lock();
@@ -290,7 +304,6 @@ impl ServiceManager {
                         det.family,
                         lianli_shared::device_id::DeviceFamily::WirelessTx
                             | lianli_shared::device_id::DeviceFamily::WirelessRx
-                            | lianli_shared::device_id::DeviceFamily::DisplaySwitcher
                             | lianli_shared::device_id::DeviceFamily::TlFan
                             | lianli_shared::device_id::DeviceFamily::Ene6k77
                     ) {
@@ -304,16 +317,20 @@ impl ServiceManager {
                         family: det.family,
                         name: det.name.to_string(),
                         serial: Some(device_id),
+                        vid: det.vid,
+                        pid: det.pid,
                         has_lcd: det.family.has_lcd(),
                         has_fan: det.family.has_fan(),
                         has_pump: det.family.has_pump(),
                         has_rgb: det.family.has_rgb(),
+                        has_pump_control: false,
                         fan_count: None,
                         per_fan_control: None,
                         mb_sync_support: false,
                         rgb_zone_count: None,
                         screen_width: screen.map(|s| s.width),
                         screen_height: screen.map(|s| s.height),
+                        is_unbound_wireless: false,
                     });
                 }
 
@@ -348,50 +365,114 @@ impl ServiceManager {
         // Build device list from wireless discovery
         let mut devices = Vec::new();
         for dev in self.wireless.devices() {
+            use lianli_devices::wireless::WirelessFanType;
+            use lianli_shared::device_id::DeviceFamily;
+
             let family = match dev.fan_type {
-                lianli_devices::wireless::WirelessFanType::Slv3Led => {
-                    lianli_shared::device_id::DeviceFamily::Slv3Led
+                WirelessFanType::Slv3Led => DeviceFamily::Slv3Led,
+                WirelessFanType::Slv3Lcd => DeviceFamily::Slv3Lcd,
+                WirelessFanType::Tlv2Lcd => DeviceFamily::Tlv2Lcd,
+                WirelessFanType::Tlv2Led => DeviceFamily::Tlv2Led,
+                WirelessFanType::SlInf => DeviceFamily::SlInf,
+                WirelessFanType::Clv1 => DeviceFamily::Clv1,
+                WirelessFanType::WaterBlock | WirelessFanType::WaterBlock2 => {
+                    DeviceFamily::WirelessAio
                 }
-                lianli_devices::wireless::WirelessFanType::Slv3Lcd => {
-                    lianli_shared::device_id::DeviceFamily::Slv3Lcd
-                }
-                lianli_devices::wireless::WirelessFanType::Tlv2Lcd => {
-                    lianli_shared::device_id::DeviceFamily::Tlv2Lcd
-                }
-                lianli_devices::wireless::WirelessFanType::Tlv2Led => {
-                    lianli_shared::device_id::DeviceFamily::Tlv2Led
-                }
-                lianli_devices::wireless::WirelessFanType::SlInf => {
-                    lianli_shared::device_id::DeviceFamily::SlInf
-                }
-                lianli_devices::wireless::WirelessFanType::Clv1 => {
-                    lianli_shared::device_id::DeviceFamily::Clv1
-                }
-                lianli_devices::wireless::WirelessFanType::Unknown => {
-                    lianli_shared::device_id::DeviceFamily::Slv3Led
-                }
+                WirelessFanType::Strimer(_) => DeviceFamily::WirelessStrimer,
+                WirelessFanType::Lc217 => DeviceFamily::WirelessLc217,
+                WirelessFanType::Led88 => DeviceFamily::WirelessLed88,
+                WirelessFanType::V150 => DeviceFamily::WirelessV150,
+                WirelessFanType::Unknown => DeviceFamily::Slv3Led,
             };
+
+            let is_aio = dev.fan_type.is_aio();
+            let is_rgb_only = dev.fan_type.is_rgb_only();
+
+            // Fan count is the actual number of fans (excluding pump).
+            // Pump speed control is handled separately via has_pump_control.
+            let fan_count = dev.fan_count;
+
+            // RGB zones: fans + pump head for AIO, or 1 zone for RGB-only devices
+            let rgb_zone_count = if is_aio {
+                dev.fan_count + 1 // fans + pump head
+            } else if is_rgb_only {
+                1
+            } else {
+                dev.fan_count
+            };
+
             devices.push(DeviceInfo {
                 device_id: format!("wireless:{}", dev.mac_str()),
                 family,
                 name: dev.fan_type.display_name().to_string(),
                 serial: Some(dev.mac_str()),
-                has_lcd: false, // LCD streaming uses USB bulk, not wireless
+                vid: 0,
+                pid: 0,
+                has_lcd: false,
                 has_fan: dev.fan_count > 0,
-                has_pump: false,
-                has_rgb: true, // All wireless fans have RGB LEDs
-                fan_count: Some(dev.fan_count),
-                per_fan_control: Some(true),
+                has_pump: is_aio,
+                has_rgb: true,
+                has_pump_control: is_aio,
+                fan_count: Some(fan_count),
+                per_fan_control: Some(!is_rgb_only),
                 mb_sync_support: dev.fan_type.supports_hw_mobo_sync() || self.wireless.motherboard_pwm().is_some(),
-                rgb_zone_count: Some(dev.fan_count), // One zone per fan
+                rgb_zone_count: Some(rgb_zone_count),
                 screen_width: None,
                 screen_height: None,
+                is_unbound_wireless: false,
             });
 
             // Update RPM telemetry keyed by device_id
             let device_id = format!("wireless:{}", dev.mac_str());
-            let rpms: Vec<u16> = dev.fan_rpms[..dev.fan_count as usize].to_vec();
+            let mut rpms: Vec<u16> = dev.fan_rpms[..dev.fan_count as usize].to_vec();
+            if is_aio {
+                rpms.push(dev.fan_rpms[3]); // pump RPM
+            }
             ipc_state.telemetry.fan_rpms.insert(device_id, rpms);
+        }
+
+        // Add unbound wireless devices (visible but not controllable until bound)
+        for dev in self.wireless.unbound_devices() {
+            use lianli_devices::wireless::WirelessFanType;
+            use lianli_shared::device_id::DeviceFamily;
+
+            let family = match dev.fan_type {
+                WirelessFanType::Slv3Led => DeviceFamily::Slv3Led,
+                WirelessFanType::Slv3Lcd => DeviceFamily::Slv3Lcd,
+                WirelessFanType::Tlv2Lcd => DeviceFamily::Tlv2Lcd,
+                WirelessFanType::Tlv2Led => DeviceFamily::Tlv2Led,
+                WirelessFanType::SlInf => DeviceFamily::SlInf,
+                WirelessFanType::Clv1 => DeviceFamily::Clv1,
+                WirelessFanType::WaterBlock | WirelessFanType::WaterBlock2 => {
+                    DeviceFamily::WirelessAio
+                }
+                WirelessFanType::Strimer(_) => DeviceFamily::WirelessStrimer,
+                WirelessFanType::Lc217 => DeviceFamily::WirelessLc217,
+                WirelessFanType::Led88 => DeviceFamily::WirelessLed88,
+                WirelessFanType::V150 => DeviceFamily::WirelessV150,
+                WirelessFanType::Unknown => DeviceFamily::Slv3Led,
+            };
+
+            devices.push(DeviceInfo {
+                device_id: format!("wireless-unbound:{}", dev.mac_str()),
+                family,
+                name: dev.fan_type.display_name().to_string(),
+                serial: Some(dev.mac_str()),
+                vid: 0,
+                pid: 0,
+                has_lcd: false,
+                has_fan: false,
+                has_pump: false,
+                has_rgb: false,
+                has_pump_control: false,
+                fan_count: Some(dev.fan_count),
+                per_fan_control: None,
+                mb_sync_support: false,
+                rgb_zone_count: None,
+                screen_width: None,
+                screen_height: None,
+                is_unbound_wireless: true,
+            });
         }
 
         // Add wired USB/HID fan devices (per-port entries from open_wired_fan_devices)
@@ -461,17 +542,11 @@ impl ServiceManager {
             controller.stop();
         }
 
-        let (fan_config, fan_curves) = if let Some(cfg) = &self.config {
-            match (&cfg.fans, &cfg.fan_curves) {
-                (Some(fans), curves) => (fans.clone(), curves.clone()),
-                (None, _) => {
-                    info!("No fan configuration found in config");
-                    return;
-                }
-            }
-        } else {
+        let Some(cfg) = &self.config else {
             return;
         };
+        let fan_config = cfg.fans.clone().unwrap_or_default();
+        let fan_curves = cfg.fan_curves.clone();
 
         // Reuse the already-opened wired fan device handles (populated at startup).
         let wired_devices = Arc::clone(&self.wired_fan_devices);
@@ -527,7 +602,8 @@ impl ServiceManager {
                 };
                 if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
                     self.register_wired_controllers(
-                        &base_id, det.name, det.family, det.serial.as_deref(),
+                        &base_id, det.name, det.family, det.vid, det.pid,
+                        det.serial.as_deref(),
                         result, &mut fan_devices, &mut wired_rgb,
                     );
                 }
@@ -553,7 +629,8 @@ impl ServiceManager {
                 };
                 if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
                     self.register_wired_controllers(
-                        &base_id, det.name, det.family, det.serial.as_deref(),
+                        &base_id, det.name, det.family, det.vid, det.pid,
+                        det.serial.as_deref(),
                         result, &mut fan_devices, &mut wired_rgb,
                     );
                 }
@@ -571,6 +648,8 @@ impl ServiceManager {
         base_id: &str,
         name: &str,
         family: DeviceFamily,
+        vid: u16,
+        pid: u16,
         serial: Option<&str>,
         result: anyhow::Result<lianli_devices::detect::WiredControllerSet>,
         fan_devices: &mut HashMap<String, Box<dyn FanDevice>>,
@@ -583,6 +662,7 @@ impl ServiceManager {
                     let ports = fan_ctrl.fan_port_info();
                     let per_fan = fan_ctrl.per_fan_control();
                     let mb_sync = fan_ctrl.supports_mb_sync();
+                    let pump_control = fan_ctrl.has_pump_control();
                     for &(port, fan_count) in &ports {
                         let device_id = if ports.len() > 1 {
                             format!("{base_id}:port{port}")
@@ -599,16 +679,20 @@ impl ServiceManager {
                             family,
                             name: dev_name,
                             serial: serial.map(|s| s.to_string()),
+                            vid,
+                            pid,
                             has_lcd: false,
                             has_fan: true,
-                            has_pump: false,
+                            has_pump: pump_control,
                             has_rgb: family.has_rgb(),
+                            has_pump_control: pump_control,
                             fan_count: Some(fan_count),
                             per_fan_control: Some(per_fan),
                             mb_sync_support: mb_sync,
                             rgb_zone_count: None,
                             screen_width: None,
                             screen_height: None,
+                            is_unbound_wireless: false,
                         });
                     }
                     fan_devices.insert(base_id.to_string(), fan_ctrl);
@@ -994,6 +1078,59 @@ impl ServiceManager {
 
         self.targets = new_targets;
     }
+
+    fn handle_display_switch_to_desktop(&mut self, device_id: &str) {
+        // Find and remove the active LCD target for this device
+        let target_idx = self.targets.iter().find_map(|(&idx, t)| {
+            if t.device_identity == *device_id {
+                Some(idx)
+            } else {
+                None
+            }
+        });
+
+        if let Some(idx) = target_idx {
+            if let Some(mut target) = self.targets.remove(&idx) {
+                target.stop();
+                if let LcdBackend::WinUsb(ref mut lcd) = target.lcd {
+                    match lcd.switch_to_desktop_mode() {
+                        Ok(()) => info!("Switched {device_id} to desktop mode"),
+                        Err(e) => warn!("Failed to switch {device_id} to desktop mode: {e}"),
+                    }
+                } else {
+                    warn!("Device {device_id} is not a WinUSB LCD, cannot switch to desktop mode");
+                }
+            }
+        } else {
+            // No active target — try opening a temporary connection
+            info!("No active LCD target for {device_id}, opening temporary connection");
+            let det = self.cached_usb_devices.iter().find(|d| d.device_id == *device_id);
+            if let Some(det) = det {
+                let family = det.family;
+                if let Ok(usb_devs) = lianli_devices::detect::enumerate_devices() {
+                    for usb_det in usb_devs {
+                        if usb_det.family == family && usb_det.device_id() == *device_id {
+                            let screen = lianli_shared::screen::screen_info_for(family)
+                                .unwrap_or(lianli_shared::screen::ScreenInfo::AIO_LCD_480);
+                            match WinUsbLcdDevice::new(usb_det.device, screen, det.name.as_str()) {
+                                Ok(mut lcd) => {
+                                    match lcd.switch_to_desktop_mode() {
+                                        Ok(()) => info!("Switched {device_id} to desktop mode"),
+                                        Err(e) => warn!("Switch to desktop failed: {e}"),
+                                    }
+                                }
+                                Err(e) => warn!("Failed to open {device_id} for mode switch: {e}"),
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else {
+                warn!("Device {device_id} not found in cached devices");
+            }
+        }
+    }
+
 
     fn stream_target(&mut self, this_asset: Arc<MediaAsset>) {
         // Find ID of matching target
@@ -1388,4 +1525,16 @@ impl MediaRuntime {
 enum SendError {
     Usb(lianli_transport::TransportError),
     Other(anyhow::Error),
+}
+
+fn parse_mac_str(s: &str) -> Option<[u8; 6]> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    let mut mac = [0u8; 6];
+    for (i, part) in parts.iter().enumerate() {
+        mac[i] = u8::from_str_radix(part, 16).ok()?;
+    }
+    Some(mac)
 }

@@ -15,12 +15,18 @@ export struct DeviceData {
     fan-rpms: string,
     coolant-temp: string,
     resolution: string,
+    in-desktop-mode: bool,
+    in-lcd-mode: bool,
+    is-unbound-wireless: bool,
 }
 
 component DeviceCard inherits Card {
     in property <DeviceData> device;
+    callback switch-display-mode(string);
+    callback bind-wireless-device(string);
 
     width: 280px;
+    opacity: device.is-unbound-wireless ? 0.5 : 1.0;
 
     VerticalLayout {
         spacing: 6px;
@@ -76,12 +82,32 @@ component DeviceCard inherits Card {
             font-size: 11px;
             color: Theme.text-primary;
         }
+
+        if device.in-desktop-mode: Button {
+            text: "Switch to LCD Mode";
+            clicked => { root.switch-display-mode(device.device-id); }
+        }
+
+        if device.in-lcd-mode: Button {
+            text: "Switch to Desktop Mode";
+            clicked => { root.switch-display-mode(device.device-id); }
+        }
+
+        if device.is-unbound-wireless: HorizontalLayout {
+            opacity: device.is-unbound-wireless ? 2.0 : 1.0;
+            Button {
+                text: "Bind to this dongle";
+                clicked => { root.bind-wireless-device(device.device-id); }
+            }
+        }
     }
 }
 
 export component DevicesPage inherits VerticalLayout {
     in property <[DeviceData]> devices: [];
     callback refresh();
+    callback switch-display-mode(string);
+    callback bind-wireless-device(string);
 
     PageHeader {
         title: "Devices";
@@ -113,6 +139,8 @@ export component DevicesPage inherits VerticalLayout {
 
                 for device[idx] in root.devices: DeviceCard {
                     device: device;
+                    switch-display-mode(id) => { root.switch-display-mode(id); }
+                    bind-wireless-device(id) => { root.bind-wireless-device(id); }
                 }
             }
 

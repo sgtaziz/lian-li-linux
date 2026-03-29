@@ -58,6 +58,14 @@ pub enum IpcRequest {
     SetRgbConfig {
         config: RgbAppConfig,
     },
+    /// Switch a WinUSB LCD device between LCD mode and desktop mode.
+    SwitchDisplayMode {
+        device_id: String,
+    },
+    /// Bind an unbound wireless device to this dongle.
+    BindWirelessDevice {
+        mac: String,
+    },
     Subscribe,
     Ping,
 }
@@ -112,16 +120,25 @@ pub struct DeviceInfo {
     pub family: DeviceFamily,
     pub name: String,
     pub serial: Option<String>,
+    #[serde(default)]
+    pub vid: u16,
+    #[serde(default)]
+    pub pid: u16,
     pub has_lcd: bool,
     pub has_fan: bool,
     pub has_pump: bool,
     pub has_rgb: bool,
+    /// Whether this device exposes a controllable pump (speed slot 3).
+    #[serde(default)]
+    pub has_pump_control: bool,
     pub fan_count: Option<u8>,
     pub per_fan_control: Option<bool>,
     pub mb_sync_support: bool,
     pub rgb_zone_count: Option<u8>,
     pub screen_width: Option<u32>,
     pub screen_height: Option<u32>,
+    #[serde(default)]
+    pub is_unbound_wireless: bool,
 }
 
 /// Status of the OpenRGB SDK server.

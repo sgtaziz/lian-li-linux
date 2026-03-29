@@ -39,4 +39,11 @@ impl HidBackend {
             Self::Rusb(dev) => dev.get_feature_report(buf).map_err(|e| anyhow::anyhow!("{e}")),
         }
     }
+
+    pub fn get_input_report(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
+        match self {
+            Self::Hidapi(dev) => dev.get_input_report(buf).map_err(|e| anyhow::anyhow!("{e}")),
+            Self::Rusb(dev) => dev.get_input_report(buf).map_err(|e| anyhow::anyhow!("{e}")),
+        }
+    }
 }

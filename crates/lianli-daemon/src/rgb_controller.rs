@@ -31,7 +31,12 @@ struct WirelessRgbState {
 impl WirelessRgbState {
     fn new(mac: [u8; 6], fan_count: u8, fan_type: WirelessFanType) -> Self {
         let leds_per_fan = fan_type.leds_per_fan();
-        let total_leds = fan_count as usize * leds_per_fan as usize;
+        let total_leds = if let Some(override_count) = fan_type.total_led_count_override() {
+            override_count as usize
+        } else {
+            let pump_leds = fan_type.pump_led_count() as usize;
+            pump_leds + fan_count as usize * leds_per_fan as usize
+        };
         Self {
             mac,
             fan_count,
@@ -248,14 +253,35 @@ impl RgbController {
 
         // Wireless devices
         for (device_id, state) in &self.wireless_state {
-            let total_leds =
-                state.fan_count as u16 * state.leds_per_fan as u16;
-            let zones: Vec<RgbZoneInfo> = (0..state.fan_count)
-                .map(|i| RgbZoneInfo {
+            let mut zones: Vec<RgbZoneInfo> = Vec::new();
+
+            if let Some(total) = state.fan_type.total_led_count_override() {
+                // RGB-only devices: single zone
+                let zone_name = match state.fan_type {
+                    WirelessFanType::Lc217 => "Case Ring",
+                    WirelessFanType::Led88 => "Screen Ring",
+                    _ => "LED Strip",
+                };
+                zones.push(RgbZoneInfo {
+                    name: zone_name.to_string(),
+                    led_count: total,
+                });
+            } else {
+                // AIO: pump head zone first
+                if state.fan_type.is_aio() {
+                    zones.push(RgbZoneInfo {
+                        name: "Pump Head".to_string(),
+                        led_count: state.fan_type.pump_led_count() as u16,
+                    });
+                }
+                // Fan zones
+                zones.extend((0..state.fan_count).map(|i| RgbZoneInfo {
                     name: format!("Fan {}", i + 1),
                     led_count: state.leds_per_fan as u16,
-                })
-                .collect();
+                }));
+            }
+
+            let total_leds: u16 = zones.iter().map(|z| z.led_count).sum();
 
             caps.push(RgbDeviceCapabilities {
                 device_id: device_id.clone(),

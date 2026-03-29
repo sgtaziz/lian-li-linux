@@ -414,6 +414,12 @@ export component RgbPage inherits VerticalLayout {
                         vertical-alignment: center;
                     }
                 }
+                if root.openrgb-enabled: Text {
+                    text: "RGB effects configured below will be disabled while the OpenRGB server is enabled.";
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                    wrap: word-wrap;
+                }
             }
 
             // Device cards

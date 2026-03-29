@@ -534,9 +534,19 @@ pub fn create_wired_controllers(
         DeviceFamily::Ene6k77 => Some(
             crate::ene6k77::Ene6k77Controller::new(backend, pid).map(|ctrl| {
                 let ctrl = Arc::new(ctrl);
+                let rgb: Vec<_> = ctrl
+                    .group_devices()
+                    .into_iter()
+                    .map(|(group, dev)| {
+                        (
+                            format!("group{group}"),
+                            Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+                        )
+                    })
+                    .collect();
                 WiredControllerSet {
                     fan: Some(Box::new(Arc::clone(&ctrl))),
-                    rgb: vec![(String::new(), Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>)],
+                    rgb,
                 }
             }),
         ),
@@ -548,10 +558,13 @@ pub fn create_wired_controllers(
                 }),
         ),
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => Some(
-            crate::hydroshift_lcd::AioLcdRgbController::new(backend, pid)
-                .map(|c| WiredControllerSet {
-                    fan: None,
-                    rgb: vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)],
+            crate::hydroshift_lcd::HydroShiftLcdController::new(Arc::clone(&backend), pid)
+                .and_then(|lcd_ctrl| {
+                    let rgb_ctrl = crate::hydroshift_lcd::AioLcdRgbController::new(backend, pid)?;
+                    Ok(WiredControllerSet {
+                        fan: Some(Box::new(Arc::new(lcd_ctrl))),
+                        rgb: vec![(String::new(), Box::new(rgb_ctrl) as Box<dyn crate::traits::RgbDevice>)],
+                    })
                 }),
         ),
         _ => None,
