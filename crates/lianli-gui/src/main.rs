@@ -841,7 +841,7 @@ fn wire_lcd_callbacks(
             let field_str = field.to_string();
             // Only rebuild UI for dropdown/button fields that affect layout.
             // Text fields update in-place in the LineEdit — rebuilding would steal focus.
-            let needs_refresh = matches!(field_str.as_str(), "device" | "media_type" | "orientation")
+            let needs_refresh = matches!(field_str.as_str(), "device" | "media_type" | "orientation" | "sensor_source")
                 || field_str == "gauge_range_add"
                 || field_str == "gauge_range_remove";
             {
