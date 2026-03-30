@@ -1057,10 +1057,13 @@ impl ServiceManager {
                             cfg_key,
                             candidate.device_id.clone(),
                             lcd,
-                            asset,
+                            Arc::clone(&asset),
                             self.tx.clone(),
                         );
                         new_targets.insert(cfg_idx, target);
+                        if let Some(ref tx) = self.tx {
+                            tx.send(DaemonEvent::FrameFinished { asset }).ok();
+                        }
                     }
                     Err(err) => {
                         warn!(
