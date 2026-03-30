@@ -4,6 +4,7 @@
 //! The GUI polls periodically for telemetry. Config writes go through IPC.
 
 use crate::rgb_controller::RgbController;
+use crate::service::DaemonEvent;
 use lianli_shared::config::AppConfig;
 use lianli_shared::ipc::{DeviceInfo, IpcRequest, IpcResponse, TelemetrySnapshot};
 use parking_lot::Mutex;
@@ -15,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::thread;
 use tracing::{debug, error, info, warn};
+use std::sync::mpsc::Sender;
 
 pub static SOCKET_PATH: LazyLock<String> = LazyLock::new(|| {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
@@ -27,14 +29,8 @@ pub struct DaemonState {
     pub config_path: PathBuf,
     pub devices: Vec<DeviceInfo>,
     pub telemetry: TelemetrySnapshot,
-    /// Set by IPC when a config write comes in; main loop checks and clears.
-    pub config_reload_pending: bool,
     /// RGB controller, set once devices are opened.
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
-    /// Device ID pending display mode switch (LCD→Desktop). Handled by service main loop.
-    pub pending_display_switch: Option<String>,
-    /// MAC address pending wireless device bind. Handled by service main loop.
-    pub pending_bind: Option<String>,
 }
 
 impl DaemonState {
@@ -44,10 +40,7 @@ impl DaemonState {
             config_path,
             devices: Vec::new(),
             telemetry: TelemetrySnapshot::default(),
-            config_reload_pending: false,
             rgb_controller: None,
-            pending_display_switch: None,
-            pending_bind: None,
         }
     }
 }
@@ -57,15 +50,16 @@ impl DaemonState {
 pub fn start_ipc_server(
     state: Arc<Mutex<DaemonState>>,
     stop_flag: Arc<AtomicBool>,
+    tx: Sender<DaemonEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        if let Err(e) = run_server(state, stop_flag) {
+        if let Err(e) = run_server(state, stop_flag, tx) {
             error!("IPC server error: {e}");
         }
     })
 }
 
-fn run_server(state: Arc<Mutex<DaemonState>>, stop_flag: Arc<AtomicBool>) -> anyhow::Result<()> {
+fn run_server(state: Arc<Mutex<DaemonState>>, stop_flag: Arc<AtomicBool>, tx: Sender<DaemonEvent>) -> anyhow::Result<()> {
     // Clean up stale socket
     let socket_path = Path::new(SOCKET_PATH.as_str());
     if socket_path.exists() {
@@ -104,8 +98,9 @@ fn run_server(state: Arc<Mutex<DaemonState>>, stop_flag: Arc<AtomicBool>) -> any
                     .ok();
 
                 let state = Arc::clone(&state);
+                let tx_for_client = tx.clone();
                 thread::spawn(move || {
-                    if let Err(e) = handle_connection(stream, state) {
+                    if let Err(e) = handle_connection(stream, state, tx_for_client) {
                         debug!("IPC connection error: {e}");
                     }
                 });
@@ -130,6 +125,7 @@ fn run_server(state: Arc<Mutex<DaemonState>>, stop_flag: Arc<AtomicBool>) -> any
 fn handle_connection(
     stream: std::os::unix::net::UnixStream,
     state: Arc<Mutex<DaemonState>>,
+    tx: Sender<DaemonEvent>,
 ) -> anyhow::Result<()> {
     let reader = BufReader::new(&stream);
     let mut writer = &stream;
@@ -150,14 +146,14 @@ fn handle_connection(
         };
 
         debug!("IPC request: {request:?}");
-        let response = handle_request(request, &state);
+        let response = handle_request(request, &state, tx.clone());
         write_response(&mut writer, &response)?;
     }
 
     Ok(())
 }
 
-fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcResponse {
+fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>, tx: Sender<DaemonEvent>) -> IpcResponse {
     match request {
         IpcRequest::Ping => IpcResponse::ok(serde_json::json!("pong")),
 
@@ -184,7 +180,7 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
             match write_config(&state.config_path, &config) {
                 Ok(()) => {
                     state.config = Some(config);
-                    state.config_reload_pending = true;
+                    tx.send(DaemonEvent::IpcUpdate).ok();
                     info!("Config updated via IPC");
                     IpcResponse::ok(serde_json::json!(null))
                 }
@@ -208,7 +204,7 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
             let cfg_clone = app_config.clone();
             match write_config(&state.config_path, &cfg_clone) {
                 Ok(()) => {
-                    state.config_reload_pending = true;
+                    tx.send(DaemonEvent::IpcUpdate).ok();
                     IpcResponse::ok(serde_json::json!(null))
                 }
                 Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
@@ -222,7 +218,7 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
             let cfg_clone = app_config.clone();
             match write_config(&state.config_path, &cfg_clone) {
                 Ok(()) => {
-                    state.config_reload_pending = true;
+                    tx.send(DaemonEvent::IpcUpdate).ok();
                     IpcResponse::ok(serde_json::json!(null))
                 }
                 Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
@@ -315,7 +311,7 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
             let cfg_clone = app_config.clone();
             match write_config(&state.config_path, &cfg_clone) {
                 Ok(()) => {
-                    state.config_reload_pending = true;
+                    tx.send(DaemonEvent::IpcUpdate).ok();
                     IpcResponse::ok(serde_json::json!(null))
                 }
                 Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
@@ -351,8 +347,7 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
                 }
                 Some(f) if f.supports_display_mode_switch() => {
                     // LCD -> Desktop: service loop owns the WinUSB transport
-                    let mut state = state.lock();
-                    state.pending_display_switch = Some(device_id);
+                    tx.send(DaemonEvent::DisplaySwitch { device_id}).ok();
                     IpcResponse::ok(serde_json::json!({
                         "switched": "to_desktop",
                         "message": "Device is switching to desktop mode. It will reboot shortly."
@@ -364,8 +359,7 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
         }
 
         IpcRequest::BindWirelessDevice { mac } => {
-            let mut state = state.lock();
-            state.pending_bind = Some(mac);
+            tx.send(DaemonEvent::Bind {mac_address: mac}).ok();
             IpcResponse::ok(serde_json::json!({
                 "message": "Bind command queued. Device should appear shortly."
             }))

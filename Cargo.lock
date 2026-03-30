@@ -2652,6 +2652,7 @@ dependencies = [
  "anyhow",
  "image 0.24.9",
  "lianli-shared",
+ "parking_lot",
  "rusttype",
  "tempfile",
  "thiserror 2.0.18",

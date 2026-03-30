@@ -10,6 +10,7 @@ use lianli_devices::detect::{
     open_hid_backend_hidapi, open_hid_backend_rusb, open_hid_lcd_by_vid_pid,
     open_hid_lcd_device_rusb,
 };
+use lianli_media::sensor::FrameInfo;
 use lianli_shared::config::HidDriver;
 use lianli_transport::HidBackend;
 use lianli_devices::hydroshift_lcd::HydroShiftLcdController;
@@ -18,7 +19,7 @@ use lianli_devices::traits::FanDevice;
 use lianli_devices::winusb_lcd::WinUsbLcdDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_shared::device_id::DeviceFamily;
-use lianli_media::{prepare_media_asset, MediaAsset, SensorAsset};
+use lianli_media::{prepare_media_asset, MediaAsset, MediaAssetKind, SensorAsset};
 use lianli_shared::config::{config_identity, AppConfig, ConfigKey};
 use lianli_shared::ipc::DeviceInfo;
 use lianli_shared::media::MediaType;
@@ -27,23 +28,32 @@ use parking_lot::Mutex;
 use rusb::Device;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// Full USB bus enumeration interval — only needed for hot-plug detection of
 /// wired USB devices (LCD, AIO, etc.). Wireless discovery uses its own RX polling.
 const USB_ENUM_INTERVAL: Duration = Duration::from_secs(10);
-const ACTIVE_SLEEP: Duration = Duration::from_millis(1);
-const IDLE_SLEEP: Duration = Duration::from_millis(200);
+
+#[derive(Debug)]
+pub enum DaemonEvent {
+    IpcUpdate, // Somebody changed the DaemonState in the mutex
+    USBCheck,
+    DevicePoll,
+    DisplaySwitch{device_id: String}, // Device ID pending display mode switch (LCD→Desktop). Handled by main event loop.
+    Bind{mac_address: String}, // MAC address pending wireless device bind. Handled by main event loop.
+    FrameFinished { asset: Arc<MediaAsset> }, // A device has calculated a new frame, let's update the display
+}
 
 pub struct ServiceManager {
     config_path: PathBuf,
     config: Option<AppConfig>,
-    media_assets: HashMap<usize, MediaAsset>,
+    media_assets: HashMap<usize, Arc<MediaAsset>>,
     targets: HashMap<usize, ActiveTarget>,
     wireless: WirelessController,
     packet_builder: PacketBuilder,
@@ -56,20 +66,18 @@ pub struct ServiceManager {
     /// Shared HID backends keyed by device ID — allows fan, RGB, and LCD
     /// controllers for the same physical device to share one USB handle.
     hid_backends: HashMap<String, Arc<Mutex<HidBackend>>>,
-    last_device_scan: Instant,
-    last_usb_enum: Instant,
     /// Cached USB device list from enumerate_devices() — refreshed every USB_ENUM_INTERVAL.
     cached_usb_devices: Vec<DeviceInfo>,
-    running: bool,
     restart_requested: bool,
-    ipc_state: Arc<Mutex<DaemonState>>,
-    ipc_stop: Arc<AtomicBool>,
-    ipc_thread: Option<JoinHandle<()>>,
+    ipc_state: Arc<Mutex<DaemonState>>, // the (shared) state of the deamon. Shared between daemon itself and IPC thread.
+    ipc_stop: Arc<AtomicBool>, // Flag which allows the deamon thread (on shutdown) to tell the IPC thread to stop.
+    ipc_thread: Option<JoinHandle<()>>, // Here the deamon thread stores the handle to the IPC thread.
     openrgb_stop: Arc<AtomicBool>,
     openrgb_thread: Option<JoinHandle<()>>,
     openrgb_state: Arc<Mutex<openrgb_server::OpenRgbServerState>>,
     direct_color_buffer: Arc<Mutex<crate::rgb_controller::DirectColorBuffer>>,
     direct_color_writer: Option<JoinHandle<()>>,
+    tx: Option<Sender<DaemonEvent>>,
 }
 
 impl ServiceManager {
@@ -88,10 +96,7 @@ impl ServiceManager {
             wired_fan_device_info: Vec::new(),
             wired_fan_devices: Arc::new(HashMap::new()),
             hid_backends: HashMap::new(),
-            last_device_scan: Instant::now() - DEVICE_POLL_INTERVAL,
-            last_usb_enum: Instant::now() - USB_ENUM_INTERVAL,
             cached_usb_devices: Vec::new(),
-            running: true,
             restart_requested: false,
             ipc_state,
             ipc_stop: Arc::new(AtomicBool::new(false)),
@@ -101,6 +106,7 @@ impl ServiceManager {
             openrgb_state: Arc::new(Mutex::new(openrgb_server::OpenRgbServerState::default())),
             direct_color_buffer: Arc::new(Mutex::new(crate::rgb_controller::DirectColorBuffer::new())),
             direct_color_writer: None,
+            tx: None,
         })
     }
 
@@ -146,6 +152,11 @@ impl ServiceManager {
         Ok(backend)
     }
 
+    pub fn device_poll(&mut self) {
+        self.refresh_targets();
+        self.sync_ipc_telemetry();
+    }
+
     /// Run the daemon main loop. Returns `true` if the daemon should restart.
     pub fn run(&mut self) -> Result<bool> {
         info!("=====================================================================");
@@ -174,14 +185,24 @@ impl ServiceManager {
             }
         }
 
+        let (tx, rx) = std::sync::mpsc::channel::<DaemonEvent>();
+
+        self.tx = Some(tx.clone());
+
+        // We need to send these two events to ourselves before load_config, as load_config sets up the assets and already sends FrameFinished-Events
+        tx.send(DaemonEvent::USBCheck).ok();
+        tx.send(DaemonEvent::DevicePoll).ok();
+
         // Load config before IPC starts — prevents GUI from getting empty defaults
-        self.load_config();
+        self.load_config(tx.clone());
         self.sync_ipc_state();
 
         // Start IPC server
+        let tx_cloned = tx.clone();
         self.ipc_thread = Some(ipc_server::start_ipc_server(
             Arc::clone(&self.ipc_state),
             Arc::clone(&self.ipc_stop),
+            tx_cloned,
         ));
         self.try_wireless();
         if !self.use_rusb() {
@@ -191,49 +212,38 @@ impl ServiceManager {
         self.start_openrgb_server();
         self.start_fan_control();
 
-        while self.running {
-            let now = Instant::now();
-
-            // Check for IPC-triggered config reload
-            {
-                let mut ipc_state = self.ipc_state.lock();
-                if ipc_state.config_reload_pending {
-                    ipc_state.config_reload_pending = false;
-                    info!("Config reload triggered via IPC");
-                    let old_hid_driver = self.config.as_ref().map(|c| c.hid_driver);
-                    // Force the config watcher to pick up the new file
-                    drop(ipc_state);
-                    if self.load_config() {
-                        let new_hid_driver = self.config.as_ref().map(|c| c.hid_driver);
-                        if old_hid_driver != new_hid_driver {
-                            info!("HID driver changed ({old_hid_driver:?} -> {new_hid_driver:?}), restarting daemon...");
-                            self.restart_requested = true;
-                            self.running = false;
-                            break;
-                        }
-                        self.last_device_scan = Instant::now() - DEVICE_POLL_INTERVAL;
-                        self.start_fan_control();
-                        self.apply_rgb_config();
-                        self.start_openrgb_server();
-                        self.sync_ipc_state();
-                    }
-                }
+        // Spawn a thread to regularily check for new USB devices.
+        let usb_tx = tx.clone();
+        thread::spawn(move || loop {
+            thread::sleep(USB_ENUM_INTERVAL);
+            if usb_tx.send(DaemonEvent::USBCheck).is_err() {
+                break; // Daemon thread has ended. Time for us to die as well
             }
+        });
 
-            // Check for IPC-triggered display mode switch (LCD -> Desktop)
-            {
-                let mut ipc_state = self.ipc_state.lock();
-                if let Some(device_id) = ipc_state.pending_display_switch.take() {
-                    drop(ipc_state);
+        // Spawn a thread to regularily check for new known devices.
+        let device_tx = tx.clone();
+        thread::spawn(move || loop {
+            thread::sleep(DEVICE_POLL_INTERVAL);
+            if device_tx.send(DaemonEvent::DevicePoll).is_err() {
+                break; // Daemon thread has ended. Time for us to die as well
+            }
+        });
+
+        for event in rx {
+            match event {
+                DaemonEvent::USBCheck => {
+                    // Refresh USB device enumeration
+                    // Wireless discovery is handled by its own RX polling thread.
+                    self.refresh_usb_device_cache();
+                }
+                DaemonEvent::DevicePoll => {
+                    self.device_poll();
+                }
+                DaemonEvent::DisplaySwitch{ device_id } => {
                     self.handle_display_switch_to_desktop(&device_id);
                 }
-            }
-
-            // Check for IPC-triggered wireless device bind
-            {
-                let mut ipc_state = self.ipc_state.lock();
-                if let Some(mac_str) = ipc_state.pending_bind.take() {
-                    drop(ipc_state);
+                DaemonEvent::Bind { mac_address: mac_str } => {
                     if let Some(mac) = parse_mac_str(&mac_str) {
                         if let Err(e) = self.wireless.bind_device(&mac) {
                             warn!("Failed to bind wireless device {mac_str}: {e}");
@@ -242,27 +252,33 @@ impl ServiceManager {
                         warn!("Invalid MAC address for bind: {mac_str}");
                     }
                 }
-            }
+                DaemonEvent::IpcUpdate => {
+                    // Check for IPC-triggered config reload
+                    let ipc_state = self.ipc_state.lock();
+                    info!("Config reload triggered via IPC");
+                    let old_hid_driver = self.config.as_ref().map(|c| c.hid_driver);
+                    // Force the config watcher to pick up the new file
+                    drop(ipc_state);
+                    if self.load_config(tx.clone()) {
+                        let new_hid_driver = self.config.as_ref().map(|c| c.hid_driver);
+                        if old_hid_driver != new_hid_driver {
+                            info!("HID driver changed ({old_hid_driver:?} -> {new_hid_driver:?}), restarting daemon...");
+                            self.restart_requested = true;
+                            break;
+                        }
+                        self.start_fan_control();
+                        self.apply_rgb_config();
+                        self.start_openrgb_server();
+                        self.sync_ipc_state();
 
-            if now.duration_since(self.last_device_scan) >= DEVICE_POLL_INTERVAL {
-                self.last_device_scan = Instant::now();
-                self.refresh_targets();
-                // Refresh USB device enumeration at a slower rate (hot-plug detection).
-                // Wireless discovery is handled by its own RX polling thread.
-                if now.duration_since(self.last_usb_enum) >= USB_ENUM_INTERVAL {
-                    self.last_usb_enum = Instant::now();
-                    self.refresh_usb_device_cache();
+                        self.device_poll();
+                    }
                 }
-                self.sync_ipc_telemetry();
+                DaemonEvent::FrameFinished { asset } => {
+                    // which worker has a new image to send?
+                    self.stream_target(asset);
+                }
             }
-
-            self.stream_targets();
-
-            thread::sleep(if self.targets.is_empty() {
-                IDLE_SLEEP
-            } else {
-                ACTIVE_SLEEP
-            });
         }
 
         self.shutdown();
@@ -810,7 +826,7 @@ impl ServiceManager {
         self.wireless.has_discovered_devices()
     }
 
-    fn load_config(&mut self) -> bool {
+    fn load_config(&mut self, tx: Sender<DaemonEvent>) -> bool {
         match AppConfig::load(&self.config_path) {
             Ok((cfg, warnings)) => {
                 for w in &warnings {
@@ -818,7 +834,7 @@ impl ServiceManager {
                 }
                 self.config = Some(cfg);
                 self.packet_builder = PacketBuilder::new();
-                self.prepare_media_assets();
+                self.prepare_media_assets(tx);
                 true
             }
             Err(err) => {
@@ -828,7 +844,7 @@ impl ServiceManager {
         }
     }
 
-    fn prepare_media_assets(&mut self) {
+    fn prepare_media_assets(&mut self, tx: Sender<DaemonEvent>) {
         self.media_assets.clear();
 
         // Build a serial to ScreenInfo map from currently connected devices so each
@@ -854,9 +870,12 @@ impl ServiceManager {
                     .unwrap_or(ScreenInfo::WIRELESS_LCD);
                 let cfg_key = config_identity(device);
                 match prepare_media_asset(device, cfg.default_fps, &screen) {
-                    Ok(asset) => {
-                        self.media_assets.insert(idx, asset);
+                    Ok(asset_kind) => {
                         let device_id = device.device_id();
+                        let asset = MediaAsset{kind: asset_kind, config_key: cfg_key};
+                        let asset_arc = Arc::new(asset);
+                        self.media_assets.insert(idx, Arc::clone(&asset_arc));
+
                         match device.media_type {
                             MediaType::Image => info!("Prepared image for LCD[{device_id}]"),
                             MediaType::Video => info!("Prepared video for LCD[{device_id}]"),
@@ -867,6 +886,8 @@ impl ServiceManager {
                                 device.sensor.as_ref().map(|s| s.label.as_str()).unwrap_or("<unknown>")
                             ),
                         }
+                        tx.send(DaemonEvent::FrameFinished { asset: asset_arc })
+                            .ok();
                     }
                     Err(err) => warn!("Skipping LCD[{cfg_key}] media: {err}"),
                 }
@@ -929,7 +950,7 @@ impl ServiceManager {
         if let Some(cfg) = &self.config {
             for (cfg_idx, device_cfg) in cfg.lcds.iter().enumerate() {
                 let asset = match self.media_assets.get(&cfg_idx) {
-                    Some(asset) => asset,
+                    Some(asset_arc) => Arc::clone(asset_arc),
                     None => {
                         if let Some(mut existing) = self.targets.remove(&cfg_idx) {
                             existing.stop();
@@ -1028,8 +1049,18 @@ impl ServiceManager {
                             candidate.device_id,
                             device_cfg.orientation
                         );
-                        let target = ActiveTarget::new(cfg_idx, cfg_key, candidate.device_id.clone(), lcd, asset);
+                        let target = ActiveTarget::new(
+                            cfg_idx,
+                            cfg_key,
+                            candidate.device_id.clone(),
+                            lcd,
+                            Arc::clone(&asset),
+                            self.tx.clone(),
+                        );
                         new_targets.insert(cfg_idx, target);
+                        if let Some(ref tx) = self.tx {
+                            tx.send(DaemonEvent::FrameFinished { asset }).ok();
+                        }
                     }
                     Err(err) => {
                         warn!(
@@ -1100,19 +1131,18 @@ impl ServiceManager {
         }
     }
 
-    fn stream_targets(&mut self) {
-        if self.targets.is_empty() {
-            return;
-        }
 
-        let now = Instant::now();
-        let ids: Vec<usize> = self.targets.keys().cloned().collect();
-        for idx in ids {
-            if let Some(target) = self.targets.get_mut(&idx) {
-                if !target.should_send(now) {
-                    continue;
-                }
+    fn stream_target(&mut self, this_asset: Arc<MediaAsset>) {
+        // Find ID of matching target
+        let target_id = self
+            .targets
+            .iter()
+            .find(|(_, t)| t.asset.config_key == this_asset.config_key)
+            .map(|(id, _)| *id);
 
+        if let Some(id) = target_id {
+            // 2. retrieve target mutable
+            if let Some(target) = self.targets.get_mut(&id) {
                 match target.send_frame(&self.wireless, &mut self.packet_builder) {
                     Ok(true) => {
                         if target.frame_counter % 30 == 0 {
@@ -1124,14 +1154,12 @@ impl ServiceManager {
                     }
                     Ok(false) => {}
                     Err(SendError::Usb(err)) => {
-                        self.handle_usb_error(idx, err);
-                        break;
+                        self.handle_usb_error(id, err);
                     }
                     Err(SendError::Other(err)) => {
                         warn!("LCD[{}] media error: {err}", target.index);
-                        let mut removed = self.targets.remove(&idx).unwrap();
+                        let mut removed = self.targets.remove(&id).unwrap();
                         removed.stop();
-                        break;
                     }
                 }
             }
@@ -1143,9 +1171,7 @@ impl ServiceManager {
             warn!("LCD[{index}] USB error: {err}");
             target.stop();
         }
-        if matches!(err, lianli_transport::TransportError::Timeout)
-            && self.recover_wireless()
-        {
+        if matches!(err, lianli_transport::TransportError::Timeout) && self.recover_wireless() {
             info!("Wireless link recovered");
         }
     }
@@ -1193,35 +1219,32 @@ struct ActiveTarget {
     device_identity: String,
     lcd: LcdBackend,
     media: MediaRuntime,
-    next_due: Option<Instant>,
+    asset: Arc<MediaAsset>,
     frame_counter: u64,
 }
 
 impl ActiveTarget {
-    fn new(index: usize, key: ConfigKey, device_identity: String, lcd: LcdBackend, asset: &MediaAsset) -> Self {
+    fn new(
+        index: usize,
+        key: ConfigKey,
+        device_identity: String,
+        lcd: LcdBackend,
+        asset: Arc<MediaAsset>,
+        tx: Option<Sender<DaemonEvent>>,
+    ) -> Self {
         Self {
             index,
             key,
             device_identity,
             lcd,
-            media: MediaRuntime::from_asset(asset),
-            next_due: None,
+            media: MediaRuntime::from_asset(Arc::clone(&asset), tx),
+            asset,
             frame_counter: 0,
         }
     }
 
     fn matches(&self, identity: &str, key: &ConfigKey) -> bool {
         self.device_identity == identity && key == &self.key
-    }
-
-    fn should_send(&self, now: Instant) -> bool {
-        match &self.media {
-            MediaRuntime::Static { sent, .. } => !*sent,
-            MediaRuntime::Video { .. } | MediaRuntime::Sensor { .. } => match self.next_due {
-                Some(due) => now >= due,
-                None => true,
-            },
-        }
     }
 
     fn send_frame(
@@ -1240,13 +1263,13 @@ impl ActiveTarget {
         } else {
             self.lcd.send_frame(wireless, builder, frame)
         };
-        result
-            .map_err(|err| match err.downcast::<lianli_transport::TransportError>() {
+        result.map_err(
+            |err| match err.downcast::<lianli_transport::TransportError>() {
                 Ok(usb) => SendError::Usb(usb),
                 Err(other) => SendError::Other(other),
-            })?;
+            },
+        )?;
 
-        self.media.advance_schedule(&mut self.next_due);
         self.frame_counter += 1;
         Ok(true)
     }
@@ -1257,34 +1280,37 @@ impl ActiveTarget {
 enum MediaRuntime {
     Static {
         frame: Arc<Vec<u8>>,
-        sent: bool,
     },
     Video {
+        #[allow(dead_code)] // We do not read the player, we only store it
+        player: Arc<AsyncVideoPlayer>,
         frames: Arc<Vec<Vec<u8>>>,
-        durations: Arc<Vec<Duration>>,
-        cursor: usize,
-        start: Option<Instant>,
-        elapsed: Duration,
-        last_duration: Duration,
+        sent_frame_index: usize,
     },
     Sensor {
         renderer: Arc<AsyncSensorRenderer>,
         cached_frame: Vec<u8>,
-        next_frame_time: Instant,
+        sent_frame_index: usize,
     },
 }
 
 struct AsyncSensorRenderer {
+    #[allow(dead_code)] // We'd like to keep the SensorAsset, who knows if we'll need it
     asset: Arc<SensorAsset>,
-    current_frame: Arc<Mutex<Vec<u8>>>,
+    current_frame: Arc<Mutex<FrameInfo>>,
     stop_flag: Arc<AtomicBool>,
     _thread: Option<JoinHandle<()>>,
 }
 
 impl AsyncSensorRenderer {
-    fn new(asset: Arc<SensorAsset>) -> Self {
-        let initial = match asset.render_frame() {
-            Ok(frame) => frame,
+    fn new(
+        tx: Option<Sender<DaemonEvent>>,
+        asset: Arc<SensorAsset>,
+        baseasset: Arc<MediaAsset>,
+    ) -> Self {
+        let initial = match asset.render_frame(true) {
+            Ok(Some(frame)) => frame,
+            Ok(None) => asset.blank_frame(),
             Err(err) => {
                 warn!("sensor initial render failed: {err}");
                 asset.blank_frame()
@@ -1299,16 +1325,28 @@ impl AsyncSensorRenderer {
         let frame_clone = Arc::clone(&current_frame);
         let stop_clone = Arc::clone(&stop_flag);
 
+        let asset_for_thread = Arc::clone(&baseasset);
+        let tx_for_thread = tx.clone();
+
         let thread = thread::spawn(move || {
             while !stop_clone.load(Ordering::Relaxed) {
                 thread::sleep(update_interval);
                 if stop_clone.load(Ordering::Relaxed) {
                     break;
                 }
-                match asset_clone.render_frame() {
-                    Ok(new_frame) => {
+                match asset_clone.render_frame(false) {
+                    Ok(Some(new_frame)) => {
                         *frame_clone.lock() = new_frame;
+                        if let Some(ref tx) = tx_for_thread {
+                            let event = DaemonEvent::FrameFinished {
+                                asset: Arc::clone(&asset_for_thread),
+                            };
+                            if tx.send(event).is_err() {
+                                break;
+                            }
+                        }
                     }
+                    Ok(None) => {}
                     Err(err) => {
                         warn!("sensor background render failed: {err}");
                     }
@@ -1324,8 +1362,12 @@ impl AsyncSensorRenderer {
         }
     }
 
-    fn get_frame(&self) -> Vec<u8> {
-        self.current_frame.lock().clone()
+    fn get_frame_index(&self) -> usize {
+        self.current_frame.lock().frame_index
+    }
+
+    fn get_current_frame(&self) -> Vec<u8> {
+        self.current_frame.lock().data.clone()
     }
 }
 
@@ -1335,32 +1377,106 @@ impl Drop for AsyncSensorRenderer {
     }
 }
 
+struct AsyncVideoPlayer {
+    stop_flag: Arc<AtomicBool>,
+    _thread: Option<JoinHandle<()>>,
+    frame_index: Arc<AtomicUsize>,
+}
+
+impl AsyncVideoPlayer {
+    fn new(tx: Option<Sender<DaemonEvent>>, asset: Arc<MediaAsset>) -> Self {
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop_flag);
+
+        let tx_for_thread = tx.clone();
+
+        let asset_for_thread = Arc::clone(&asset);
+
+        let min_dur = Duration::from_millis(10);
+        let std_dur = Duration::from_millis(100);
+
+        let frame_durations: Vec<Duration> = if let MediaAssetKind::Video {
+            frame_durations, ..
+        } = &asset.kind
+        {
+            frame_durations.iter().map(|&d| d.max(min_dur)).collect()
+
+        } else {
+            vec![min_dur; 1]
+        };
+
+        let frame_index: Arc<AtomicUsize> = Arc::new(0.into());
+        let frame_index_cloned = frame_index.clone();
+
+        let thread = thread::spawn(move || {
+            while !stop_clone.load(Ordering::Relaxed) {
+                let mut frame_cnt = 0;
+                if let Some(ref tx) = tx_for_thread {
+                    frame_cnt = frame_index.fetch_add(1, Ordering::SeqCst);
+                    let event = DaemonEvent::FrameFinished {
+                        asset: Arc::clone(&asset_for_thread),
+                    };
+                    if tx.send(event).is_err() {
+                        break;
+                    }
+                }
+
+                if stop_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                let millis = frame_durations.get(frame_cnt % frame_durations.len());
+                thread::sleep(*millis.unwrap_or(&std_dur));
+            }
+        });
+
+        Self {
+            stop_flag,
+            _thread: Some(thread),
+            frame_index: frame_index_cloned,
+        }
+    }
+
+    fn get_frame_index(&self) -> usize {
+        self.frame_index.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for AsyncVideoPlayer {
+    fn drop(&mut self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+    }
+}
+
 impl MediaRuntime {
-    fn from_asset(asset: &MediaAsset) -> Self {
-        match asset {
-            MediaAsset::Static { frame } => Self::Static {
+    fn from_asset(asset: Arc<MediaAsset>, tx: Option<Sender<DaemonEvent>>) -> Self {
+        match &asset.kind {
+            MediaAssetKind::Static { frame } => Self::Static {
                 frame: Arc::clone(frame),
-                sent: false,
             },
-            MediaAsset::Video {
-                frames,
-                frame_durations,
-            } => Self::Video {
-                frames: Arc::clone(frames),
-                durations: Arc::clone(frame_durations),
-                cursor: 0,
-                start: None,
-                elapsed: Duration::default(),
-                last_duration: Duration::default(),
-            },
-            MediaAsset::Sensor { asset } => {
-                let renderer = Arc::new(AsyncSensorRenderer::new(Arc::clone(asset)));
-                let update_interval = asset.update_interval();
-                let cached_frame = renderer.get_frame();
+            MediaAssetKind::Video { frames, .. } => {
+                let player = Arc::new(AsyncVideoPlayer::new(tx, Arc::clone(&asset)));
+
+                Self::Video {
+                    player,
+                    frames: Arc::clone(frames),
+                    sent_frame_index: 0,
+                }
+            }
+
+            MediaAssetKind::Sensor {
+                asset: sensor_asset,
+            } => {
+                let renderer = Arc::new(AsyncSensorRenderer::new(
+                    tx,
+                    Arc::clone(sensor_asset),
+                    Arc::clone(&asset),
+                ));
+                let cached_frame = renderer.get_current_frame();
                 Self::Sensor {
                     renderer,
                     cached_frame,
-                    next_frame_time: Instant::now() + update_interval,
+                    sent_frame_index: 0,
                 }
             }
         }
@@ -1368,76 +1484,29 @@ impl MediaRuntime {
 
     fn next_frame_bytes(&mut self) -> Option<&[u8]> {
         match self {
-            MediaRuntime::Static { frame, sent } => {
-                if *sent {
-                    None
-                } else {
-                    *sent = true;
-                    Some(frame.as_slice())
+            MediaRuntime::Static { frame } => Some(frame.as_slice()),
+            MediaRuntime::Video { player, frames, sent_frame_index, .. } => {
+                let rendered_frame_index = player.get_frame_index();
+                if rendered_frame_index <= *sent_frame_index || frames.is_empty() {
+                    return None;
                 }
-            }
-            MediaRuntime::Video {
-                frames,
-                durations,
-                cursor,
-                last_duration,
-                ..
-            } => {
-                if frames.is_empty() {
-                    None
-                } else {
-                    let idx = *cursor % frames.len();
-                    *cursor += 1;
-                    let duration = durations
-                        .get(idx)
-                        .copied()
-                        .unwrap_or_else(|| Duration::from_millis(33));
-                    *last_duration = duration;
-                    Some(frames[idx].as_slice())
-                }
+                let ret = Some(frames[rendered_frame_index % frames.len()].as_slice());
+                *sent_frame_index = rendered_frame_index;
+                ret
             }
             MediaRuntime::Sensor {
                 renderer,
                 cached_frame,
-                next_frame_time,
+                sent_frame_index,
                 ..
             } => {
-                let now = Instant::now();
-                if now >= *next_frame_time {
-                    *cached_frame = renderer.get_frame();
-                    *next_frame_time = now + renderer.asset.update_interval();
+                let rendered_frame_index = renderer.get_frame_index();
+                if rendered_frame_index <= *sent_frame_index {
+                    return None;
                 }
+                *cached_frame = renderer.get_current_frame();
+                *sent_frame_index = rendered_frame_index;
                 Some(cached_frame.as_slice())
-            }
-        }
-    }
-
-    fn advance_schedule(&mut self, next_due: &mut Option<Instant>) {
-        match self {
-            MediaRuntime::Static { .. } => {
-                *next_due = None;
-            }
-            MediaRuntime::Video {
-                durations,
-                cursor,
-                start,
-                elapsed,
-                last_duration,
-                ..
-            } => {
-                let base = start.get_or_insert_with(Instant::now);
-                let frame_delay = (*last_duration).max(Duration::from_millis(10));
-                *elapsed += frame_delay;
-                *next_due = Some(*base + *elapsed);
-                if !durations.is_empty() && *cursor % durations.len() == 0 {
-                    *start = Some(Instant::now());
-                    *elapsed = Duration::default();
-                }
-            }
-            MediaRuntime::Sensor {
-                next_frame_time, ..
-            } => {
-                *next_due = Some(*next_frame_time);
             }
         }
     }

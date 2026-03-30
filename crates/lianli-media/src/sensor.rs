@@ -6,8 +6,16 @@ use rusttype::{point, Font, Scale};
 use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use parking_lot::Mutex;
 
+pub struct FrameInfo {
+    pub data: Vec<u8>,
+    pub frame_index: usize,
+}
+
+#[derive(Debug)]
 pub struct SensorAsset {
     label: String,
     unit: String,
@@ -32,6 +40,10 @@ pub struct SensorAsset {
     unit_offset: i32,
     label_offset: i32,
     screen: ScreenInfo,
+     // We store the previous value as displayed on the LCD in order to be able to compare whether we need to update the frame
+    previous_value: Mutex<String>,
+    // Each time a frame gets redrawn this index is "assigned" to the frame.
+    frame_index: AtomicUsize,
 }
 
 impl SensorAsset {
@@ -110,6 +122,8 @@ impl SensorAsset {
             unit_offset: descriptor.unit_offset,
             label_offset: descriptor.label_offset,
             screen: *screen,
+            previous_value: Mutex::new("N/A".into()),
+            frame_index: 0.into(),
         }))
     }
 
@@ -117,8 +131,28 @@ impl SensorAsset {
         self.update_interval
     }
 
-    pub fn render_frame(&self) -> Result<Vec<u8>, MediaError> {
+    /// Force flag: if true, frame gets rendered even if value has not changed. For example when we render the first frame, we set force=true
+    /// Returns OK(Empty) in case of "nothing changed", OK(FrameInfo) in case a new frame has been rendered, and Error in case of an error
+    pub fn render_frame(&self, force: bool) -> Result<Option<FrameInfo>, MediaError> {
+
+        // First of all, let's check whether we need to render a new frame:
+        // if the value to display has not changed, we omit frame rendering
+
         let value = self.read_value()?.clamp(0.0, 100.0);
+
+        // So let's find out how the value will appear as a string
+        let value_text = if self.decimal_places > 0 {
+            format!("{:.prec$}", value, prec = self.decimal_places as usize)
+        } else {
+            format!("{:.0}", value.round())
+        };
+
+        // And let's compare it with the previously stored value
+        let mut prev = self.previous_value.lock();
+        if value_text == *prev  && !force {
+            return Ok(None);
+        }
+
         let gauge_color = self.color_for_value(value);
         let w = self.screen.width;
         let h = self.screen.height;
@@ -144,15 +178,14 @@ impl SensorAsset {
         let text_params = TextRenderParams {
             label: &self.label,
             unit: &self.unit,
-            value,
             color: self.text_color,
             value_size: self.value_font_size,
             unit_size: self.unit_font_size,
             label_size: self.label_font_size,
-            decimal_places: self.decimal_places,
             value_offset: self.value_offset,
             unit_offset: self.unit_offset,
             label_offset: self.label_offset,
+            value_text: &value_text,
         };
 
         if let Some(font) = &self.font {
@@ -161,18 +194,31 @@ impl SensorAsset {
             draw_sensor_text_fallback(&mut image, w, h, text_params);
         }
 
+        *prev = value_text; // set the previous value
+
         let oriented = apply_orientation(image, self.orientation);
-        encode_jpeg(oriented, &self.screen)
+        let encoded_jpeg_result: Result<Option<Vec<u8>>, MediaError> = encode_jpeg(oriented, &self.screen).map(Some);
+
+        let frame_result: Result<Option<FrameInfo>, MediaError> = encoded_jpeg_result.map(|opt| {
+            opt.map(|data| FrameInfo {
+                data,
+                frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
+            })
+        });
+        return frame_result;
     }
 
-    pub fn blank_frame(&self) -> Vec<u8> {
+    pub fn blank_frame(&self) -> FrameInfo {
         let image = ImageBuffer::from_pixel(
             self.screen.width,
             self.screen.height,
             Rgb(self.background_color),
         );
         let oriented = apply_orientation(image, self.orientation);
-        encode_jpeg(oriented, &self.screen).unwrap_or_default()
+        let frame_ret = FrameInfo{data: encode_jpeg(oriented, &self.screen).unwrap_or_default(), 
+                        frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst) };
+
+        return frame_ret;
     }
 
     fn color_for_value(&self, value: f32) -> [u8; 3] {
@@ -215,6 +261,7 @@ impl SensorAsset {
     }
 }
 
+#[derive(Debug)]
 enum SensorSource {
     Constant(f32),
     Command(String),
@@ -323,15 +370,14 @@ fn draw_gauge(image: &mut RgbImage, width: u32, height: u32, params: GaugeParams
 struct TextRenderParams<'a> {
     label: &'a str,
     unit: &'a str,
-    value: f32,
     color: [u8; 3],
     value_size: f32,
     unit_size: f32,
     label_size: f32,
-    decimal_places: u8,
     value_offset: i32,
     unit_offset: i32,
     label_offset: i32,
+    value_text: &'a str,
 }
 
 fn draw_sensor_text_ttf(
@@ -341,13 +387,7 @@ fn draw_sensor_text_ttf(
     params: TextRenderParams,
     font: &Font,
 ) {
-    let value_text = if params.decimal_places > 0 {
-        format!("{:.prec$}", params.value, prec = params.decimal_places as usize)
-    } else {
-        format!("{:.0}", params.value.round())
-    };
-
-    draw_text_centered(image, width, height, &value_text, params.value_size, params.color, params.value_offset, font);
+    draw_text_centered(image, width, height, params.value_text, params.value_size, params.color, params.value_offset, font);
     draw_text_centered(image, width, height, params.unit, params.unit_size, params.color, params.unit_offset, font);
     draw_text_centered(image, width, height, params.label, params.label_size, params.color, params.label_offset, font);
 }
@@ -413,13 +453,7 @@ fn draw_sensor_text_fallback(
     let unit_scale = (params.unit_size / 4.0).max(3.0) as u32;
     let label_scale = (params.label_size / 4.0).max(3.0) as u32;
 
-    let value_text = if params.decimal_places > 0 {
-        format!("{:.prec$}", params.value, prec = params.decimal_places as usize)
-    } else {
-        format!("{:.0}", params.value.round())
-    };
-
-    draw_text_center_bitmap(image, width, height, &value_text, value_scale, params.color, params.value_offset);
+    draw_text_center_bitmap(image, width, height, params.value_text, value_scale, params.color, params.value_offset);
     draw_text_center_bitmap(image, width, height, params.unit, unit_scale, params.color, params.unit_offset);
     draw_text_center_bitmap(image, width, height, params.label, label_scale, params.color, params.label_offset);
 }
