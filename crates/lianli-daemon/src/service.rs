@@ -1312,7 +1312,8 @@ impl AsyncSensorRenderer {
         baseasset: Arc<MediaAsset>,
     ) -> Self {
         let initial = match asset.render_frame(true) {
-            Ok(frame) => frame.unwrap(),
+            Ok(Some(frame)) => frame,
+            Ok(None) => asset.blank_frame(),
             Err(err) => {
                 warn!("sensor initial render failed: {err}");
                 asset.blank_frame()
