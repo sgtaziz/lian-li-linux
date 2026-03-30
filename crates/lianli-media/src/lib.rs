@@ -50,14 +50,14 @@ pub fn prepare_media_asset(
 ) -> Result<MediaAssetKind, MediaError> {
     match cfg.media_type {
         MediaType::Image => {
-            let path = cfg.path.as_ref().expect("validated path");
+            let path = cfg.path.as_ref().ok_or(MediaError::InvalidConfig("image entry requires a 'path' field".into()))?;
             let frame = image::load_image_frame(path, cfg.orientation, screen)?;
             Ok(MediaAssetKind::Static {
                 frame: Arc::new(frame),
             })
         }
         MediaType::Color => {
-            let rgb = cfg.rgb.expect("validated rgb");
+            let rgb = cfg.rgb.ok_or(MediaError::InvalidConfig("color entry requires an 'rgb' field".into()))?;
             let frame = image::build_color_frame(rgb, screen);
             Ok(MediaAssetKind::Static {
                 frame: Arc::new(frame),
@@ -68,7 +68,7 @@ pub fn prepare_media_asset(
             if desired_fps <= 0.0 {
                 return Err(MediaError::InvalidFps);
             }
-            let path = cfg.path.as_ref().expect("validated path");
+            let path = cfg.path.as_ref().ok_or(MediaError::InvalidConfig("video entry requires a 'path' field".into()))?;
             let (frames, durations) =
                 video::build_video_frames(path, desired_fps, cfg.orientation, screen)?;
             Ok(MediaAssetKind::Video {
@@ -77,7 +77,7 @@ pub fn prepare_media_asset(
             })
         }
         MediaType::Gif => {
-            let path = cfg.path.as_ref().expect("validated path");
+            let path = cfg.path.as_ref().ok_or(MediaError::InvalidConfig("gif entry requires a 'path' field".into()))?;
             let (frames, durations) = video::build_gif_frames(path, cfg.orientation, screen)?;
             Ok(MediaAssetKind::Video {
                 frames: Arc::new(frames),
@@ -85,7 +85,7 @@ pub fn prepare_media_asset(
             })
         }
         MediaType::Sensor => {
-            let descriptor = cfg.sensor.as_ref().expect("validated sensor config");
+            let descriptor = cfg.sensor.as_ref().ok_or(MediaError::InvalidConfig("sensor entry requires a 'sensor' field".into()))?;
             let asset = SensorAsset::new(descriptor, cfg.orientation, screen)?;
             Ok(MediaAssetKind::Sensor { asset })
         }

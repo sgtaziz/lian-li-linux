@@ -19,6 +19,8 @@ pub enum MediaError {
     InvalidFps,
     #[error("sensor error: {0}")]
     Sensor(String),
+    #[error("invalid config: {0}")]
+    InvalidConfig(String),
 }
 
 pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
