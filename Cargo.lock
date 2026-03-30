@@ -2621,6 +2621,7 @@ dependencies = [
  "des",
  "hex",
  "hidapi",
+ "image 0.24.9",
  "lianli-shared",
  "lianli-transport",
  "once_cell",

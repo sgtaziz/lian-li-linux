@@ -191,10 +191,58 @@ impl WinUsbLcdDevice {
         self.send_command(stop_play, "StopPlay");
         let stop_clock = self.builder.stop_clock_header_winusb();
         self.send_command(stop_clock, "StopClock");
+        self.clear_layers();
         self.set_frame_rate(30)?;
 
         self.initialized = true;
         Ok(())
+    }
+
+    fn clear_layers(&mut self) {
+        use image::{ImageBuffer, Rgb, Rgba};
+        use std::io::Cursor;
+
+        let w = self.screen.width as u32;
+        let h = self.screen.height as u32;
+
+        // Clear PNG overlay layer
+        let png_img = ImageBuffer::from_pixel(w, h, Rgba([0u8, 0, 0, 0]));
+        let mut png_buf = Vec::new();
+        if png_img
+            .write_to(&mut Cursor::new(&mut png_buf), image::ImageFormat::Png)
+            .is_ok()
+        {
+            let header = self.builder.png_header_winusb(png_buf.len());
+            let mut packet = vec![0u8; 512 + png_buf.len()];
+            packet[..512].copy_from_slice(&header);
+            packet[512..].copy_from_slice(&png_buf);
+            if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
+                warn!("ClearPngLayer failed: {e}");
+            } else {
+                self.read_response("ClearPngLayer");
+            }
+        }
+
+        // Clear JPG background layer
+        let jpg_img = ImageBuffer::from_pixel(w, h, Rgb([0u8, 0, 0]));
+        let mut jpg_buf = Vec::new();
+        {
+            let mut encoder =
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_buf, 50);
+            if let Err(e) = encoder.encode_image(&jpg_img) {
+                warn!("Failed to encode blank JPEG: {e}");
+                return;
+            }
+        }
+        let header = self.builder.jpeg_header_winusb(jpg_buf.len());
+        let mut packet = vec![0u8; 512 + jpg_buf.len()];
+        packet[..512].copy_from_slice(&header);
+        packet[512..].copy_from_slice(&jpg_buf);
+        if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
+            warn!("ClearJpgLayer failed: {e}");
+        } else {
+            self.read_response("ClearJpgLayer");
+        }
     }
 
     fn send_command(&mut self, header: Vec<u8>, label: &str) {

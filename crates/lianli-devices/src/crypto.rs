@@ -14,6 +14,7 @@ pub const CMD_BRIGHTNESS: u8 = 0x0E;
 pub const CMD_FRAME_RATE: u8 = 0x0F;
 pub const CMD_STOP_CLOCK: u8 = 0x34;
 pub const CMD_PUSH_JPG: u8 = 0x65;
+pub const CMD_PUSH_PNG: u8 = 0x66;
 pub const CMD_START_PLAY: u8 = 0x79;
 pub const CMD_QUERY_BLOCK: u8 = 0x7A;
 pub const CMD_STOP_PLAY: u8 = 0x7B;
@@ -139,6 +140,10 @@ impl PacketBuilder {
 
     pub fn jpeg_header_winusb(&mut self, jpeg_size: usize) -> Vec<u8> {
         self.build_winusb(CMD_PUSH_JPG, &(jpeg_size as u32).to_be_bytes())
+    }
+
+    pub fn png_header_winusb(&mut self, png_size: usize) -> Vec<u8> {
+        self.build_winusb(CMD_PUSH_PNG, &(png_size as u32).to_be_bytes())
     }
 
     pub fn frame_rate_header_winusb(&mut self, fps: u8) -> Vec<u8> {
