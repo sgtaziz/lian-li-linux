@@ -33,7 +33,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 
 const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// Full USB bus enumeration interval — only needed for hot-plug detection of
@@ -109,7 +109,6 @@ impl ServiceManager {
             tx: None,
         })
     }
-
 
     /// Check if the configured HID driver is rusb.
     fn use_rusb(&self) -> bool {
@@ -239,8 +238,6 @@ impl ServiceManager {
                     self.refresh_usb_device_cache();
                 }
                 DaemonEvent::DevicePoll => {
-                    // Refresh USB device enumeration
-                    // Wireless discovery is handled by its own RX polling thread.
                     self.device_poll();
                 }
                 DaemonEvent::DisplaySwitch{ device_id } => {
@@ -1241,7 +1238,7 @@ impl ActiveTarget {
             device_identity,
             lcd,
             media: MediaRuntime::from_asset(Arc::clone(&asset), tx),
-            asset: asset,
+            asset,
             frame_counter: 0,
         }
     }
@@ -1332,7 +1329,6 @@ impl AsyncSensorRenderer {
         let tx_for_thread = tx.clone();
 
         let thread = thread::spawn(move || {
-
             while !stop_clone.load(Ordering::Relaxed) {
                 thread::sleep(update_interval);
                 if stop_clone.load(Ordering::Relaxed) {
@@ -1373,7 +1369,6 @@ impl AsyncSensorRenderer {
     fn get_current_frame(&self) -> Vec<u8> {
         self.current_frame.lock().data.clone()
     }
-
 }
 
 impl Drop for AsyncSensorRenderer {
@@ -1411,7 +1406,7 @@ impl AsyncVideoPlayer {
         };
 
         let frame_index: Arc<AtomicUsize> = Arc::new(0.into());
-        let frame_index_cloned= frame_index.clone();
+        let frame_index_cloned = frame_index.clone();
 
         let thread = thread::spawn(move || {
             while !stop_clone.load(Ordering::Relaxed) {
@@ -1445,7 +1440,6 @@ impl AsyncVideoPlayer {
     fn get_frame_index(&self) -> usize {
         self.frame_index.load(Ordering::SeqCst)
     }
-
 }
 
 impl Drop for AsyncVideoPlayer {
@@ -1491,20 +1485,14 @@ impl MediaRuntime {
     fn next_frame_bytes(&mut self) -> Option<&[u8]> {
         match self {
             MediaRuntime::Static { frame } => Some(frame.as_slice()),
-            MediaRuntime::Video { player,  frames, sent_frame_index, .. } => {
+            MediaRuntime::Video { player, frames, sent_frame_index, .. } => {
                 let rendered_frame_index = player.get_frame_index();
-                trace!("Last sent frame index: {}, most recent rendered frame index : {}", *sent_frame_index,rendered_frame_index);
-                if rendered_frame_index<=*sent_frame_index {
-                    trace!("==> nothing new, most recent rendered frame already sent to LCD");
+                if rendered_frame_index <= *sent_frame_index || frames.is_empty() {
                     return None;
-                } else if frames.is_empty() {
-                    return None
-                } else {
-                    trace!("==> Ok, a new frame has been rendered, so we sent out this one.");
-                    let ret = Some(frames[rendered_frame_index % frames.len()].as_slice());
-                    *sent_frame_index=rendered_frame_index;
-                    return ret;
                 }
+                let ret = Some(frames[rendered_frame_index % frames.len()].as_slice());
+                *sent_frame_index = rendered_frame_index;
+                ret
             }
             MediaRuntime::Sensor {
                 renderer,
@@ -1513,14 +1501,11 @@ impl MediaRuntime {
                 ..
             } => {
                 let rendered_frame_index = renderer.get_frame_index();
-                trace!("Last sent frame index: {}, most recent rendered frame index : {}", *sent_frame_index,rendered_frame_index);
-                if rendered_frame_index<=*sent_frame_index {
-                    trace!("==> nothing new, most recent rendered frame already sent to LCD");
+                if rendered_frame_index <= *sent_frame_index {
                     return None;
                 }
-                trace!("==> Ok, a new frame has been rendered, so we sent out this one.");
                 *cached_frame = renderer.get_current_frame();
-                *sent_frame_index=rendered_frame_index;
+                *sent_frame_index = rendered_frame_index;
                 Some(cached_frame.as_slice())
             }
         }
