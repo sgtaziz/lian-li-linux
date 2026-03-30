@@ -161,11 +161,15 @@ impl RgbController {
         {
             let lpf = state.leds_per_fan as usize;
             let zone_idx = zone as usize;
+            let total_zones = if state.fan_type.is_aio() {
+                state.fan_count as usize + 1
+            } else {
+                state.fan_count as usize
+            };
 
-            if zone_idx >= state.fan_count as usize {
+            if zone_idx >= total_zones {
                 anyhow::bail!(
-                    "Zone {zone} out of range (device has {} fans)",
-                    state.fan_count
+                    "Zone {zone} out of range (device has {total_zones} zones)"
                 );
             }
 
@@ -211,11 +215,15 @@ impl RgbController {
         {
             let lpf = state.leds_per_fan as usize;
             let zone_idx = zone as usize;
+            let total_zones = if state.fan_type.is_aio() {
+                state.fan_count as usize + 1
+            } else {
+                state.fan_count as usize
+            };
 
-            if zone_idx >= state.fan_count as usize {
+            if zone_idx >= total_zones {
                 anyhow::bail!(
-                    "Zone {zone} out of range (device has {} fans)",
-                    state.fan_count
+                    "Zone {zone} out of range (device has {total_zones} zones)"
                 );
             }
 
