@@ -171,7 +171,7 @@ impl RgbController {
 
             if zone_idx >= total_zones {
                 anyhow::bail!(
-                    "Zone {zone} out of range (device has {total_zones} zones)"
+                    "Zone {zone} out of range (device has {total_zones} zones, fan_type={:?}, fan_count={})", state.fan_type, state.fan_count
                 );
             }
 
@@ -227,7 +227,7 @@ impl RgbController {
 
             if zone_idx >= total_zones {
                 anyhow::bail!(
-                    "Zone {zone} out of range (device has {total_zones} zones)"
+                    "Zone {zone} out of range (device has {total_zones} zones, fan_type={:?}, fan_count={})", state.fan_type, state.fan_count
                 );
             }
 
