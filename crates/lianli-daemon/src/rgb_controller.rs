@@ -163,6 +163,8 @@ impl RgbController {
             let zone_idx = zone as usize;
             let total_zones = if state.fan_type.is_aio() {
                 state.fan_count as usize + 1
+            } else if state.fan_type.is_rgb_only() {
+                1
             } else {
                 state.fan_count as usize
             };
@@ -217,6 +219,8 @@ impl RgbController {
             let zone_idx = zone as usize;
             let total_zones = if state.fan_type.is_aio() {
                 state.fan_count as usize + 1
+            } else if state.fan_type.is_rgb_only() {
+                1
             } else {
                 state.fan_count as usize
             };
