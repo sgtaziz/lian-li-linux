@@ -6,7 +6,8 @@ use tracing::{debug, info, warn};
 pub const EP_OUT: u8 = 0x01;
 pub const EP_IN: u8 = 0x81;
 pub const USB_TIMEOUT: Duration = Duration::from_millis(5_000);
-pub const LCD_WRITE_TIMEOUT: Duration = Duration::from_millis(10_000);
+pub const LCD_WRITE_TIMEOUT: Duration = Duration::from_millis(2_000);
+pub const FRAME_ACK_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// Low-level USB transport wrapping a `rusb` device handle.
 ///

@@ -13,8 +13,9 @@ use crate::crypto::PacketBuilder;
 use crate::traits::LcdDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
-use lianli_transport::usb::{UsbTransport, LCD_WRITE_TIMEOUT, USB_TIMEOUT};
+use lianli_transport::usb::{UsbTransport, FRAME_ACK_TIMEOUT, LCD_WRITE_TIMEOUT, USB_TIMEOUT};
 use rusb::{Device, GlobalContext};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// Generic WinUSB LCD device.
@@ -105,7 +106,7 @@ impl WinUsbLcdDevice {
             .write(&packet, LCD_WRITE_TIMEOUT)
             .context("writing LCD frame")?;
 
-        self.read_response("frame ack");
+        self.read_response("frame ack", FRAME_ACK_TIMEOUT);
 
         Ok(())
     }
@@ -136,7 +137,7 @@ impl WinUsbLcdDevice {
         self.transport
             .write(&header, LCD_WRITE_TIMEOUT)
             .context("setting brightness")?;
-        self.read_response("brightness");
+        self.read_response("brightness", USB_TIMEOUT);
         debug!("Set brightness to {}", brightness.min(100));
         Ok(())
     }
@@ -147,7 +148,7 @@ impl WinUsbLcdDevice {
         self.transport
             .write(&header, LCD_WRITE_TIMEOUT)
             .context("setting rotation")?;
-        self.read_response("rotation");
+        self.read_response("rotation", USB_TIMEOUT);
         debug!("Set rotation to {}", rotation);
         Ok(())
     }
@@ -158,7 +159,7 @@ impl WinUsbLcdDevice {
         self.transport
             .write(&header, LCD_WRITE_TIMEOUT)
             .context("setting frame rate")?;
-        self.read_response("frame rate");
+        self.read_response("frame rate", USB_TIMEOUT);
         debug!("Set frame rate to {fps}");
         Ok(())
     }
@@ -169,13 +170,13 @@ impl WinUsbLcdDevice {
     /// The device reboots and re-enumerates as a CH340 device (VID=0x1A86).
     pub fn switch_to_desktop_mode(&mut self) -> Result<()> {
         let stop = self.builder.stop_play_header_winusb();
-        self.send_command(stop, "StopPlay");
+        self.send_command(stop, "StopPlay", true);
 
         let switch_cmd = self.builder.switch_to_desktop_header_winusb();
-        self.send_command(switch_cmd, "SwitchToDesktop");
+        self.send_command(switch_cmd, "SwitchToDesktop", true);
 
         let reboot = self.builder.reboot_header_winusb();
-        self.send_command(reboot, "Reboot");
+        self.send_command(reboot, "Reboot", true);
 
         info!("Sent SwitchToDesktop + Reboot — device will reboot into desktop mode");
         self.initialized = false;
@@ -186,11 +187,11 @@ impl WinUsbLcdDevice {
         self.transport.read_flush();
 
         let ver = self.builder.get_ver_header_winusb();
-        self.send_command(ver, "GetVer");
+        self.send_command(ver, "GetVer", false);
         let stop_play = self.builder.stop_play_header_winusb();
-        self.send_command(stop_play, "StopPlay");
+        self.send_command(stop_play, "StopPlay", true);
         let stop_clock = self.builder.stop_clock_header_winusb();
-        self.send_command(stop_clock, "StopClock");
+        self.send_command(stop_clock, "StopClock", true);
         self.clear_layers();
         self.set_frame_rate(30)?;
 
@@ -219,11 +220,11 @@ impl WinUsbLcdDevice {
             if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
                 warn!("ClearPngLayer failed: {e}");
             } else {
-                self.read_response("ClearPngLayer");
+                self.read_response("ClearPngLayer", FRAME_ACK_TIMEOUT);
             }
         }
 
-        // Clear JPG background layer
+        // Clear JPG background layer (use short timeout — about to stream JPEGs anyway)
         let jpg_img = ImageBuffer::from_pixel(w, h, Rgb([0u8, 0, 0]));
         let mut jpg_buf = Vec::new();
         {
@@ -241,21 +242,21 @@ impl WinUsbLcdDevice {
         if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
             warn!("ClearJpgLayer failed: {e}");
         } else {
-            self.read_response("ClearJpgLayer");
+            self.read_response("ClearJpgLayer", FRAME_ACK_TIMEOUT);
         }
     }
 
-    fn send_command(&mut self, header: Vec<u8>, label: &str) {
+    fn send_command(&mut self, header: Vec<u8>, label: &str, fast: bool) {
         if let Err(e) = self.transport.write(&header, LCD_WRITE_TIMEOUT) {
             warn!("{label} write failed: {e}");
             return;
         }
-        self.read_response(label);
+        self.read_response(label,  if fast { FRAME_ACK_TIMEOUT } else { USB_TIMEOUT });
     }
 
-    fn read_response(&mut self, context: &str) {
+    fn read_response(&mut self, context: &str, timeout: Duration) {
         let mut buf = [0u8; 512];
-        match self.transport.read(&mut buf, USB_TIMEOUT) {
+        match self.transport.read(&mut buf, timeout) {
             Ok(n) if n > 0 => {
                 debug!("Response for {context} ({n} bytes): {:02x?}", &buf[..n.min(32)]);
                 self.last_read_ok = true;
