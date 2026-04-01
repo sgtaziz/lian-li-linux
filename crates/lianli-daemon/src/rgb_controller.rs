@@ -159,7 +159,6 @@ impl RgbController {
         if let (Some(ref wireless), Some(state)) =
             (&self.wireless, self.wireless_state.get_mut(device_id))
         {
-            let lpf = state.leds_per_fan as usize;
             let zone_idx = zone as usize;
             let total_zones = if state.fan_type.is_aio() {
                 state.fan_count as usize + 1
@@ -175,12 +174,19 @@ impl RgbController {
                 );
             }
 
+            // For RGB-only devices, the single zone spans all LEDs
+            let leds_in_zone = if state.fan_type.is_rgb_only() {
+                state.led_state.len()
+            } else {
+                state.leds_per_fan as usize
+            };
+
             // Render this zone's LED colors
-            let zone_color = render_zone_color(effect, lpf);
+            let zone_color = render_zone_color(effect, leds_in_zone);
 
             // Update only this zone's slice in the full LED state buffer
-            let start = zone_idx * lpf;
-            let end = start + lpf;
+            let start = zone_idx * leds_in_zone;
+            let end = start + leds_in_zone;
             state.led_state[start..end].copy_from_slice(&zone_color);
 
             // Send the full device LED state
@@ -189,8 +195,8 @@ impl RgbController {
 
             wireless.send_rgb_direct(&state.mac, &state.led_state, &idx, 4)?;
             debug!(
-                "Set wireless RGB on {device_id} zone {zone}: {:?}, {} LEDs/fan",
-                effect.mode, lpf
+                "Set wireless RGB on {device_id} zone {zone}: {:?}, {} LEDs/zone",
+                effect.mode, leds_in_zone
             );
             return Ok(());
         }
@@ -215,7 +221,6 @@ impl RgbController {
         if let (Some(ref wireless), Some(state)) =
             (&self.wireless, self.wireless_state.get_mut(device_id))
         {
-            let lpf = state.leds_per_fan as usize;
             let zone_idx = zone as usize;
             let total_zones = if state.fan_type.is_aio() {
                 state.fan_count as usize + 1
@@ -231,8 +236,14 @@ impl RgbController {
                 );
             }
 
-            let start = zone_idx * lpf;
-            let copy_len = colors.len().min(lpf);
+            let leds_in_zone = if state.fan_type.is_rgb_only() {
+                state.led_state.len()
+            } else {
+                state.leds_per_fan as usize
+            };
+
+            let start = zone_idx * leds_in_zone;
+            let copy_len = colors.len().min(leds_in_zone);
             state.led_state[start..start + copy_len].copy_from_slice(&colors[..copy_len]);
 
             state.effect_counter = state.effect_counter.wrapping_add(1);
