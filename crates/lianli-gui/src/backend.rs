@@ -255,7 +255,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
         let openrgb_port = rgb.openrgb_port as i32;
         let fan_update_interval = config.fans.as_ref()
             .map(|f| f.update_interval_ms as i32)
-            .unwrap_or(1000);
+            .unwrap_or(100);
         let hid_driver = match config.hid_driver {
             lianli_shared::config::HidDriver::Hidapi => "HIDAPI",
             lianli_shared::config::HidDriver::Rusb => "Rusb",

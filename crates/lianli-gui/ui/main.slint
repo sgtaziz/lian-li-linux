@@ -51,7 +51,7 @@ export component MainWindow inherits Window {
     in property <[string]> curve-names: [];
     in property <[string]> fan-speed-options: [];
     in property <[string]> sensor-options: [];
-    in property <int> fan-update-interval: 1000;
+    in property <int> fan-update-interval: 100;
 
     // Callbacks for Rust backend
     callback refresh-devices();
