@@ -149,7 +149,7 @@ fn main() {
             if let Some(ref mut c) = state.config {
                 let fc = c.fans.get_or_insert_with(|| FanConfig {
                         speeds: vec![],
-                        update_interval_ms: 100,
+                        update_interval_ms: 500,
                     });
                 fc.update_interval_ms = ms as u64;
             }
@@ -722,7 +722,7 @@ fn wire_fan_callbacks(
                 if let Some(ref mut c) = state.config {
                     let fc = c.fans.get_or_insert_with(|| FanConfig {
                         speeds: vec![],
-                        update_interval_ms: 100,
+                        update_interval_ms: 500,
                     });
                     let group = fc.speeds.iter_mut().find(|g| g.device_id.as_deref() == Some(&dev_id));
                     let group = if let Some(g) = group {
@@ -761,7 +761,7 @@ fn wire_fan_callbacks(
                 if let Some(ref mut c) = state.config {
                     let fc = c.fans.get_or_insert_with(|| FanConfig {
                         speeds: vec![],
-                        update_interval_ms: 100,
+                        update_interval_ms: 500,
                     });
                     if let Some(group) = fc.speeds.iter_mut().find(|g| g.device_id.as_deref() == Some(&dev_id)) {
                         if slot < 4 {
