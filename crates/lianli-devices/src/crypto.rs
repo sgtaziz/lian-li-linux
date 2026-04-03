@@ -160,6 +160,10 @@ impl PacketBuilder {
         self.build_winusb(CMD_GET_VER, &[])
     }
 
+    pub fn query_block_header_winusb(&mut self) -> Vec<u8> {
+        self.build_winusb(CMD_QUERY_BLOCK, &[])
+    }
+
     pub fn stop_play_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_STOP_PLAY, &[])
     }

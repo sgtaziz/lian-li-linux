@@ -112,7 +112,14 @@ impl WinUsbLcdDevice {
                 .context("writing LCD frame (retry)")?;
         }
 
-        self.read_response("frame ack", LCD_READ_TIMEOUT);
+        let resp = self.read_response("frame ack", LCD_READ_TIMEOUT);
+
+        // Flow control: if device buffer is getting full, wait for it to drain
+        if let Some(buf) = resp {
+            if buf[8] > 3 {
+                self.wait_buffer(2);
+            }
+        }
 
         Ok(())
     }
@@ -272,12 +279,14 @@ impl WinUsbLcdDevice {
         }
     }
 
-    fn read_response(&mut self, context: &str, timeout: Duration) {
+    fn read_response(&mut self, context: &str, timeout: Duration) -> Option<[u8; 512]> {
         let mut buf = [0u8; 512];
         match self.transport.read(&mut buf, timeout) {
             Ok(n) if n > 0 => {
                 debug!("Response for {context} ({n} bytes): {:02x?}", &buf[..n.min(32)]);
                 self.last_read_ok = true;
+                self.transport.read_flush();
+                return Some(buf);
             }
             Ok(_) => {
                 debug!("No response for {context} (timeout)");
@@ -289,6 +298,28 @@ impl WinUsbLcdDevice {
             }
         }
         self.transport.read_flush();
+        None
+    }
+
+    /// Query device buffer level. Returns None on communication failure.
+    fn query_block(&mut self) -> Option<u8> {
+        let header = self.builder.query_block_header_winusb();
+        self.transport.write(&header, LCD_WRITE_TIMEOUT).ok()?;
+        let resp = self.read_response("QueryBlock", LCD_READ_TIMEOUT)?;
+        Some(resp[8])
+    }
+
+    /// Wait until the device buffer drains to an acceptable level.
+    /// Reference polls QueryBlock every 50ms until buf[8] <= threshold.
+    fn wait_buffer(&mut self, threshold: u8) {
+        for _ in 0..40 {
+            match self.query_block() {
+                Some(level) if level <= threshold => return,
+                Some(_) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                None => return,
+            }
+        }
+        debug!("Buffer wait timed out after 2s");
     }
 }
 
