@@ -116,7 +116,7 @@ impl WinUsbLcdDevice {
                 .context("writing LCD frame (retry)")?;
         }
 
-        let resp = self.read_response("frame ack", LCD_READ_TIMEOUT);
+        let resp = self.read_response("frame ack", Duration::from_millis(200));
 
         // Flow control: if device buffer is getting full, wait for it to drain
         if let Some(buf) = resp {
@@ -132,11 +132,7 @@ impl WinUsbLcdDevice {
     pub fn send_frame_verified(&mut self, frame: &[u8]) -> Result<()> {
         for attempt in 0..3u32 {
             match self.send_frame(frame) {
-                Ok(()) if self.last_read_ok => return Ok(()),
-                Ok(()) => {
-                    warn!("Frame ack missing (attempt {}), reinitializing", attempt + 1);
-                    self.initialized = false;
-                }
+                Ok(()) => return Ok(()),
                 Err(e) if attempt < 2 => {
                     warn!("Frame send failed (attempt {}): {e}, reinitializing", attempt + 1);
                     self.initialized = false;
@@ -144,7 +140,6 @@ impl WinUsbLcdDevice {
                 Err(e) => return Err(e),
             }
         }
-        warn!("Frame delivery unconfirmed after 3 attempts, proceeding anyway");
         Ok(())
     }
 
@@ -329,7 +324,7 @@ impl WinUsbLcdDevice {
         if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
             warn!("ClearJpgLayer failed: {e}");
         } else {
-            self.read_response("ClearJpgLayer", LCD_READ_TIMEOUT);
+            self.read_response("ClearJpgLayer", Duration::from_millis(200));
         }
     }
 
