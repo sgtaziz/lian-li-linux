@@ -12,6 +12,7 @@ pub const CMD_GET_VER: u8 = 0x0A;
 pub const CMD_ROTATE: u8 = 0x0D;
 pub const CMD_BRIGHTNESS: u8 = 0x0E;
 pub const CMD_FRAME_RATE: u8 = 0x0F;
+pub const CMD_SET_CLOCK: u8 = 0x33;
 pub const CMD_STOP_CLOCK: u8 = 0x34;
 pub const CMD_PUSH_JPG: u8 = 0x65;
 pub const CMD_PUSH_PNG: u8 = 0x66;
@@ -166,6 +167,16 @@ impl PacketBuilder {
 
     pub fn stop_play_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_STOP_PLAY, &[])
+    }
+
+    pub fn sync_clock_header_winusb(&mut self, mode: u8) -> Vec<u8> {
+        let now = time::OffsetDateTime::now_utc();
+        let y = now.year() as u16;
+        self.build_winusb(CMD_SET_CLOCK, &[
+            (y >> 8) as u8, (y & 0xFF) as u8,
+            now.month() as u8, now.day(), now.hour(), now.minute(), now.second(),
+            mode,
+        ])
     }
 
     pub fn stop_clock_header_winusb(&mut self) -> Vec<u8> {

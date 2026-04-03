@@ -17,6 +17,7 @@ once_cell = { workspace = true }
 rusb = { workspace = true }
 hidapi = { workspace = true }
 image = { workspace = true }
+time = { workspace = true }
 
 [build-dependencies]
 cc = "1.0"

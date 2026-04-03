@@ -41,11 +41,8 @@ notify = { version = "7.0", default-features = false, features = ["macos_kqueue"
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 
-# GUI
-tauri = { version = "2", features = ["devtools"] }
-tauri-build = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-shell = "2"
+# Time
+time = "0.3"
 
 # Misc
 hex = "0.4"

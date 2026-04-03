@@ -203,8 +203,12 @@ impl WinUsbLcdDevice {
         self.send_command(ver, "GetVer");
         let stop_play = self.builder.stop_play_header_winusb();
         self.send_command(stop_play, "StopPlay");
+
+        let sync = self.builder.sync_clock_header_winusb(2);
+        self.send_command(sync, "SyncClock");
         let stop_clock = self.builder.stop_clock_header_winusb();
         self.send_command(stop_clock, "StopClock");
+
         self.clear_layers();
         self.set_frame_rate(30)?;
 
