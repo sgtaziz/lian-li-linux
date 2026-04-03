@@ -26,6 +26,7 @@ pub struct WinUsbLcdDevice {
     transport: UsbTransport,
     builder: PacketBuilder,
     screen: ScreenInfo,
+    name: String,
     bus: u8,
     address: u8,
     serial: String,
@@ -62,6 +63,7 @@ impl WinUsbLcdDevice {
             transport,
             builder: PacketBuilder::new(),
             screen,
+            name: name.to_string(),
             bus,
             address,
             serial,
@@ -102,9 +104,13 @@ impl WinUsbLcdDevice {
         packet[..512].copy_from_slice(&header);
         packet[512..total].copy_from_slice(frame);
 
-        self.transport
-            .write(&packet, LCD_WRITE_TIMEOUT)
-            .context("writing LCD frame")?;
+        if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
+            warn!("Frame write failed: {e}, resetting transport");
+            self.reinit_transport();
+            self.transport
+                .write(&packet, LCD_WRITE_TIMEOUT)
+                .context("writing LCD frame (retry)")?;
+        }
 
         self.read_response("frame ack", LCD_READ_TIMEOUT);
 
@@ -248,10 +254,22 @@ impl WinUsbLcdDevice {
 
     fn send_command(&mut self, header: Vec<u8>, label: &str) {
         if let Err(e) = self.transport.write(&header, LCD_WRITE_TIMEOUT) {
-            warn!("{label} write failed: {e}");
-            return;
+            warn!("{label} write failed: {e}, resetting transport");
+            self.reinit_transport();
+            if let Err(e2) = self.transport.write(&header, LCD_WRITE_TIMEOUT) {
+                warn!("{label} write retry failed: {e2}");
+                return;
+            }
         }
         self.read_response(label, LCD_READ_TIMEOUT);
+    }
+
+    fn reinit_transport(&mut self) {
+        let _ = self.transport.reset();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if let Err(e) = self.transport.detach_and_configure(&self.name) {
+            warn!("Transport reinit failed: {e}");
+        }
     }
 
     fn read_response(&mut self, context: &str, timeout: Duration) {
