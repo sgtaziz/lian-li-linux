@@ -1160,6 +1160,7 @@ impl ServiceManager {
             if let Some(target) = self.targets.get_mut(&id) {
                 match target.send_frame(&self.wireless, &mut self.packet_builder) {
                     Ok(true) => {
+                        target.consecutive_errors = 0;
                         if target.frame_counter % 30 == 0 {
                             debug!(
                                 "LCD[{}] streamed {} frames",
@@ -1169,6 +1170,16 @@ impl ServiceManager {
                     }
                     Ok(false) => {}
                     Err(SendError::Usb(err)) => {
+                        if let Some(target) = self.targets.get_mut(&id) {
+                            target.consecutive_errors += 1;
+                            if target.consecutive_errors < 3 {
+                                warn!(
+                                    "LCD[{}] USB error ({}/3): {err}",
+                                    target.index, target.consecutive_errors
+                                );
+                                return;
+                            }
+                        }
                         self.handle_usb_error(id, err);
                     }
                     Err(SendError::Other(err)) => {
@@ -1236,6 +1247,7 @@ struct ActiveTarget {
     media: MediaRuntime,
     asset: Arc<MediaAsset>,
     frame_counter: u64,
+    consecutive_errors: u32,
 }
 
 impl ActiveTarget {
@@ -1255,6 +1267,7 @@ impl ActiveTarget {
             media: MediaRuntime::from_asset(Arc::clone(&asset), tx),
             asset,
             frame_counter: 0,
+            consecutive_errors: 0,
         }
     }
 
