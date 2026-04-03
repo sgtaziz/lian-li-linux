@@ -1,4 +1,4 @@
-use super::common::{apply_orientation, encode_jpeg, MediaError};
+use super::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
 use image::imageops::FilterType;
 use image::{ImageBuffer, Rgb};
 use lianli_shared::screen::ScreenInfo;
@@ -10,8 +10,8 @@ pub fn load_image_frame(
     screen: &ScreenInfo,
 ) -> Result<Vec<u8>, MediaError> {
     let rgb = image::open(path)?.to_rgb8();
-    let resized =
-        image::imageops::resize(&rgb, screen.width, screen.height, FilterType::Lanczos3);
+    let (w, h) = render_dimensions(screen, orientation);
+    let resized = image::imageops::resize(&rgb, w, h, FilterType::Lanczos3);
     let oriented = apply_orientation(resized, orientation);
     encode_jpeg(oriented, screen)
 }

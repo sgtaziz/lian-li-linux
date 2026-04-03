@@ -46,6 +46,15 @@ fn apply_device_rotation(image: RgbImage, rotation: u16) -> RgbImage {
     }
 }
 
+pub fn render_dimensions(screen: &ScreenInfo, orientation: f32) -> (u32, u32) {
+    let norm = ((orientation % 360.0) + 360.0) % 360.0;
+    if (norm - 90.0).abs() < 1.0 || (norm - 270.0).abs() < 1.0 {
+        (screen.height, screen.width)
+    } else {
+        (screen.width, screen.height)
+    }
+}
+
 pub fn apply_orientation(image: RgbImage, orientation: f32) -> RgbImage {
     let norm = ((orientation % 360.0) + 360.0) % 360.0;
     if (norm - 0.0).abs() < 0.5 || (norm - 360.0).abs() < 0.5 {

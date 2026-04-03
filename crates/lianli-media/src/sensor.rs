@@ -1,4 +1,4 @@
-use super::common::{apply_orientation, encode_jpeg, MediaError};
+use super::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
 use lianli_shared::media::{SensorDescriptor, SensorRange, SensorSourceConfig};
 use lianli_shared::screen::ScreenInfo;
 use image::{ImageBuffer, Rgb, RgbImage};
@@ -38,7 +38,8 @@ pub struct SensorAsset {
     unit_offset: i32,
     label_offset: i32,
     screen: ScreenInfo,
-     // We store the previous value as displayed on the LCD in order to be able to compare whether we need to update the frame
+    render_width: u32,
+    render_height: u32,
     previous_value: Mutex<String>,
     // Each time a frame gets redrawn this index is "assigned" to the frame.
     frame_index: AtomicUsize,
@@ -98,7 +99,8 @@ impl SensorAsset {
         };
 
         let update_interval = Duration::from_millis(descriptor.update_interval_ms.max(100));
-        let max_radius = (screen.width.min(screen.height) as f32 / 2.0) - 6.0;
+        let (rw, rh) = render_dimensions(screen, orientation);
+        let max_radius = (rw.min(rh) as f32 / 2.0) - 6.0;
         let gauge_outer_radius = descriptor.gauge_outer_radius.clamp(20.0, max_radius);
         let gauge_thickness = descriptor.gauge_thickness.clamp(5.0, gauge_outer_radius - 5.0);
         let gauge_start_angle = (descriptor.gauge_start_angle % 360.0 + 360.0) % 360.0;
@@ -129,6 +131,8 @@ impl SensorAsset {
             unit_offset: descriptor.unit_offset,
             label_offset: descriptor.label_offset,
             screen: *screen,
+            render_width: rw,
+            render_height: rh,
             previous_value: Mutex::new("N/A".into()),
             frame_index: 1.into(),
         }))
@@ -161,8 +165,8 @@ impl SensorAsset {
         }
 
         let gauge_color = self.color_for_value(value);
-        let w = self.screen.width;
-        let h = self.screen.height;
+        let w = self.render_width;
+        let h = self.render_height;
 
         let mut image = ImageBuffer::from_pixel(w, h, Rgb(self.background_color));
 
@@ -217,8 +221,8 @@ impl SensorAsset {
 
     pub fn blank_frame(&self) -> FrameInfo {
         let image = ImageBuffer::from_pixel(
-            self.screen.width,
-            self.screen.height,
+            self.render_width,
+            self.render_height,
             Rgb(self.background_color),
         );
         let oriented = apply_orientation(image, self.orientation);

@@ -1,4 +1,4 @@
-use super::common::{apply_orientation, encode_jpeg, MediaError};
+use super::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
 use image::codecs::gif::GifDecoder;
 use image::imageops::FilterType;
 use image::{load_from_memory, AnimationDecoder, DynamicImage};
@@ -17,7 +17,8 @@ pub fn build_video_frames(
 ) -> Result<(Vec<Vec<u8>>, Vec<Duration>), MediaError> {
     let temp = TempDir::new()?;
     let output_pattern = temp.path().join("frame_%05d.jpg");
-    run_ffmpeg(path, fps, &output_pattern, screen)?;
+    let (rw, rh) = render_dimensions(screen, orientation);
+    run_ffmpeg(path, fps, &output_pattern, rw, rh)?;
 
     let mut entries: Vec<_> = std::fs::read_dir(temp.path())?
         .filter_map(|entry| entry.ok())
@@ -72,8 +73,8 @@ pub fn build_gif_frames(
         let duration = Duration::from_millis(millis.max(10.0) as u64);
         let rgba = frame.into_buffer();
         let rgb = DynamicImage::ImageRgba8(rgba).to_rgb8();
-        let resized =
-            image::imageops::resize(&rgb, screen.width, screen.height, FilterType::Lanczos3);
+        let (rw, rh) = render_dimensions(screen, orientation);
+        let resized = image::imageops::resize(&rgb, rw, rh, FilterType::Lanczos3);
         let oriented = apply_orientation(resized, orientation);
         let jpeg = encode_jpeg(oriented, screen)?;
         encoded.push(jpeg);
@@ -96,9 +97,8 @@ pub fn encode_h264(
     let temp = TempDir::new()?;
     let output = temp.path().join("stream.h264");
 
-    let w = screen.width;
-    let h = screen.height;
-    let mut vf_parts = vec![format!("scale={w}:{h}:flags=lanczos")];
+    let (rw, rh) = render_dimensions(screen, orientation);
+    let mut vf_parts = vec![format!("scale={rw}:{rh}:flags=lanczos")];
     if screen.device_rotation == 90 {
         vf_parts.push("transpose=1".into());
     } else if screen.device_rotation == 180 {
@@ -149,12 +149,10 @@ fn run_ffmpeg(
     input: &Path,
     fps: f32,
     output_pattern: &Path,
-    screen: &ScreenInfo,
+    width: u32,
+    height: u32,
 ) -> Result<(), MediaError> {
-    let scale_filter = format!(
-        "scale={}:{}:flags=lanczos",
-        screen.width, screen.height
-    );
+    let scale_filter = format!("scale={width}:{height}:flags=lanczos");
     let status = Command::new("ffmpeg")
         .args([
             "-y",
