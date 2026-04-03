@@ -65,12 +65,12 @@ impl ScreenInfo {
     };
 
     pub const UNIVERSAL_SCREEN: Self = Self {
-        width: 1920,
-        height: 480,
+        width: 480,
+        height: 1920,
         max_fps: 30,
-        jpeg_quality: 80,
+        jpeg_quality: 95,
         max_payload: 512_000,
-        device_rotation: 0,
+        device_rotation: 90,
         h264: true,
     };
 }

@@ -262,6 +262,7 @@ impl WinUsbLcdDevice {
     }
 
     fn do_init(&mut self) -> Result<()> {
+        info!("Initializing LCD ({}x{}, quality {})", self.screen.width, self.screen.height, self.screen.jpeg_quality);
         self.transport.read_flush();
 
         let ver = self.builder.get_ver_header_winusb();
@@ -311,7 +312,7 @@ impl WinUsbLcdDevice {
         let mut jpg_buf = Vec::new();
         {
             let mut encoder =
-                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_buf, 50);
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_buf, self.screen.jpeg_quality);
             if let Err(e) = encoder.encode_image(&jpg_img) {
                 warn!("Failed to encode blank JPEG: {e}");
                 return;

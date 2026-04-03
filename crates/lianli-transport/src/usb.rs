@@ -117,11 +117,19 @@ impl UsbTransport {
     }
 
     pub fn write(&self, data: &[u8], timeout: Duration) -> Result<usize, TransportError> {
-        if self.ep_out_interrupt {
-            Ok(self.handle.write_interrupt(self.ep_out, data, timeout)?)
+        let n = if self.ep_out_interrupt {
+            self.handle.write_interrupt(self.ep_out, data, timeout)?
         } else {
-            Ok(self.handle.write_bulk(self.ep_out, data, timeout)?)
+            self.handle.write_bulk(self.ep_out, data, timeout)?
+        };
+        if n != data.len() {
+            warn!(
+                "USB short write: {n}/{} bytes on EP 0x{:02x} ({})",
+                data.len(), self.ep_out,
+                if self.ep_out_interrupt { "interrupt" } else { "bulk" }
+            );
         }
+        Ok(n)
     }
 
     pub fn read(&self, buf: &mut [u8], timeout: Duration) -> Result<usize, TransportError> {
