@@ -52,7 +52,7 @@ Both V1 (VID 0x0416) and V2 (VID 0x1A86) wireless dongles are supported. Binding
 | HydroShift II LCD Circle | 480x480 | Yes | |
 | HydroShift II LCD Square | 480x480 | Yes | |
 | Lancool 207 Digital | 1472x720 | Yes | |
-| Universal Screen 8.8" | 1920x480 | - | |
+| Universal Screen 8.8" | 1920x480 | Yes | |
 | Universal Screen 8.8" LED Ring | - | - | RGB detection only (control TBD) |
 
 Devices stuck in desktop/display mode are detected and can be switched back to LCD mode via the GUI.
