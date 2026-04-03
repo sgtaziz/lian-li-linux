@@ -988,6 +988,17 @@ impl ServiceManager {
                     if existing.matches(&candidate.device_id, &cfg_key) {
                         new_targets.insert(cfg_idx, existing);
                         continue;
+                    } else if existing.device_identity == candidate.device_id {
+                        // Same device, different config — reuse the USB transport,
+                        // just swap the media asset. Reopening the device can leave
+                        // some firmware in a bad state.
+                        existing.swap_media(Arc::clone(&asset), self.tx.clone());
+                        existing.key = cfg_key;
+                        new_targets.insert(cfg_idx, existing);
+                        if let Some(ref tx) = self.tx {
+                            tx.send(DaemonEvent::FrameFinished { asset }).ok();
+                        }
+                        continue;
                     } else {
                         existing.stop();
                     }
@@ -1249,6 +1260,14 @@ impl ActiveTarget {
 
     fn matches(&self, identity: &str, key: &ConfigKey) -> bool {
         self.device_identity == identity && key == &self.key
+    }
+
+    /// Replace the media asset without reopening the LCD transport.
+    fn swap_media(&mut self, asset: Arc<MediaAsset>, tx: Option<Sender<DaemonEvent>>) {
+        self.asset = Arc::clone(&asset);
+        self.media = MediaRuntime::from_asset(asset, tx);
+        self.frame_counter = 0;
+        info!("[devices] LCD[{}] media swapped (keeping transport)", self.index);
     }
 
     fn send_frame(
