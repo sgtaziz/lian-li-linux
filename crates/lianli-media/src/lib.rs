@@ -106,7 +106,8 @@ pub fn prepare_media_asset(
         }
         MediaType::Sensor => {
             let descriptor = cfg.sensor.as_ref().ok_or(MediaError::InvalidConfig("sensor entry requires a 'sensor' field".into()))?;
-            let asset = SensorAsset::new(descriptor, cfg.orientation, screen, all_sensors)?;
+            let bg_path = cfg.path.as_deref();
+            let asset = SensorAsset::new(descriptor, cfg.orientation, screen, all_sensors, bg_path)?;
             Ok(MediaAssetKind::Sensor { asset })
         }
     }

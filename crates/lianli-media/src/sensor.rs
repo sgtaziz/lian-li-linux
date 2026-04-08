@@ -4,6 +4,7 @@ use lianli_shared::screen::ScreenInfo;
 use image::{ImageBuffer, Rgb, RgbImage};
 use lianli_shared::sensors::SensorInfo;
 use rusttype::{point, Font, Scale};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -34,6 +35,7 @@ pub struct SensorAsset {
     unit_font_size: f32,
     label_font_size: f32,
     font: Option<Font<'static>>,
+    template_image: Option<Arc<RgbImage>>,
     decimal_places: u8,
     value_offset: i32,
     unit_offset: i32,
@@ -52,6 +54,7 @@ impl SensorAsset {
         orientation: f32,
         screen: &ScreenInfo,
         sensors: &[SensorInfo],
+        background_image: Option<&Path>,
     ) -> Result<Arc<Self>, MediaError> {
         let mut ranges = descriptor.gauge_ranges.clone();
         if ranges.is_empty() {
@@ -67,6 +70,26 @@ impl SensorAsset {
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         });
+
+
+        let (rw, rh) = render_dimensions(screen, orientation);
+
+        let template_image: Option<Arc<RgbImage>> = background_image
+            .filter(|path| !path.as_os_str().is_empty())
+            .and_then(|path| {
+                match ::image::open(path) {
+                    Ok(img) => {
+                        let resized = img
+                            .resize_exact(rw, rh, ::image::imageops::FilterType::Lanczos3)
+                            .to_rgb8();
+                        Some(Arc::new(resized))
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to load sensor background image '{}': {e}", path.display());
+                        None
+                    }
+                }
+            });
 
         if ranges.last().and_then(|r| r.max).is_some() {
             if let Some(last) = ranges.last().cloned() {
@@ -107,7 +130,6 @@ impl SensorAsset {
         };
 
         let update_interval = Duration::from_millis(descriptor.update_interval_ms.max(100));
-        let (rw, rh) = render_dimensions(screen, orientation);
         let max_radius = (rw.min(rh) as f32 / 2.0) - 6.0;
         let gauge_outer_radius = descriptor.gauge_outer_radius.clamp(20.0, max_radius);
         let gauge_thickness = descriptor.gauge_thickness.clamp(5.0, gauge_outer_radius - 5.0);
@@ -134,6 +156,7 @@ impl SensorAsset {
             unit_font_size: descriptor.unit_font_size,
             label_font_size: descriptor.label_font_size,
             font,
+            template_image,
             decimal_places: descriptor.decimal_places,
             value_offset: descriptor.value_offset,
             unit_offset: descriptor.unit_offset,
@@ -176,7 +199,10 @@ impl SensorAsset {
         let w = self.render_width;
         let h = self.render_height;
 
-        let mut image = ImageBuffer::from_pixel(w, h, Rgb(self.background_color));
+        let mut image = match &self.template_image {
+            Some(tpl) => (**tpl).clone(),
+            None => ImageBuffer::from_pixel(w, h, Rgb(self.background_color)),
+        };
 
         draw_gauge(
             &mut image,
@@ -228,11 +254,10 @@ impl SensorAsset {
     }
 
     pub fn blank_frame(&self) -> FrameInfo {
-        let image = ImageBuffer::from_pixel(
-            self.render_width,
-            self.render_height,
-            Rgb(self.background_color),
-        );
+        let image = match &self.template_image {
+            Some(tpl) => (**tpl).clone(),
+            None => ImageBuffer::from_pixel(self.render_width, self.render_height, Rgb(self.background_color)),
+        };
         let oriented = apply_orientation(image, self.orientation);
         let frame_ret = FrameInfo{data: encode_jpeg(oriented, &self.screen).unwrap_or_default(), 
                         frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst) };
