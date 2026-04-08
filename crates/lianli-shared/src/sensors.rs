@@ -433,7 +433,7 @@ fn get_amd_gpu_names() -> HashMap<String, String> {
 // For example, if all values contain the prefix "VGA compatible controller: <blah blah>", then the prefix "VGA compatible controller: " will be removed
 
 fn clean_common_prefixes(mut gpus: HashMap<String, String>) -> HashMap<String, String> {
-    if gpus.is_empty() {
+    if gpus.len()<=1 {
         return gpus;
     }
 
