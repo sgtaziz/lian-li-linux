@@ -4,8 +4,9 @@ use lianli_shared::config::{AppConfig, LcdConfig};
 use lianli_shared::device_id::DeviceFamily;
 use lianli_shared::fan::{FanConfig, FanCurve, FanSpeed};
 use lianli_shared::ipc::{DeviceInfo, TelemetrySnapshot};
-use lianli_shared::media::MediaType;
+use lianli_shared::media::{MediaType};
 use lianli_shared::rgb::{RgbDeviceCapabilities, RgbMode, RgbScope};
+use lianli_shared::sensors::Unit;
 use slint::{ModelRc, SharedString, VecModel};
 
 fn family_display_name(f: DeviceFamily) -> &'static str {
@@ -119,27 +120,22 @@ pub fn lcd_to_slint(
 ) -> super::LcdEntryData {
     let sensor = lcd.sensor.as_ref();
 
-    let (source_display, cmd) = sensor
-        .map(|s| match &s.source {
-            lianli_shared::media::SensorSourceConfig::Command { cmd } => {
-                ("Custom command".to_string(), cmd.clone())
-            }
-            lianli_shared::media::SensorSourceConfig::Constant { value } => {
-                ("Custom command".to_string(), format!("{value}"))
-            }
-            lianli_shared::media::SensorSourceConfig::Hwmon { .. }
-            | lianli_shared::media::SensorSourceConfig::NvidiaGpu { .. }
-            | lianli_shared::media::SensorSourceConfig::WirelessCoolant { .. } => {
-                let ts = s.source.to_temp_source();
-                let display = sensors
-                    .iter()
-                    .find(|si| si.source == ts)
-                    .map(|si| si.display_name.clone())
-                    .unwrap_or_else(|| "Custom command".to_string());
-                (display, String::new())
-            }
-        })
-        .unwrap_or_else(|| ("Custom command".to_string(), String::new()));
+    let mut sg_sensor_index = 0;
+    let mut cmd = "".to_string();
+    if let Some(sd) = sensor {
+        // Find sd.source in sensors: Return its index
+        let ts: lianli_shared::sensors::SensorSource = sd.source.to_sensor_source();
+
+        if let Some(idx) = sensors.iter().position(|si| si.source == ts) {
+            sg_sensor_index = idx;
+        } else {
+            sg_sensor_index = sensors.len();
+            cmd = match ts {
+                lianli_shared::sensors::SensorSource::Command { cmd } => cmd,
+                _ => String::new(),
+            };
+        }
+    };
 
     let text_color = sensor.map(|s| s.text_color).unwrap_or([255, 255, 255]);
     let bg_color = sensor.map(|s| s.background_color).unwrap_or([0, 0, 0]);
@@ -172,7 +168,7 @@ pub fn lcd_to_slint(
         rgb_b: b as i32,
         sensor_label: SharedString::from(sensor.map(|s| s.label.as_str()).unwrap_or("")),
         sensor_unit: SharedString::from(sensor.map(|s| s.unit.as_str()).unwrap_or("")),
-        sensor_source_display: SharedString::from(&source_display),
+        sg_sensor_index: sg_sensor_index as i32,
         sensor_command: SharedString::from(&cmd),
         sensor_font_path: SharedString::from(sensor.and_then(|s| s.font_path.as_ref()).map(|p| p.display().to_string()).unwrap_or_default()),
         sensor_decimal_places: sensor.map(|s| s.decimal_places as i32).unwrap_or(0),
@@ -307,22 +303,29 @@ pub fn fan_curve_to_slint(
     let mut sorted: Vec<(f32, f32)> = curve.curve.clone();
     sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    let (display, index) = if let Some(ref source) = curve.temp_source {
-        match sensors.iter().position(|s| &s.source == source) {
-            Some(idx) => (sensors[idx].display_name.clone(), idx as i32),
-            None => ("Custom command".to_string(), sensors.len() as i32),
-        }
-    } else if !curve.temp_command.is_empty() {
-        ("Custom command".to_string(), sensors.len() as i32)
-    } else {
-        ("Custom command".to_string(), sensors.len() as i32)
-    };
+    let sensor = curve.temp_source.as_ref();
 
+    let mut sensor_index = 0;
+    let user_cmd = curve.temp_command.to_string();
+    if let Some(sd) = sensor {
+        // Find sd in sensors: Return its index
+        if let Some(idx) = sensors
+                .iter()
+                .filter(|s| s.unit == Unit::C)
+                .position(|si| si.source == *sd) {
+            sensor_index = idx;
+        } else {
+            sensor_index = sensors
+                            .iter()
+                            .filter(|s| s.unit == Unit::C)
+                            .count();
+        }
+    }
+    
     super::FanCurveData {
         name: SharedString::from(&curve.name),
-        temp_source_display: SharedString::from(&display),
-        temp_source_index: index,
-        temp_command: SharedString::from(&curve.temp_command),
+        temp_source_index: sensor_index as i32,
+        temp_command: SharedString::from(user_cmd),
         points: ModelRc::new(VecModel::from(points)),
         curve_segments: ModelRc::new(VecModel::from(build_curve_segments(&sorted))),
         clamp_segments: ModelRc::new(VecModel::from(build_clamp_segments(&sorted))),
@@ -339,12 +342,19 @@ pub fn fan_curves_to_model(
 
 pub fn sensor_options_model(
     sensors: &[lianli_shared::sensors::SensorInfo],
+    only_temp_sensors: bool,
 ) -> ModelRc<SharedString> {
     let mut items: Vec<SharedString> = sensors
         .iter()
-        .map(|s| SharedString::from(&s.display_name))
+        .filter(|s| !only_temp_sensors || s.unit == Unit::C)
+        .enumerate()
+        .map(|(i, s)| {
+            let display_name=format!("{}. {}", i + 1, s.get_display_name());
+            SharedString::from(display_name)
+        })
         .collect();
-    items.push(SharedString::from("Custom command"));
+    let display_name=format!("{}. {}", items.len()+1, "Custom command");
+    items.push(SharedString::from(display_name));
     ModelRc::new(VecModel::from(items))
 }
 

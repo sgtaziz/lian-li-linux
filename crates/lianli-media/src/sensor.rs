@@ -2,6 +2,7 @@ use super::common::{apply_orientation, encode_jpeg, render_dimensions, MediaErro
 use lianli_shared::media::{SensorDescriptor, SensorRange, SensorSourceConfig};
 use lianli_shared::screen::ScreenInfo;
 use image::{ImageBuffer, Rgb, RgbImage};
+use lianli_shared::sensors::SensorInfo;
 use rusttype::{point, Font, Scale};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -50,6 +51,7 @@ impl SensorAsset {
         descriptor: &SensorDescriptor,
         orientation: f32,
         screen: &ScreenInfo,
+        sensors: &Vec<SensorInfo>,
     ) -> Result<Arc<Self>, MediaError> {
         let mut ranges = descriptor.gauge_ranges.clone();
         if ranges.is_empty() {
@@ -80,8 +82,10 @@ impl SensorAsset {
             | SensorSourceConfig::Hwmon { .. }
             | SensorSourceConfig::NvidiaGpu { .. }
             | SensorSourceConfig::WirelessCoolant { .. } => {
-                let temp_source = descriptor.source.to_temp_source();
-                match lianli_shared::sensors::resolve_sensor(&temp_source) {
+                let sensor_source = descriptor.source.to_sensor_source();
+                let sensor_info = sensors.iter().find(|s| s.source==sensor_source);
+                let divider =sensor_info.map_or(1, |s| s.divider);
+                match lianli_shared::sensors::resolve_sensor(&sensor_source,divider) {
                     Some(resolved) => SensorSource::Resolved(resolved),
                     None => return Err(MediaError::Sensor("sensor not found on system".into())),
                 }
@@ -245,7 +249,7 @@ impl SensorAsset {
         match &self.source {
             SensorSource::Constant(value) => Ok(*value),
             SensorSource::Resolved(resolved) => {
-                lianli_shared::sensors::read_sensor_temp(resolved)
+                lianli_shared::sensors::read_sensor_value(resolved)
                     .map_err(|e| MediaError::Sensor(e.to_string()))
             }
         }
@@ -467,7 +471,7 @@ fn draw_text_center_bitmap(
     }
     let glyph_width = 5 * scale;
     let spacing = scale;
-    let total_width = glyphs.len() as u32 * (glyph_width + spacing) - spacing;
+    let total_width = (glyphs.len() as u32 * (glyph_width + spacing) - spacing).min(width); // total_width must not be greater than width
     let start_x = ((width - total_width) / 2) as i32;
     let start_y = ((height as i32) / 2) + offset_y - ((7 * scale) as i32 / 2);
 

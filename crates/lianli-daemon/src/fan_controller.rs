@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_shared::fan::{FanConfig, FanCurve, FanSpeed};
-use lianli_shared::sensors::{self, ResolvedSensor, TempSource};
+use lianli_shared::sensors::{self, ResolvedSensor, SensorInfo, SensorSource};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -45,9 +45,10 @@ impl FanController {
         let wireless = self.wireless.clone();
         let wired = Arc::clone(&self.wired_devices);
         let stop_flag = Arc::clone(&self.stop_flag);
+        let all_sensors = lianli_shared::sensors::enumerate_sensors();
 
         let thread = thread::spawn(move || {
-            fan_control_thread(config, curves, wireless, wired, stop_flag);
+            fan_control_thread(config, curves, wireless, wired, stop_flag,&all_sensors);
         });
 
         self.thread = Some(thread);
@@ -67,6 +68,7 @@ fn fan_control_thread(
     wireless: Option<Arc<WirelessController>>,
     wired: Arc<HashMap<String, Box<dyn FanDevice>>>,
     stop_flag: Arc<AtomicBool>,
+    all_sensors: &Vec<SensorInfo>,
 ) {
     let update_interval = Duration::from_millis(config.update_interval_ms);
     let mut last_update = Instant::now() - update_interval;
@@ -108,8 +110,8 @@ fn fan_control_thread(
 
     info!("Starting fan speed control loop ({} group(s))", config.speeds.len());
 
-    let mut temp_ema: HashMap<TempSource, f32> = HashMap::new();
-    let mut sensor_cache: HashMap<TempSource, ResolvedSensor> = HashMap::new();
+    let mut temp_ema: HashMap<SensorSource, f32> = HashMap::new();
+    let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
 
     // Initialize MB RPM sync state for all wired groups at startup.
     // Groups with MbSync speeds get sync enabled; others get it disabled.
@@ -173,7 +175,7 @@ fn fan_control_thread(
                 continue;
             }
 
-            let speeds = match calculate_fan_speeds(&group.speeds, &curves, &mut sensor_cache, &mut temp_ema) {
+            let speeds = match calculate_fan_speeds(&group.speeds, &curves, &mut sensor_cache, &mut temp_ema,all_sensors) {
                 Ok(speeds) => speeds,
                 Err(err) => {
                     warn!("Fan speed calculation failed for group {group_idx}: {err}");
@@ -254,8 +256,9 @@ const TEMP_EMA_ALPHA: f32 = 0.3;
 fn calculate_fan_speeds(
     fan_speeds: &[FanSpeed; 4],
     curves: &HashMap<String, FanCurve>,
-    sensor_cache: &mut HashMap<TempSource, ResolvedSensor>,
-    temp_ema: &mut HashMap<TempSource, f32>,
+    sensor_cache: &mut HashMap<SensorSource, ResolvedSensor>,
+    temp_ema: &mut HashMap<SensorSource, f32>,
+    all_sensors: &Vec<SensorInfo>,
 ) -> Result<[u8; 4]> {
     let mut pwm_values = [0u8; 4];
 
@@ -268,7 +271,7 @@ fn calculate_fan_speeds(
                     .ok_or_else(|| anyhow::anyhow!("Curve '{curve_name}' not found"))?;
 
                 let source = curve.effective_source();
-                let temp = smoothed_temperature(&source, sensor_cache, temp_ema)?;
+                let temp = smoothed_temperature(&source, sensor_cache, temp_ema,all_sensors)?;
                 let speed_percent = interpolate_curve(&curve.curve, temp);
                 let pwm = (speed_percent * 2.55) as u8;
 
@@ -282,20 +285,23 @@ fn calculate_fan_speeds(
 }
 
 fn smoothed_temperature(
-    source: &TempSource,
-    cache: &mut HashMap<TempSource, ResolvedSensor>,
-    ema: &mut HashMap<TempSource, f32>,
+    source: &SensorSource,
+    cache: &mut HashMap<SensorSource, ResolvedSensor>,
+    ema: &mut HashMap<SensorSource, f32>,
+    all_sensors: &Vec<SensorInfo>,
 ) -> Result<f32> {
     let resolved = match cache.get(source) {
         Some(r) => r.clone(),
         None => {
-            let r = sensors::resolve_sensor(source).context("sensor not found")?;
+            let sensor_info = all_sensors.iter().find(|s| s.source==*source);
+            let divider =sensor_info.map_or(1, |s| s.divider);
+            let r = sensors::resolve_sensor(source,divider).context("sensor not found")?;
             cache.insert(source.clone(), r.clone());
             r
         }
     };
 
-    match sensors::read_sensor_temp(&resolved) {
+    match sensors::read_sensor_value(&resolved) {
         Ok(temp) if temp > 0.0 && temp <= 100.0 => {
             let smoothed = match ema.get(source) {
                 Some(&prev) => TEMP_EMA_ALPHA * temp + (1.0 - TEMP_EMA_ALPHA) * prev,

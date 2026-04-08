@@ -6,3 +6,4 @@ pub mod media;
 pub mod rgb;
 pub mod screen;
 pub mod sensors;
+pub mod systeminfo;

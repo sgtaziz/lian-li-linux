@@ -28,7 +28,7 @@ export struct LcdEntryData {
     // Sensor fields
     sensor-label: string,
     sensor-unit: string,
-    sensor-source-display: string,
+    sg_sensor_index: int,
     sensor-command: string,
     sensor-font-path: string,
     sensor-decimal-places: int,
@@ -231,12 +231,12 @@ component LcdConfigCard inherits Card {
                 Text { text: "Sensor Source"; font-size: 11px; color: Theme.text-secondary; }
                 ComboBox {
                     model: root.sensor-options;
-                    current-value: root.lcd.sensor-source-display;
+                    current-index: root.lcd.sg_sensor-index;
                     selected(val) => { root.update-field(root.index, "sensor_source", val); }
                 }
             }
 
-            if root.lcd.sensor-source-display == "Custom command": VerticalLayout {
+            if root.lcd.sg_sensor-index == (root.sensor-options.length - 1): VerticalLayout {
                 spacing: 4px;
                 Text { text: "Command"; font-size: 11px; color: Theme.text-secondary; }
                 LineEdit {

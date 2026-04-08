@@ -19,8 +19,8 @@ pub enum SensorSourceConfig {
     Hwmon {
         name: String,
         label: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device_path: Option<String>,
+        #[serde(default)]
+        device_path: String,
     },
     #[serde(rename = "nvidia_gpu")]
     NvidiaGpu {
@@ -34,25 +34,25 @@ pub enum SensorSourceConfig {
 }
 
 impl SensorSourceConfig {
-    pub fn to_temp_source(&self) -> crate::sensors::TempSource {
+    pub fn to_sensor_source(&self) -> crate::sensors::SensorSource {
         match self {
-            Self::Constant { value } => crate::sensors::TempSource::Command {
+            Self::Constant { value } => crate::sensors::SensorSource::Command {
                 cmd: format!("echo {value}"),
             },
-            Self::Command { cmd } => crate::sensors::TempSource::Command { cmd: cmd.clone() },
+            Self::Command { cmd } => crate::sensors::SensorSource::Command { cmd: cmd.clone() },
             Self::Hwmon {
                 name,
                 label,
                 device_path,
-            } => crate::sensors::TempSource::Hwmon {
+            } => crate::sensors::SensorSource::Hwmon {
                 name: name.clone(),
                 label: label.clone(),
                 device_path: device_path.clone(),
             },
-            Self::NvidiaGpu { gpu_index } => crate::sensors::TempSource::NvidiaGpu {
+            Self::NvidiaGpu { gpu_index } => crate::sensors::SensorSource::NvidiaGpu {
                 gpu_index: *gpu_index,
             },
-            Self::WirelessCoolant { device_id } => crate::sensors::TempSource::WirelessCoolant {
+            Self::WirelessCoolant { device_id } => crate::sensors::SensorSource::WirelessCoolant {
                 device_id: device_id.clone(),
             },
         }
