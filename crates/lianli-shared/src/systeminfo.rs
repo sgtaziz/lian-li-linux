@@ -92,7 +92,8 @@ impl SysSensor {
                             .filter_map(|p| p.parse().ok())
                             .collect();
 
-                        let idle = parts.get(3).copied().unwrap_or(0);
+                        let idle = parts.get(3).copied().unwrap_or(0)
+                            + parts.get(4).copied().unwrap_or(0);
                         let total: u64 = parts.iter().sum();
 
                         let (prev_total, prev_idle) = last_stats[i];
