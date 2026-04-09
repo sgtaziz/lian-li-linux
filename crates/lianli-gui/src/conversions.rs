@@ -4,7 +4,7 @@ use lianli_shared::config::{AppConfig, LcdConfig};
 use lianli_shared::device_id::DeviceFamily;
 use lianli_shared::fan::{FanConfig, FanCurve, FanSpeed};
 use lianli_shared::ipc::{DeviceInfo, TelemetrySnapshot};
-use lianli_shared::media::{MediaType};
+use lianli_shared::media::{DoublegaugeDescriptor, MediaType};
 use lianli_shared::rgb::{RgbDeviceCapabilities, RgbMode, RgbScope};
 use lianli_shared::sensors::Unit;
 use slint::{ModelRc, SharedString, VecModel};
@@ -110,6 +110,8 @@ fn media_type_to_string(mt: &MediaType) -> &'static str {
         MediaType::Gif => "GIF",
         MediaType::Color => "Solid Color",
         MediaType::Sensor => "Sensor Gauge",
+        MediaType::Doublegauge => "Doublegauge",
+        MediaType::Cooler => "Cooler",
     }
 }
 
@@ -119,6 +121,11 @@ pub fn lcd_to_slint(
     sensors: &[lianli_shared::sensors::SensorInfo],
 ) -> super::LcdEntryData {
     let sensor = lcd.sensor.as_ref();
+    // In case somebody wonders why there is a DoublegaugeDescriptor and no CoolerDescriptor:
+    // The DoublegaugeDescriptor already lets us define two arbitrary sensors. The Cooler also uses two arbitrary sensors (and a fixed one, the usage per core).
+    // So both share the DoublegaugeDescriptor. Ok, naming could be better...
+    // Basically we could remove the sensor descriptions from the sensor asset as well, but that would break compatibility...
+    let doublegauge: Option<&DoublegaugeDescriptor> = lcd.doublegauge.as_ref();
 
     let mut sg_sensor_index = 0;
     let mut cmd = "".to_string();
@@ -136,6 +143,32 @@ pub fn lcd_to_slint(
             };
         }
     };
+
+    let sensor_index_1;
+    let mut cmd_1 = String::new();
+    let ts1 = lcd.sensor_source_1.to_sensor_source();
+    if let Some(idx) = sensors.iter().position(|si| si.source == ts1) {
+        sensor_index_1 = idx;
+    } else {
+        sensor_index_1 = sensors.len();
+        cmd_1 = match ts1 {
+            lianli_shared::sensors::SensorSource::Command { cmd } => cmd,
+            _ => String::new(),
+        };
+    }
+    let sensor_index_2;
+    let mut cmd_2 = String::new();
+    let ts2 = lcd.sensor_source_2.to_sensor_source();
+    if let Some(idx) = sensors.iter().position(|si| si.source == ts2) {
+        sensor_index_2 = idx;
+    } else {
+        sensor_index_2 = sensors.len();
+        cmd_2 = match ts2 {
+            lianli_shared::sensors::SensorSource::Command { cmd } => cmd,
+            _ => String::new(),
+        };
+    }
+
 
     let text_color = sensor.map(|s| s.text_color).unwrap_or([255, 255, 255]);
     let bg_color = sensor.map(|s| s.background_color).unwrap_or([0, 0, 0]);
@@ -194,6 +227,33 @@ pub fn lcd_to_slint(
         sensor_gauge_bg_g: gauge_bg[1] as i32,
         sensor_gauge_bg_b: gauge_bg[2] as i32,
         sensor_gauge_ranges: ModelRc::new(VecModel::from(gauge_ranges)),
+
+        header: SharedString::from(doublegauge.map(|dg| dg.header.as_str()).unwrap_or("")),
+        sensor_index_1: sensor_index_1 as i32,
+        sensor_command_1: SharedString::from(&cmd_1),
+        gauge_1_min: doublegauge.map(|dg| dg.gauge_1_min as i32).unwrap_or(0),
+        gauge_1_max: doublegauge.map(|dg| dg.gauge_1_max as i32).unwrap_or(100),
+        value_1_min: doublegauge.map(|dg| dg.value_1_min as i32).unwrap_or(0),
+        value_1_max: doublegauge.map(|dg| dg.value_1_max as i32).unwrap_or(100),
+        display_value_1_min: doublegauge.map(|dg| dg.display_value_1_min as i32).unwrap_or(0),
+        display_value_1_max: doublegauge.map(|dg| dg.display_value_1_max as i32).unwrap_or(100),
+        clamp_1: doublegauge.map(|dg| dg.clamp_1 as bool).unwrap_or(true),
+        unit_1: SharedString::from(doublegauge.map(|dg| dg.unit_1.as_str()).unwrap_or("N/A")),
+        label_1: SharedString::from(doublegauge.map(|dg| dg.label_1.as_str()).unwrap_or("N/A")),
+        decimals_1: doublegauge.map(|dg| dg.decimals_1 as i32).unwrap_or(0),
+
+        sensor_index_2: sensor_index_2 as i32,
+        sensor_command_2: SharedString::from(&cmd_2),
+        gauge_2_min: doublegauge.map(|dg| dg.gauge_2_min as i32).unwrap_or(0),
+        gauge_2_max: doublegauge.map(|dg| dg.gauge_2_max as i32).unwrap_or(100),
+        value_2_min: doublegauge.map(|dg| dg.value_2_min as i32).unwrap_or(0),
+        value_2_max: doublegauge.map(|dg| dg.value_2_max as i32).unwrap_or(100),
+        display_value_2_min: doublegauge.map(|dg| dg.display_value_2_min as i32).unwrap_or(0),
+        display_value_2_max: doublegauge.map(|dg| dg.display_value_2_max as i32).unwrap_or(100),
+        clamp_2: doublegauge.map(|dg| dg.clamp_2 as bool).unwrap_or(true),
+        unit_2: SharedString::from(doublegauge.map(|dg| dg.unit_2.as_str()).unwrap_or("N/A")),
+        label_2: SharedString::from(doublegauge.map(|dg| dg.label_2.as_str()).unwrap_or("N/A")),
+        decimals_2: doublegauge.map(|dg| dg.decimals_2 as i32).unwrap_or(0),
     }
 }
 

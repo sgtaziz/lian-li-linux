@@ -9,6 +9,8 @@ pub enum MediaType {
     Color,
     Gif,
     Sensor,
+    Doublegauge,
+    Cooler,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -39,6 +41,12 @@ pub enum SensorSourceConfig {
     MemUsed,
     #[serde(rename = "mem_free")]
     MemFree,
+}
+
+impl Default for SensorSourceConfig {
+    fn default() -> Self {
+        SensorSourceConfig::CpuUsage
+    }
 }
 
 impl SensorSourceConfig {
@@ -204,6 +212,53 @@ impl SensorDescriptor {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DoublegaugeDescriptor {
+    #[serde(default)]
+    pub header: String,
+
+    #[serde(default)]
+    pub gauge_1_min: i32,
+    #[serde(default = "default_100")]
+    pub gauge_1_max: i32,
+    #[serde(default)]
+    pub value_1_min: i32,
+    #[serde(default = "default_100")]
+    pub value_1_max: i32,
+    #[serde(default)]
+    pub display_value_1_min: i32,
+    #[serde(default = "default_100")]
+    pub display_value_1_max: i32,
+    #[serde(default = "default_true")]
+    pub clamp_1: bool,
+    #[serde(default = "default_percent")]
+    pub unit_1: String,
+    #[serde(default = "default_n_a")]
+    pub label_1: String,
+    #[serde(default)]
+    pub decimals_1: usize,
+
+    #[serde(default)]
+    pub gauge_2_min: i32,
+    #[serde(default = "default_100")]
+    pub gauge_2_max: i32,
+    pub value_2_min: i32,
+    #[serde(default = "default_100")]
+    pub value_2_max: i32,
+    pub display_value_2_min: i32,
+    #[serde(default = "default_100")]
+    pub display_value_2_max: i32,
+    #[serde(default = "default_true")]
+    pub clamp_2: bool,
+    #[serde(default = "default_percent")]
+    pub unit_2: String,
+    #[serde(default = "default_n_a")]
+    pub label_2: String,
+    #[serde(default)]
+    pub decimals_2: usize,
+}
+
+
 fn default_text_color() -> [u8; 3] {
     [255, 255, 255]
 }
@@ -275,4 +330,20 @@ fn default_unit_offset() -> i32 {
 
 fn default_label_offset() -> i32 {
     -60
+}
+
+fn default_n_a() -> String {
+    "N/A".to_string()
+}
+
+fn default_100() -> i32 {
+    100
+}
+
+fn default_percent() -> String {
+    "%".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }

@@ -1,7 +1,7 @@
 import { Theme } from "../theme.slint";
 import { Card } from "../widgets.slint";
 import { PageHeader } from "../page_header.slint";
-import { Button, ScrollView, ComboBox, LineEdit, SpinBox } from "std-widgets.slint";
+import { Button, ScrollView, ComboBox, LineEdit, SpinBox, GroupBox, CheckBox } from "std-widgets.slint";
 
 export struct LcdDeviceOption {
     label: string,
@@ -56,6 +56,33 @@ export struct LcdEntryData {
     sensor-gauge-bg-b: int,
     // Gauge ranges
     sensor-gauge-ranges: [GaugeRangeData],
+
+    header: string,
+    sensor_index_1: int,
+    sensor-command_1: string,
+    gauge_1_min: int,
+    gauge_1_max: int,
+    value_1_min: int,
+    value_1_max: int,
+    display_value_1_min: int,
+    display_value_1_max: int,
+    clamp_1: bool,
+    unit_1: string,
+    label_1: string,
+    decimals_1: int,
+
+    sensor_index_2: int,
+    sensor-command_2: string,
+    gauge_2_min: int,
+    gauge_2_max: int,
+    value_2_min: int,
+    value_2_max: int,
+    display_value_2_min: int,
+    display_value_2_max: int,
+    clamp_2: bool,
+    unit_2: string,
+    label_2: string,
+    decimals_2: int,
 }
 
 component OrientationButton inherits Rectangle {
@@ -84,7 +111,7 @@ component OrientationButton inherits Rectangle {
 component LcdConfigCard inherits Card {
     in property <int> index;
     in property <LcdEntryData> lcd;
-    in property <[string]> media-types: ["Image", "Video", "GIF", "Solid Color", "Sensor Gauge"];
+    in property <[string]> media-types: ["Image", "Video", "GIF", "Solid Color", "Sensor Gauge", "Doublegauge", "Cooler"];
     in property <[string]> device-options: [];
     in property <[string]> sensor-options: [];
 
@@ -148,6 +175,481 @@ component LcdConfigCard inherits Card {
                 Button {
                     text: "Browse";
                     clicked => { root.pick-file(root.index); }
+                }
+            }
+        }
+
+        // Doublegauge
+        if root.lcd.media-type == "Doublegauge" || root.lcd.media-type == "Cooler": VerticalLayout {
+            spacing: 16px;
+
+            if root.lcd.media-type == "Doublegauge": HorizontalLayout {
+                // Contains the header text which informs the user what is displayed in this doublegauge, for example CPU, GPU (should be at most 5 charsa very small text)
+                spacing: 8px;
+                Text { text: "Header:"; font-size: 13px; color: Theme.text-primary; vertical-alignment: center; }
+                LineEdit {
+                    horizontal-stretch: 1;
+                    text: root.lcd.header;
+                    width: 8rem;
+                    enabled: true;
+                    edited(val) => { root.update-field(root.index, "doublegauge_header", "\{val}"); }
+                }
+                Rectangle { horizontal-stretch: 1;}
+            }
+            
+            Rectangle {
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.border;
+                height: (root.lcd.sensor-index_1 == (root.sensor-options.length - 1))? 29rem+64px:28rem+56px;
+                clip: false;
+
+                VerticalLayout {
+                    padding: 8px;
+                    HorizontalLayout {
+                        Rectangle { border-radius: 4px;border-width: 1px;background: Theme.card-background; y: -1rem; width: 88px; height: 1rem;}
+                    }
+                    HorizontalLayout {
+                        Rectangle { width:5px; }
+                        Text { text: root.lcd.media-type == "Doublegauge" ? "Outer Gauge":"Left Sensor"; font-weight: 800; color: Theme.text-primary; vertical-alignment: center; y: -2rem-4px;}
+                    }
+
+                    GridLayout {
+                        spacing: 8px;
+                        padding: -2rem;
+                        Row {                        
+                            Rectangle { width:25px; }
+                            Text { text: "Display:"; color: Theme.text-primary; vertical-alignment: center; width: 5rem; }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: root.sensor-options;
+                                enabled: true;
+                                current-index: root.lcd.sensor-index_1;
+                                selected(val) => { root.update-field(root.index, "doublegauge_display_1", val); }
+                            }
+                            Rectangle { width:25px; }
+                        }
+                        if root.lcd.sensor-index_1 == (root.sensor-options.length - 1): Row {
+                            Rectangle { width:25px; }
+                            Text { text: "Command:"; color: Theme.text-primary; vertical-alignment: center; width: 5rem; }
+                            LineEdit {
+                                text: root.lcd.sensor-command-1;
+                                edited(val) => { root.update-field(root.index, "sensor_command_1", val); }
+                            }
+                            Rectangle { width:25px; }
+                        }
+                    }
+                    HorizontalLayout {
+                        Rectangle { height: 3.5rem;}
+                    }
+
+                    // Outer Gauge, 0-100%
+                    Rectangle {
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        clip: false;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            HorizontalLayout {
+                                Rectangle { border-radius: 4px;border-width: 1px;background: Theme.card-background; y: -1rem; width: 10rem; height: 1rem;}
+                            }
+                            HorizontalLayout {
+                                Rectangle { width:5px; }
+                                Text { text: "Gauge (0% - 100%)"; font-weight: 800; color: Theme.text-primary; vertical-alignment: center; y: -2rem-4px;}
+                            }
+
+                            GridLayout {
+                                spacing: 8px;
+                                padding: -2rem;
+                                Row {                        
+                                    Rectangle { width:25px; }
+                                    Text { text: "Min (0%):"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.gauge_1_min;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_gauge_1_min", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: "Max (100%):"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.gauge_1_max;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_gauge_1_max", val); }
+                                    }
+                                    Rectangle { width:9rem; }
+                                }
+                            }
+                            HorizontalLayout {
+                                Rectangle { height: 2.3rem;}
+                            }
+                        }
+                    } // End Rectangle - 0-100% (from outer gauge)
+                    HorizontalLayout {
+                        Rectangle { height: 1.5rem;}
+                    }
+
+                    // Outer Gauge, current value
+                    Rectangle {
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        clip: false;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            HorizontalLayout {
+                                Rectangle { border-radius: 4px;border-width: 1px;background: Theme.card-background; y: -1rem; width: 10rem; height: 1rem;}
+                            }
+                            HorizontalLayout {
+                                Rectangle { width:5px; }
+                                Text { text: "Current Value"; font-weight: 800; color: Theme.text-primary; vertical-alignment: center; y: -2rem-4px;}
+                            }
+
+                            GridLayout {
+                                spacing: 8px;
+                                padding: -2rem;
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: "Lower Value:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.value_1_min;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_value_1_min", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: "Upper Value:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.value_1_max;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_value_1_max", val); }
+                                    }
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    Text {
+                                        text: "Maps to↓";
+                                        width: 12rem;
+                                    }
+                                    Rectangle {  }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    Text {
+                                        text: "Maps to↓";
+                                        width: 12rem;
+                                    }
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        text: root.lcd.display_value_1_min;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_display_value_1_min", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        text: root.lcd.display_value_1_max;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_display_value_1_max", val); }
+                                    }
+                                    Rectangle { width: 0.5rem; }
+                                    CheckBox {  
+                                        width: 7rem; 
+                                        text: "Clamp"; 
+                                        checked: root.lcd.clamp-1; 
+                                        toggled() => { root.update-field(root.index, "doublegauge_clamp_1", self.checked ? "true":"false"); }
+                                    }
+                                    Rectangle { width: 0.5rem; }
+                                }
+                                Row {
+                                    Rectangle { height:1rem; }
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: "Label:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.label-1;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_label_1", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: "Unit:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.unit-1;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_unit_1", val); }
+                                    }
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: "Decimals:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.decimals-1;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_decimals_1", val); }
+                                    }
+                                    Rectangle {  }
+                                    Rectangle { width: 8rem; }
+                                    Rectangle { horizontal-stretch: 1; width: 12rem;}
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                            }
+                            HorizontalLayout {
+                                Rectangle { height: 2.3rem;}
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1rem; }
+
+            Rectangle {
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.border;
+                height: (root.lcd.sensor-index_2 == (root.sensor-options.length - 1))? 29rem+64px:28rem+56px;
+                clip: false;
+
+                VerticalLayout {
+                    padding: 8px;
+                    HorizontalLayout {
+                        Rectangle { border-radius: 4px;border-width: 1px;background: Theme.card-background; y: -1rem; width: 88px; height: 1rem;}
+                    }
+                    HorizontalLayout {
+                        Rectangle { width:5px; }
+                        Text { text: root.lcd.media-type == "Doublegauge" ? "Inner Gauge":"Right Sensor"; font-weight: 800; color: Theme.text-primary; vertical-alignment: center; y: -2rem-4px;}
+                    }
+
+                    GridLayout {
+                        spacing: 8px;
+                        padding: -2rem;
+                        Row {                        
+                            Rectangle { width:25px; }
+                            Text { text: "Display:"; color: Theme.text-primary; vertical-alignment: center; width: 5rem; }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: root.sensor-options;
+                                enabled: true;
+                                current-index: root.lcd.sensor-index_2;
+                                selected(val) => { root.update-field(root.index, "doublegauge_display_2", val); }
+                            }
+                            Rectangle { width:25px; }
+                        }
+                        if root.lcd.sensor-index_2 == (root.sensor-options.length - 1): Row {                        
+                            Rectangle { width:25px; }
+                            Text { text: "Command:"; color: Theme.text-primary; vertical-alignment: center; width: 5rem; }
+                            LineEdit {
+                                text: root.lcd.sensor-command-2;
+                                edited(val) => { root.update-field(root.index, "sensor_command_2", val); }
+                            }
+                            Rectangle { width:25px; }
+                        }
+                    }
+                    HorizontalLayout {
+                        Rectangle { height: 3.5rem;}
+                    }
+
+                    // Outer Gauge, 0-100%
+                    Rectangle {
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        clip: false;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            HorizontalLayout {
+                                Rectangle { border-radius: 4px;border-width: 1px;background: Theme.card-background; y: -1rem; width: 10rem; height: 1rem;}
+                            }
+                            HorizontalLayout {
+                                Rectangle { width:5px; }
+                                Text { text: "Gauge (0% - 100%)"; font-weight: 800; color: Theme.text-primary; vertical-alignment: center; y: -2rem-4px;}
+                            }
+
+                            GridLayout {
+                                spacing: 8px;
+                                padding: -2rem;
+                                Row {                        
+                                    Rectangle { width:25px; }
+                                    Text { text: "Min (0%):"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.gauge_2_min;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_gauge_2_min", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: "Max (100%):"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.gauge_2_max;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_gauge_2_max", val); }
+                                    }
+                                    Rectangle { width:9rem; }
+                                }
+                            }
+                            HorizontalLayout {
+                                Rectangle { height: 2.3rem;}
+                            }
+                        }
+                    } // End Rectangle - 0-100% (from outer gauge)
+                    HorizontalLayout {
+                        Rectangle { height: 1.5rem;}
+                    }
+
+                    // Outer Gauge, current value
+                    Rectangle {
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        clip: false;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            HorizontalLayout {
+                                Rectangle { border-radius: 4px;border-width: 1px;background: Theme.card-background; y: -1rem; width: 10rem; height: 1rem;}
+                            }
+                            HorizontalLayout {
+                                Rectangle { width:5px; }
+                                Text { text: "Current Value"; font-weight: 800; color: Theme.text-primary; vertical-alignment: center; y: -2rem-4px;}
+                            }
+
+                            GridLayout {
+                                spacing: 8px;
+                                padding: -2rem;
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: "Lower Value:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.value_2_min;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_value_2_min", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: "Upper Value:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.value_2_max;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_value_2_max", val); }
+                                    }
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    Text {
+                                        text: "Maps to↓";
+                                        width: 12rem;
+                                    }
+                                    Rectangle {  }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    Text {
+                                        text: "Maps to↓";
+                                        width: 12rem;
+                                    }
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        text: root.lcd.display-value-2-min;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_display_value_2_min", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: ""; color: Theme.text-primary; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        text: root.lcd.display-value-2-max;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_display_value_2_max", val); }
+                                    }
+                                    Rectangle { width: 0.5rem; }
+                                    CheckBox {  
+                                        width: 7rem; 
+                                        text: "Clamp";
+                                        checked: root.lcd.clamp-2;
+                                        toggled() => { root.update-field(root.index, "doublegauge_clamp_2", self.checked ? "true":"false"); }
+                                    }
+                                    Rectangle { width: 0.5rem; }
+                                }
+                                Row {
+                                    Rectangle { height:1rem; }
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: "Label:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.label-2;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_label_2", val); }
+                                    }
+                                    Rectangle {  }
+                                    Text { text: "Unit:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.unit-2;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_unit_2", val); }
+                                    }
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                                Row {
+                                    Rectangle { width:25px; }
+                                    Text { text: "Decimals:"; color: Theme.text-primary; horizontal-alignment: right; vertical-alignment: center; width: 8rem; }
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.lcd.decimals-2;
+                                        width: 12rem;
+                                        enabled: true;
+                                        edited(val) => { root.update-field(root.index, "doublegauge_decimals_2", val); }
+                                    }
+                                    Rectangle {  }
+                                    Rectangle { width: 8rem; }
+                                    Rectangle { horizontal-stretch: 1; width: 12rem;}
+                                    Rectangle { width:8rem; colspan: 3;}
+                                }
+                            }
+                            HorizontalLayout {
+                                Rectangle { height: 2.3rem;}
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -477,7 +979,7 @@ component LcdConfigCard inherits Card {
         HorizontalLayout {
             spacing: 16px;
 
-            VerticalLayout {
+            if root.lcd.media-type != "Doublegauge" && root.lcd.media-type != "Cooler": VerticalLayout {
                 spacing: 4px;
                 Text { text: "FPS"; font-size: 12px; color: Theme.text-secondary; }
                 SpinBox {

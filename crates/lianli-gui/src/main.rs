@@ -11,6 +11,7 @@ use lianli_shared::rgb::{
 use slint::{Model, ModelRc, VecModel};
 use std::sync::{Arc, Mutex};
 use lianli_shared::sensors::Unit;
+use lianli_shared::media::{SensorSourceConfig};
 
 slint::include_modules!();
 
@@ -813,7 +814,10 @@ fn wire_lcd_callbacks(
                         fps: Some(30.0),
                         rgb: None,
                         orientation: 0.0,
+                        sensor_source_1: SensorSourceConfig::CpuUsage,
+                        sensor_source_2: SensorSourceConfig::MemUsage,
                         sensor: None,
+                        doublegauge: None,
                     });
                 }
             }
@@ -845,41 +849,41 @@ fn wire_lcd_callbacks(
             let field_str = field.to_string();
             // Only rebuild UI for dropdown/button fields that affect layout.
             // Text fields update in-place in the LineEdit — rebuilding would steal focus.
-            let needs_refresh = matches!(field_str.as_str(), "device" | "media_type" | "orientation" | "sensor_source")
+            let needs_refresh = matches!(field_str.as_str(), "device" | "media_type" | "orientation" | "sensor_source" | "doublegauge_display_1" | "doublegauge_display_2")
                 || field_str == "gauge_range_add"
                 || field_str == "gauge_range_remove";
             {
                 let mut state = shared.lock().unwrap();
                 let devices = state.devices.clone();
-                let resolved_sensor_source: Option<lianli_shared::media::SensorSourceConfig> = {
+                let resolved_sensor_source: lianli_shared::media::SensorSourceConfig = {
                     let val_str = val.to_string();
                     let sensor_idx: usize = val_str.split('.').next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    if field_str == "sensor_source" && !val_str.ends_with("Custom command") && sensor_idx > 0 {
+                    if (field_str == "sensor_source" || field_str == "doublegauge_display_1" || field_str == "doublegauge_display_2") && !val_str.ends_with("Custom command") && sensor_idx > 0 {
                         if let Some(sensor) = state.available_sensors.get(sensor_idx - 1) {
                             match &sensor.source {
                                 lianli_shared::sensors::SensorSource::Hwmon { name, label, device_path } =>
                                 {
-                                    let ret = Some(lianli_shared::media::SensorSourceConfig::Hwmon {
+                                    let ret = lianli_shared::media::SensorSourceConfig::Hwmon {
                                         name: name.clone(), label: label.clone(), device_path: device_path.clone(),
-                                    });
+                                    };
                                     ret
                                 },
                                 lianli_shared::sensors::SensorSource::NvidiaGpu { gpu_index } =>
-                                    Some(lianli_shared::media::SensorSourceConfig::NvidiaGpu {gpu_index: *gpu_index}),
+                                    lianli_shared::media::SensorSourceConfig::NvidiaGpu {gpu_index: *gpu_index},
                                 lianli_shared::sensors::SensorSource::Command { cmd } =>
-                                    Some(lianli_shared::media::SensorSourceConfig::Command { cmd: cmd.clone() }),
+                                    lianli_shared::media::SensorSourceConfig::Command { cmd: cmd.clone() },
                                 lianli_shared::sensors::SensorSource::WirelessCoolant { device_id } =>
-                                    Some(lianli_shared::media::SensorSourceConfig::WirelessCoolant { device_id: device_id.clone() }),
-                                lianli_shared::sensors::SensorSource::CpuUsage => Some(lianli_shared::media::SensorSourceConfig::CpuUsage),
-                                lianli_shared::sensors::SensorSource::MemUsage => Some(lianli_shared::media::SensorSourceConfig::MemUsage),
-                                lianli_shared::sensors::SensorSource::MemUsed => Some(lianli_shared::media::SensorSourceConfig::MemUsed),
-                                lianli_shared::sensors::SensorSource::MemFree => Some(lianli_shared::media::SensorSourceConfig::MemFree),
+                                    lianli_shared::media::SensorSourceConfig::WirelessCoolant { device_id: device_id.clone() },
+                                lianli_shared::sensors::SensorSource::CpuUsage => lianli_shared::media::SensorSourceConfig::CpuUsage,
+                                lianli_shared::sensors::SensorSource::MemUsage => lianli_shared::media::SensorSourceConfig::MemUsage,
+                                lianli_shared::sensors::SensorSource::MemUsed => lianli_shared::media::SensorSourceConfig::MemUsed,
+                                lianli_shared::sensors::SensorSource::MemFree => lianli_shared::media::SensorSourceConfig::MemFree,
                             }
                         } else {
-                            None
+                            lianli_shared::media::SensorSourceConfig::Command { cmd: String::new() }
                         }
                     } else {
-                        None
+                        lianli_shared::media::SensorSourceConfig::Command { cmd: String::new() }
                     }
                 };
                 if let Some(ref mut c) = state.config {
@@ -906,6 +910,8 @@ fn wire_lcd_callbacks(
                                         lcd.path = None;
                                         lianli_shared::media::MediaType::Sensor
                                     }
+                                    "Doublegauge" => lianli_shared::media::MediaType::Doublegauge,
+                                    "Cooler" => lianli_shared::media::MediaType::Cooler,
                                     _ => lcd.media_type,
                                 };
                             }
@@ -919,14 +925,7 @@ fn wire_lcd_callbacks(
                             }
                             "sensor_source" => {
                                 let sensor_cfg = lcd.sensor.get_or_insert_with(default_sensor);
-                                if let Some(source) = resolved_sensor_source {
-                                    sensor_cfg.source = source;
-                                } else {
-                                    sensor_cfg.source =
-                                        lianli_shared::media::SensorSourceConfig::Command {
-                                            cmd: String::new(),
-                                        };
-                                }
+                                sensor_cfg.source = resolved_sensor_source;
                             }
                             "sensor_command" => {
                                 lcd.sensor.get_or_insert_with(default_sensor).source =
@@ -979,15 +978,48 @@ fn wire_lcd_callbacks(
                             "sensor_label_offset" => {
                                 lcd.sensor.get_or_insert_with(default_sensor).label_offset = val.parse().unwrap_or(0);
                             }
-                            "sensor_text_color_r" => lcd.sensor.get_or_insert_with(default_sensor).text_color[0] = val.parse().unwrap_or(255),
-                            "sensor_text_color_g" => lcd.sensor.get_or_insert_with(default_sensor).text_color[1] = val.parse().unwrap_or(255),
-                            "sensor_text_color_b" => lcd.sensor.get_or_insert_with(default_sensor).text_color[2] = val.parse().unwrap_or(255),
-                            "sensor_bg_color_r" => lcd.sensor.get_or_insert_with(default_sensor).background_color[0] = val.parse().unwrap_or(0),
-                            "sensor_bg_color_g" => lcd.sensor.get_or_insert_with(default_sensor).background_color[1] = val.parse().unwrap_or(0),
-                            "sensor_bg_color_b" => lcd.sensor.get_or_insert_with(default_sensor).background_color[2] = val.parse().unwrap_or(0),
-                            "sensor_gauge_bg_r" => lcd.sensor.get_or_insert_with(default_sensor).gauge_background_color[0] = val.parse().unwrap_or(40),
-                            "sensor_gauge_bg_g" => lcd.sensor.get_or_insert_with(default_sensor).gauge_background_color[1] = val.parse().unwrap_or(40),
-                            "sensor_gauge_bg_b" => lcd.sensor.get_or_insert_with(default_sensor).gauge_background_color[2] = val.parse().unwrap_or(40),
+                            "sensor_text_color_r" => {
+                                lcd.sensor.get_or_insert_with(default_sensor).text_color[0] =
+                                    val.parse().unwrap_or(255)
+                            }
+                            "sensor_text_color_g" => {
+                                lcd.sensor.get_or_insert_with(default_sensor).text_color[1] =
+                                    val.parse().unwrap_or(255)
+                            }
+                            "sensor_text_color_b" => {
+                                lcd.sensor.get_or_insert_with(default_sensor).text_color[2] =
+                                    val.parse().unwrap_or(255)
+                            }
+                            "sensor_bg_color_r" => {
+                                lcd.sensor
+                                    .get_or_insert_with(default_sensor)
+                                    .background_color[0] = val.parse().unwrap_or(0)
+                            }
+                            "sensor_bg_color_g" => {
+                                lcd.sensor
+                                    .get_or_insert_with(default_sensor)
+                                    .background_color[1] = val.parse().unwrap_or(0)
+                            }
+                            "sensor_bg_color_b" => {
+                                lcd.sensor
+                                    .get_or_insert_with(default_sensor)
+                                    .background_color[2] = val.parse().unwrap_or(0)
+                            }
+                            "sensor_gauge_bg_r" => {
+                                lcd.sensor
+                                    .get_or_insert_with(default_sensor)
+                                    .gauge_background_color[0] = val.parse().unwrap_or(40)
+                            }
+                            "sensor_gauge_bg_g" => {
+                                lcd.sensor
+                                    .get_or_insert_with(default_sensor)
+                                    .gauge_background_color[1] = val.parse().unwrap_or(40)
+                            }
+                            "sensor_gauge_bg_b" => {
+                                lcd.sensor
+                                    .get_or_insert_with(default_sensor)
+                                    .gauge_background_color[2] = val.parse().unwrap_or(40)
+                            }
                             "gauge_range_add" => {
                                 let s = lcd.sensor.get_or_insert_with(default_sensor);
                                 s.gauge_ranges.push(lianli_shared::media::SensorRange {
@@ -995,6 +1027,84 @@ fn wire_lcd_callbacks(
                                     color: [0, 200, 0],
                                 });
                             }
+                            "doublegauge_header" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).header = val;
+                            }
+                            "doublegauge_display_1" => {
+                                lcd.sensor_source_1 = resolved_sensor_source;
+                            }
+                            "sensor_command_1" => {
+                                lcd.sensor_source_1 =
+                                    lianli_shared::media::SensorSourceConfig::Command { cmd: val };
+                            }
+                            "doublegauge_display_2" => {
+                                lcd.sensor_source_2 = resolved_sensor_source;
+                            }
+                            "sensor_command_2" => {
+                                lcd.sensor_source_2 =
+                                    lianli_shared::media::SensorSourceConfig::Command { cmd: val };
+                            }
+                            "doublegauge_gauge_1_min" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).gauge_1_min = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_gauge_1_max" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).gauge_1_max = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_gauge_2_min" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).gauge_2_min = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_gauge_2_max" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).gauge_2_max = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_value_1_min" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).value_1_min = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_value_1_max" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).value_1_max = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_display_value_1_min" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).display_value_1_min = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_display_value_1_max" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).display_value_1_max = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_value_2_min" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).value_2_min = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_value_2_max" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).value_2_max = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_display_value_2_min" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).display_value_2_min = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_display_value_2_max" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).display_value_2_max = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_label_1" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).label_1 = val;
+                            }
+                            "doublegauge_label_2" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).label_2 = val;
+                            }
+                            "doublegauge_unit_1" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).unit_1 = val;
+                            }
+                            "doublegauge_unit_2" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).unit_2 = val;
+                            }
+                            "doublegauge_decimals_1" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).decimals_1 = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_decimals_2" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).decimals_2 = val.parse().unwrap_or(0);
+                            }
+                            "doublegauge_clamp_1" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).clamp_1 = val == "true";
+                            }
+                            "doublegauge_clamp_2" => {
+                                lcd.doublegauge.get_or_insert_with(default_doublegauge).clamp_2 = val == "true";
+                            }
+                            
                             f if f.starts_with("gauge_range_remove") => {
                                 if let Ok(ridx) = val.parse::<usize>() {
                                     let s = lcd.sensor.get_or_insert_with(default_sensor);
@@ -1167,6 +1277,35 @@ fn default_sensor() -> lianli_shared::media::SensorDescriptor {
         value_offset: 0,
         unit_offset: 0,
         label_offset: 0,
+    }
+}
+
+fn default_doublegauge() -> lianli_shared::media::DoublegaugeDescriptor {
+    lianli_shared::media::DoublegaugeDescriptor {
+        header: "CPU".to_string(),
+
+        gauge_1_min: 45,
+        gauge_1_max: 85,
+        value_1_min: 45,
+        value_1_max: 85,
+        display_value_1_min: 45,
+        display_value_1_max: 85,
+        clamp_1: false,
+        unit_1: "\u{00B0}C".to_string(),
+        label_1: "TEMP".to_string(),
+        decimals_1: 0,
+
+        gauge_2_min: 45,
+        gauge_2_max: 85,
+        value_2_min: 45,
+        value_2_max: 85,
+        display_value_2_min: 45,
+        display_value_2_max: 85,
+        clamp_2: false,
+        unit_2: "\u{00B0}C".to_string(),
+        label_2: "TEMP".to_string(),
+        decimals_2: 0,
+
     }
 }
 

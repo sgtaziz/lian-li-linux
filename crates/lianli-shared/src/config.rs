@@ -1,5 +1,5 @@
 use crate::fan::{FanConfig, FanCurve};
-use crate::media::{MediaType, SensorDescriptor};
+use crate::media::{DoublegaugeDescriptor, MediaType, SensorDescriptor, SensorSourceConfig};
 use crate::rgb::RgbAppConfig;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,13 @@ pub struct LcdConfig {
     pub orientation: f32,
     #[serde(default)]
     pub sensor: Option<SensorDescriptor>,
+    // As most media types display sensor values, we store the selected sensors here. So if the media type switches, the sensor keeps the same.
+    #[serde(default)]
+    pub sensor_source_1: SensorSourceConfig,
+    #[serde(default)]
+    pub sensor_source_2: SensorSourceConfig,
+    #[serde(default)]
+    pub doublegauge: Option<DoublegaugeDescriptor>,
 }
 
 impl LcdConfig {
@@ -69,6 +76,7 @@ impl LcdConfig {
                 })?;
                 descriptor.validate()?;
             }
+            _ => {}
         }
 
         if let Some(fps) = self.fps {

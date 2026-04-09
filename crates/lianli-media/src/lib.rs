@@ -1,14 +1,18 @@
 pub mod common;
 pub mod image;
 pub mod sensor;
+pub mod doublegauge;
+pub mod cooler;
 pub mod video;
 
 pub use common::MediaError;
-use lianli_shared::sensors::SensorInfo;
+use lianli_shared::sensors::{SensorInfo};
 pub use sensor::SensorAsset;
+pub use doublegauge::DoublegaugeAsset;
+pub use cooler::CoolerAsset;
 
 use lianli_shared::config::{ConfigKey, LcdConfig};
-use lianli_shared::media::MediaType;
+use lianli_shared::media::{MediaType, SensorSourceConfig};
 use lianli_shared::screen::ScreenInfo;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -38,6 +42,12 @@ pub enum MediaAssetKind {
         path: PathBuf,
         looping: bool,
         _temp: Arc<TempDir>,
+    },
+    Doublegauge {
+        asset: Arc<DoublegaugeAsset>,
+    },
+    Cooler {
+        asset: Arc<CoolerAsset>,
     },
 }
 
@@ -109,6 +119,40 @@ pub fn prepare_media_asset(
             let bg_path = cfg.path.as_deref();
             let asset = SensorAsset::new(descriptor, cfg.orientation, screen, all_sensors, bg_path)?;
             Ok(MediaAssetKind::Sensor { asset })
+        }
+        MediaType::Doublegauge => {
+            let descriptor = cfg.doublegauge.as_ref().expect("validated doublegauge config");
+            let source_1 = resolve_sensor_config(&cfg.sensor_source_1, &all_sensors)?;
+            let source_2 = resolve_sensor_config(&cfg.sensor_source_2, &all_sensors)?;
+            let asset = DoublegaugeAsset::new(descriptor, cfg.orientation, screen,source_1,source_2)?;
+            Ok(MediaAssetKind::Doublegauge { asset })
+        }
+        MediaType::Cooler => {
+            let descriptor = cfg.doublegauge.as_ref().expect("validated doublegauge config");
+            let source_1 = resolve_sensor_config(&cfg.sensor_source_1, &all_sensors)?;
+            let source_2 = resolve_sensor_config(&cfg.sensor_source_2, &all_sensors)?;
+            let asset = CoolerAsset::new(descriptor, cfg.orientation, screen,source_1,source_2)?;
+            Ok(MediaAssetKind::Cooler { asset })
+        }
+    }
+}
+
+
+fn resolve_sensor_config(
+    cfg_source: &SensorSourceConfig,
+    all_sensors: &[SensorInfo], // Annahme: Der Typ heißt SensorInfo
+) -> Result<lianli_shared::sensors::ResolvedSensor, MediaError> {
+    match cfg_source {
+        SensorSourceConfig::Constant { value } => {
+            Ok(lianli_shared::sensors::ResolvedSensor::ShellCommand(format!("echo {value}")))
+        }
+        _ => {
+            let sensor_source = cfg_source.to_sensor_source();
+            let sensor_info = all_sensors.iter().find(|s| s.source == sensor_source);
+            let divider = sensor_info.map_or(1, |s| s.divider);
+            
+            lianli_shared::sensors::resolve_sensor(&sensor_source, divider)
+                .ok_or_else(|| MediaError::Sensor("sensor not found on system".into()))
         }
     }
 }
