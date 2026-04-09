@@ -8,7 +8,6 @@ export { CurvePoint, CurveSegment }
 
 export struct FanCurveData {
     name: string,
-    temp-source-display: string,
     temp-source-index: int,
     temp-command: string,
     points: [CurvePoint],
@@ -71,13 +70,13 @@ component FanCurveCard inherits Card {
             ComboBox {
                 horizontal-stretch: 1;
                 model: root.sensor-options;
-                current-value: root.curve.temp-source-display;
+                current-index: root.curve.temp-source-index;
                 selected(val) => { root.set-temp-source(root.index, val); }
             }
         }
 
         // Show command editor only for custom command
-        if root.curve.temp-source-display == "Custom command": HorizontalLayout {
+        if root.curve.temp-source-index == (root.sensor-options.length - 1): HorizontalLayout {
             spacing: 8px;
             Text { text: "Command:"; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
             LineEdit {

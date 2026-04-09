@@ -12,6 +12,7 @@ use lianli_devices::detect::{
 };
 use lianli_media::sensor::FrameInfo;
 use lianli_shared::config::HidDriver;
+use lianli_shared::systeminfo::SysSensor;
 use lianli_transport::HidBackend;
 use lianli_devices::hydroshift_lcd::HydroShiftLcdController;
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
@@ -229,6 +230,7 @@ impl ServiceManager {
                 break; // Daemon thread has ended. Time for us to die as well
             }
         });
+        SysSensor::init();
 
         for event in rx {
             match event {
@@ -864,6 +866,8 @@ impl ServiceManager {
             })
             .collect();
 
+        let all_sensors = lianli_shared::sensors::enumerate_sensors();
+
         if let Some(cfg) = &self.config {
             for (idx, device) in cfg.lcds.iter().enumerate() {
                 // Look up screen info by serial; fall back to WIRELESS_LCD (400×400) for
@@ -874,7 +878,7 @@ impl ServiceManager {
                     .and_then(|s| screen_map.get(s).copied())
                     .unwrap_or(ScreenInfo::WIRELESS_LCD);
                 let cfg_key = config_identity(device);
-                match prepare_media_asset(device, cfg.default_fps, &screen, screen.h264) {
+                match prepare_media_asset(device, cfg.default_fps, &screen, screen.h264, &all_sensors) {
                     Ok(asset_kind) => {
                         let device_id = device.device_id();
                         let asset = MediaAsset{kind: asset_kind, config_key: cfg_key};
@@ -1366,6 +1370,8 @@ struct ActiveTarget {
     lcd: LcdBackend,
     media: MediaRuntime,
     asset: Arc<MediaAsset>,
+    // This variable contains the last seen frame version. Each renderer holds a frame version counter which gets increased each time it actually writes into the frame. The first time it writes into the frame sets the frame version to 1
+    // By using this mechanism we are able to detect whether we actually need to send the frame via USB bus to the LCD, and thus we can save quite a lot of time by not sending frames which are already displayed.
     frame_counter: u64,
     consecutive_errors: u32,
 }

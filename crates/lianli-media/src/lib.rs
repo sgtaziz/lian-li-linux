@@ -4,6 +4,7 @@ pub mod sensor;
 pub mod video;
 
 pub use common::MediaError;
+use lianli_shared::sensors::SensorInfo;
 pub use sensor::SensorAsset;
 
 use lianli_shared::config::{ConfigKey, LcdConfig};
@@ -55,6 +56,7 @@ pub fn prepare_media_asset(
     default_fps: f32,
     screen: &ScreenInfo,
     h264: bool,
+    all_sensors: &[SensorInfo],
 ) -> Result<MediaAssetKind, MediaError> {
     match cfg.media_type {
         MediaType::Image => {
@@ -104,7 +106,7 @@ pub fn prepare_media_asset(
         }
         MediaType::Sensor => {
             let descriptor = cfg.sensor.as_ref().ok_or(MediaError::InvalidConfig("sensor entry requires a 'sensor' field".into()))?;
-            let asset = SensorAsset::new(descriptor, cfg.orientation, screen)?;
+            let asset = SensorAsset::new(descriptor, cfg.orientation, screen, all_sensors)?;
             Ok(MediaAssetKind::Sensor { asset })
         }
     }

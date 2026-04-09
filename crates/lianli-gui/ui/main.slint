@@ -40,6 +40,7 @@ export component MainWindow inherits Window {
     // LCD properties
     in property <[LcdEntryData]> lcd-entries: [];
     in property <[string]> lcd-device-options: [];
+    in property <[string]> lcd-sensor-options: [];
     in property <bool> has-config: false;
 
     // RGB properties
@@ -50,7 +51,7 @@ export component MainWindow inherits Window {
     in property <[FanGroupData]> fan-groups: [];
     in property <[string]> curve-names: [];
     in property <[string]> fan-speed-options: [];
-    in property <[string]> sensor-options: [];
+    in property <[string]> fan-sensor-options: [];
     in property <int> fan-update-interval: 500;
 
     // Callbacks for Rust backend
@@ -124,7 +125,7 @@ export component MainWindow inherits Window {
             if root.current-page == 1: LcdPage {
                 lcd-entries: root.lcd-entries;
                 device-options: root.lcd-device-options;
-                sensor-options: root.sensor-options;
+                sensor-options: root.lcd-sensor-options;
                 has-config: root.has-config;
                 add-lcd => { root.add-lcd(); }
                 remove-lcd(idx) => { root.remove-lcd(idx); }
@@ -138,7 +139,7 @@ export component MainWindow inherits Window {
                 fan-groups: root.fan-groups;
                 curve-names: root.curve-names;
                 speed-options: root.fan-speed-options;
-                sensor-options: root.sensor-options;
+                sensor-options: root.fan-sensor-options;
                 update-interval: root.fan-update-interval;
                 has-config: root.has-config;
                 add-curve => { root.fan-add-curve(); }

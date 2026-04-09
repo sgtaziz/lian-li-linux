@@ -10,6 +10,7 @@ use lianli_shared::rgb::{
 };
 use slint::{Model, ModelRc, VecModel};
 use std::sync::{Arc, Mutex};
+use lianli_shared::sensors::Unit;
 
 slint::include_modules!();
 
@@ -587,14 +588,17 @@ fn wire_fan_callbacks(
             let display = display_name.to_string();
             {
                 let mut state = shared.lock().unwrap();
-                let source = if display == "Custom command" {
+                let source = if display.ends_with("Custom command") {
                     None
                 } else {
-                    state
-                        .available_sensors
-                        .iter()
-                        .find(|s| s.display_name == display)
-                        .map(|s| s.source.clone())
+                    let sensor_idx: usize = display.split('.').next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    sensor_idx.checked_sub(1).and_then(|i| {
+                        state.available_sensors
+                            .iter()
+                            .filter(|s| s.unit == Unit::C)
+                            .nth(i)
+                            .map(|s| s.source.clone())
+                    })
                 };
                 if let Some(ref mut c) = state.config {
                     if let Some(curve) = c.fan_curves.get_mut(idx as usize) {
@@ -849,21 +853,31 @@ fn wire_lcd_callbacks(
                 let devices = state.devices.clone();
                 let resolved_sensor_source: Option<lianli_shared::media::SensorSourceConfig> = {
                     let val_str = val.to_string();
-                    if field_str == "sensor_source" && val_str != "Custom command" {
-                        state.available_sensors.iter()
-                            .find(|s| s.display_name == val_str)
-                            .map(|si| match &si.source {
-                                lianli_shared::sensors::TempSource::Hwmon { name, label, device_path } =>
-                                    lianli_shared::media::SensorSourceConfig::Hwmon {
+                    let sensor_idx: usize = val_str.split('.').next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    if field_str == "sensor_source" && !val_str.ends_with("Custom command") && sensor_idx > 0 {
+                        if let Some(sensor) = state.available_sensors.get(sensor_idx - 1) {
+                            match &sensor.source {
+                                lianli_shared::sensors::SensorSource::Hwmon { name, label, device_path } =>
+                                {
+                                    let ret = Some(lianli_shared::media::SensorSourceConfig::Hwmon {
                                         name: name.clone(), label: label.clone(), device_path: device_path.clone(),
-                                    },
-                                lianli_shared::sensors::TempSource::NvidiaGpu { gpu_index } =>
-                                    lianli_shared::media::SensorSourceConfig::NvidiaGpu { gpu_index: *gpu_index },
-                                lianli_shared::sensors::TempSource::Command { cmd } =>
-                                    lianli_shared::media::SensorSourceConfig::Command { cmd: cmd.clone() },
-                                lianli_shared::sensors::TempSource::WirelessCoolant { device_id } =>
-                                    lianli_shared::media::SensorSourceConfig::WirelessCoolant { device_id: device_id.clone() },
-                            })
+                                    });
+                                    ret
+                                },
+                                lianli_shared::sensors::SensorSource::NvidiaGpu { gpu_index } =>
+                                    Some(lianli_shared::media::SensorSourceConfig::NvidiaGpu {gpu_index: *gpu_index}),
+                                lianli_shared::sensors::SensorSource::Command { cmd } =>
+                                    Some(lianli_shared::media::SensorSourceConfig::Command { cmd: cmd.clone() }),
+                                lianli_shared::sensors::SensorSource::WirelessCoolant { device_id } =>
+                                    Some(lianli_shared::media::SensorSourceConfig::WirelessCoolant { device_id: device_id.clone() }),
+                                lianli_shared::sensors::SensorSource::CpuUsage => Some(lianli_shared::media::SensorSourceConfig::CpuUsage),
+                                lianli_shared::sensors::SensorSource::MemUsage => Some(lianli_shared::media::SensorSourceConfig::MemUsage),
+                                lianli_shared::sensors::SensorSource::MemUsed => Some(lianli_shared::media::SensorSourceConfig::MemUsed),
+                                lianli_shared::sensors::SensorSource::MemFree => Some(lianli_shared::media::SensorSourceConfig::MemFree),
+                            }
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -890,7 +904,7 @@ fn wire_lcd_callbacks(
                                     "Sensor Gauge" => {
                                         lcd.sensor.get_or_insert_with(default_sensor);
                                         lianli_shared::media::MediaType::Sensor
-                                    }
+                                    } 
                                     _ => lcd.media_type,
                                 };
                             }

@@ -1,26 +1,32 @@
-use crate::sensors::TempSource;
+use crate::sensors::SensorSource;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FanCurve {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temp_source: Option<TempSource>,
+    pub temp_source: Option<SensorSource>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub temp_command: String,
     pub curve: Vec<(f32, f32)>,
 }
 
 impl FanCurve {
-    pub fn effective_source(&self) -> TempSource {
+    pub fn effective_source(&self) -> SensorSource {
         if let Some(ref source) = self.temp_source {
-            source.clone()
+            if matches!(source, SensorSource::Command { .. }) {
+                SensorSource::Command {
+                    cmd: self.temp_command.clone(),
+                }
+            } else {
+                source.clone()
+            }
         } else if !self.temp_command.is_empty() {
-            TempSource::Command {
+            SensorSource::Command {
                 cmd: self.temp_command.clone(),
             }
         } else {
-            TempSource::Command {
+            SensorSource::Command {
                 cmd: "cat /sys/class/thermal/thermal_zone0/temp | awk '{print $1/1000}'".into(),
             }
         }

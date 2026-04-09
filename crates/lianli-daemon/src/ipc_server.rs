@@ -7,6 +7,7 @@ use crate::rgb_controller::RgbController;
 use crate::service::DaemonEvent;
 use lianli_shared::config::AppConfig;
 use lianli_shared::ipc::{DeviceInfo, IpcRequest, IpcResponse, TelemetrySnapshot};
+use lianli_shared::sensors::Unit;
 use parking_lot::Mutex;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -167,11 +168,14 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>, tx: Send
                     .map(|d| format!("{} (Coolant)", d.name))
                     .unwrap_or_else(|| format!("{device_id} (Coolant)"));
                 sensors.push(lianli_shared::sensors::SensorInfo {
-                    source: lianli_shared::sensors::TempSource::WirelessCoolant {
+                    source: lianli_shared::sensors::SensorSource::WirelessCoolant {
                         device_id: device_id.clone(),
                     },
-                    display_name: display,
-                    current_temp: Some(*temp),
+                    sensor_name: None,
+                    display_name: Some(display),
+                    unit: Unit::C,
+                    divider: 1,
+                    current_value: Some(*temp),
                 });
             }
             drop(ipc_state);
