@@ -349,11 +349,11 @@ pub fn sensor_options_model(
         .filter(|s| !only_temp_sensors || s.unit == Unit::C)
         .enumerate()
         .map(|(i, s)| {
-            let display_name=format!("{}. {}", i + 1, s.get_display_name());
+            let display_name = format!("{}. {}", i + 1, s.get_display_name());
             SharedString::from(display_name)
         })
         .collect();
-    let display_name=format!("{}. {}", items.len()+1, "Custom command");
+    let display_name = format!("{}. {}", items.len() + 1, "Custom command");
     items.push(SharedString::from(display_name));
     ModelRc::new(VecModel::from(items))
 }

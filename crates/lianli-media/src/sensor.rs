@@ -51,7 +51,7 @@ impl SensorAsset {
         descriptor: &SensorDescriptor,
         orientation: f32,
         screen: &ScreenInfo,
-        sensors: &Vec<SensorInfo>,
+        sensors: &[SensorInfo],
     ) -> Result<Arc<Self>, MediaError> {
         let mut ranges = descriptor.gauge_ranges.clone();
         if ranges.is_empty() {
@@ -83,9 +83,9 @@ impl SensorAsset {
             | SensorSourceConfig::NvidiaGpu { .. }
             | SensorSourceConfig::WirelessCoolant { .. } => {
                 let sensor_source = descriptor.source.to_sensor_source();
-                let sensor_info = sensors.iter().find(|s| s.source==sensor_source);
-                let divider =sensor_info.map_or(1, |s| s.divider);
-                match lianli_shared::sensors::resolve_sensor(&sensor_source,divider) {
+                let sensor_info = sensors.iter().find(|s| s.source == sensor_source);
+                let divider = sensor_info.map_or(1, |s| s.divider);
+                match lianli_shared::sensors::resolve_sensor(&sensor_source, divider) {
                     Some(resolved) => SensorSource::Resolved(resolved),
                     None => return Err(MediaError::Sensor("sensor not found on system".into())),
                 }

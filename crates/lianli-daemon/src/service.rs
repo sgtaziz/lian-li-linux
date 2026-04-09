@@ -878,7 +878,7 @@ impl ServiceManager {
                     .and_then(|s| screen_map.get(s).copied())
                     .unwrap_or(ScreenInfo::WIRELESS_LCD);
                 let cfg_key = config_identity(device);
-                match prepare_media_asset(device, cfg.default_fps, &screen, screen.h264,&all_sensors) {
+                match prepare_media_asset(device, cfg.default_fps, &screen, screen.h264, &all_sensors) {
                     Ok(asset_kind) => {
                         let device_id = device.device_id();
                         let asset = MediaAsset{kind: asset_kind, config_key: cfg_key};

@@ -16,7 +16,7 @@ pub struct SysSensor {
     last_global_usage: AtomicU32,
 }
 
-pub static INSTANCE: OnceLock<SysSensor> = OnceLock::new();
+static INSTANCE: OnceLock<SysSensor> = OnceLock::new();
 
 impl SysSensor {
     pub fn init() {

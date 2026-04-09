@@ -56,7 +56,7 @@ pub fn prepare_media_asset(
     default_fps: f32,
     screen: &ScreenInfo,
     h264: bool,
-    all_sensors: &Vec<SensorInfo>,
+    all_sensors: &[SensorInfo],
 ) -> Result<MediaAssetKind, MediaError> {
     match cfg.media_type {
         MediaType::Image => {

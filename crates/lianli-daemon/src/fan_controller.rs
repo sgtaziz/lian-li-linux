@@ -48,7 +48,7 @@ impl FanController {
         let all_sensors = lianli_shared::sensors::enumerate_sensors();
 
         let thread = thread::spawn(move || {
-            fan_control_thread(config, curves, wireless, wired, stop_flag,&all_sensors);
+            fan_control_thread(config, curves, wireless, wired, stop_flag, &all_sensors);
         });
 
         self.thread = Some(thread);
@@ -68,7 +68,7 @@ fn fan_control_thread(
     wireless: Option<Arc<WirelessController>>,
     wired: Arc<HashMap<String, Box<dyn FanDevice>>>,
     stop_flag: Arc<AtomicBool>,
-    all_sensors: &Vec<SensorInfo>,
+    all_sensors: &[SensorInfo],
 ) {
     let update_interval = Duration::from_millis(config.update_interval_ms);
     let mut last_update = Instant::now() - update_interval;
@@ -175,7 +175,7 @@ fn fan_control_thread(
                 continue;
             }
 
-            let speeds = match calculate_fan_speeds(&group.speeds, &curves, &mut sensor_cache, &mut temp_ema,all_sensors) {
+            let speeds = match calculate_fan_speeds(&group.speeds, &curves, &mut sensor_cache, &mut temp_ema, all_sensors) {
                 Ok(speeds) => speeds,
                 Err(err) => {
                     warn!("Fan speed calculation failed for group {group_idx}: {err}");
@@ -258,7 +258,7 @@ fn calculate_fan_speeds(
     curves: &HashMap<String, FanCurve>,
     sensor_cache: &mut HashMap<SensorSource, ResolvedSensor>,
     temp_ema: &mut HashMap<SensorSource, f32>,
-    all_sensors: &Vec<SensorInfo>,
+    all_sensors: &[SensorInfo],
 ) -> Result<[u8; 4]> {
     let mut pwm_values = [0u8; 4];
 
@@ -271,7 +271,7 @@ fn calculate_fan_speeds(
                     .ok_or_else(|| anyhow::anyhow!("Curve '{curve_name}' not found"))?;
 
                 let source = curve.effective_source();
-                let temp = smoothed_temperature(&source, sensor_cache, temp_ema,all_sensors)?;
+                let temp = smoothed_temperature(&source, sensor_cache, temp_ema, all_sensors)?;
                 let speed_percent = interpolate_curve(&curve.curve, temp);
                 let pwm = (speed_percent * 2.55) as u8;
 
@@ -288,14 +288,14 @@ fn smoothed_temperature(
     source: &SensorSource,
     cache: &mut HashMap<SensorSource, ResolvedSensor>,
     ema: &mut HashMap<SensorSource, f32>,
-    all_sensors: &Vec<SensorInfo>,
+    all_sensors: &[SensorInfo],
 ) -> Result<f32> {
     let resolved = match cache.get(source) {
         Some(r) => r.clone(),
         None => {
-            let sensor_info = all_sensors.iter().find(|s| s.source==*source);
-            let divider =sensor_info.map_or(1, |s| s.divider);
-            let r = sensors::resolve_sensor(source,divider).context("sensor not found")?;
+            let sensor_info = all_sensors.iter().find(|s| s.source == *source);
+            let divider = sensor_info.map_or(1, |s| s.divider);
+            let r = sensors::resolve_sensor(source, divider).context("sensor not found")?;
             cache.insert(source.clone(), r.clone());
             r
         }

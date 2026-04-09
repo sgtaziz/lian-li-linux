@@ -278,7 +278,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 w.set_lcd_entries(lcd_model);
                 let lcd_opts = conversions::lcd_device_options(&devices);
                 w.set_lcd_device_options(lcd_opts);
-                w.set_lcd_sensor_options(conversions::sensor_options_model(&sensors,false));
+                w.set_lcd_sensor_options(conversions::sensor_options_model(&sensors, false));
 
                 // Fan curves
                 let curves_model = conversions::fan_curves_to_model(&config.fan_curves, &sensors);
@@ -287,7 +287,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 w.set_curve_names(names_model);
                 let speed_opts = conversions::speed_options_model(&config.fan_curves, true);
                 w.set_fan_speed_options(speed_opts);
-                w.set_fan_sensor_options(conversions::sensor_options_model(&sensors,true));
+                w.set_fan_sensor_options(conversions::sensor_options_model(&sensors, true));
                 w.set_fan_update_interval(fan_update_interval);
 
                 // Fan groups
