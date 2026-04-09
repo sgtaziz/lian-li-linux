@@ -536,15 +536,16 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
                         let fname = file.file_name().to_string_lossy().to_string();
                         if fname.ends_with("_input") {
                             let prefix = fname.strip_suffix("_input").unwrap();
-                            // Match by prefix (new format) or by label file content (old format)
                             if prefix == label {
                                 return Some(ResolvedSensor::SysfsFile { path: file.path(), divider });
                             }
+                            // Old config format: label is human-readable (e.g. "Package id 0")
                             let file_label = std::fs::read_to_string(path.join(format!("{prefix}_label")))
                                 .map(|l| l.trim().to_string())
                                 .unwrap_or_default();
                             if file_label == *label {
-                                return Some(ResolvedSensor::SysfsFile { path: file.path(), divider });
+                                let actual_divider = get_unit(prefix).1;
+                                return Some(ResolvedSensor::SysfsFile { path: file.path(), divider: actual_divider });
                             }
                         }
                     }
