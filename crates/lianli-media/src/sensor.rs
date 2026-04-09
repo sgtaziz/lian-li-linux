@@ -81,7 +81,11 @@ impl SensorAsset {
             SensorSourceConfig::Command { .. }
             | SensorSourceConfig::Hwmon { .. }
             | SensorSourceConfig::NvidiaGpu { .. }
-            | SensorSourceConfig::WirelessCoolant { .. } => {
+            | SensorSourceConfig::WirelessCoolant { .. }
+            | SensorSourceConfig::CpuUsage
+            | SensorSourceConfig::MemUsage
+            | SensorSourceConfig::MemUsed
+            | SensorSourceConfig::MemFree => {
                 let sensor_source = descriptor.source.to_sensor_source();
                 let sensor_info = sensors.iter().find(|s| s.source == sensor_source);
                 let divider = sensor_info.map_or(1, |s| s.divider);

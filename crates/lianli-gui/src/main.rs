@@ -870,7 +870,10 @@ fn wire_lcd_callbacks(
                                     Some(lianli_shared::media::SensorSourceConfig::Command { cmd: cmd.clone() }),
                                 lianli_shared::sensors::SensorSource::WirelessCoolant { device_id } =>
                                     Some(lianli_shared::media::SensorSourceConfig::WirelessCoolant { device_id: device_id.clone() }),
-                                _ => None,
+                                lianli_shared::sensors::SensorSource::CpuUsage => Some(lianli_shared::media::SensorSourceConfig::CpuUsage),
+                                lianli_shared::sensors::SensorSource::MemUsage => Some(lianli_shared::media::SensorSourceConfig::MemUsage),
+                                lianli_shared::sensors::SensorSource::MemUsed => Some(lianli_shared::media::SensorSourceConfig::MemUsed),
+                                lianli_shared::sensors::SensorSource::MemFree => Some(lianli_shared::media::SensorSourceConfig::MemFree),
                             }
                         } else {
                             None
