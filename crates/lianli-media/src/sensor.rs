@@ -71,7 +71,6 @@ impl SensorAsset {
             (None, None) => std::cmp::Ordering::Equal,
         });
 
-
         let (rw, rh) = render_dimensions(screen, orientation);
 
         let template_image: Option<Arc<RgbImage>> = background_image
