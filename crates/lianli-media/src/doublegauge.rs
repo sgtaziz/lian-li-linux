@@ -113,7 +113,7 @@ impl DoublegaugeAsset {
         let dynamic_img =
             ::image::load_from_memory(data).map_err(|e| MediaError::ImageError(e.to_string()))?;
 
-        let dynamic_img = dynamic_img.resize(
+        let dynamic_img = dynamic_img.resize_exact(
             screen.width,
             screen.height,
             ::image::imageops::FilterType::Lanczos3,
