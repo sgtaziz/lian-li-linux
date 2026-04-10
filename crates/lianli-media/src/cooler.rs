@@ -84,6 +84,12 @@ pub struct CoolerAsset {
     screen: ScreenInfo,
     template_image: image::RgbaImage, // Pre-rendered background image
 
+    // Derived once in new() so render_frame doesn't recompute them every tick
+    // and the two paths can't drift apart.
+    scale_x: f32,
+    scale_y: f32,
+    scale_uniform: f32,
+
     font_label: Font<'static>,
 
     sensor_1_failed: AtomicBool,
@@ -311,6 +317,9 @@ impl CoolerAsset {
             sys_data,
             screen: *screen,
             template_image: resized,
+            scale_x: x_scale,
+            scale_y: y_scale,
+            scale_uniform: uniform_scale,
             font_label,
             sensor_1_failed: AtomicBool::new(false),
             sensor_2_failed: AtomicBool::new(false),
@@ -410,9 +419,9 @@ impl CoolerAsset {
 
         let font_label = &self.font_label;
 
-        let x_scale = (self.screen.width as f32) / 480.0;
-        let y_scale = (self.screen.height as f32) / 480.0;
-        let uniform_scale = x_scale.min(y_scale);
+        let x_scale = self.scale_x;
+        let y_scale = self.scale_y;
+        let uniform_scale = self.scale_uniform;
 
         let left_anchor_x = (220.0 * x_scale).round() as i32;
         let box_y = (277.0 * y_scale).round() as i32;

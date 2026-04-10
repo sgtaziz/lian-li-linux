@@ -86,6 +86,12 @@ pub struct DoublegaugeAsset {
     sensor_1_failed: AtomicBool,
     sensor_2_failed: AtomicBool,
 
+    // Derived once in new() so render_frame doesn't recompute them every tick
+    // and the two paths can't drift apart.
+    scale_x: f32,
+    scale_y: f32,
+    scale_uniform: f32,
+
     /// here we store the screen info like width and height
     screen: ScreenInfo,
     // Each time a frame gets redrawn this index is "assigned" to the frame.
@@ -355,6 +361,9 @@ impl DoublegaugeAsset {
             previous_inner_state: Mutex::new(None),
             sensor_1_failed: AtomicBool::new(false),
             sensor_2_failed: AtomicBool::new(false),
+            scale_x: x_scale,
+            scale_y: y_scale,
+            scale_uniform: uniform_scale,
             screen: *screen,
             frame_index: 1.into(),
         }))
@@ -508,11 +517,10 @@ impl DoublegaugeAsset {
         let rgba_green = ::image::Rgba([40, 255, 137, 255]);
         let rgba_blue = ::image::Rgba([32, 209, 255, 255]);
 
-        let x_scale = (self.screen.width as f32) / 400.0;
-        let y_scale = (self.screen.height as f32) / 400.0;
-        let uniform_scale = x_scale.min(y_scale);
+        let x_scale = self.scale_x;
+        let y_scale = self.scale_y;
 
-        let scale = Scale::uniform(70.0 * uniform_scale);
+        let scale = Scale::uniform(70.0 * self.scale_uniform);
 
         let (tw, th, ox, oy, _) =
             get_exact_text_metrics(&self.font, &metric_outer_gauge_text, scale);
