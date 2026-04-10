@@ -1656,7 +1656,8 @@ impl AsyncDoublegaugeRenderer {
     ) -> Self {
 
         let initial = match asset.render_frame(true) {
-            Ok(frame) => frame.unwrap(),
+            Ok(Some(frame)) => frame,
+            Ok(None) => asset.blank_frame(),
             Err(err) => {
                 warn!("Doublegauge initial render failed: {err}");
                 asset.blank_frame()
@@ -1740,7 +1741,8 @@ impl AsyncCoolerRenderer {
     ) -> Self {
 
         let initial = match asset.render_frame(true) {
-            Ok(frame) => frame.unwrap(),
+            Ok(Some(frame)) => frame,
+            Ok(None) => asset.blank_frame(),
             Err(err) => {
                 warn!("Cooler initial render failed: {err}");
                 asset.blank_frame()
