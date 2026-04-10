@@ -31,6 +31,7 @@ export struct LcdEntryData {
     sg_sensor_index: int,
     sensor-command: string,
     sensor-font-path: string,
+    sensor-font-name: string,
     sensor-decimal-places: int,
     update-interval-ms: int,
     sensor-value-font-size: int,
@@ -90,6 +91,7 @@ component LcdConfigCard inherits Card {
     in property <[string]> media-types: ["Image", "Video", "GIF", "Solid Color", "Sensor Gauge", "Custom"];
     in property <[string]> device-options: [];
     in property <[string]> sensor-options: [];
+    in property <[string]> font-options: [];
     // Custom media type — pretty-label list mirrored from the template store.
     // Selection propagates via `update-field(idx, "template_label", label)`,
     // and the Rust handler resolves the label back to the template id.
@@ -257,14 +259,18 @@ component LcdConfigCard inherits Card {
                 }
             }
 
-            // Font path
             VerticalLayout {
                 spacing: 4px;
-                Text { text: "Font Path"; font-size: 11px; color: Theme.text-secondary; }
-                LineEdit {
-                    text: root.lcd.sensor-font-path;
-                    placeholder-text: "/usr/share/fonts/...";
-                    edited(val) => { root.update-field(root.index, "sensor_font_path", val); }
+                Text { text: "Font"; font-size: 11px; color: Theme.text-secondary; }
+                changed-name := Rectangle {
+                    property <string> name: root.lcd.sensor-font-name;
+                    changed name => { font-combo.current-value = self.name; }
+                    font-combo := ComboBox {
+                        width: parent.width;
+                        model: root.font-options;
+                        current-value: root.lcd.sensor-font-name;
+                        selected(val) => { root.update-field(root.index, "sensor_font_name", val); }
+                    }
                 }
             }
 
@@ -577,6 +583,7 @@ export component LcdPage inherits VerticalLayout {
     in property <[LcdEntryData]> lcd-entries: [];
     in property <[string]> device-options: [];
     in property <[string]> sensor-options: [];
+    in property <[string]> font-options: [];
     in property <[string]> template-labels: [];
     in property <bool> has-config: false;
 
@@ -645,6 +652,7 @@ export component LcdPage inherits VerticalLayout {
                 lcd: lcd-entry;
                 device-options: root.device-options;
                 sensor-options: root.sensor-options;
+                font-options: root.font-options;
                 template-labels: root.template-labels;
                 remove(i) => { root.remove-lcd(i); }
                 update-field(i, field, val) => { root.update-lcd-field(i, field, val); }

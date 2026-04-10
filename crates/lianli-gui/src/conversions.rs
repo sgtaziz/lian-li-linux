@@ -185,6 +185,9 @@ pub fn lcd_to_slint(
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
         ),
+        sensor_font_name: SharedString::from(lianli_shared::fonts::font_label_for_path(
+            sensor.and_then(|s| s.font_path.as_deref()),
+        )),
         sensor_decimal_places: sensor.map(|s| s.decimal_places as i32).unwrap_or(0),
         update_interval_ms: lcd.update_interval_ms.unwrap_or(1000) as i32,
         sensor_value_font_size: sensor.map(|s| s.value_font_size as i32).unwrap_or(120),
@@ -415,6 +418,17 @@ pub fn sensor_options_model(
 
 pub fn curve_names_to_model(curves: &[FanCurve]) -> ModelRc<SharedString> {
     let items: Vec<SharedString> = curves.iter().map(|c| SharedString::from(&c.name)).collect();
+    ModelRc::new(VecModel::from(items))
+}
+
+pub fn font_options_model() -> ModelRc<SharedString> {
+    let mut items: Vec<SharedString> =
+        vec![SharedString::from(lianli_shared::fonts::DEFAULT_FONT_LABEL)];
+    items.extend(
+        lianli_shared::fonts::cached_system_fonts()
+            .iter()
+            .map(|f| SharedString::from(f.family.as_str())),
+    );
     ModelRc::new(VecModel::from(items))
 }
 

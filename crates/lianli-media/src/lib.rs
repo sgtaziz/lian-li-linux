@@ -153,4 +153,3 @@ pub fn prepare_media_asset(
         }
     }
 }
-

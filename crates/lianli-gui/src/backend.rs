@@ -292,6 +292,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 let lcd_opts = conversions::lcd_device_options(&devices);
                 w.set_lcd_device_options(lcd_opts);
                 w.set_lcd_sensor_options(conversions::sensor_options_model(&sensors, false));
+                w.set_lcd_font_options(conversions::font_options_model());
                 w.set_lcd_template_labels(conversions::template_labels_model(&templates));
 
                 // Fan curves

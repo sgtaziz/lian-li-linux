@@ -1025,6 +1025,10 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
                                 lcd.sensor.get_or_insert_with(default_sensor).font_path =
                                     Some(std::path::PathBuf::from(val));
                             }
+                            "sensor_font_name" => {
+                                lcd.sensor.get_or_insert_with(default_sensor).font_path =
+                                    lianli_shared::fonts::font_path_for_label(&val);
+                            }
                             "fps" => lcd.fps = Some(val.parse::<f32>().unwrap_or(30.0)),
                             "rgb_r" => {
                                 lcd.rgb.get_or_insert([0, 0, 0])[0] = val.parse().unwrap_or(0)

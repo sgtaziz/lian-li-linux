@@ -92,9 +92,7 @@ impl CustomAsset {
         all_sensors: &[SensorInfo],
     ) -> Result<Arc<Self>, MediaError> {
         let default_path = default_font_path().ok_or_else(|| {
-            MediaError::Sensor(
-                "no system font available; install fontconfig or DejaVu Sans".into(),
-            )
+            MediaError::Sensor("no system font available; install fontconfig or DejaVu Sans".into())
         })?;
         let default_font = load_font_from_disk(&default_path)?;
         let mut fonts: HashMap<PathBuf, Font<'static>> = HashMap::new();

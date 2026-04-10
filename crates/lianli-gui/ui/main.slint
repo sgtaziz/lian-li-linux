@@ -43,6 +43,7 @@ export component MainWindow inherits Window {
     in property <[LcdEntryData]> lcd-entries: [];
     in property <[string]> lcd-device-options: [];
     in property <[string]> lcd-sensor-options: [];
+    in property <[string]> lcd-font-options: [];
     in property <[string]> lcd-template-labels: [];
     in property <bool> has-config: false;
 
@@ -133,6 +134,7 @@ export component MainWindow inherits Window {
                 lcd-entries: root.lcd-entries;
                 device-options: root.lcd-device-options;
                 sensor-options: root.lcd-sensor-options;
+                font-options: root.lcd-font-options;
                 template-labels: root.lcd-template-labels;
                 has-config: root.has-config;
                 add-lcd => { root.add-lcd(); }

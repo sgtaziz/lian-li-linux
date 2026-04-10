@@ -4,11 +4,13 @@
 use crate::conversions;
 use crate::ipc_client;
 use crate::{EditorRange, EditorWidget, MainWindow, Shared, TemplateEditorWindow};
+use lianli_shared::fonts::{
+    cached_system_fonts, font_label_for_path, font_path_for_label, DEFAULT_FONT_LABEL,
+};
 use lianli_shared::ipc::IpcRequest;
 use lianli_shared::media::{SensorRange, SensorSourceConfig};
 use lianli_shared::screen::{screen_preset_label, screen_presets};
 use lianli_shared::sensors::{SensorInfo, SensorSource};
-use lianli_shared::fonts::{list_system_fonts, SystemFont};
 use lianli_shared::template::{
     BarOrientation, FontRef, ImageFit, LcdTemplate, TemplateBackground, TextAlign, Widget,
     WidgetKind,
@@ -16,13 +18,7 @@ use lianli_shared::template::{
 use parking_lot::Mutex as PLMutex;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-
-static SYSTEM_FONTS: OnceLock<Vec<SystemFont>> = OnceLock::new();
-
-fn cached_system_fonts() -> &'static [SystemFont] {
-    SYSTEM_FONTS.get_or_init(list_system_fonts).as_slice()
-}
+use std::sync::Arc;
 
 #[derive(Debug, Default)]
 pub struct EditorState {
@@ -52,6 +48,14 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
 
     let sensors = shared.lock().unwrap().available_sensors.clone();
     editor.set_sensor_options(conversions::sensor_options_model(&sensors, false));
+
+    let mut font_labels: Vec<SharedString> = vec![SharedString::from(DEFAULT_FONT_LABEL)];
+    font_labels.extend(
+        cached_system_fonts()
+            .iter()
+            .map(|f| SharedString::from(f.family.as_str())),
+    );
+    editor.set_font_names(ModelRc::new(VecModel::from(font_labels)));
 
     {
         let editor_state = editor_state.clone();
@@ -558,7 +562,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             align,
         } => {
             out.text = SharedString::from(text.as_str());
-            out.font_name = SharedString::from(font_ref_to_label(font, cached_system_fonts()));
+            out.font_name = SharedString::from(font_ref_to_label(font));
             out.font_size = *font_size;
             out.color_r = color[0] as i32;
             out.color_g = color[1] as i32;
@@ -581,7 +585,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             out.source_index = sensor_index_for_source(source, sensors);
             out.format = SharedString::from(format.as_str());
             out.unit = SharedString::from(unit.as_str());
-            out.font_name = SharedString::from(font_ref_to_label(font, cached_system_fonts()));
+            out.font_name = SharedString::from(font_ref_to_label(font));
             out.font_size = *font_size;
             out.color_r = color[0] as i32;
             out.color_g = color[1] as i32;
@@ -703,32 +707,14 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
     out
 }
 
-const DEFAULT_FONT_LABEL: &str = "(Default)";
-
-fn font_ref_to_label(f: &FontRef, fonts: &[SystemFont]) -> String {
-    let Some(p) = &f.path else {
-        return DEFAULT_FONT_LABEL.to_string();
-    };
-    fonts
-        .iter()
-        .find(|sf| sf.path == *p)
-        .map(|sf| sf.family.clone())
-        .unwrap_or_else(|| {
-            p.file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| p.display().to_string())
-        })
+fn font_ref_to_label(f: &FontRef) -> String {
+    font_label_for_path(f.path.as_deref())
 }
 
-fn label_to_font_ref(label: &str, fonts: &[SystemFont]) -> FontRef {
-    if label == DEFAULT_FONT_LABEL || label.is_empty() {
-        return FontRef { path: None };
+fn label_to_font_ref(label: &str) -> FontRef {
+    FontRef {
+        path: font_path_for_label(label),
     }
-    let path = fonts
-        .iter()
-        .find(|sf| sf.family == label)
-        .map(|sf| sf.path.clone());
-    FontRef { path }
 }
 
 fn text_align_name(a: TextAlign) -> &'static str {
@@ -920,7 +906,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             align,
         } => match field {
             "text" => *text = val.to_string(),
-            "font" => *font = label_to_font_ref(val, cached_system_fonts()),
+            "font" => *font = label_to_font_ref(val),
             "font_size" => {
                 if let Ok(v) = val.parse() {
                     *font_size = v;
@@ -948,7 +934,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "text" => {}
             "format" => *format = val.to_string(),
             "unit" => *unit = val.to_string(),
-            "font" => *font = label_to_font_ref(val, cached_system_fonts()),
+            "font" => *font = label_to_font_ref(val),
             "font_size" => {
                 if let Ok(v) = val.parse() {
                     *font_size = v;

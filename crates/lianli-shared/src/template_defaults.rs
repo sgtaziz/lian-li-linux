@@ -5,8 +5,8 @@
 use crate::media::{SensorRange, SensorSourceConfig};
 use crate::sensors::{find_default_cpu_temp, SensorInfo, SensorSource};
 use crate::template::{
-    BarOrientation, BuiltinAsset, FontRef, LcdTemplate, TemplateBackground, TextAlign,
-    Widget, WidgetKind,
+    BarOrientation, BuiltinAsset, FontRef, LcdTemplate, TemplateBackground, TextAlign, Widget,
+    WidgetKind,
 };
 
 pub const BUILTIN_COOLER_ID: &str = "cooler-default";
