@@ -1,3 +1,16 @@
+// Heads-up before you touch anything in here:
+//
+// Every coordinate in this file is tuned for a 480x480 panel and the bundled
+// cooler.png. Scales are screen.dim / 480, label and gauge positions are
+// baked-in pixel offsets, and the layout will stretch (not letterbox) on
+// non-square panels. Swapping in a background of a different size will land
+// widgets in the wrong place — when we let users pick their own backgrounds we
+// will need the layout coords to come from the asset, not from this file.
+//
+// The cooler.png, thermometer.png, and the bundled fonts are also pulled in
+// with include_bytes!, which adds ~700 KB to the daemon binary. Same redesign
+// that makes backgrounds configurable should move these onto disk too.
+
 use super::common::{
     apply_orientation, encode_jpeg, get_exact_text_metrics, hsl_to_rgb, MediaError,
     FONT_DATA_DIGITAL_7, FONT_DATA_LABEL,

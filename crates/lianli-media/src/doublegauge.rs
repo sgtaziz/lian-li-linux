@@ -1,3 +1,15 @@
+// Same caveat as cooler.rs: every coordinate here is tuned for a 400x400 panel
+// and the bundled gauge.jpg. Scales are screen.dim / 400, arc centers come
+// from the screen midpoint, label and value-text positions are baked-in pixel
+// offsets, and the layout will stretch (not letterbox) on non-square panels.
+// Swapping the background for one of a different size will misplace the arcs
+// and labels — when we let users pick their own, layout coords need to come
+// from the asset.
+//
+// The gauge.jpg and Victor Mono font are pulled in with include_bytes!, part
+// of the ~700 KB of assets baked into the daemon binary across this and
+// cooler.rs.
+
 use super::common::MediaError;
 use super::common::{apply_orientation, encode_jpeg, get_exact_text_metrics, FONT_DATA};
 use image::{imageops, DynamicImage, ImageBuffer, Pixel, Rgb, RgbImage, Rgba, RgbaImage};
