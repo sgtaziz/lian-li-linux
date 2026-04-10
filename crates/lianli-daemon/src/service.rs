@@ -17,7 +17,8 @@ use lianli_devices::winusb_lcd::WinUsbLcdDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_media::sensor::FrameInfo;
 use lianli_media::{
-    prepare_media_asset, CoolerAsset, DoublegaugeAsset, MediaAsset, MediaAssetKind, SensorAsset,
+    prepare_media_asset, CoolerAsset, CustomAsset, DoublegaugeAsset, MediaAsset, MediaAssetKind,
+    SensorAsset,
 };
 use lianli_shared::config::HidDriver;
 use lianli_shared::config::{config_identity, AppConfig, ConfigKey};
@@ -1547,6 +1548,11 @@ enum MediaRuntime {
         cached_frame: Vec<u8>,
         sent_frame_index: usize,
     },
+    Custom {
+        renderer: Arc<AsyncCustomRenderer>,
+        cached_frame: Vec<u8>,
+        sent_frame_index: usize,
+    },
 }
 
 struct AsyncSensorRenderer {
@@ -1863,6 +1869,86 @@ impl Drop for AsyncCoolerRenderer {
     }
 }
 
+struct AsyncCustomRenderer {
+    current_frame: Arc<Mutex<FrameInfo>>,
+    stop_flag: Arc<AtomicBool>,
+    _thread: Option<JoinHandle<()>>,
+}
+
+impl AsyncCustomRenderer {
+    fn new(
+        tx: Option<Sender<DaemonEvent>>,
+        asset: Arc<CustomAsset>,
+        baseasset: Arc<MediaAsset>,
+    ) -> Self {
+        let initial = match asset.render_frame(true) {
+            Ok(Some(frame)) => frame,
+            Ok(None) => asset.blank_frame(),
+            Err(err) => {
+                warn!("Custom initial render failed: {err}");
+                asset.blank_frame()
+            }
+        };
+
+        let current_frame = Arc::new(Mutex::new(initial));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let update_interval = asset.update_interval();
+
+        let asset_clone = Arc::clone(&asset);
+        let frame_clone = Arc::clone(&current_frame);
+        let stop_clone = Arc::clone(&stop_flag);
+
+        let asset_for_thread = Arc::clone(&baseasset);
+        let tx_for_thread = tx.clone();
+
+        let thread = thread::spawn(move || {
+            while !stop_clone.load(Ordering::Relaxed) {
+                thread::sleep(update_interval);
+                if stop_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                match asset_clone.render_frame(false) {
+                    Ok(Some(new_frame)) => {
+                        *frame_clone.lock() = new_frame;
+                        if let Some(ref tx) = tx_for_thread {
+                            let event = DaemonEvent::FrameFinished {
+                                asset: Arc::clone(&asset_for_thread),
+                            };
+                            if tx.send(event).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!("Custom background render failed: {err}");
+                    }
+                }
+            }
+        });
+
+        Self {
+            current_frame,
+            stop_flag,
+            _thread: Some(thread),
+        }
+    }
+
+    fn get_frame_index(&self) -> usize {
+        self.current_frame.lock().frame_index
+    }
+
+    fn get_current_frame(&self) -> Vec<u8> {
+        self.current_frame.lock().data.clone()
+    }
+}
+
+impl Drop for AsyncCustomRenderer {
+    fn drop(&mut self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+    }
+}
+
 impl MediaRuntime {
     fn from_asset(asset: Arc<MediaAsset>, tx: Option<Sender<DaemonEvent>>) -> Self {
         match &asset.kind {
@@ -1931,6 +2017,22 @@ impl MediaRuntime {
                     sent_frame_index: 0,
                 }
             }
+            MediaAssetKind::Custom {
+                asset: custom_asset,
+            } => {
+                let renderer = Arc::new(AsyncCustomRenderer::new(
+                    tx,
+                    Arc::clone(custom_asset),
+                    Arc::clone(&asset),
+                ));
+
+                let cached_frame = renderer.get_current_frame();
+                Self::Custom {
+                    renderer,
+                    cached_frame,
+                    sent_frame_index: 0,
+                }
+            }
         }
     }
 
@@ -1980,6 +2082,20 @@ impl MediaRuntime {
                 Some(cached_frame.as_slice())
             }
             MediaRuntime::Cooler {
+                renderer,
+                cached_frame,
+                sent_frame_index,
+                ..
+            } => {
+                let rendered_frame_index = renderer.get_frame_index();
+                if rendered_frame_index <= *sent_frame_index {
+                    return None;
+                }
+                *cached_frame = renderer.get_current_frame();
+                *sent_frame_index = rendered_frame_index;
+                Some(cached_frame.as_slice())
+            }
+            MediaRuntime::Custom {
                 renderer,
                 cached_frame,
                 sent_frame_index,

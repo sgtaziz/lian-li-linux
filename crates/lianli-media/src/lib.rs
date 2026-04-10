@@ -1,5 +1,6 @@
 pub mod common;
 pub mod cooler;
+pub mod custom;
 pub mod doublegauge;
 pub mod image;
 pub mod sensor;
@@ -7,6 +8,7 @@ pub mod video;
 
 pub use common::MediaError;
 pub use cooler::CoolerAsset;
+pub use custom::CustomAsset;
 pub use doublegauge::DoublegaugeAsset;
 use lianli_shared::sensors::SensorInfo;
 pub use sensor::SensorAsset;
@@ -14,7 +16,7 @@ pub use sensor::SensorAsset;
 use lianli_shared::config::{ConfigKey, LcdConfig};
 use lianli_shared::media::{MediaType, SensorSourceConfig};
 use lianli_shared::screen::ScreenInfo;
-use lianli_shared::template::{LcdTemplate, TemplateBackground};
+use lianli_shared::template::LcdTemplate;
 use lianli_shared::template_defaults::builtin_template;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,6 +51,9 @@ pub enum MediaAssetKind {
     },
     Cooler {
         asset: Arc<CoolerAsset>,
+    },
+    Custom {
+        asset: Arc<CustomAsset>,
     },
 }
 
@@ -183,9 +188,6 @@ pub fn prepare_media_asset(
             Ok(MediaAssetKind::Cooler { asset })
         }
         MediaType::Custom => {
-            // Commit 1 stub: resolve the template id and render a single solid
-            // background frame. The full widget-composition renderer lands in
-            // Commit 2 as `CustomAsset`.
             let template_id = cfg.template_id.as_deref().ok_or_else(|| {
                 MediaError::InvalidConfig("custom entry requires a 'template_id' field".into())
             })?;
@@ -194,16 +196,8 @@ pub fn prepare_media_asset(
                 .ok_or_else(|| {
                     MediaError::InvalidConfig(format!("unknown template id '{template_id}'"))
                 })?;
-            let rgb = match template.background {
-                TemplateBackground::Color { rgb } => rgb,
-                // Commit 1: treat image backgrounds as black until the widget
-                // renderer lands in Commit 2.
-                TemplateBackground::Image { .. } => [0, 0, 0],
-            };
-            let frame = image::build_color_frame(rgb, screen);
-            Ok(MediaAssetKind::Static {
-                frame: Arc::new(frame),
-            })
+            let asset = CustomAsset::new(&template, cfg.orientation, screen, all_sensors)?;
+            Ok(MediaAssetKind::Custom { asset })
         }
     }
 }

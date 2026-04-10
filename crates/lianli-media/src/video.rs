@@ -1,7 +1,7 @@
 use super::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
 use image::codecs::gif::GifDecoder;
 use image::imageops::FilterType;
-use image::{load_from_memory, AnimationDecoder, DynamicImage};
+use image::{load_from_memory, AnimationDecoder, DynamicImage, RgbaImage};
 use lianli_shared::screen::ScreenInfo;
 use std::fs::File;
 use std::path::Path;
@@ -86,6 +86,77 @@ pub fn build_gif_frames(
     }
 
     Ok((encoded, durations))
+}
+
+/// Decode a video or GIF into a sequence of `RgbaImage` frames at the target
+/// resolution. Used by the Custom template Video widget where frames are
+/// composited per-tick rather than streamed raw to the device.
+///
+/// For GIFs, falls through to the GIF decoder; for anything else we call
+/// ffmpeg. Returns a single per-frame `Duration` derived from `fps` (GIFs
+/// keep their own per-frame delays).
+pub fn decode_frames_to_rgba(
+    path: &Path,
+    fps: f32,
+    width: u32,
+    height: u32,
+) -> Result<(Vec<RgbaImage>, Vec<Duration>), MediaError> {
+    let is_gif = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("gif"))
+        .unwrap_or(false);
+
+    if is_gif {
+        let file = File::open(path)?;
+        let decoder = GifDecoder::new(file)?;
+        let mut frames = Vec::new();
+        let mut durations = Vec::new();
+        for frame in decoder.into_frames() {
+            let frame = frame?;
+            let (numer, denom) = frame.delay().numer_denom_ms();
+            let millis = if denom == 0 {
+                numer as f32
+            } else {
+                numer as f32 / denom as f32
+            };
+            let duration = Duration::from_millis(millis.max(10.0) as u64);
+            let rgba = frame.into_buffer();
+            let resized = image::imageops::resize(&rgba, width, height, FilterType::Lanczos3);
+            frames.push(resized);
+            durations.push(duration);
+        }
+        if frames.is_empty() {
+            return Err(MediaError::EmptyVideo);
+        }
+        return Ok((frames, durations));
+    }
+
+    let temp = TempDir::new()?;
+    let output_pattern = temp.path().join("frame_%05d.jpg");
+    run_ffmpeg(path, fps, &output_pattern, width, height)?;
+
+    let mut entries: Vec<_> = std::fs::read_dir(temp.path())?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "jpg").unwrap_or(false))
+        .collect();
+    entries.sort();
+
+    if entries.is_empty() {
+        return Err(MediaError::EmptyVideo);
+    }
+
+    let mut frames = Vec::with_capacity(entries.len());
+    for frame_path in entries {
+        let data = std::fs::read(&frame_path)?;
+        let img = load_from_memory(&data)?;
+        frames.push(img.to_rgba8());
+    }
+
+    let interval = Duration::from_secs_f32(1.0 / fps.max(1.0));
+    let durations = vec![interval; frames.len()];
+    Ok((frames, durations))
 }
 
 pub fn encode_h264(

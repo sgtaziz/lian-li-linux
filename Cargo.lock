@@ -2745,6 +2745,7 @@ name = "lianli-daemon"
 version = "0.3.2"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "hidapi",
  "lianli-devices",

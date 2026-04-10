@@ -6,8 +6,10 @@
 use crate::rgb_controller::RgbController;
 use crate::service::DaemonEvent;
 use crate::template_store;
+use lianli_media::CustomAsset;
 use lianli_shared::config::AppConfig;
 use lianli_shared::ipc::{DeviceInfo, IpcRequest, IpcResponse, TelemetrySnapshot};
+use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::Unit;
 use lianli_shared::template::LcdTemplate;
 use parking_lot::Mutex;
@@ -439,19 +441,50 @@ fn handle_request(
         }
 
         IpcRequest::RenderTemplatePreview {
-            template: _template,
-            width: _width,
-            height: _height,
+            template,
+            width,
+            height,
         } => {
-            // Commit 1 stub: real rendering lands in Commit 2 when CustomAsset
-            // exists. Commit 4's editor is the only caller of this endpoint.
-            IpcResponse::error("template preview rendering not implemented yet")
+            // Synthesize a ScreenInfo matching the requested preview size. The
+            // editor decides which device preset to render against; here we
+            // just honor those dimensions and use a reasonable max_payload so
+            // the JPEG encoder doesn't reject large previews.
+            let preview_screen = ScreenInfo {
+                width,
+                height,
+                max_fps: 30,
+                jpeg_quality: 90,
+                max_payload: 4 * 1024 * 1024,
+                device_rotation: 0,
+                h264: false,
+            };
+            let all_sensors = lianli_shared::sensors::enumerate_sensors();
+            match CustomAsset::new(&template, 0.0, &preview_screen, &all_sensors) {
+                Ok(asset) => match asset.render_frame(true) {
+                    Ok(Some(frame)) => IpcResponse::ok(serde_json::json!({
+                        "jpeg_base64": base64_encode(&frame.data),
+                    })),
+                    Ok(None) => {
+                        let blank = asset.blank_frame();
+                        IpcResponse::ok(serde_json::json!({
+                            "jpeg_base64": base64_encode(&blank.data),
+                        }))
+                    }
+                    Err(e) => IpcResponse::error(format!("preview render failed: {e}")),
+                },
+                Err(e) => IpcResponse::error(format!("preview asset creation failed: {e}")),
+            }
         }
 
         IpcRequest::Subscribe => {
             IpcResponse::error("Subscribe not yet implemented; use polling via GetTelemetry")
         }
     }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 fn write_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
