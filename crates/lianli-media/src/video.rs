@@ -88,13 +88,6 @@ pub fn build_gif_frames(
     Ok((encoded, durations))
 }
 
-/// Decode a video or GIF into a sequence of `RgbaImage` frames at the target
-/// resolution. Used by the Custom template Video widget where frames are
-/// composited per-tick rather than streamed raw to the device.
-///
-/// For GIFs, falls through to the GIF decoder; for anything else we call
-/// ffmpeg. Returns a single per-frame `Duration` derived from `fps` (GIFs
-/// keep their own per-frame delays).
 pub fn decode_frames_to_rgba(
     path: &Path,
     fps: f32,

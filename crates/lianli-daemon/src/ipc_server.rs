@@ -36,7 +36,6 @@ pub struct DaemonState {
     pub telemetry: TelemetrySnapshot,
     /// RGB controller, set once devices are opened.
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
-    /// User-defined LCD templates (excluding built-ins).
     pub user_templates: Vec<LcdTemplate>,
 }
 
@@ -52,7 +51,6 @@ impl DaemonState {
         }
     }
 
-    /// Path of the `lcd_templates.json` file, derived from `config_path`.
     pub fn templates_path(&self) -> PathBuf {
         template_store::templates_path_for(&self.config_path)
     }
@@ -420,7 +418,8 @@ fn handle_request(
 
         IpcRequest::GetLcdTemplates => {
             let state = state.lock();
-            let all = template_store::all_templates(&state.user_templates);
+            let sensors = lianli_shared::sensors::enumerate_sensors();
+            let all = template_store::all_templates(&state.user_templates, &sensors);
             IpcResponse::ok(&all)
         }
 
@@ -429,8 +428,6 @@ fn handle_request(
             let path = state.templates_path();
             match template_store::save_user_templates(&path, &templates) {
                 Ok(()) => {
-                    // Reload from disk to apply the built-in filtering done in
-                    // save_user_templates, so in-memory state matches disk.
                     state.user_templates = template_store::load_user_templates(&path);
                     tx.send(DaemonEvent::IpcUpdate).ok();
                     info!("LCD templates updated via IPC");
@@ -445,10 +442,6 @@ fn handle_request(
             width,
             height,
         } => {
-            // Synthesize a ScreenInfo matching the requested preview size. The
-            // editor decides which device preset to render against; here we
-            // just honor those dimensions and use a reasonable max_payload so
-            // the JPEG encoder doesn't reject large previews.
             let preview_screen = ScreenInfo {
                 width,
                 height,

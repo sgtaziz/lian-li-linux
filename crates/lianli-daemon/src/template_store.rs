@@ -1,26 +1,23 @@
-//! Persistence + resolution for LCD templates.
-//!
-//! The daemon owns `lcd_templates.json` next to `config.json`. Built-in
-//! templates live in `lianli_shared::template_defaults` (as `const` in code)
-//! and are *not* written to the file — they're merged in at read time.
-//! Editing a built-in in the GUI triggers a "Duplicate to edit" flow that
-//! writes a user-owned copy with a new id into the file.
+//! Persistence + resolution for LCD templates. Built-ins live in
+//! `lianli_shared::template_defaults` and are merged in at read time.
 
 use anyhow::{Context, Result};
+use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
-use lianli_shared::template_defaults::{builtin_template, builtin_templates, is_builtin_id};
+use lianli_shared::template_defaults::{
+    builtin_template_resolved, builtin_templates, is_builtin_id, BUILTIN_COOLER_ID,
+    BUILTIN_DOUBLEGAUGE_ID,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
-/// File format for `lcd_templates.json`.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct TemplateFile {
     #[serde(default)]
     templates: Vec<LcdTemplate>,
 }
 
-/// Derive the templates file path from the config file path.
 pub fn templates_path_for(config_path: &Path) -> PathBuf {
     config_path
         .parent()
@@ -29,33 +26,27 @@ pub fn templates_path_for(config_path: &Path) -> PathBuf {
         .join("lcd_templates.json")
 }
 
-/// Load user templates from disk. Missing file → empty list (not an error).
-/// Malformed file → logs warning and returns empty list so the daemon still
-/// boots with built-ins available.
 pub fn load_user_templates(path: &Path) -> Vec<LcdTemplate> {
     if !path.exists() {
         return Vec::new();
     }
     match fs::read_to_string(path) {
         Ok(json) => match serde_json::from_str::<TemplateFile>(&json) {
-            Ok(file) => {
-                // Silently drop any user templates that shadow built-in ids —
-                // built-ins are reserved and resolved first.
-                file.templates
-                    .into_iter()
-                    .filter(|t| {
-                        if is_builtin_id(&t.id) {
-                            warn!(
-                                "Ignoring user template with reserved built-in id '{}'",
-                                t.id
-                            );
-                            false
-                        } else {
-                            true
-                        }
-                    })
-                    .collect()
-            }
+            Ok(file) => file
+                .templates
+                .into_iter()
+                .filter(|t| {
+                    if is_builtin_id(&t.id) {
+                        warn!(
+                            "Ignoring user template with reserved built-in id '{}'",
+                            t.id
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .collect(),
             Err(e) => {
                 warn!("Failed to parse {}: {e}", path.display());
                 Vec::new()
@@ -68,8 +59,6 @@ pub fn load_user_templates(path: &Path) -> Vec<LcdTemplate> {
     }
 }
 
-/// Write user templates to disk. Built-in templates are filtered out on save
-/// so the file only ever contains user content.
 pub fn save_user_templates(path: &Path, templates: &[LcdTemplate]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -87,17 +76,25 @@ pub fn save_user_templates(path: &Path, templates: &[LcdTemplate]) -> Result<()>
     Ok(())
 }
 
-/// Full template list visible to the GUI: built-ins first, then user entries.
-pub fn all_templates(user: &[LcdTemplate]) -> Vec<LcdTemplate> {
-    let mut out = builtin_templates();
+pub fn all_templates(user: &[LcdTemplate], sensors: &[SensorInfo]) -> Vec<LcdTemplate> {
+    let mut out: Vec<LcdTemplate> = [BUILTIN_COOLER_ID, BUILTIN_DOUBLEGAUGE_ID]
+        .iter()
+        .filter_map(|id| {
+            builtin_template_resolved(id, sensors)
+                .or_else(|| builtin_templates().into_iter().find(|t| &t.id == id))
+        })
+        .collect();
     out.extend(user.iter().cloned());
     out
 }
 
-/// Resolve a template id against the combined built-in + user set.
-#[allow(dead_code)] // used by Commit 2+ in the real CustomAsset renderer path
-pub fn resolve_template(id: &str, user: &[LcdTemplate]) -> Option<LcdTemplate> {
-    if let Some(t) = builtin_template(id) {
+#[allow(dead_code)]
+pub fn resolve_template(
+    id: &str,
+    user: &[LcdTemplate],
+    sensors: &[SensorInfo],
+) -> Option<LcdTemplate> {
+    if let Some(t) = builtin_template_resolved(id, sensors) {
         return Some(t);
     }
     user.iter().find(|t| t.id == id).cloned()

@@ -21,7 +21,31 @@ use lianli_media::{
     SensorAsset,
 };
 use lianli_shared::config::HidDriver;
-use lianli_shared::config::{config_identity, AppConfig, ConfigKey};
+use lianli_shared::config::{config_identity, AppConfig, ConfigKey, LcdConfig};
+use lianli_shared::sensors::SensorInfo;
+use lianli_shared::template::LcdTemplate;
+use lianli_shared::template_defaults::builtin_template_resolved;
+
+fn asset_cache_key(
+    device: &LcdConfig,
+    user_templates: &[LcdTemplate],
+    sensors: &[SensorInfo],
+) -> ConfigKey {
+    let base = config_identity(device);
+    if device.media_type != MediaType::Custom {
+        return base;
+    }
+    let Some(id) = device.template_id.as_deref() else {
+        return base;
+    };
+    let resolved = builtin_template_resolved(id, sensors)
+        .or_else(|| user_templates.iter().find(|t| t.id == id).cloned());
+    let Some(tpl) = resolved else {
+        return base;
+    };
+    let body = serde_json::to_string(&tpl).unwrap_or_default();
+    format!("{base}|tpl:{body}")
+}
 use lianli_shared::device_id::DeviceFamily;
 use lianli_shared::ipc::DeviceInfo;
 use lianli_shared::media::MediaType;
@@ -36,7 +60,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -854,8 +878,6 @@ impl ServiceManager {
     }
 
     fn load_config(&mut self, tx: Sender<DaemonEvent>) -> bool {
-        // Reload user LCD templates alongside the main config. Missing file →
-        // empty list (built-ins still resolvable).
         let templates_path = template_store::templates_path_for(&self.config_path);
         let user_templates = template_store::load_user_templates(&templates_path);
         for t in &user_templates {
@@ -883,10 +905,6 @@ impl ServiceManager {
     }
 
     fn prepare_media_assets(&mut self, tx: Sender<DaemonEvent>) {
-        self.media_assets.clear();
-
-        // Build a serial to ScreenInfo map from currently connected devices so each
-        // LCD gets its correct native resolution (e.g., H2 = 480×480, not 400×400).
         let screen_map: HashMap<String, ScreenInfo> = enumerate_devices()
             .unwrap_or_default()
             .into_iter()
@@ -900,16 +918,35 @@ impl ServiceManager {
         let all_sensors = lianli_shared::sensors::enumerate_sensors();
         let user_templates = self.ipc_state.lock().user_templates.clone();
 
+        // Cache previous assets by their content key so reloads that don't
+        // change a given LCD's config can reuse already-prepared media (videos
+        // are particularly expensive — ffmpeg can take ~10s).
+        let prev_by_key: HashMap<ConfigKey, Arc<MediaAsset>> = self
+            .media_assets
+            .values()
+            .map(|a| (a.config_key.clone(), Arc::clone(a)))
+            .collect();
+        self.media_assets.clear();
+
         if let Some(cfg) = &self.config {
             for (idx, device) in cfg.lcds.iter().enumerate() {
-                // Look up screen info by serial; fall back to WIRELESS_LCD (400×400) for
-                // devices not currently connected or without a matching serial.
                 let screen = device
                     .serial
                     .as_ref()
                     .and_then(|s| screen_map.get(s).copied())
                     .unwrap_or(ScreenInfo::WIRELESS_LCD);
-                let cfg_key = config_identity(device);
+                let cfg_key = asset_cache_key(device, &user_templates, &all_sensors);
+                let device_id = device.device_id();
+
+                if let Some(existing) = prev_by_key.get(&cfg_key) {
+                    self.media_assets.insert(idx, Arc::clone(existing));
+                    tx.send(DaemonEvent::FrameFinished {
+                        asset: Arc::clone(existing),
+                    })
+                    .ok();
+                    continue;
+                }
+
                 match prepare_media_asset(
                     device,
                     cfg.default_fps,
@@ -919,7 +956,6 @@ impl ServiceManager {
                     &user_templates,
                 ) {
                     Ok(asset_kind) => {
-                        let device_id = device.device_id();
                         let asset = MediaAsset {
                             kind: asset_kind,
                             config_key: cfg_key,
@@ -952,7 +988,7 @@ impl ServiceManager {
                         tx.send(DaemonEvent::FrameFinished { asset: asset_arc })
                             .ok();
                     }
-                    Err(err) => warn!("Skipping LCD[{cfg_key}] media: {err}"),
+                    Err(err) => warn!("Skipping LCD[{device_id}] media: {err}"),
                 }
             }
         }
@@ -1045,7 +1081,7 @@ impl ServiceManager {
                     }
                 };
 
-                let cfg_key = config_identity(device_cfg);
+                let cfg_key = asset.config_key.clone();
                 if let Some(mut existing) = self.targets.remove(&cfg_idx) {
                     if existing.matches(&candidate.device_id, &cfg_key) {
                         new_targets.insert(cfg_idx, existing);
@@ -1902,10 +1938,18 @@ impl AsyncCustomRenderer {
         let tx_for_thread = tx.clone();
 
         let thread = thread::spawn(move || {
+            let mut next_deadline = Instant::now() + update_interval;
             while !stop_clone.load(Ordering::Relaxed) {
-                thread::sleep(update_interval);
+                let now = Instant::now();
+                if now < next_deadline {
+                    thread::sleep(next_deadline - now);
+                }
                 if stop_clone.load(Ordering::Relaxed) {
                     break;
+                }
+                next_deadline += update_interval;
+                if next_deadline < Instant::now() {
+                    next_deadline = Instant::now() + update_interval;
                 }
                 match asset_clone.render_frame(false) {
                     Ok(Some(new_frame)) => {

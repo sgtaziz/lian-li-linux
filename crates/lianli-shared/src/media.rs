@@ -88,6 +88,12 @@ impl SensorSourceConfig {
 pub struct SensorRange {
     pub max: Option<f32>,
     pub color: [u8; 3],
+    #[serde(default = "default_sensor_range_alpha")]
+    pub alpha: u8,
+}
+
+fn default_sensor_range_alpha() -> u8 {
+    255
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -302,14 +308,17 @@ fn default_ranges() -> Vec<SensorRange> {
         SensorRange {
             max: Some(50.0),
             color: [0, 200, 0],
+            alpha: 255,
         },
         SensorRange {
             max: Some(80.0),
             color: [220, 140, 0],
+            alpha: 255,
         },
         SensorRange {
             max: None,
             color: [220, 0, 0],
+            alpha: 255,
         },
     ]
 }

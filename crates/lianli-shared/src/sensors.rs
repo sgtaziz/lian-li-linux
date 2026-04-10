@@ -106,6 +106,35 @@ pub enum ResolvedSensor {
     Constant(f32),
 }
 
+/// Picks the most likely "CPU control temp" sensor — k10temp's `Tctl` /
+/// coretemp's `Package id 0` first, then any other CPU temp sensor as a
+/// fallback. Returns `None` if no CPU temp is exposed.
+pub fn find_default_cpu_temp(sensors: &[SensorInfo]) -> Option<SensorSource> {
+    let cpu_temps: Vec<&SensorInfo> = sensors
+        .iter()
+        .filter(|s| {
+            s.unit == Unit::C
+                && matches!(
+                    &s.source,
+                    SensorSource::Hwmon { name, .. } if name == "k10temp" || name == "coretemp"
+                )
+        })
+        .collect();
+
+    cpu_temps
+        .iter()
+        .find(|s| {
+            if let SensorSource::Hwmon { label, .. } = &s.source {
+                let l = label.to_lowercase();
+                l.contains("tctl") || l.contains("package id 0")
+            } else {
+                false
+            }
+        })
+        .or_else(|| cpu_temps.first())
+        .map(|s| s.source.clone())
+}
+
 pub fn enumerate_sensors() -> Vec<SensorInfo> {
     let mut sensors = Vec::new();
 

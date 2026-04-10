@@ -1,43 +1,81 @@
-//! Built-in `LcdTemplate`s shipped with the software.
-//!
-//! Built-ins live here (not in `lcd_templates.json`) so they're always fresh,
-//! upgradable with software updates, and safe from accidental corruption.
-//! Editing a built-in in the GUI triggers a "Duplicate to edit" flow that
-//! clones the template into the user file under a new id.
-//!
-//! The ids `cooler-default` and `doublegauge-default` approximate the
-//! existing `MediaType::Cooler` and `MediaType::Doublegauge` renderers so
-//! users can migrate between the two with minimal visual difference. Exact
-//! pixel parity is not guaranteed — the legacy renderers bake custom
-//! thermometers and per-core separators that the declarative widget system
-//! approximates rather than reproduces verbatim.
+//! Built-in `LcdTemplate`s shipped with the software. Editing a built-in in
+//! the GUI triggers a "Duplicate to edit" flow so the originals stay pristine
+//! and survive software upgrades.
 
 use crate::media::{SensorRange, SensorSourceConfig};
+use crate::sensors::{find_default_cpu_temp, SensorInfo, SensorSource};
 use crate::template::{
-    BarOrientation, BuiltinFont, FontRef, LcdTemplate, TemplateBackground, TemplateOrientation,
-    TextAlign, Widget, WidgetKind,
+    BarOrientation, BuiltinAsset, BuiltinFont, FontRef, LcdTemplate, TemplateBackground, TextAlign,
+    Widget, WidgetKind,
 };
-use std::path::PathBuf;
 
 pub const BUILTIN_COOLER_ID: &str = "cooler-default";
 pub const BUILTIN_DOUBLEGAUGE_ID: &str = "doublegauge-default";
 
-/// Reserved ids that cannot be deleted or overwritten by user templates.
 pub fn is_builtin_id(id: &str) -> bool {
     id == BUILTIN_COOLER_ID || id == BUILTIN_DOUBLEGAUGE_ID
 }
 
-/// Return all built-in templates. Called by the template store to merge with
-/// user templates during resolution.
 pub fn builtin_templates() -> Vec<LcdTemplate> {
     vec![builtin_cooler(), builtin_doublegauge()]
 }
 
-/// Look up a built-in template by id. Returns `None` for non-reserved ids.
 pub fn builtin_template(id: &str) -> Option<LcdTemplate> {
     match id {
         BUILTIN_COOLER_ID => Some(builtin_cooler()),
         BUILTIN_DOUBLEGAUGE_ID => Some(builtin_doublegauge()),
+        _ => None,
+    }
+}
+
+pub fn builtin_template_resolved(id: &str, sensors: &[SensorInfo]) -> Option<LcdTemplate> {
+    let mut tpl = builtin_template(id)?;
+    let Some(cpu_temp_source) = find_default_cpu_temp(sensors) else {
+        return Some(tpl);
+    };
+    let cfg = sensor_source_to_config(&cpu_temp_source);
+    for w in tpl.widgets.iter_mut() {
+        if matches!(w.id.as_str(), "bar-temp" | "value-temp" | "gauge-temp") {
+            if let Some(s) = widget_source_mut(&mut w.kind) {
+                *s = cfg.clone();
+            }
+        }
+    }
+    Some(tpl)
+}
+
+fn sensor_source_to_config(s: &SensorSource) -> SensorSourceConfig {
+    match s {
+        SensorSource::Hwmon {
+            name,
+            label,
+            device_path,
+        } => SensorSourceConfig::Hwmon {
+            name: name.clone(),
+            label: label.clone(),
+            device_path: device_path.clone(),
+        },
+        SensorSource::NvidiaGpu { gpu_index } => SensorSourceConfig::NvidiaGpu {
+            gpu_index: *gpu_index,
+        },
+        SensorSource::Command { cmd } => SensorSourceConfig::Command { cmd: cmd.clone() },
+        SensorSource::WirelessCoolant { device_id } => SensorSourceConfig::WirelessCoolant {
+            device_id: device_id.clone(),
+        },
+        SensorSource::CpuUsage => SensorSourceConfig::CpuUsage,
+        SensorSource::MemUsage => SensorSourceConfig::MemUsage,
+        SensorSource::MemUsed => SensorSourceConfig::MemUsed,
+        SensorSource::MemFree => SensorSourceConfig::MemFree,
+    }
+}
+
+fn widget_source_mut(kind: &mut WidgetKind) -> Option<&mut SensorSourceConfig> {
+    match kind {
+        WidgetKind::ValueText { source, .. }
+        | WidgetKind::RadialGauge { source, .. }
+        | WidgetKind::VerticalBar { source, .. }
+        | WidgetKind::HorizontalBar { source, .. }
+        | WidgetKind::Speedometer { source, .. } => Some(source),
         _ => None,
     }
 }
@@ -62,31 +100,35 @@ fn default_ranges() -> Vec<SensorRange> {
         SensorRange {
             max: Some(50.0),
             color: [0, 200, 0],
+            alpha: 255,
         },
         SensorRange {
-            max: Some(80.0),
+            max: Some(75.0),
             color: [220, 140, 0],
+            alpha: 255,
         },
         SensorRange {
             max: None,
             color: [220, 0, 0],
+            alpha: 255,
         },
     ]
 }
 
 fn builtin_cooler() -> LcdTemplate {
-    // 480×480 base, matching the legacy Cooler renderer.
-    let label_color = [230, 238, 246];
-    let value_color = [224, 240, 255];
-    let bg_gray = [40, 40, 40];
+    let label_color = [230, 238, 246, 255];
+    let value_color = [224, 240, 255, 255];
 
     LcdTemplate {
         id: BUILTIN_COOLER_ID.to_string(),
         name: "Cooler (default)".to_string(),
         base_width: 480,
         base_height: 480,
-        background: TemplateBackground::Color { rgb: [10, 14, 22] },
-        orientation: TemplateOrientation::Portrait,
+        background: TemplateBackground::Builtin {
+            asset: BuiltinAsset::CoolerBackground,
+        },
+        rotated: false,
+        target_device: None,
         widgets: vec![
             widget(
                 "label-cpu",
@@ -100,9 +142,9 @@ fn builtin_cooler() -> LcdTemplate {
                     align: TextAlign::Center,
                 },
                 170.0,
-                234.0,
-                120.0,
-                32.0,
+                232.0,
+                100.0,
+                28.0,
             ),
             widget(
                 "label-temp",
@@ -116,9 +158,9 @@ fn builtin_cooler() -> LcdTemplate {
                     align: TextAlign::Center,
                 },
                 318.0,
-                168.0,
-                120.0,
-                32.0,
+                167.0,
+                100.0,
+                28.0,
             ),
             widget(
                 "label-cores",
@@ -132,11 +174,10 @@ fn builtin_cooler() -> LcdTemplate {
                     align: TextAlign::Center,
                 },
                 240.0,
-                336.0,
+                334.0,
                 200.0,
-                32.0,
+                28.0,
             ),
-            // Left speedometer-style CPU usage gauge.
             widget(
                 "gauge-cpu",
                 WidgetKind::Speedometer {
@@ -145,33 +186,38 @@ fn builtin_cooler() -> LcdTemplate {
                     value_max: 100.0,
                     start_angle: 180.0,
                     sweep_angle: 180.0,
-                    needle_color: [224, 240, 255],
-                    tick_color: [120, 140, 160],
+                    needle_color: [224, 240, 255, 255],
+                    tick_color: [120, 140, 160, 255],
                     tick_count: 10,
-                    background_color: bg_gray,
+                    background_color: [40, 40, 40, 255],
+                    ranges: default_ranges(),
+                    show_gauge: false,
+                    show_needle: true,
+                    needle_width: 14.0,
+                    needle_length_pct: 0.95,
+                    needle_border_color: [174, 10, 16, 255],
+                    needle_border_width: 1.5,
                 },
                 168.0,
-                190.0,
-                140.0,
-                140.0,
+                206.0,
+                120.0,
+                120.0,
             ),
-            // Right temperature vertical bar (thermometer replacement).
             widget(
                 "bar-temp",
                 WidgetKind::VerticalBar {
                     source: SensorSourceConfig::CpuUsage,
                     value_min: 0.0,
                     value_max: 100.0,
-                    background_color: bg_gray,
-                    corner_radius: 4.0,
+                    background_color: [40, 40, 40, 255],
+                    corner_radius: 0.0,
                     ranges: default_ranges(),
                 },
-                318.0,
-                210.0,
-                24.0,
-                80.0,
+                317.0,
+                206.0,
+                7.0,
+                32.0,
             ),
-            // Live CPU usage %.
             widget(
                 "value-cpu",
                 WidgetKind::ValueText {
@@ -183,14 +229,16 @@ fn builtin_cooler() -> LcdTemplate {
                     },
                     font_size: 39.0,
                     color: value_color,
-                    align: TextAlign::Right,
+                    align: TextAlign::Center,
+                    value_min: 0.0,
+                    value_max: 100.0,
+                    ranges: default_ranges(),
                 },
                 170.0,
-                277.0,
-                120.0,
+                270.0,
+                140.0,
                 48.0,
             ),
-            // Live temperature value.
             widget(
                 "value-temp",
                 WidgetKind::ValueText {
@@ -202,104 +250,73 @@ fn builtin_cooler() -> LcdTemplate {
                     },
                     font_size: 39.0,
                     color: value_color,
-                    align: TextAlign::Right,
+                    align: TextAlign::Center,
+                    value_min: 0.0,
+                    value_max: 100.0,
+                    ranges: default_ranges(),
                 },
                 318.0,
-                277.0,
-                120.0,
+                270.0,
+                140.0,
                 48.0,
             ),
-            // Per-core CPU usage strip along the bottom.
             widget(
                 "core-bars",
                 WidgetKind::CoreBars {
                     orientation: BarOrientation::Horizontal,
-                    color_cold: [0, 200, 0],
-                    color_hot: [220, 0, 0],
-                    background_color: [30, 30, 30],
+                    background_color: [40, 40, 40, 255],
                     show_labels: true,
+                    ranges: default_ranges(),
                 },
-                240.0,
-                400.0,
-                280.0,
-                60.0,
+                242.0,
+                367.0,
+                256.0,
+                47.0,
             ),
         ],
     }
 }
 
 fn builtin_doublegauge() -> LcdTemplate {
-    // 400×400 base, matching the legacy Doublegauge renderer.
-    let label_color = [230, 238, 246];
-    let bg_gray = [40, 40, 40];
-    let outer_green = [40, 255, 137];
-    let inner_blue = [32, 209, 255];
+    let bg_transparent = [0, 0, 0, 0];
+    let outer_green = [40, 255, 137, 220];
+    let inner_blue = [32, 209, 255, 220];
+    let value_outer_green = [40, 255, 137, 255];
+    let value_inner_blue = [32, 209, 255, 255];
+    let label_color = [230, 238, 246, 255];
+    let header_color = [0, 0, 0, 255];
 
     LcdTemplate {
         id: BUILTIN_DOUBLEGAUGE_ID.to_string(),
         name: "Doublegauge (default)".to_string(),
         base_width: 400,
         base_height: 400,
-        background: TemplateBackground::Color { rgb: [10, 14, 22] },
-        orientation: TemplateOrientation::Portrait,
+        background: TemplateBackground::Builtin {
+            asset: BuiltinAsset::DoublegaugeBackground,
+        },
+        rotated: false,
+        target_device: None,
         widgets: vec![
             widget(
-                "header",
-                WidgetKind::Label {
-                    text: "SYSTEM".to_string(),
-                    font: FontRef::Builtin {
-                        font: BuiltinFont::VictorMono,
-                    },
-                    font_size: 34.0,
-                    color: label_color,
-                    align: TextAlign::Center,
-                },
-                200.0,
-                50.0,
-                320.0,
-                40.0,
-            ),
-            widget(
-                "label-outer",
+                "label-header",
                 WidgetKind::Label {
                     text: "CPU".to_string(),
                     font: FontRef::Builtin {
                         font: BuiltinFont::VictorMono,
                     },
-                    font_size: 34.0,
-                    color: label_color,
+                    font_size: 50.0,
+                    color: header_color,
                     align: TextAlign::Center,
                 },
                 200.0,
-                106.0,
-                320.0,
-                40.0,
-            ),
-            // Outer gauge (CPU usage).
-            widget(
-                "gauge-outer",
-                WidgetKind::RadialGauge {
-                    source: SensorSourceConfig::CpuUsage,
-                    value_min: 0.0,
-                    value_max: 100.0,
-                    start_angle: 122.0,
-                    sweep_angle: 296.0,
-                    inner_radius_pct: 0.88,
-                    background_color: bg_gray,
-                    ranges: vec![SensorRange {
-                        max: None,
-                        color: outer_green,
-                    }],
-                },
-                200.0,
-                200.0,
-                360.0,
-                360.0,
+                50.0,
+                160.0,
+                60.0,
             ),
             widget(
-                "label-inner",
+                "label-1",
                 WidgetKind::Label {
-                    text: "MEM".to_string(),
+                    text: "USAGE".to_string(),
                     font: FontRef::Builtin {
                         font: BuiltinFont::VictorMono,
                     },
@@ -308,34 +325,70 @@ fn builtin_doublegauge() -> LcdTemplate {
                     align: TextAlign::Center,
                 },
                 200.0,
-                220.0,
-                320.0,
+                113.0,
+                240.0,
                 40.0,
             ),
-            // Inner gauge (memory usage).
             widget(
-                "gauge-inner",
+                "label-2",
+                WidgetKind::Label {
+                    text: "TEMP".to_string(),
+                    font: FontRef::Builtin {
+                        font: BuiltinFont::VictorMono,
+                    },
+                    font_size: 34.0,
+                    color: label_color,
+                    align: TextAlign::Center,
+                },
+                200.0,
+                227.0,
+                240.0,
+                40.0,
+            ),
+            widget(
+                "gauge-usage",
                 WidgetKind::RadialGauge {
-                    source: SensorSourceConfig::MemUsage,
+                    source: SensorSourceConfig::CpuUsage,
                     value_min: 0.0,
                     value_max: 100.0,
-                    start_angle: 122.0,
+                    start_angle: 302.0,
                     sweep_angle: 296.0,
-                    inner_radius_pct: 0.85,
-                    background_color: bg_gray,
+                    inner_radius_pct: 0.89,
+                    background_color: bg_transparent,
                     ranges: vec![SensorRange {
                         max: None,
-                        color: inner_blue,
+                        color: [outer_green[0], outer_green[1], outer_green[2]],
+                        alpha: outer_green[3],
                     }],
                 },
                 200.0,
                 200.0,
-                280.0,
-                280.0,
+                352.0,
+                352.0,
             ),
-            // Outer value text.
             widget(
-                "value-outer",
+                "gauge-temp",
+                WidgetKind::RadialGauge {
+                    source: SensorSourceConfig::CpuUsage,
+                    value_min: 0.0,
+                    value_max: 100.0,
+                    start_angle: 302.0,
+                    sweep_angle: 296.0,
+                    inner_radius_pct: 0.86,
+                    background_color: bg_transparent,
+                    ranges: vec![SensorRange {
+                        max: None,
+                        color: [inner_blue[0], inner_blue[1], inner_blue[2]],
+                        alpha: inner_blue[3],
+                    }],
+                },
+                200.0,
+                200.0,
+                290.0,
+                290.0,
+            ),
+            widget(
+                "value-usage",
                 WidgetKind::ValueText {
                     source: SensorSourceConfig::CpuUsage,
                     format: "{:.0}".to_string(),
@@ -344,38 +397,38 @@ fn builtin_doublegauge() -> LcdTemplate {
                         font: BuiltinFont::VictorMono,
                     },
                     font_size: 70.0,
-                    color: outer_green,
+                    color: value_outer_green,
                     align: TextAlign::Center,
+                    value_min: 0.0,
+                    value_max: 100.0,
+                    ranges: Vec::new(),
                 },
                 200.0,
-                156.0,
-                200.0,
-                80.0,
+                160.0,
+                160.0,
+                72.0,
             ),
-            // Inner value text.
             widget(
-                "value-inner",
+                "value-temp",
                 WidgetKind::ValueText {
-                    source: SensorSourceConfig::MemUsage,
+                    source: SensorSourceConfig::CpuUsage,
                     format: "{:.0}".to_string(),
-                    unit: "%".to_string(),
+                    unit: "°C".to_string(),
                     font: FontRef::Builtin {
                         font: BuiltinFont::VictorMono,
                     },
                     font_size: 70.0,
-                    color: inner_blue,
+                    color: value_inner_blue,
                     align: TextAlign::Center,
+                    value_min: 0.0,
+                    value_max: 100.0,
+                    ranges: Vec::new(),
                 },
                 200.0,
-                248.0,
-                200.0,
-                80.0,
+                274.0,
+                160.0,
+                72.0,
             ),
         ],
     }
 }
-
-// Unused imports placeholder — `PathBuf` is imported for future image-background
-// defaults. Silence the dead import until then.
-#[allow(dead_code)]
-fn _path_placeholder(_: PathBuf) {}

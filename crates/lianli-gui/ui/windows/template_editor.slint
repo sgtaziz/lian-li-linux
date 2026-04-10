@@ -1,17 +1,21 @@
-// Template Editor — a separate top-level Slint Window for building Custom LCD
-// layouts. The main window instantiates this alongside MainWindow and shows it
-// on demand via `ComponentHandle::show()`. The editor owns its in-progress
-// template state; the main window doesn't read into the editor's interior, it
-// just seeds `in-out` properties before `show()` and listens for `save-requested`.
-
 import { Theme } from "../theme.slint";
 import {
     Button, ComboBox, LineEdit, SpinBox, CheckBox, ScrollView, StandardButton, Palette,
 } from "std-widgets.slint";
 
+// `max-pct` of -1 means "open-ended" (the final range with `max: None` in Rust).
+export struct EditorRange {
+    max-pct: int,
+    color-r: int,
+    color-g: int,
+    color-b: int,
+    color-a: int,
+}
+
 export struct EditorWidget {
     id: string,
     kind: string,
+    kind-label: string,        // friendly display name
     x: float,
     y: float,
     width: float,
@@ -20,36 +24,52 @@ export struct EditorWidget {
     visible: bool,
     update-interval-ms: int,
 
-    // Label / ValueText
     text: string,
     font-name: string,
     font-size: float,
     color-r: int,
     color-g: int,
     color-b: int,
+    color-a: int,
     align: string,
 
-    // ValueText
     format: string,
     unit: string,
 
-    // Sensor-bound widgets (ValueText, RadialGauge, VerticalBar, HorizontalBar, Speedometer)
     source-index: int,
     value-min: float,
     value-max: float,
 
-    // Gauge geometry
     start-angle: float,
     sweep-angle: float,
     inner-radius-pct: float,
 
-    // Backgrounds + tick colors
     bg-r: int,
     bg-g: int,
     bg-b: int,
+    bg-a: int,
     tick-count: int,
 
-    // Image / Video
+    show-gauge: bool,
+    show-needle: bool,
+    needle-width: float,
+    needle-length-pct: int,
+    needle-color-r: int,
+    needle-color-g: int,
+    needle-color-b: int,
+    needle-color-a: int,
+    tick-color-r: int,
+    tick-color-g: int,
+    tick-color-b: int,
+    tick-color-a: int,
+    needle-border-r: int,
+    needle-border-g: int,
+    needle-border-b: int,
+    needle-border-a: int,
+    needle-border-width: float,
+
+    show-labels: bool,
+
     image-path: string,
     opacity: float,
     fps: float,
@@ -75,11 +95,11 @@ component WidgetListRow inherits Rectangle {
         padding-right: 8px;
         spacing: 6px;
         Text {
-            text: root.widget.kind;
+            text: root.widget.kind-label;
             font-size: 11px;
             color: Theme.text-secondary;
             vertical-alignment: center;
-            width: 80px;
+            width: 90px;
         }
         Text {
             text: root.widget.id;
@@ -91,22 +111,76 @@ component WidgetListRow inherits Rectangle {
     }
 }
 
-component LabeledSpinBox inherits HorizontalLayout {
+component LabeledSpinBox inherits Rectangle {
     in property <string> label;
     in property <int> value;
     in property <int> minimum: -100000;
     in property <int> maximum: 100000;
     callback edited(int);
-    spacing: 4px;
-    Text {
-        text: root.label;
-        font-size: 11px;
-        color: Theme.text-secondary;
-        vertical-alignment: center;
-        width: 54px;
+
+    height: 28px;
+
+    changed value => { spin.value = root.value; }
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+            width: 64px;
+        }
+        spin := SpinBox {
+            horizontal-stretch: 1;
+            minimum: root.minimum;
+            maximum: root.maximum;
+            value: root.value;
+            edited(v) => { root.edited(v); }
+        }
     }
-    SpinBox {
-        horizontal-stretch: 1;
+}
+
+component LabeledLineEdit inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    callback edited(string);
+
+    height: 28px;
+
+    changed value => { line.text = root.value; }
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+            width: 64px;
+        }
+        line := LineEdit {
+            horizontal-stretch: 1;
+            text: root.value;
+            edited(v) => { root.edited(v); }
+        }
+    }
+}
+
+component BareSpinBox inherits Rectangle {
+    in property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 255;
+    callback edited(int);
+
+    horizontal-stretch: 1;
+    height: 28px;
+
+    changed value => { spin.value = root.value; }
+
+    spin := SpinBox {
+        width: parent.width;
+        height: parent.height;
         minimum: root.minimum;
         maximum: root.maximum;
         value: root.value;
@@ -114,34 +188,133 @@ component LabeledSpinBox inherits HorizontalLayout {
     }
 }
 
+component BareLineEdit inherits Rectangle {
+    in property <string> value;
+    callback edited(string);
+
+    horizontal-stretch: 1;
+    height: 28px;
+
+    changed value => { line.text = root.value; }
+
+    line := LineEdit {
+        width: parent.width;
+        height: parent.height;
+        text: root.value;
+        edited(v) => { root.edited(v); }
+    }
+}
+
+component LabeledComboValue inherits Rectangle {
+    in property <string> label;
+    in property <[string]> model;
+    in property <string> value;
+    callback selected(string);
+
+    height: 28px;
+
+    changed value => { combo.current-value = root.value; }
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+            width: 64px;
+        }
+        combo := ComboBox {
+            horizontal-stretch: 1;
+            model: root.model;
+            current-value: root.value;
+            selected(v) => { root.selected(v); }
+        }
+    }
+}
+
+component LabeledComboIndex inherits Rectangle {
+    in property <string> label;
+    in property <[string]> model;
+    in property <int> index;
+    callback selected(string);
+
+    height: 28px;
+
+    changed index => { combo.current-index = root.index; }
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+            width: 64px;
+        }
+        combo := ComboBox {
+            horizontal-stretch: 1;
+            model: root.model;
+            current-index: root.index;
+            selected(v) => { root.selected(v); }
+        }
+    }
+}
+
+component LabeledCheckBox inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    callback toggled(bool);
+
+    height: 28px;
+
+    changed checked => { box.checked = root.checked; }
+
+    box := CheckBox {
+        text: root.text;
+        checked: root.checked;
+        toggled => { root.toggled(self.checked); }
+    }
+}
+
+component RgbaRow inherits VerticalLayout {
+    in property <string> title;
+    in property <int> r;
+    in property <int> g;
+    in property <int> b;
+    in property <int> a;
+    callback edited(string, int);
+
+    spacing: 4px;
+
+    Text { text: root.title; font-size: 10px; color: Theme.text-secondary; }
+    HorizontalLayout {
+        spacing: 4px;
+        BareSpinBox { value: root.r; edited(v) => { root.edited("r", v); } }
+        BareSpinBox { value: root.g; edited(v) => { root.edited("g", v); } }
+        BareSpinBox { value: root.b; edited(v) => { root.edited("b", v); } }
+        BareSpinBox { value: root.a; edited(v) => { root.edited("a", v); } }
+    }
+}
+
 component WidgetBox inherits Rectangle {
     in property <EditorWidget> widget;
     in property <bool> selected;
     in property <int> index;
-    // Canvas→widget mapping so drag callbacks can convert back to template-space.
     in property <length> canvas-x;
     in property <length> canvas-y;
     in property <length> canvas-w;
     in property <length> canvas-h;
     in property <float> base-w;
     in property <float> base-h;
-    in property <bool> is-landscape;
 
     callback selected-clicked(int);
     callback moved(int, float, float);
 
-    property <float> screen-px-x: root.is-landscape
-        ? (root.base-h - root.widget.y) / root.base-h
-        : root.widget.x / root.base-w;
-    property <float> screen-px-y: root.is-landscape
-        ? root.widget.x / root.base-w
-        : root.widget.y / root.base-h;
-    property <float> screen-w: root.is-landscape
-        ? root.widget.height / root.base-h
-        : root.widget.width / root.base-w;
-    property <float> screen-h: root.is-landscape
-        ? root.widget.width / root.base-w
-        : root.widget.height / root.base-h;
+    property <float> screen-px-x: root.widget.x / root.base-w;
+    property <float> screen-px-y: root.widget.y / root.base-h;
+    property <float> screen-w: root.widget.width / root.base-w;
+    property <float> screen-h: root.widget.height / root.base-h;
 
     x: root.canvas-x + (screen-px-x * root.canvas-w) - (screen-w * root.canvas-w / 2);
     y: root.canvas-y + (screen-px-y * root.canvas-h) - (screen-h * root.canvas-h / 2);
@@ -161,8 +334,8 @@ component WidgetBox inherits Rectangle {
         moved => {
             root.moved(
                 root.index,
-                root.is-landscape ? root.frac-y * root.base-w : root.frac-x * root.base-w,
-                root.is-landscape ? (1 - root.frac-x) * root.base-h : root.frac-y * root.base-h
+                root.frac-x * root.base-w,
+                root.frac-y * root.base-h
             );
         }
         clicked => { root.selected-clicked(root.index); }
@@ -177,20 +350,25 @@ export component TemplateEditorWindow inherits Window {
     min-height: 540px;
     background: Palette.background;
 
-    // Template metadata (seeded by parent before show()).
     in-out property <string> template-id: "";
     in-out property <string> template-name: "Untitled";
     in-out property <int> base-width: 480;
     in-out property <int> base-height: 480;
-    in-out property <string> orientation: "portrait"; // "portrait" | "landscape"
-    in-out property <string> bg-type: "color";        // "color" | "image"
+    in-out property <bool> rotated: false;
+    in-out property <string> bg-type: "color";
     in-out property <int> bg-r: 10;
     in-out property <int> bg-g: 14;
     in-out property <int> bg-b: 22;
+    in-out property <int> bg-a: 255;
     in-out property <string> bg-image-path: "";
+
+    in-out property <string> status-message: "";
+    in-out property <bool> status-is-error: false;
 
     in-out property <[EditorWidget]> widgets: [];
     in-out property <int> selected-index: -1;
+    in-out property <EditorWidget> selected-widget;
+    in-out property <[EditorRange]> selected-ranges: [];
 
     in property <image> preview-image;
     in property <[string]> device-presets: [];
@@ -200,7 +378,12 @@ export component TemplateEditorWindow inherits Window {
         "label", "value_text", "radial_gauge", "vertical_bar",
         "horizontal_bar", "speedometer", "core_bars", "image", "video",
     ];
+    in property <[string]> widget-kind-labels: [
+        "Label", "Sensor Value", "Radial Gauge", "Vertical Bar",
+        "Horizontal Bar", "Speedometer", "Core Usage", "Image", "Video",
+    ];
     in property <[string]> font-names: ["Victor Mono", "JetBrains Mono", "Digital 7"];
+    in property <[string]> align-options: ["left", "center", "right"];
 
     callback save-requested();
     callback cancel();
@@ -210,32 +393,36 @@ export component TemplateEditorWindow inherits Window {
     callback widget-moved(int, float, float);
     callback widget-added(string);
     callback widget-removed(int);
+    // `field == "_select"` is a no-op edit that just sets the selection.
     callback widget-field(int, string, string);
+    callback range-field(int, string, string);
+    callback range-added();
+    callback range-removed(int);
     callback pick-bg-image();
     callback pick-widget-image(int);
     callback preset-selected(string);
     callback request-preview();
 
-    property <bool> is-landscape: root.orientation == "landscape";
+    changed current-preset-label => { device-combo.current-value = root.current-preset-label; }
 
     VerticalLayout {
-        // ── Header ──
         Rectangle {
-            height: 56px;
+            height: 64px;
             background: Theme.card-background;
             border-width: 0px;
             border-color: Theme.border;
 
             HorizontalLayout {
-                padding: 12px;
+                padding: 10px;
                 spacing: 12px;
-                alignment: start;
 
                 VerticalLayout {
                     spacing: 2px;
+                    alignment: end;
                     Text { text: "Template Name"; font-size: 10px; color: Theme.text-secondary; }
                     LineEdit {
-                        width: 200px;
+                        width: 180px;
+                        height: 28px;
                         text: root.template-name;
                         edited(v) => { root.header-field("name", v); }
                     }
@@ -243,45 +430,44 @@ export component TemplateEditorWindow inherits Window {
 
                 VerticalLayout {
                     spacing: 2px;
+                    alignment: end;
                     Text { text: "Target Device"; font-size: 10px; color: Theme.text-secondary; }
-                    ComboBox {
-                        width: 220px;
+                    device-combo := ComboBox {
+                        horizontal-stretch: 1;
+                        min-width: 300px;
+                        height: 28px;
                         model: root.device-presets;
                         current-value: root.current-preset-label;
                         selected(v) => { root.preset-selected(v); }
                     }
                 }
 
-                VerticalLayout {
+                if root.base-width != root.base-height: VerticalLayout {
                     spacing: 2px;
-                    Text { text: "Layout"; font-size: 10px; color: Theme.text-secondary; }
-                    HorizontalLayout {
-                        spacing: 4px;
-                        Button {
-                            text: "Portrait";
-                            primary: root.orientation == "portrait";
-                            clicked => { root.header-field("orientation", "portrait"); }
-                        }
-                        Button {
-                            text: "Landscape";
-                            primary: root.orientation == "landscape";
-                            clicked => { root.header-field("orientation", "landscape"); }
-                        }
+                    alignment: end;
+                    Text { text: " "; font-size: 10px; }
+                    LabeledCheckBox {
+                        text: "Rotated";
+                        checked: root.rotated;
+                        toggled(c) => { root.header-field("rotated", c ? "true" : "false"); }
                     }
                 }
 
                 VerticalLayout {
                     spacing: 2px;
+                    alignment: end;
                     Text { text: "Background"; font-size: 10px; color: Theme.text-secondary; }
                     HorizontalLayout {
                         spacing: 4px;
                         Button {
                             text: "Color";
+                            height: 28px;
                             primary: root.bg-type == "color";
                             clicked => { root.header-field("bg_type", "color"); }
                         }
                         Button {
                             text: "Image…";
+                            height: 28px;
                             primary: root.bg-type == "image";
                             clicked => { root.pick-bg-image(); }
                         }
@@ -290,21 +476,60 @@ export component TemplateEditorWindow inherits Window {
 
                 Rectangle { horizontal-stretch: 1; }
 
-                Button {
-                    text: "Close";
-                    clicked => { root.cancel(); }
+                if root.status-message != "": VerticalLayout {
+                    spacing: 2px;
+                    alignment: end;
+                    Text { text: " "; font-size: 10px; }
+                    Rectangle {
+                        height: 28px;
+                        background: root.status-is-error
+                            ? #5a1f24
+                            : #1e3a2a;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: root.status-is-error
+                            ? #a23a3a
+                            : #3aa05a;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text {
+                                text: root.status-message;
+                                font-size: 11px;
+                                color: root.status-is-error
+                                    ? #ffd0d0
+                                    : #d0ffd0;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
                 }
-                Button {
-                    text: "Save";
-                    primary: true;
-                    clicked => { root.save-requested(); }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    alignment: end;
+                    Text { text: " "; font-size: 10px; }
+                    Button {
+                        text: "Close";
+                        height: 28px;
+                        clicked => { root.cancel(); }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    alignment: end;
+                    Text { text: " "; font-size: 10px; }
+                    Button {
+                        text: "Save";
+                        height: 28px;
+                        primary: true;
+                        clicked => { root.save-requested(); }
+                    }
                 }
             }
         }
 
-        // ── Main three-pane layout ──
         HorizontalLayout {
-            // Left: widget list
             Rectangle {
                 width: 220px;
                 background: Theme.sidebar-background;
@@ -317,12 +542,11 @@ export component TemplateEditorWindow inherits Window {
 
                     Text { text: "Widgets"; font-size: 12px; font-weight: 700; color: Theme.text-primary; }
 
-                    // Add widget dropdown
                     HorizontalLayout {
                         spacing: 4px;
                         ComboBox {
                             horizontal-stretch: 1;
-                            model: root.widget-kinds;
+                            model: root.widget-kind-labels;
                             current-index: 0;
                             selected(v) => { root.widget-added(v); }
                         }
@@ -348,27 +572,20 @@ export component TemplateEditorWindow inherits Window {
                 }
             }
 
-            // Center: preview canvas with draggable widget boxes.
             Rectangle {
                 horizontal-stretch: 1;
                 background: #1a1f29;
                 clip: true;
 
-                // Canvas area — square fit inside the available space.
                 property <length> pad: 24px;
                 property <length> avail-w: self.width - 2 * self.pad;
                 property <length> avail-h: self.height - 2 * self.pad;
-                // Aspect ratio as displayed (may differ from base_w/base_h
-                // when viewing a portrait template rotated into landscape).
-                property <float> disp-aspect: root.is-landscape
-                    ? root.base-height / root.base-width
-                    : root.base-width / root.base-height;
+                property <float> disp-aspect: root.base-width / root.base-height;
                 property <length> canvas-w: min(self.avail-w, self.avail-h * self.disp-aspect);
                 property <length> canvas-h: self.canvas-w / self.disp-aspect;
                 property <length> canvas-x: (self.width - self.canvas-w) / 2;
                 property <length> canvas-y: (self.height - self.canvas-h) / 2;
 
-                // Rendered preview image (daemon-rendered via IPC).
                 Image {
                     x: parent.canvas-x;
                     y: parent.canvas-y;
@@ -378,7 +595,6 @@ export component TemplateEditorWindow inherits Window {
                     image-fit: ImageFit.contain;
                 }
 
-                // Widget boxes (draggable overlays).
                 for w[idx] in root.widgets: WidgetBox {
                     widget: w;
                     index: idx;
@@ -389,22 +605,27 @@ export component TemplateEditorWindow inherits Window {
                     canvas-h: parent.canvas-h;
                     base-w: root.base-width;
                     base-h: root.base-height;
-                    is-landscape: root.is-landscape;
                     selected-clicked(i) => { root.selected-index = i; root.widget-field(i, "_select", ""); }
                     moved(i, x, y) => { root.widget-moved(i, x, y); }
                 }
             }
 
-            // Right: property inspector
             Rectangle {
-                width: 280px;
+                width: 554px;
                 background: Theme.sidebar-background;
                 border-width: 0px;
                 border-color: Theme.border;
+                clip: true;
 
                 ScrollView {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-width: self.width;
+                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                     VerticalLayout {
-                        padding: 10px;
+                        padding: 12px;
                         spacing: 8px;
                         alignment: start;
 
@@ -415,177 +636,319 @@ export component TemplateEditorWindow inherits Window {
                             wrap: word-wrap;
                         }
 
-                        if root.selected-index >= 0 && root.selected-index < root.widgets.length: VerticalLayout {
+                        if root.selected-index >= 0: VerticalLayout {
                             spacing: 8px;
 
                             Text {
-                                text: "⚙ " + root.widgets[root.selected-index].kind;
+                                text: "Properties - " + root.selected-widget.kind-label;
                                 font-size: 13px;
                                 font-weight: 700;
                                 color: Theme.text-primary;
                             }
 
-                            // ── Common geometry ──
+                            LabeledLineEdit {
+                                label: "ID";
+                                value: root.selected-widget.id;
+                                edited(v) => { root.widget-field(root.selected-index, "id", v); }
+                            }
+
                             LabeledSpinBox {
                                 label: "X";
-                                value: root.widgets[root.selected-index].x;
+                                value: root.selected-widget.x;
                                 minimum: 0;
                                 maximum: 10000;
                                 edited(v) => { root.widget-field(root.selected-index, "x", v); }
                             }
                             LabeledSpinBox {
                                 label: "Y";
-                                value: root.widgets[root.selected-index].y;
+                                value: root.selected-widget.y;
                                 minimum: 0;
                                 maximum: 10000;
                                 edited(v) => { root.widget-field(root.selected-index, "y", v); }
                             }
                             LabeledSpinBox {
                                 label: "Width";
-                                value: root.widgets[root.selected-index].width;
+                                value: root.selected-widget.width;
                                 minimum: 1;
                                 maximum: 10000;
                                 edited(v) => { root.widget-field(root.selected-index, "width", v); }
                             }
                             LabeledSpinBox {
                                 label: "Height";
-                                value: root.widgets[root.selected-index].height;
+                                value: root.selected-widget.height;
                                 minimum: 1;
                                 maximum: 10000;
                                 edited(v) => { root.widget-field(root.selected-index, "height", v); }
                             }
                             LabeledSpinBox {
                                 label: "Rotate°";
-                                value: root.widgets[root.selected-index].rotation;
+                                value: root.selected-widget.rotation;
                                 minimum: -360;
                                 maximum: 360;
                                 edited(v) => { root.widget-field(root.selected-index, "rotation", v); }
                             }
 
-                            CheckBox {
+                            LabeledCheckBox {
                                 text: "Visible";
-                                checked: root.widgets[root.selected-index].visible;
-                                toggled => { root.widget-field(root.selected-index, "visible", self.checked ? "true" : "false"); }
+                                checked: root.selected-widget.visible;
+                                toggled(c) => { root.widget-field(root.selected-index, "visible", c ? "true" : "false"); }
                             }
 
                             Rectangle { height: 1px; background: Theme.border; }
 
-                            // ── Variant-specific ──
-                            if root.widgets[root.selected-index].kind == "label"
-                               || root.widgets[root.selected-index].kind == "value_text": VerticalLayout {
+                            if root.selected-widget.kind == "label"
+                               || root.selected-widget.kind == "value_text": VerticalLayout {
                                 spacing: 6px;
-                                Text { text: "Text"; font-size: 10px; color: Theme.text-secondary; }
-                                LineEdit {
-                                    text: root.widgets[root.selected-index].text;
+                                LabeledLineEdit {
+                                    label: "Text";
+                                    value: root.selected-widget.text;
                                     edited(v) => { root.widget-field(root.selected-index, "text", v); }
                                 }
                                 LabeledSpinBox {
                                     label: "Font sz";
-                                    value: root.widgets[root.selected-index].font-size;
+                                    value: root.selected-widget.font-size;
                                     minimum: 6;
                                     maximum: 400;
                                     edited(v) => { root.widget-field(root.selected-index, "font_size", v); }
                                 }
-                                Text { text: "Font"; font-size: 10px; color: Theme.text-secondary; }
-                                ComboBox {
+                                LabeledComboValue {
+                                    label: "Font";
                                     model: root.font-names;
-                                    current-value: root.widgets[root.selected-index].font-name;
+                                    value: root.selected-widget.font-name;
                                     selected(v) => { root.widget-field(root.selected-index, "font", v); }
                                 }
-                                Text { text: "Color (R/G/B)"; font-size: 10px; color: Theme.text-secondary; }
-                                HorizontalLayout {
-                                    spacing: 4px;
-                                    SpinBox {
-                                        minimum: 0;
-                                        maximum: 255;
-                                        value: root.widgets[root.selected-index].color-r;
-                                        edited(v) => { root.widget-field(root.selected-index, "color_r", v); }
-                                    }
-                                    SpinBox {
-                                        minimum: 0;
-                                        maximum: 255;
-                                        value: root.widgets[root.selected-index].color-g;
-                                        edited(v) => { root.widget-field(root.selected-index, "color_g", v); }
-                                    }
-                                    SpinBox {
-                                        minimum: 0;
-                                        maximum: 255;
-                                        value: root.widgets[root.selected-index].color-b;
-                                        edited(v) => { root.widget-field(root.selected-index, "color_b", v); }
-                                    }
+                                LabeledComboValue {
+                                    label: "Align";
+                                    model: root.align-options;
+                                    value: root.selected-widget.align;
+                                    selected(v) => { root.widget-field(root.selected-index, "align", v); }
+                                }
+                                RgbaRow {
+                                    title: "Color (R / G / B / A)";
+                                    r: root.selected-widget.color-r;
+                                    g: root.selected-widget.color-g;
+                                    b: root.selected-widget.color-b;
+                                    a: root.selected-widget.color-a;
+                                    edited(ch, v) => { root.widget-field(root.selected-index, "color_" + ch, v); }
                                 }
                             }
 
-                            if root.widgets[root.selected-index].kind == "value_text": VerticalLayout {
+                            if root.selected-widget.kind == "value_text": VerticalLayout {
                                 spacing: 6px;
-                                Text { text: "Format (e.g. {:.1})"; font-size: 10px; color: Theme.text-secondary; }
-                                LineEdit {
-                                    text: root.widgets[root.selected-index].format;
+                                LabeledLineEdit {
+                                    label: "Format";
+                                    value: root.selected-widget.format;
                                     edited(v) => { root.widget-field(root.selected-index, "format", v); }
                                 }
-                                Text { text: "Unit"; font-size: 10px; color: Theme.text-secondary; }
-                                LineEdit {
-                                    text: root.widgets[root.selected-index].unit;
+                                LabeledLineEdit {
+                                    label: "Unit";
+                                    value: root.selected-widget.unit;
                                     edited(v) => { root.widget-field(root.selected-index, "unit", v); }
                                 }
                             }
 
-                            if root.widgets[root.selected-index].kind == "radial_gauge"
-                               || root.widgets[root.selected-index].kind == "vertical_bar"
-                               || root.widgets[root.selected-index].kind == "horizontal_bar"
-                               || root.widgets[root.selected-index].kind == "speedometer"
-                               || root.widgets[root.selected-index].kind == "value_text": VerticalLayout {
+                            if root.selected-widget.kind == "radial_gauge"
+                               || root.selected-widget.kind == "vertical_bar"
+                               || root.selected-widget.kind == "horizontal_bar"
+                               || root.selected-widget.kind == "speedometer"
+                               || root.selected-widget.kind == "value_text": VerticalLayout {
                                 spacing: 6px;
-                                Text { text: "Sensor"; font-size: 10px; color: Theme.text-secondary; }
-                                ComboBox {
+                                LabeledComboIndex {
+                                    label: "Sensor";
                                     model: root.sensor-options;
-                                    current-index: root.widgets[root.selected-index].source-index;
+                                    index: root.selected-widget.source-index;
                                     selected(v) => { root.widget-field(root.selected-index, "source", v); }
                                 }
                                 LabeledSpinBox {
                                     label: "Min";
-                                    value: root.widgets[root.selected-index].value-min;
+                                    value: root.selected-widget.value-min;
                                     minimum: -100000;
                                     maximum: 100000;
                                     edited(v) => { root.widget-field(root.selected-index, "value_min", v); }
                                 }
                                 LabeledSpinBox {
                                     label: "Max";
-                                    value: root.widgets[root.selected-index].value-max;
+                                    value: root.selected-widget.value-max;
                                     minimum: -100000;
                                     maximum: 100000;
                                     edited(v) => { root.widget-field(root.selected-index, "value_max", v); }
                                 }
                             }
 
-                            if root.widgets[root.selected-index].kind == "radial_gauge"
-                               || root.widgets[root.selected-index].kind == "speedometer": VerticalLayout {
+                            if root.selected-widget.kind == "radial_gauge"
+                               || root.selected-widget.kind == "speedometer": VerticalLayout {
                                 spacing: 6px;
                                 LabeledSpinBox {
                                     label: "Start°";
-                                    value: root.widgets[root.selected-index].start-angle;
+                                    value: root.selected-widget.start-angle;
                                     minimum: -360;
                                     maximum: 720;
                                     edited(v) => { root.widget-field(root.selected-index, "start_angle", v); }
                                 }
                                 LabeledSpinBox {
                                     label: "Sweep°";
-                                    value: root.widgets[root.selected-index].sweep-angle;
+                                    value: root.selected-widget.sweep-angle;
                                     minimum: 1;
                                     maximum: 360;
                                     edited(v) => { root.widget-field(root.selected-index, "sweep_angle", v); }
                                 }
                             }
 
-                            if root.widgets[root.selected-index].kind == "image"
-                               || root.widgets[root.selected-index].kind == "video": VerticalLayout {
+                            if root.selected-widget.kind == "speedometer": VerticalLayout {
+                                spacing: 6px;
+                                LabeledCheckBox {
+                                    text: "Show gauge (arc + ticks)";
+                                    checked: root.selected-widget.show-gauge;
+                                    toggled(c) => { root.widget-field(root.selected-index, "show_gauge", c ? "true" : "false"); }
+                                }
+                                LabeledCheckBox {
+                                    text: "Show needle";
+                                    checked: root.selected-widget.show-needle;
+                                    toggled(c) => { root.widget-field(root.selected-index, "show_needle", c ? "true" : "false"); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Needle w";
+                                    value: root.selected-widget.needle-width;
+                                    minimum: 1;
+                                    maximum: 60;
+                                    edited(v) => { root.widget-field(root.selected-index, "needle_width", v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Needle %";
+                                    value: root.selected-widget.needle-length-pct;
+                                    minimum: 10;
+                                    maximum: 150;
+                                    edited(v) => { root.widget-field(root.selected-index, "needle_length_pct", v); }
+                                }
+                                RgbaRow {
+                                    title: "Needle color (R / G / B / A)";
+                                    r: root.selected-widget.needle-color-r;
+                                    g: root.selected-widget.needle-color-g;
+                                    b: root.selected-widget.needle-color-b;
+                                    a: root.selected-widget.needle-color-a;
+                                    edited(ch, v) => { root.widget-field(root.selected-index, "needle_color_" + ch, v); }
+                                }
+                                RgbaRow {
+                                    title: "Needle border (R / G / B / A)";
+                                    r: root.selected-widget.needle-border-r;
+                                    g: root.selected-widget.needle-border-g;
+                                    b: root.selected-widget.needle-border-b;
+                                    a: root.selected-widget.needle-border-a;
+                                    edited(ch, v) => { root.widget-field(root.selected-index, "needle_border_" + ch, v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Border w";
+                                    value: root.selected-widget.needle-border-width;
+                                    minimum: 0;
+                                    maximum: 20;
+                                    edited(v) => { root.widget-field(root.selected-index, "needle_border_width", v); }
+                                }
+                                RgbaRow {
+                                    title: "Tick color (R / G / B / A)";
+                                    r: root.selected-widget.tick-color-r;
+                                    g: root.selected-widget.tick-color-g;
+                                    b: root.selected-widget.tick-color-b;
+                                    a: root.selected-widget.tick-color-a;
+                                    edited(ch, v) => { root.widget-field(root.selected-index, "tick_color_" + ch, v); }
+                                }
+                                RgbaRow {
+                                    title: "Gauge background (R / G / B / A)";
+                                    r: root.selected-widget.bg-r;
+                                    g: root.selected-widget.bg-g;
+                                    b: root.selected-widget.bg-b;
+                                    a: root.selected-widget.bg-a;
+                                    edited(ch, v) => { root.widget-field(root.selected-index, "bg_" + ch, v); }
+                                }
+                            }
+
+                            if root.selected-widget.kind == "vertical_bar"
+                               || root.selected-widget.kind == "horizontal_bar"
+                               || root.selected-widget.kind == "radial_gauge"
+                               || root.selected-widget.kind == "core_bars": RgbaRow {
+                                title: "Background (R / G / B / A)";
+                                r: root.selected-widget.bg-r;
+                                g: root.selected-widget.bg-g;
+                                b: root.selected-widget.bg-b;
+                                a: root.selected-widget.bg-a;
+                                edited(ch, v) => { root.widget-field(root.selected-index, "bg_" + ch, v); }
+                            }
+
+                            if root.selected-widget.kind == "core_bars": LabeledCheckBox {
+                                text: "Show core numbers";
+                                checked: root.selected-widget.show-labels;
+                                toggled(c) => { root.widget-field(root.selected-index, "show_labels", c ? "true" : "false"); }
+                            }
+
+                            if root.selected-widget.kind == "radial_gauge"
+                               || root.selected-widget.kind == "vertical_bar"
+                               || root.selected-widget.kind == "horizontal_bar"
+                               || root.selected-widget.kind == "speedometer"
+                               || root.selected-widget.kind == "core_bars"
+                               || root.selected-widget.kind == "value_text": VerticalLayout {
+                                spacing: 6px;
+                                Text { text: "Color ranges (max value / R / G / B / A)"; font-size: 10px; color: Theme.text-secondary; }
+                                for r[ri] in root.selected-ranges: HorizontalLayout {
+                                    spacing: 3px;
+                                    height: 28px;
+                                    BareSpinBox {
+                                        width: 96px;
+                                        horizontal-stretch: 0;
+                                        value: r.max-pct;
+                                        minimum: -1;
+                                        maximum: 100;
+                                        edited(v) => { root.range-field(ri, "max", v); }
+                                    }
+                                    BareSpinBox {
+                                        width: 96px;
+                                        horizontal-stretch: 0;
+                                        value: r.color-r;
+                                        edited(v) => { root.range-field(ri, "color_r", v); }
+                                    }
+                                    BareSpinBox {
+                                        width: 96px;
+                                        horizontal-stretch: 0;
+                                        value: r.color-g;
+                                        edited(v) => { root.range-field(ri, "color_g", v); }
+                                    }
+                                    BareSpinBox {
+                                        width: 96px;
+                                        horizontal-stretch: 0;
+                                        value: r.color-b;
+                                        edited(v) => { root.range-field(ri, "color_b", v); }
+                                    }
+                                    BareSpinBox {
+                                        width: 96px;
+                                        horizontal-stretch: 0;
+                                        value: r.color-a;
+                                        edited(v) => { root.range-field(ri, "color_a", v); }
+                                    }
+                                    Button {
+                                        text: "✕";
+                                        horizontal-stretch: 1;
+                                        height: 28px;
+                                        clicked => { root.range-removed(ri); }
+                                    }
+                                }
+                                Button {
+                                    text: "+ Add range";
+                                    clicked => { root.range-added(); }
+                                }
+                                Text {
+                                    text: "Use max = -1 for the open-ended (final) range.";
+                                    font-size: 10px;
+                                    color: Theme.text-secondary;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            if root.selected-widget.kind == "image"
+                               || root.selected-widget.kind == "video": VerticalLayout {
                                 spacing: 6px;
                                 Text { text: "File"; font-size: 10px; color: Theme.text-secondary; }
                                 HorizontalLayout {
                                     spacing: 4px;
-                                    LineEdit {
-                                        horizontal-stretch: 1;
-                                        text: root.widgets[root.selected-index].image-path;
+                                    BareLineEdit {
+                                        value: root.selected-widget.image-path;
                                         edited(v) => { root.widget-field(root.selected-index, "path", v); }
                                     }
                                     Button {
@@ -595,18 +958,19 @@ export component TemplateEditorWindow inherits Window {
                                 }
                             }
 
-                            if root.widgets[root.selected-index].kind == "video": LabeledSpinBox {
+                            if root.selected-widget.kind == "video": LabeledSpinBox {
                                 label: "FPS";
-                                value: root.widgets[root.selected-index].fps;
+                                value: root.selected-widget.fps;
                                 minimum: 1;
                                 maximum: 60;
                                 edited(v) => { root.widget-field(root.selected-index, "fps", v); }
                             }
 
-                            if root.widgets[root.selected-index].kind != "label"
-                               && root.widgets[root.selected-index].kind != "image": LabeledSpinBox {
-                                label: "Update ms";
-                                value: root.widgets[root.selected-index].update-interval-ms;
+                            if root.selected-widget.kind != "label"
+                               && root.selected-widget.kind != "image"
+                               && root.selected-widget.kind != "video": LabeledSpinBox {
+                                label: "Update (ms)";
+                                value: root.selected-widget.update-interval-ms;
                                 minimum: 100;
                                 maximum: 10000;
                                 edited(v) => { root.widget-field(root.selected-index, "update_interval_ms", v); }

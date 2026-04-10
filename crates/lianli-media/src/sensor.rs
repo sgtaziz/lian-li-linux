@@ -63,14 +63,17 @@ impl SensorAsset {
                 SensorRange {
                     max: Some(50.0),
                     color: [0, 200, 0],
+                    alpha: 255,
                 },
                 SensorRange {
                     max: Some(80.0),
                     color: [220, 140, 0],
+                    alpha: 255,
                 },
                 SensorRange {
                     max: None,
                     color: [220, 0, 0],
+                    alpha: 255,
                 },
             ];
         }
@@ -108,6 +111,7 @@ impl SensorAsset {
                 ranges.push(SensorRange {
                     max: None,
                     color: last.color,
+                    alpha: last.alpha,
                 });
             }
         }

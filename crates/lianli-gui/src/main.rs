@@ -226,10 +226,8 @@ fn main() {
     // ── Fan callbacks ──
     wire_fan_callbacks(&window, &backend, &shared);
 
-    // ── Template editor (separate top-level Window) ──
     let editor_handle = editor::install(&window, shared.clone());
 
-    // ── LCD callbacks ──
     wire_lcd_callbacks(&window, &shared, &editor_handle);
 
     window.run().expect("Failed to run Slint event loop");
@@ -988,10 +986,6 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
                                         lianli_shared::media::MediaType::Cooler
                                     }
                                     "Custom" => {
-                                        // Default to the built-in Cooler template so newly-
-                                        // selected Custom entries have a valid template_id.
-                                        // The GUI template picker (Commit 3) lets the user
-                                        // choose a different one.
                                         if lcd
                                             .template_id
                                             .as_ref()
@@ -1161,6 +1155,7 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
                                 s.gauge_ranges.push(lianli_shared::media::SensorRange {
                                     max: Some(100.0),
                                     color: [0, 200, 0],
+                                    alpha: 255,
                                 });
                             }
                             "doublegauge_header" => {
@@ -1403,11 +1398,6 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
         });
     }
 
-    // ── Template management ──
-    // New / Edit / Duplicate / Delete buttons under the Custom media type.
-    // New and Edit launch the separate Template Editor Window. Edit on a
-    // built-in triggers a duplicate-then-edit flow: the built-in stays
-    // pristine, the user edits the copy.
     {
         let shared = shared.clone();
         let weak = window.as_weak();
@@ -1447,9 +1437,6 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
         let editor_window = editor.window.clone_strong();
         let editor_state = editor.state.clone();
         window.on_lcd_edit_template(move |idx| {
-            // Find the currently-assigned template. If it's a built-in we
-            // first duplicate it into a user-owned copy, then open the
-            // editor against the copy — built-ins remain read-only.
             let (starting_template, target_idx) = {
                 let state = shared.lock().unwrap();
                 let lcd = state.config.as_ref().and_then(|c| c.lcds.get(idx as usize));
@@ -1462,7 +1449,6 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
 
             let starting = match starting_template {
                 Some(tpl) if lianli_shared::template_defaults::is_builtin_id(&tpl.id) => {
-                    // Duplicate the built-in first, persist, then edit the copy.
                     duplicate_current_template(&shared, target_idx);
                     refresh_lcd_ui(&weak, &shared);
                     let state = shared.lock().unwrap();
@@ -1485,7 +1471,6 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
     }
 }
 
-/// Generate a unique user-template id. Built-in ids are reserved elsewhere.
 fn generate_template_id(prefix: &str) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
@@ -1501,9 +1486,12 @@ pub(crate) fn make_blank_template() -> lianli_shared::template::LcdTemplate {
         name: "New Template".to_string(),
         base_width: 480,
         base_height: 480,
-        background: lianli_shared::template::TemplateBackground::Color { rgb: [10, 14, 22] },
+        background: lianli_shared::template::TemplateBackground::Color {
+            rgb: [10, 14, 22, 255],
+        },
         widgets: Vec::new(),
-        orientation: lianli_shared::template::TemplateOrientation::Portrait,
+        rotated: false,
+        target_device: None,
     }
 }
 
@@ -1521,7 +1509,7 @@ fn duplicate_current_template(shared: &Shared, idx: usize) {
         if let Some(source) = source {
             let mut copy = source.clone();
             copy.id = generate_template_id("user");
-            copy.name = format!("{} (copy)", source.name);
+            copy.name = next_unique_name(&source.name, &state.lcd_templates);
             let new_id = copy.id.clone();
             state.lcd_templates.push(copy);
             if let Some(ref mut c) = state.config {
@@ -1537,6 +1525,41 @@ fn duplicate_current_template(shared: &Shared, idx: usize) {
     if let Some(list) = user_list {
         send_set_templates(list);
     }
+}
+
+/// Generates a non-conflicting template name. If `base` is already a "(Copy N)"
+/// form we strip the suffix before bumping, so duplicating "Foo (Copy 2)" yields
+/// "Foo (Copy 3)" rather than "Foo (Copy 2) (Copy)".
+pub(crate) fn next_unique_name(
+    base: &str,
+    existing: &[lianli_shared::template::LcdTemplate],
+) -> String {
+    let stem = strip_copy_suffix(base);
+    let names: std::collections::HashSet<&str> = existing.iter().map(|t| t.name.as_str()).collect();
+    if !names.contains(stem) && stem != base {
+        return stem.to_string();
+    }
+    let first = format!("{stem} (Copy)");
+    if !names.contains(first.as_str()) {
+        return first;
+    }
+    for i in 2..1000 {
+        let candidate = format!("{stem} (Copy {i})");
+        if !names.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    format!("{stem} (Copy {})", generate_template_id(""))
+}
+
+fn strip_copy_suffix(name: &str) -> &str {
+    if let Some(idx) = name.rfind(" (Copy") {
+        let tail = &name[idx + 6..];
+        if tail == ")" || (tail.starts_with(' ') && tail.ends_with(')')) {
+            return &name[..idx];
+        }
+    }
+    name
 }
 
 fn delete_current_template(shared: &Shared, idx: usize) {
@@ -1555,8 +1578,6 @@ fn delete_current_template(shared: &Shared, idx: usize) {
             return;
         }
         state.lcd_templates.retain(|t| t.id != target_id);
-        // Any LCD pointing at the now-deleted template falls back to the
-        // built-in Cooler so the daemon doesn't fail the next render cycle.
         if let Some(ref mut c) = state.config {
             for lcd in c.lcds.iter_mut() {
                 if lcd.template_id.as_deref() == Some(target_id.as_str()) {

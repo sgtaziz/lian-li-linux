@@ -1,69 +1,77 @@
 //! Data model for the `MediaType::Custom` template system.
-//!
-//! A [`LcdTemplate`] is a reusable layout of widgets (gauges, labels, bars,
-//! images, videos, CPU core strips) that a Custom LCD media type can render.
-//! Templates are referenced from `LcdConfig.template_id`, stored in
-//! `lcd_templates.json`, and authored via the in-app layout editor.
-//!
-//! Commit 1 ships the types and stub built-ins only. Widget rendering and the
-//! full `CustomAsset` renderer land in Commit 2.
 
 use crate::media::{SensorRange, SensorSourceConfig};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// A reusable LCD layout template.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LcdTemplate {
-    /// Stable unique id. Built-ins use reserved ids (e.g. `cooler-default`);
-    /// user templates use a generated id.
-    pub id: String,
-    /// Display name, user-editable.
-    pub name: String,
-    /// Authoring canvas width in pixels.
-    pub base_width: u32,
-    /// Authoring canvas height in pixels.
-    pub base_height: u32,
-    /// Background fill or image.
-    pub background: TemplateBackground,
-    /// Widgets drawn in vector order (first = bottom).
-    #[serde(default)]
-    pub widgets: Vec<Widget>,
-    /// Physical mount orientation the designer laid out for.
-    #[serde(default)]
-    pub orientation: TemplateOrientation,
+/// Accepts both `[r,g,b]` (alpha defaults to 255) and `[r,g,b,a]` so older
+/// hand-written templates keep loading after the alpha channel was added.
+pub mod rgba_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(c: &[u8; 4], s: S) -> Result<S::Ok, S::Error> {
+        c.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 4], D::Error> {
+        let v: Vec<u8> = Vec::deserialize(d)?;
+        match v.len() {
+            3 => Ok([v[0], v[1], v[2], 255]),
+            4 => Ok([v[0], v[1], v[2], v[3]]),
+            n => Err(serde::de::Error::custom(format!(
+                "expected 3 or 4 color components, got {n}"
+            ))),
+        }
+    }
 }
 
-/// Design-time layout intent. Distinct from `LcdConfig.orientation`, which is
-/// the per-device physical rotation applied after template composition.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TemplateOrientation {
-    /// Widgets authored against `base_width × base_height` as-is.
-    #[default]
-    Portrait,
-    /// Widgets authored against a 90° CW rotation of the base canvas.
-    Landscape,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LcdTemplate {
+    pub id: String,
+    pub name: String,
+    pub base_width: u32,
+    pub base_height: u32,
+    pub background: TemplateBackground,
+    #[serde(default)]
+    pub widgets: Vec<Widget>,
+    #[serde(default)]
+    pub rotated: bool,
+    #[serde(default)]
+    pub target_device: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TemplateBackground {
-    Color { rgb: [u8; 3] },
-    Image { path: PathBuf },
+    Color {
+        #[serde(with = "rgba_serde")]
+        rgb: [u8; 4],
+    },
+    Image {
+        path: PathBuf,
+    },
+    Builtin {
+        asset: BuiltinAsset,
+    },
 }
 
 impl Default for TemplateBackground {
     fn default() -> Self {
-        Self::Color { rgb: [0, 0, 0] }
+        Self::Color {
+            rgb: [0, 0, 0, 255],
+        }
     }
 }
 
-/// A positioned, sized, optionally rotated widget inside a template.
-///
-/// `x` / `y` are the widget center in template-space (pixels against
-/// `base_width × base_height`). `width` / `height` are the axis-aligned
-/// bounding box before rotation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuiltinAsset {
+    CoolerBackground,
+    DoublegaugeBackground,
+    Thermometer,
+}
+
+/// `x`/`y` are the widget center; `width`/`height` are pre-rotation bounds.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Widget {
     pub id: String,
@@ -76,10 +84,8 @@ pub struct Widget {
     pub rotation: f32,
     #[serde(default = "default_true")]
     pub visible: bool,
-    /// Sensor-bound widgets re-read at this interval. `None` = template default (1000 ms).
     #[serde(default)]
     pub update_interval_ms: Option<u64>,
-    /// Video widget playback rate. `None` = template default.
     #[serde(default)]
     pub fps: Option<f32>,
 }
@@ -96,13 +102,13 @@ pub enum WidgetKind {
         #[serde(default)]
         font: FontRef,
         font_size: f32,
-        color: [u8; 3],
+        #[serde(with = "rgba_serde")]
+        color: [u8; 4],
         #[serde(default)]
         align: TextAlign,
     },
     ValueText {
         source: SensorSourceConfig,
-        /// Printf-style format string applied to the sensor value, e.g. `"{:.1}"`.
         #[serde(default = "default_value_format")]
         format: String,
         #[serde(default)]
@@ -110,9 +116,16 @@ pub enum WidgetKind {
         #[serde(default)]
         font: FontRef,
         font_size: f32,
-        color: [u8; 3],
+        #[serde(with = "rgba_serde")]
+        color: [u8; 4],
         #[serde(default)]
         align: TextAlign,
+        #[serde(default = "default_value_min")]
+        value_min: f32,
+        #[serde(default = "default_value_max")]
+        value_max: f32,
+        #[serde(default)]
+        ranges: Vec<SensorRange>,
     },
     RadialGauge {
         source: SensorSourceConfig,
@@ -120,10 +133,10 @@ pub enum WidgetKind {
         value_max: f32,
         start_angle: f32,
         sweep_angle: f32,
-        /// Inner radius as a fraction of `min(width, height) / 2`.
         #[serde(default = "default_inner_radius_pct")]
         inner_radius_pct: f32,
-        background_color: [u8; 3],
+        #[serde(with = "rgba_serde")]
+        background_color: [u8; 4],
         #[serde(default)]
         ranges: Vec<SensorRange>,
     },
@@ -131,7 +144,8 @@ pub enum WidgetKind {
         source: SensorSourceConfig,
         value_min: f32,
         value_max: f32,
-        background_color: [u8; 3],
+        #[serde(with = "rgba_serde")]
+        background_color: [u8; 4],
         #[serde(default)]
         corner_radius: f32,
         #[serde(default)]
@@ -141,7 +155,8 @@ pub enum WidgetKind {
         source: SensorSourceConfig,
         value_min: f32,
         value_max: f32,
-        background_color: [u8; 3],
+        #[serde(with = "rgba_serde")]
+        background_color: [u8; 4],
         #[serde(default)]
         corner_radius: f32,
         #[serde(default)]
@@ -153,20 +168,38 @@ pub enum WidgetKind {
         value_max: f32,
         start_angle: f32,
         sweep_angle: f32,
-        needle_color: [u8; 3],
-        tick_color: [u8; 3],
+        #[serde(with = "rgba_serde")]
+        needle_color: [u8; 4],
+        #[serde(with = "rgba_serde")]
+        tick_color: [u8; 4],
         #[serde(default = "default_tick_count")]
         tick_count: u32,
-        background_color: [u8; 3],
+        #[serde(with = "rgba_serde")]
+        background_color: [u8; 4],
+        #[serde(default)]
+        ranges: Vec<SensorRange>,
+        #[serde(default = "default_true")]
+        show_gauge: bool,
+        #[serde(default = "default_true")]
+        show_needle: bool,
+        #[serde(default = "default_needle_width")]
+        needle_width: f32,
+        #[serde(default = "default_needle_length_pct")]
+        needle_length_pct: f32,
+        #[serde(default = "default_needle_border_color", with = "rgba_serde")]
+        needle_border_color: [u8; 4],
+        #[serde(default = "default_needle_border_width")]
+        needle_border_width: f32,
     },
     CoreBars {
         #[serde(default)]
         orientation: BarOrientation,
-        color_cold: [u8; 3],
-        color_hot: [u8; 3],
-        background_color: [u8; 3],
-        #[serde(default)]
+        #[serde(with = "rgba_serde")]
+        background_color: [u8; 4],
+        #[serde(default = "default_true")]
         show_labels: bool,
+        #[serde(default)]
+        ranges: Vec<SensorRange>,
     },
     Image {
         path: PathBuf,
@@ -190,12 +223,36 @@ fn default_value_format() -> String {
     "{:.0}".to_string()
 }
 
+fn default_value_min() -> f32 {
+    0.0
+}
+
+fn default_value_max() -> f32 {
+    100.0
+}
+
 fn default_inner_radius_pct() -> f32 {
     0.78
 }
 
 fn default_tick_count() -> u32 {
     10
+}
+
+fn default_needle_width() -> f32 {
+    14.0
+}
+
+fn default_needle_length_pct() -> f32 {
+    0.95
+}
+
+fn default_needle_border_color() -> [u8; 4] {
+    [174, 10, 16, 255]
+}
+
+fn default_needle_border_width() -> f32 {
+    1.5
 }
 
 fn default_opacity() -> f32 {
@@ -228,7 +285,6 @@ pub enum ImageFit {
     Cover,
 }
 
-/// Reference to a font — either one of the bundled built-ins or a user file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FontRef {
@@ -252,10 +308,63 @@ pub enum BuiltinFont {
     Digital7,
 }
 
+impl WidgetKind {
+    pub fn kind_id(&self) -> &'static str {
+        match self {
+            Self::Label { .. } => "label",
+            Self::ValueText { .. } => "value_text",
+            Self::RadialGauge { .. } => "radial_gauge",
+            Self::VerticalBar { .. } => "vertical_bar",
+            Self::HorizontalBar { .. } => "horizontal_bar",
+            Self::Speedometer { .. } => "speedometer",
+            Self::CoreBars { .. } => "core_bars",
+            Self::Image { .. } => "image",
+            Self::Video { .. } => "video",
+        }
+    }
+
+    pub fn friendly_name(&self) -> &'static str {
+        Self::friendly_name_for(self.kind_id())
+    }
+
+    pub fn friendly_name_for(kind_id: &str) -> &'static str {
+        match kind_id {
+            "label" => "Label",
+            "value_text" => "Sensor Value",
+            "radial_gauge" => "Radial Gauge",
+            "vertical_bar" => "Vertical Bar",
+            "horizontal_bar" => "Horizontal Bar",
+            "speedometer" => "Speedometer",
+            "core_bars" => "Core Usage",
+            "image" => "Image",
+            "video" => "Video",
+            _ => "Widget",
+        }
+    }
+
+    pub fn kind_id_for_friendly(label: &str) -> Option<&'static str> {
+        Self::all_kind_ids()
+            .iter()
+            .copied()
+            .find(|id| Self::friendly_name_for(id) == label)
+    }
+
+    pub fn all_kind_ids() -> &'static [&'static str] {
+        &[
+            "label",
+            "value_text",
+            "radial_gauge",
+            "vertical_bar",
+            "horizontal_bar",
+            "speedometer",
+            "core_bars",
+            "image",
+            "video",
+        ]
+    }
+}
+
 impl LcdTemplate {
-    /// Basic structural validation — deep widget-specific checks live in the
-    /// renderer (Commit 2). Returns an error message suitable for surfacing
-    /// via `tracing::warn`.
     pub fn validate(&self) -> Result<(), String> {
         if self.id.trim().is_empty() {
             return Err("template id must not be empty".into());

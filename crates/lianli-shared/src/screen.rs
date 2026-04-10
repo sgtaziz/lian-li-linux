@@ -89,9 +89,6 @@ pub fn screen_info_for(family: DeviceFamily) -> Option<ScreenInfo> {
     }
 }
 
-/// Pretty-labeled device preset used by the template editor UI. The template
-/// JSON stores raw `base_width`/`base_height` — presets are a convenience for
-/// users so they don't have to memorize pixel dimensions.
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenPreset {
     pub label: &'static str,
@@ -99,8 +96,6 @@ pub struct ScreenPreset {
     pub height: u32,
 }
 
-/// All distinct device resolutions currently supported, pretty-labeled for UI.
-/// Duplicates (e.g. SLV3 vs TL LCD both 400×400) are merged under a single label.
 pub fn screen_presets() -> &'static [ScreenPreset] {
     &[
         ScreenPreset {
@@ -126,8 +121,6 @@ pub fn screen_presets() -> &'static [ScreenPreset] {
     ]
 }
 
-/// Reverse lookup — given raw dimensions, return the matching preset label.
-/// Falls back to `"Custom W×H"` for non-matching sizes.
 pub fn screen_preset_label(width: u32, height: u32) -> String {
     for preset in screen_presets() {
         if preset.width == width && preset.height == height {

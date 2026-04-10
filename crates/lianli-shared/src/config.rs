@@ -34,8 +34,6 @@ pub struct LcdConfig {
     pub sensor_source_2: SensorSourceConfig,
     #[serde(default)]
     pub doublegauge: Option<DoublegaugeDescriptor>,
-    /// For `MediaType::Custom` — the id of the template to render.
-    /// Looked up against built-ins + the user template file at stream time.
     #[serde(default)]
     pub template_id: Option<String>,
 }
@@ -94,9 +92,6 @@ impl LcdConfig {
                 descriptor.validate()?;
             }
             MediaType::Custom => {
-                // Deep validation (template resolution, widget checks) happens
-                // at asset-prepare time in the daemon, which has access to the
-                // loaded template store.
                 if self
                     .template_id
                     .as_ref()

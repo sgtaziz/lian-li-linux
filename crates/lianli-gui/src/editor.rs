@@ -1,86 +1,72 @@
-//! Template Editor wiring — instantiates `TemplateEditorWindow`, binds its
-//! callbacks to the in-progress editor state, drives preview rendering via
-//! `RenderTemplatePreview` IPC, and commits saves through `SetLcdTemplates`.
-//!
-//! The editor is a separate top-level Slint Window. It owns its own state
-//! (`EditorState`) — the main window seeds properties via setters before
-//! `show()` and listens for `save-requested`/`cancel` callbacks.
+//! Template editor: callbacks for the `TemplateEditorWindow`, preview
+//! rendering over IPC, and the save path back into `lcd_templates.json`.
 
 use crate::conversions;
 use crate::ipc_client;
-use crate::{EditorWidget, MainWindow, Shared, TemplateEditorWindow};
+use crate::{EditorRange, EditorWidget, MainWindow, Shared, TemplateEditorWindow};
 use lianli_shared::ipc::IpcRequest;
 use lianli_shared::media::{SensorRange, SensorSourceConfig};
 use lianli_shared::screen::{screen_preset_label, screen_presets};
 use lianli_shared::sensors::{SensorInfo, SensorSource};
 use lianli_shared::template::{
-    BarOrientation, BuiltinFont, FontRef, ImageFit, LcdTemplate, TemplateBackground,
-    TemplateOrientation, TextAlign, Widget, WidgetKind,
+    BarOrientation, BuiltinFont, FontRef, ImageFit, LcdTemplate, TemplateBackground, TextAlign,
+    Widget, WidgetKind,
 };
 use parking_lot::Mutex as PLMutex;
-use slint::{ComponentHandle, Image, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// In-progress template state. The editor edits a clone of the original
-/// template and only pushes it back on save. The parent main window
-/// assigns `target_lcd_index` when it opens the editor so we know which
-/// LcdConfig to point at the new template on save.
 #[derive(Debug, Default)]
 pub struct EditorState {
     pub template: Option<LcdTemplate>,
     pub target_lcd_index: Option<usize>,
     pub selected_widget: i32,
-    /// Monotonically-incrementing version used to discard stale preview
-    /// renders when rapid edits pile up.
     pub preview_version: u64,
 }
 
 pub type SharedEditor = Arc<PLMutex<EditorState>>;
 
-/// Publicly visible bundle returned by `install()` so main.rs can both show
-/// the window and push new editing state into it.
 pub struct EditorHandle {
     pub window: TemplateEditorWindow,
     pub state: SharedEditor,
 }
 
-/// Install the editor window alongside the main window. Returns an
-/// [`EditorHandle`] that `wire_lcd_callbacks` uses to launch the editor for
-/// a given LCD index + template.
 pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
     let editor = TemplateEditorWindow::new().expect("Failed to create template editor window");
     let editor_state: SharedEditor = Arc::new(PLMutex::new(EditorState::default()));
     let preview_version = Arc::new(AtomicU64::new(0));
 
-    // ── Seed static models ──
     let presets: Vec<SharedString> = screen_presets()
         .iter()
         .map(|p| SharedString::from(p.label))
         .collect();
     editor.set_device_presets(ModelRc::new(VecModel::from(presets)));
 
-    // Populate sensor options from current shared state (same format the LCD
-    // page uses so the dropdown is consistent).
     let sensors = shared.lock().unwrap().available_sensors.clone();
     editor.set_sensor_options(conversions::sensor_options_model(&sensors, false));
 
-    // ── save-requested ──
     {
         let editor_state = editor_state.clone();
         let shared = shared.clone();
         let editor_weak = editor.as_weak();
         let main_weak = main.as_weak();
-        editor.on_save_requested(move || {
-            commit_save(&editor_state, &shared);
-            if let Some(e) = editor_weak.upgrade() {
-                e.hide().ok();
+        editor.on_save_requested(move || match commit_save(&editor_state, &shared) {
+            Ok(()) => {
+                if let Some(e) = editor_weak.upgrade() {
+                    e.hide().ok();
+                }
+                crate::refresh_lcd_ui(&main_weak, &shared);
             }
-            crate::refresh_lcd_ui(&main_weak, &shared);
+            Err(msg) => {
+                if let Some(e) = editor_weak.upgrade() {
+                    e.set_status_message(SharedString::from(msg));
+                    e.set_status_is_error(true);
+                }
+            }
         });
     }
 
-    // ── cancel ──
     {
         let editor_weak = editor.as_weak();
         editor.on_cancel(move || {
@@ -90,13 +76,13 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
         });
     }
 
-    // ── header-field ──
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
         let preview_version = preview_version.clone();
         let shared = shared.clone();
         editor.on_header_field(move |field, val| {
+            let mut needs_widgets_refresh = false;
             {
                 let mut st = editor_state.lock();
                 let prev_color = editor_color_from_state(&st);
@@ -105,12 +91,13 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                 };
                 match field.as_str() {
                     "name" => tpl.name = val.to_string(),
-                    "orientation" => {
-                        tpl.orientation = if val.as_str() == "landscape" {
-                            TemplateOrientation::Landscape
-                        } else {
-                            TemplateOrientation::Portrait
-                        };
+                    "rotated" => {
+                        let new = val.as_str() == "true";
+                        if new != tpl.rotated && tpl.base_width != tpl.base_height {
+                            apply_rotation_swap(tpl, new);
+                            needs_widgets_refresh = true;
+                        }
+                        tpl.rotated = new;
                     }
                     "bg_type" => {
                         if val.as_str() == "color" {
@@ -120,12 +107,17 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                     _ => {}
                 }
             }
-            reflect_editor_state(&editor_weak, &editor_state);
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_header(&e, &editor_state);
+                if needs_widgets_refresh {
+                    reflect_widgets_model(&e, &editor_state, &shared);
+                }
+                e.set_status_message(SharedString::default());
+            }
             request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
     }
 
-    // ── preset-selected ──
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
@@ -140,14 +132,21 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                 if let Some(preset) = screen_presets().iter().find(|p| p.label == label.as_str()) {
                     tpl.base_width = preset.width;
                     tpl.base_height = preset.height;
+                    tpl.target_device = Some(preset.label.to_string());
+                    if preset.width == preset.height {
+                        tpl.rotated = false;
+                    }
                 }
             }
-            reflect_editor_state(&editor_weak, &editor_state);
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_header(&e, &editor_state);
+            }
             request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
     }
 
-    // ── widget-moved (drag callback) ──
+    // Drag handler must use in-place row updates; rebuilding the widgets
+    // model would tear down the for-loop instances and kill the live drag.
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
@@ -163,34 +162,36 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                     }
                 }
             }
-            reflect_editor_state(&editor_weak, &editor_state);
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_widget_row(&e, &editor_state, &shared, idx as usize);
+            }
             request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
     }
 
-    // ── widget-added ──
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
         let preview_version = preview_version.clone();
         let shared = shared.clone();
-        editor.on_widget_added(move |kind| {
+        editor.on_widget_added(move |kind_label| {
+            let kind_id = WidgetKind::kind_id_for_friendly(kind_label.as_str()).unwrap_or("label");
             {
                 let mut st = editor_state.lock();
                 if let Some(tpl) = st.template.as_mut() {
                     let (cx, cy) = (tpl.base_width as f32 / 2.0, tpl.base_height as f32 / 2.0);
                     let id = format!("w-{}", tpl.widgets.len() + 1);
-                    tpl.widgets
-                        .push(make_default_widget(&id, kind.as_str(), cx, cy));
+                    tpl.widgets.push(make_default_widget(&id, kind_id, cx, cy));
                     st.selected_widget = (tpl.widgets.len() - 1) as i32;
                 }
             }
-            reflect_editor_state(&editor_weak, &editor_state);
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_widgets_model(&e, &editor_state, &shared);
+            }
             request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
     }
 
-    // ── widget-removed ──
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
@@ -207,12 +208,13 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                     }
                 }
             }
-            reflect_editor_state(&editor_weak, &editor_state);
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_widgets_model(&e, &editor_state, &shared);
+            }
             request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
     }
 
-    // ── widget-field (inspector edits) ──
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
@@ -221,6 +223,9 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
         editor.on_widget_field(move |idx, field, val| {
             if field.as_str() == "_select" {
                 editor_state.lock().selected_widget = idx;
+                if let Some(e) = editor_weak.upgrade() {
+                    select_widget(&e, &editor_state, &shared, idx);
+                }
                 return;
             }
             {
@@ -232,12 +237,13 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                     }
                 }
             }
-            reflect_editor_state(&editor_weak, &editor_state);
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_widget_row(&e, &editor_state, &shared, idx as usize);
+            }
             request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
     }
 
-    // ── pick-bg-image ──
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
@@ -259,14 +265,20 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                             tpl.background = TemplateBackground::Image { path };
                         }
                     }
-                    reflect_editor_state(&editor_weak2, &editor_state2);
+                    let editor_weak3 = editor_weak2.clone();
+                    let editor_state3 = editor_state2.clone();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(e) = editor_weak3.upgrade() {
+                            reflect_header(&e, &editor_state3);
+                        }
+                    })
+                    .ok();
                     request_preview(&editor_weak2, &editor_state2, &preview_version2, &shared2);
                 }
             });
         });
     }
 
-    // ── pick-widget-image ──
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
@@ -300,14 +312,115 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                             }
                         }
                     }
-                    reflect_editor_state(&editor_weak2, &editor_state2);
+                    let editor_weak3 = editor_weak2.clone();
+                    let editor_state3 = editor_state2.clone();
+                    let shared3 = shared2.clone();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(e) = editor_weak3.upgrade() {
+                            reflect_widget_row(&e, &editor_state3, &shared3, idx_usize);
+                        }
+                    })
+                    .ok();
                     request_preview(&editor_weak2, &editor_state2, &preview_version2, &shared2);
                 }
             });
         });
     }
 
-    let _ = main; // main window ref kept around only for symmetric API
+    {
+        let editor_state = editor_state.clone();
+        let editor_weak = editor.as_weak();
+        let preview_version = preview_version.clone();
+        let shared = shared.clone();
+        editor.on_range_field(move |range_idx, field, val| {
+            let target_idx = editor_state.lock().selected_widget;
+            if target_idx < 0 {
+                return;
+            }
+            {
+                let mut st = editor_state.lock();
+                if let Some(tpl) = st.template.as_mut() {
+                    if let Some(widget) = tpl.widgets.get_mut(target_idx as usize) {
+                        if let Some(ranges) = widget_ranges_mut(&mut widget.kind) {
+                            if let Some(r) = ranges.get_mut(range_idx as usize) {
+                                apply_range_field(r, field.as_str(), val.as_str());
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_ranges(&e, &editor_state);
+                reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
+            }
+            request_preview(&editor_weak, &editor_state, &preview_version, &shared);
+        });
+    }
+
+    {
+        let editor_state = editor_state.clone();
+        let editor_weak = editor.as_weak();
+        let preview_version = preview_version.clone();
+        let shared = shared.clone();
+        editor.on_range_added(move || {
+            let target_idx = editor_state.lock().selected_widget;
+            if target_idx < 0 {
+                return;
+            }
+            {
+                let mut st = editor_state.lock();
+                if let Some(tpl) = st.template.as_mut() {
+                    if let Some(widget) = tpl.widgets.get_mut(target_idx as usize) {
+                        if let Some(ranges) = widget_ranges_mut(&mut widget.kind) {
+                            ranges.push(SensorRange {
+                                max: Some(50.0),
+                                color: [200, 200, 200],
+                                alpha: 255,
+                            });
+                        }
+                    }
+                }
+            }
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_ranges(&e, &editor_state);
+                reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
+            }
+            request_preview(&editor_weak, &editor_state, &preview_version, &shared);
+        });
+    }
+
+    {
+        let editor_state = editor_state.clone();
+        let editor_weak = editor.as_weak();
+        let preview_version = preview_version.clone();
+        let shared = shared.clone();
+        editor.on_range_removed(move |range_idx| {
+            let target_idx = editor_state.lock().selected_widget;
+            if target_idx < 0 {
+                return;
+            }
+            {
+                let mut st = editor_state.lock();
+                if let Some(tpl) = st.template.as_mut() {
+                    if let Some(widget) = tpl.widgets.get_mut(target_idx as usize) {
+                        if let Some(ranges) = widget_ranges_mut(&mut widget.kind) {
+                            let i = range_idx as usize;
+                            if i < ranges.len() {
+                                ranges.remove(i);
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(e) = editor_weak.upgrade() {
+                reflect_ranges(&e, &editor_state);
+                reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
+            }
+            request_preview(&editor_weak, &editor_state, &preview_version, &shared);
+        });
+    }
+
+    let _ = main;
 
     EditorHandle {
         window: editor,
@@ -315,75 +428,70 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
     }
 }
 
-/// Open the editor window, seeding it with the template the caller wants to
-/// edit. If `initial` is None, a blank user template is generated.
 pub fn open(
     handle: &EditorHandle,
     shared: &Shared,
     lcd_index: usize,
     initial: Option<LcdTemplate>,
 ) {
-    let tpl = initial.unwrap_or_else(crate::make_blank_template);
-    set_editing(&handle.state, tpl.clone(), lcd_index);
+    handle
+        .window
+        .set_widgets(slint::ModelRc::new(VecModel::<EditorWidget>::default()));
+    handle
+        .window
+        .set_selected_ranges(slint::ModelRc::new(VecModel::<EditorRange>::default()));
+    handle.window.set_selected_index(-1);
+    handle.window.set_selected_widget(blank_editor_widget());
+    handle.window.set_preview_image(Image::default());
+    handle.window.set_status_message(SharedString::default());
+    handle.window.set_status_is_error(false);
 
-    // Rebuild the sensor options model (sensor list may have changed since
-    // install time — hot-plug, daemon restart, etc.).
+    let tpl = initial.unwrap_or_else(crate::make_blank_template);
+    set_editing(&handle.state, tpl, lcd_index);
+
     let sensors = shared.lock().unwrap().available_sensors.clone();
     handle
         .window
         .set_sensor_options(conversions::sensor_options_model(&sensors, false));
 
-    seed_editor_from_template(&handle.window, &tpl);
+    reflect_header(&handle.window, &handle.state);
+    reflect_widgets_model(&handle.window, &handle.state, shared);
     handle.window.show().ok();
 
-    // Kick off an initial preview render.
     let version = Arc::new(AtomicU64::new(0));
     request_preview(&handle.window.as_weak(), &handle.state, &version, shared);
 }
 
-// ---------------------------------------------------------------------------
-// Free helpers
-// ---------------------------------------------------------------------------
-
-fn seed_editor_from_template(editor: &TemplateEditorWindow, tpl: &LcdTemplate) {
-    editor.set_template_id(SharedString::from(tpl.id.as_str()));
-    editor.set_template_name(SharedString::from(tpl.name.as_str()));
-    editor.set_base_width(tpl.base_width as i32);
-    editor.set_base_height(tpl.base_height as i32);
-    editor.set_orientation(SharedString::from(match tpl.orientation {
-        TemplateOrientation::Portrait => "portrait",
-        TemplateOrientation::Landscape => "landscape",
-    }));
-    match &tpl.background {
-        TemplateBackground::Color { rgb } => {
-            editor.set_bg_type(SharedString::from("color"));
-            editor.set_bg_r(rgb[0] as i32);
-            editor.set_bg_g(rgb[1] as i32);
-            editor.set_bg_b(rgb[2] as i32);
-            editor.set_bg_image_path(SharedString::default());
-        }
-        TemplateBackground::Image { path } => {
-            editor.set_bg_type(SharedString::from("image"));
-            editor.set_bg_image_path(SharedString::from(path.display().to_string()));
-        }
-    }
-    editor.set_current_preset_label(SharedString::from(
-        screen_preset_label(tpl.base_width, tpl.base_height).as_str(),
-    ));
-    editor.set_widgets(template_widgets_to_model(&tpl.widgets));
-    editor.set_selected_index(-1);
-}
-
-fn template_widgets_to_model(widgets: &[Widget]) -> ModelRc<EditorWidget> {
-    let items: Vec<EditorWidget> = widgets.iter().map(widget_to_editor).collect();
+fn template_widgets_to_model(widgets: &[Widget], sensors: &[SensorInfo]) -> ModelRc<EditorWidget> {
+    let items: Vec<EditorWidget> = widgets
+        .iter()
+        .map(|w| widget_to_editor(w, sensors))
+        .collect();
     ModelRc::new(VecModel::from(items))
 }
 
-fn widget_to_editor(w: &Widget) -> EditorWidget {
-    let kind_str = widget_kind_name(&w.kind);
+fn sensor_index_for_source(source: &SensorSourceConfig, sensors: &[SensorInfo]) -> i32 {
+    match source {
+        SensorSourceConfig::Constant { .. } => 0,
+        SensorSourceConfig::Command { .. } => sensors.len() as i32,
+        _ => {
+            let target = source.to_sensor_source();
+            sensors
+                .iter()
+                .position(|s| s.source == target)
+                .map(|i| i as i32)
+                .unwrap_or(0)
+        }
+    }
+}
+
+fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
+    let kind_str = w.kind.kind_id();
+    let kind_label = WidgetKind::friendly_name_for(kind_str);
     let mut out = EditorWidget {
         id: SharedString::from(w.id.as_str()),
         kind: SharedString::from(kind_str),
+        kind_label: SharedString::from(kind_label),
         x: w.x,
         y: w.y,
         width: w.width,
@@ -397,6 +505,7 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
         color_r: 255,
         color_g: 255,
         color_b: 255,
+        color_a: 255,
         align: SharedString::from("center"),
         format: SharedString::from("{:.0}"),
         unit: SharedString::default(),
@@ -409,7 +518,26 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
         bg_r: 40,
         bg_g: 40,
         bg_b: 40,
+        bg_a: 255,
         tick_count: 10,
+        show_gauge: true,
+        show_needle: true,
+        needle_width: 14.0,
+        needle_length_pct: 95,
+        needle_color_r: 255,
+        needle_color_g: 255,
+        needle_color_b: 255,
+        needle_color_a: 255,
+        tick_color_r: 120,
+        tick_color_g: 140,
+        tick_color_b: 160,
+        tick_color_a: 255,
+        needle_border_r: 174,
+        needle_border_g: 10,
+        needle_border_b: 16,
+        needle_border_a: 255,
+        needle_border_width: 1.5,
+        show_labels: true,
         image_path: SharedString::default(),
         opacity: 1.0,
         fps: w.fps.unwrap_or(30.0),
@@ -428,17 +556,22 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
             out.color_r = color[0] as i32;
             out.color_g = color[1] as i32;
             out.color_b = color[2] as i32;
+            out.color_a = color[3] as i32;
             out.align = SharedString::from(text_align_name(*align));
         }
         WidgetKind::ValueText {
+            source,
             format,
             unit,
             font,
             font_size,
             color,
             align,
+            value_min,
+            value_max,
             ..
         } => {
+            out.source_index = sensor_index_for_source(source, sensors);
             out.format = SharedString::from(format.as_str());
             out.unit = SharedString::from(unit.as_str());
             out.font_name = SharedString::from(font_ref_to_name(font));
@@ -446,9 +579,13 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
             out.color_r = color[0] as i32;
             out.color_g = color[1] as i32;
             out.color_b = color[2] as i32;
+            out.color_a = color[3] as i32;
             out.align = SharedString::from(text_align_name(*align));
+            out.value_min = *value_min;
+            out.value_max = *value_max;
         }
         WidgetKind::RadialGauge {
+            source,
             value_min,
             value_max,
             start_angle,
@@ -457,6 +594,7 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
             background_color,
             ..
         } => {
+            out.source_index = sensor_index_for_source(source, sensors);
             out.value_min = *value_min;
             out.value_max = *value_max;
             out.start_angle = *start_angle;
@@ -465,34 +603,49 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
             out.bg_r = background_color[0] as i32;
             out.bg_g = background_color[1] as i32;
             out.bg_b = background_color[2] as i32;
+            out.bg_a = background_color[3] as i32;
         }
         WidgetKind::VerticalBar {
+            source,
             value_min,
             value_max,
             background_color,
             ..
         }
         | WidgetKind::HorizontalBar {
+            source,
             value_min,
             value_max,
             background_color,
             ..
         } => {
+            out.source_index = sensor_index_for_source(source, sensors);
             out.value_min = *value_min;
             out.value_max = *value_max;
             out.bg_r = background_color[0] as i32;
             out.bg_g = background_color[1] as i32;
             out.bg_b = background_color[2] as i32;
+            out.bg_a = background_color[3] as i32;
         }
         WidgetKind::Speedometer {
+            source,
             value_min,
             value_max,
             start_angle,
             sweep_angle,
+            needle_color,
+            tick_color,
             background_color,
             tick_count,
+            show_gauge,
+            show_needle,
+            needle_width,
+            needle_length_pct,
+            needle_border_color,
+            needle_border_width,
             ..
         } => {
+            out.source_index = sensor_index_for_source(source, sensors);
             out.value_min = *value_min;
             out.value_max = *value_max;
             out.start_angle = *start_angle;
@@ -501,13 +654,35 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
             out.bg_r = background_color[0] as i32;
             out.bg_g = background_color[1] as i32;
             out.bg_b = background_color[2] as i32;
+            out.bg_a = background_color[3] as i32;
+            out.show_gauge = *show_gauge;
+            out.show_needle = *show_needle;
+            out.needle_width = *needle_width;
+            out.needle_length_pct = (*needle_length_pct * 100.0).round() as i32;
+            out.needle_color_r = needle_color[0] as i32;
+            out.needle_color_g = needle_color[1] as i32;
+            out.needle_color_b = needle_color[2] as i32;
+            out.needle_color_a = needle_color[3] as i32;
+            out.tick_color_r = tick_color[0] as i32;
+            out.tick_color_g = tick_color[1] as i32;
+            out.tick_color_b = tick_color[2] as i32;
+            out.tick_color_a = tick_color[3] as i32;
+            out.needle_border_r = needle_border_color[0] as i32;
+            out.needle_border_g = needle_border_color[1] as i32;
+            out.needle_border_b = needle_border_color[2] as i32;
+            out.needle_border_a = needle_border_color[3] as i32;
+            out.needle_border_width = *needle_border_width;
         }
         WidgetKind::CoreBars {
-            background_color, ..
+            background_color,
+            show_labels,
+            ..
         } => {
             out.bg_r = background_color[0] as i32;
             out.bg_g = background_color[1] as i32;
             out.bg_b = background_color[2] as i32;
+            out.bg_a = background_color[3] as i32;
+            out.show_labels = *show_labels;
         }
         WidgetKind::Image { path, opacity, .. } => {
             out.image_path = SharedString::from(path.display().to_string());
@@ -519,20 +694,6 @@ fn widget_to_editor(w: &Widget) -> EditorWidget {
         }
     }
     out
-}
-
-fn widget_kind_name(kind: &WidgetKind) -> &'static str {
-    match kind {
-        WidgetKind::Label { .. } => "label",
-        WidgetKind::ValueText { .. } => "value_text",
-        WidgetKind::RadialGauge { .. } => "radial_gauge",
-        WidgetKind::VerticalBar { .. } => "vertical_bar",
-        WidgetKind::HorizontalBar { .. } => "horizontal_bar",
-        WidgetKind::Speedometer { .. } => "speedometer",
-        WidgetKind::CoreBars { .. } => "core_bars",
-        WidgetKind::Image { .. } => "image",
-        WidgetKind::Video { .. } => "video",
-    }
 }
 
 fn font_ref_to_name(f: &FontRef) -> &'static str {
@@ -574,7 +735,7 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             text: "Label".into(),
             font: FontRef::default(),
             font_size: 32.0,
-            color: [255, 255, 255],
+            color: [255, 255, 255, 255],
             align: TextAlign::Center,
         },
         "value_text" => WidgetKind::ValueText {
@@ -583,8 +744,11 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             unit: "%".into(),
             font: FontRef::default(),
             font_size: 48.0,
-            color: [255, 255, 255],
+            color: [255, 255, 255, 255],
             align: TextAlign::Center,
+            value_min: 0.0,
+            value_max: 100.0,
+            ranges: default_ranges(),
         },
         "radial_gauge" => WidgetKind::RadialGauge {
             source: SensorSourceConfig::CpuUsage,
@@ -593,14 +757,14 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             start_angle: 135.0,
             sweep_angle: 270.0,
             inner_radius_pct: 0.78,
-            background_color: [40, 40, 40],
+            background_color: [40, 40, 40, 255],
             ranges: default_ranges(),
         },
         "vertical_bar" => WidgetKind::VerticalBar {
             source: SensorSourceConfig::CpuUsage,
             value_min: 0.0,
             value_max: 100.0,
-            background_color: [40, 40, 40],
+            background_color: [40, 40, 40, 255],
             corner_radius: 4.0,
             ranges: default_ranges(),
         },
@@ -608,7 +772,7 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             source: SensorSourceConfig::CpuUsage,
             value_min: 0.0,
             value_max: 100.0,
-            background_color: [40, 40, 40],
+            background_color: [40, 40, 40, 255],
             corner_radius: 4.0,
             ranges: default_ranges(),
         },
@@ -618,17 +782,23 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             value_max: 100.0,
             start_angle: 180.0,
             sweep_angle: 180.0,
-            needle_color: [255, 255, 255],
-            tick_color: [120, 140, 160],
+            needle_color: [255, 255, 255, 255],
+            tick_color: [120, 140, 160, 255],
             tick_count: 10,
-            background_color: [40, 40, 40],
+            background_color: [40, 40, 40, 255],
+            ranges: default_ranges(),
+            show_gauge: true,
+            show_needle: true,
+            needle_width: 14.0,
+            needle_length_pct: 0.95,
+            needle_border_color: [174, 10, 16, 255],
+            needle_border_width: 1.5,
         },
         "core_bars" => WidgetKind::CoreBars {
             orientation: BarOrientation::Horizontal,
-            color_cold: [0, 200, 0],
-            color_hot: [220, 0, 0],
-            background_color: [30, 30, 30],
+            background_color: [30, 30, 30, 255],
             show_labels: true,
+            ranges: default_ranges(),
         },
         "image" => WidgetKind::Image {
             path: std::path::PathBuf::new(),
@@ -645,7 +815,7 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             text: "Label".into(),
             font: FontRef::default(),
             font_size: 32.0,
-            color: [255, 255, 255],
+            color: [255, 255, 255, 255],
             align: TextAlign::Center,
         },
     };
@@ -668,21 +838,28 @@ fn default_ranges() -> Vec<SensorRange> {
         SensorRange {
             max: Some(50.0),
             color: [0, 200, 0],
+            alpha: 255,
         },
         SensorRange {
-            max: Some(80.0),
+            max: Some(75.0),
             color: [220, 140, 0],
+            alpha: 255,
         },
         SensorRange {
             max: None,
             color: [220, 0, 0],
+            alpha: 255,
         },
     ]
 }
 
 fn apply_widget_field(widget: &mut Widget, field: &str, val: &str, sensors: &[SensorInfo]) {
-    // Shared geometry
     match field {
+        "id" => {
+            if !val.trim().is_empty() {
+                widget.id = val.trim().to_string();
+            }
+        }
         "x" => {
             if let Ok(v) = val.parse() {
                 widget.x = v;
@@ -742,6 +919,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "color_r" => color[0] = parse_u8(val),
             "color_g" => color[1] = parse_u8(val),
             "color_b" => color[2] = parse_u8(val),
+            "color_a" => color[3] = parse_u8(val),
             "align" => *align = parse_align(val),
             _ => {}
         },
@@ -753,8 +931,11 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             font_size,
             color,
             align,
+            value_min,
+            value_max,
+            ..
         } => match field {
-            "text" => { /* ignored for value_text */ }
+            "text" => {}
             "format" => *format = val.to_string(),
             "unit" => *unit = val.to_string(),
             "font" => *font = name_to_font_ref(val),
@@ -766,10 +947,21 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "color_r" => color[0] = parse_u8(val),
             "color_g" => color[1] = parse_u8(val),
             "color_b" => color[2] = parse_u8(val),
+            "color_a" => color[3] = parse_u8(val),
             "align" => *align = parse_align(val),
             "source" => {
                 if let Some(new) = parse_sensor_source(val, sensors) {
                     *source = new;
+                }
+            }
+            "value_min" => {
+                if let Ok(v) = val.parse() {
+                    *value_min = v;
+                }
+            }
+            "value_max" => {
+                if let Ok(v) = val.parse() {
+                    *value_max = v;
                 }
             }
             _ => {}
@@ -781,7 +973,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             start_angle,
             sweep_angle,
             inner_radius_pct: _,
-            background_color: _,
+            background_color,
             ranges: _,
         } => match field {
             "source" => {
@@ -809,18 +1001,24 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
                     *sweep_angle = v;
                 }
             }
+            "bg_r" => background_color[0] = parse_u8(val),
+            "bg_g" => background_color[1] = parse_u8(val),
+            "bg_b" => background_color[2] = parse_u8(val),
+            "bg_a" => background_color[3] = parse_u8(val),
             _ => {}
         },
         WidgetKind::VerticalBar {
             source,
             value_min,
             value_max,
+            background_color,
             ..
         }
         | WidgetKind::HorizontalBar {
             source,
             value_min,
             value_max,
+            background_color,
             ..
         } => match field {
             "source" => {
@@ -838,6 +1036,10 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
                     *value_max = v;
                 }
             }
+            "bg_r" => background_color[0] = parse_u8(val),
+            "bg_g" => background_color[1] = parse_u8(val),
+            "bg_b" => background_color[2] = parse_u8(val),
+            "bg_a" => background_color[3] = parse_u8(val),
             _ => {}
         },
         WidgetKind::Speedometer {
@@ -846,6 +1048,15 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             value_max,
             start_angle,
             sweep_angle,
+            needle_color,
+            tick_color,
+            background_color,
+            show_gauge,
+            show_needle,
+            needle_width,
+            needle_length_pct,
+            needle_border_color,
+            needle_border_width,
             ..
         } => match field {
             "source" => {
@@ -873,18 +1084,139 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
                     *sweep_angle = v;
                 }
             }
+            "show_gauge" => *show_gauge = val == "true",
+            "show_needle" => *show_needle = val == "true",
+            "needle_width" => {
+                if let Ok(v) = val.parse() {
+                    *needle_width = v;
+                }
+            }
+            "needle_length_pct" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *needle_length_pct = (v / 100.0).clamp(0.1, 1.5);
+                }
+            }
+            "needle_color_r" => needle_color[0] = parse_u8(val),
+            "needle_color_g" => needle_color[1] = parse_u8(val),
+            "needle_color_b" => needle_color[2] = parse_u8(val),
+            "needle_color_a" => needle_color[3] = parse_u8(val),
+            "tick_color_r" => tick_color[0] = parse_u8(val),
+            "tick_color_g" => tick_color[1] = parse_u8(val),
+            "tick_color_b" => tick_color[2] = parse_u8(val),
+            "tick_color_a" => tick_color[3] = parse_u8(val),
+            "needle_border_r" => needle_border_color[0] = parse_u8(val),
+            "needle_border_g" => needle_border_color[1] = parse_u8(val),
+            "needle_border_b" => needle_border_color[2] = parse_u8(val),
+            "needle_border_a" => needle_border_color[3] = parse_u8(val),
+            "needle_border_width" => {
+                if let Ok(v) = val.parse() {
+                    *needle_border_width = v;
+                }
+            }
+            "bg_r" => background_color[0] = parse_u8(val),
+            "bg_g" => background_color[1] = parse_u8(val),
+            "bg_b" => background_color[2] = parse_u8(val),
+            "bg_a" => background_color[3] = parse_u8(val),
+            _ => {}
+        },
+        WidgetKind::CoreBars {
+            background_color,
+            show_labels,
+            ..
+        } => match field {
+            "show_labels" => *show_labels = val == "true",
+            "bg_r" => background_color[0] = parse_u8(val),
+            "bg_g" => background_color[1] = parse_u8(val),
+            "bg_b" => background_color[2] = parse_u8(val),
+            "bg_a" => background_color[3] = parse_u8(val),
             _ => {}
         },
         WidgetKind::Image { path, .. } | WidgetKind::Video { path, .. } => match field {
             "path" => *path = std::path::PathBuf::from(val),
             _ => {}
         },
-        _ => {}
     }
 }
 
 fn parse_u8(s: &str) -> u8 {
     s.parse::<i32>().unwrap_or(0).clamp(0, 255) as u8
+}
+
+fn widget_ranges_mut(kind: &mut WidgetKind) -> Option<&mut Vec<SensorRange>> {
+    match kind {
+        WidgetKind::RadialGauge { ranges, .. }
+        | WidgetKind::VerticalBar { ranges, .. }
+        | WidgetKind::HorizontalBar { ranges, .. }
+        | WidgetKind::Speedometer { ranges, .. }
+        | WidgetKind::CoreBars { ranges, .. }
+        | WidgetKind::ValueText { ranges, .. } => Some(ranges),
+        _ => None,
+    }
+}
+
+fn widget_ranges(kind: &WidgetKind) -> Option<&[SensorRange]> {
+    match kind {
+        WidgetKind::RadialGauge { ranges, .. }
+        | WidgetKind::VerticalBar { ranges, .. }
+        | WidgetKind::HorizontalBar { ranges, .. }
+        | WidgetKind::Speedometer { ranges, .. }
+        | WidgetKind::CoreBars { ranges, .. }
+        | WidgetKind::ValueText { ranges, .. } => Some(ranges.as_slice()),
+        _ => None,
+    }
+}
+
+fn apply_range_field(range: &mut SensorRange, field: &str, val: &str) {
+    match field {
+        "max" => {
+            if let Ok(v) = val.parse::<i32>() {
+                range.max = if v < 0 {
+                    None
+                } else {
+                    Some((v.clamp(0, 100)) as f32)
+                };
+            }
+        }
+        "color_r" => range.color[0] = parse_u8(val),
+        "color_g" => range.color[1] = parse_u8(val),
+        "color_b" => range.color[2] = parse_u8(val),
+        "color_a" => range.alpha = parse_u8(val),
+        _ => {}
+    }
+}
+
+fn ranges_to_editor(ranges: &[SensorRange]) -> ModelRc<EditorRange> {
+    let items: Vec<EditorRange> = ranges
+        .iter()
+        .map(|r| EditorRange {
+            max_pct: r.max.map(|v| v as i32).unwrap_or(-1),
+            color_r: r.color[0] as i32,
+            color_g: r.color[1] as i32,
+            color_b: r.color[2] as i32,
+            color_a: r.alpha as i32,
+        })
+        .collect();
+    ModelRc::new(VecModel::from(items))
+}
+
+fn reflect_ranges(editor: &TemplateEditorWindow, state: &SharedEditor) {
+    let ranges = {
+        let st = state.lock();
+        let idx = st.selected_widget;
+        if idx < 0 {
+            None
+        } else {
+            st.template
+                .as_ref()
+                .and_then(|t| t.widgets.get(idx as usize))
+                .and_then(|w| widget_ranges(&w.kind).map(|r| r.to_vec()))
+        }
+    };
+    let model = match ranges {
+        Some(r) => ranges_to_editor(&r),
+        None => ModelRc::new(VecModel::<EditorRange>::default()),
+    };
+    editor.set_selected_ranges(model);
 }
 
 fn parse_align(s: &str) -> TextAlign {
@@ -895,8 +1227,6 @@ fn parse_align(s: &str) -> TextAlign {
     }
 }
 
-/// Parse a sensor-picker label ("1. CPU (hwmon)" / "Custom command") back
-/// into a `SensorSourceConfig` via the available-sensors index.
 fn parse_sensor_source(label: &str, sensors: &[SensorInfo]) -> Option<SensorSourceConfig> {
     if label == "Custom command" {
         return Some(SensorSourceConfig::Command { cmd: String::new() });
@@ -930,39 +1260,195 @@ fn parse_sensor_source(label: &str, sensors: &[SensorInfo]) -> Option<SensorSour
     })
 }
 
-fn editor_color_from_state(st: &EditorState) -> [u8; 3] {
+// Swap base dims and rotate widgets in-place. `to_rotated` direction:
+// true → 90° CW (e.g. 480×1920 → 1920×480), false → 90° CCW (inverse).
+fn apply_rotation_swap(tpl: &mut LcdTemplate, to_rotated: bool) {
+    let old_w = tpl.base_width as f32;
+    let old_h = tpl.base_height as f32;
+    tpl.base_width = old_h as u32;
+    tpl.base_height = old_w as u32;
+    for w in tpl.widgets.iter_mut() {
+        let (cx, cy, ww, wh) = (w.x, w.y, w.width, w.height);
+        if to_rotated {
+            w.x = old_h - cy;
+            w.y = cx;
+        } else {
+            w.x = cy;
+            w.y = old_w - cx;
+        }
+        w.width = wh;
+        w.height = ww;
+    }
+}
+
+fn editor_color_from_state(st: &EditorState) -> [u8; 4] {
     if let Some(tpl) = &st.template {
         if let TemplateBackground::Color { rgb } = tpl.background {
             return rgb;
         }
     }
-    [10, 14, 22]
+    [10, 14, 22, 255]
 }
 
-/// Re-seed the editor's UI properties from the current `EditorState`.
-/// Called after every mutation so widget inspector values, list rows, and
-/// the header reflect the live template.
-fn reflect_editor_state(weak: &slint::Weak<TemplateEditorWindow>, state: &SharedEditor) {
-    let (tpl, selected) = {
+fn reflect_header(editor: &TemplateEditorWindow, state: &SharedEditor) {
+    let st = state.lock();
+    let Some(tpl) = st.template.as_ref() else {
+        return;
+    };
+    editor.set_template_id(SharedString::from(tpl.id.as_str()));
+    editor.set_template_name(SharedString::from(tpl.name.as_str()));
+    editor.set_base_width(tpl.base_width as i32);
+    editor.set_base_height(tpl.base_height as i32);
+    editor.set_rotated(tpl.rotated);
+    match &tpl.background {
+        TemplateBackground::Color { rgb } => {
+            editor.set_bg_type(SharedString::from("color"));
+            editor.set_bg_r(rgb[0] as i32);
+            editor.set_bg_g(rgb[1] as i32);
+            editor.set_bg_b(rgb[2] as i32);
+            editor.set_bg_a(rgb[3] as i32);
+            editor.set_bg_image_path(SharedString::default());
+        }
+        TemplateBackground::Image { path } => {
+            editor.set_bg_type(SharedString::from("image"));
+            editor.set_bg_image_path(SharedString::from(path.display().to_string()));
+        }
+        TemplateBackground::Builtin { asset } => {
+            editor.set_bg_type(SharedString::from("builtin"));
+            editor.set_bg_image_path(SharedString::from(format!("builtin:{:?}", asset)));
+        }
+    }
+    editor.set_current_preset_label(SharedString::from(
+        screen_preset_label(tpl.base_width, tpl.base_height).as_str(),
+    ));
+}
+
+fn reflect_widget_row(
+    editor: &TemplateEditorWindow,
+    state: &SharedEditor,
+    shared: &Shared,
+    idx: usize,
+) {
+    let widget_clone = {
         let st = state.lock();
-        match &st.template {
-            Some(t) => (t.clone(), st.selected_widget),
+        let Some(tpl) = st.template.as_ref() else {
+            return;
+        };
+        match tpl.widgets.get(idx) {
+            Some(w) => w.clone(),
             None => return,
         }
     };
-    let weak = weak.clone();
-    slint::invoke_from_event_loop(move || {
-        if let Some(e) = weak.upgrade() {
-            seed_editor_from_template(&e, &tpl);
-            e.set_selected_index(selected);
-        }
-    })
-    .ok();
+    let sensors = shared.lock().unwrap().available_sensors.clone();
+    let editor_widget = widget_to_editor(&widget_clone, &sensors);
+    let model = editor.get_widgets();
+    if idx < model.row_count() {
+        model.set_row_data(idx, editor_widget.clone());
+    }
+    if editor.get_selected_index() == idx as i32 {
+        editor.set_selected_widget(editor_widget);
+    }
 }
 
-/// Send a preview-render IPC request on a background thread. Uses a
-/// monotonic counter to discard outdated responses when the user edits
-/// faster than the daemon can render.
+fn select_widget(editor: &TemplateEditorWindow, state: &SharedEditor, shared: &Shared, idx: i32) {
+    let widget = {
+        let st = state.lock();
+        st.template
+            .as_ref()
+            .and_then(|t| t.widgets.get(idx as usize).cloned())
+    };
+    let sensors = shared.lock().unwrap().available_sensors.clone();
+    editor.set_selected_index(idx);
+    if let Some(w) = widget {
+        editor.set_selected_widget(widget_to_editor(&w, &sensors));
+    } else {
+        editor.set_selected_widget(blank_editor_widget());
+    }
+    reflect_ranges(editor, state);
+}
+
+fn blank_editor_widget() -> EditorWidget {
+    EditorWidget {
+        id: SharedString::default(),
+        kind: SharedString::default(),
+        kind_label: SharedString::default(),
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+        rotation: 0.0,
+        visible: true,
+        update_interval_ms: 1000,
+        text: SharedString::default(),
+        font_name: SharedString::from("Victor Mono"),
+        font_size: 32.0,
+        color_r: 255,
+        color_g: 255,
+        color_b: 255,
+        color_a: 255,
+        align: SharedString::from("center"),
+        format: SharedString::from("{:.0}"),
+        unit: SharedString::default(),
+        source_index: 0,
+        value_min: 0.0,
+        value_max: 100.0,
+        start_angle: 0.0,
+        sweep_angle: 270.0,
+        inner_radius_pct: 0.78,
+        bg_r: 40,
+        bg_g: 40,
+        bg_b: 40,
+        bg_a: 255,
+        tick_count: 10,
+        show_gauge: true,
+        show_needle: true,
+        needle_width: 14.0,
+        needle_length_pct: 95,
+        needle_color_r: 255,
+        needle_color_g: 255,
+        needle_color_b: 255,
+        needle_color_a: 255,
+        tick_color_r: 120,
+        tick_color_g: 140,
+        tick_color_b: 160,
+        tick_color_a: 255,
+        needle_border_r: 174,
+        needle_border_g: 10,
+        needle_border_b: 16,
+        needle_border_a: 255,
+        needle_border_width: 1.5,
+        show_labels: true,
+        image_path: SharedString::default(),
+        opacity: 1.0,
+        fps: 30.0,
+    }
+}
+
+fn reflect_widgets_model(editor: &TemplateEditorWindow, state: &SharedEditor, shared: &Shared) {
+    let (widgets, selected) = {
+        let st = state.lock();
+        let Some(tpl) = st.template.as_ref() else {
+            return;
+        };
+        (tpl.widgets.clone(), st.selected_widget)
+    };
+    let sensors = shared.lock().unwrap().available_sensors.clone();
+    editor.set_widgets(template_widgets_to_model(&widgets, &sensors));
+    editor.set_selected_index(selected);
+    if selected >= 0 {
+        if let Some(w) = widgets.get(selected as usize) {
+            editor.set_selected_widget(widget_to_editor(w, &sensors));
+        } else {
+            editor.set_selected_widget(blank_editor_widget());
+        }
+    } else {
+        editor.set_selected_widget(blank_editor_widget());
+    }
+    reflect_ranges(editor, state);
+}
+
+/// Spawns a preview render in the background. The version counter discards
+/// late responses if the user edits faster than the daemon can render.
 fn request_preview(
     weak: &slint::Weak<TemplateEditorWindow>,
     state: &SharedEditor,
@@ -981,8 +1467,6 @@ fn request_preview(
     let weak = weak.clone();
 
     std::thread::spawn(move || {
-        // Render against the template's own base size — keeps the preview
-        // aspect matching the authored canvas.
         let req = IpcRequest::RenderTemplatePreview {
             template: tpl.clone(),
             width: tpl.base_width,
@@ -995,7 +1479,6 @@ fn request_preview(
                 return;
             }
         };
-        // Discard stale responses.
         if version.load(Ordering::SeqCst) != my_version {
             return;
         }
@@ -1003,8 +1486,7 @@ fn request_preview(
             Some(b) => b,
             None => return,
         };
-        // Write to a per-version temp file so Slint reloads rather than
-        // reusing the cached image.
+        // Per-version filename so Slint doesn't serve a cached image.
         let tmp = std::env::temp_dir().join(format!(
             "lianli-preview-{}-{}.jpg",
             std::process::id(),
@@ -1040,17 +1522,26 @@ fn decode_preview(resp: &lianli_shared::ipc::IpcResponse) -> Option<Vec<u8>> {
     }
 }
 
-fn commit_save(state: &SharedEditor, shared: &Shared) {
+fn commit_save(state: &SharedEditor, shared: &Shared) -> Result<(), String> {
     let (tpl, target_idx) = {
         let st = state.lock();
         match &st.template {
             Some(t) => (t.clone(), st.target_lcd_index),
-            None => return,
+            None => return Err("no template open".to_string()),
         }
     };
+    if tpl.name.trim().is_empty() {
+        return Err("Template name must not be empty".to_string());
+    }
     let user_list = {
         let mut gui = shared.lock().unwrap();
-        // Replace an existing template with the same id, or append.
+        if gui
+            .lcd_templates
+            .iter()
+            .any(|t| t.id != tpl.id && t.name == tpl.name)
+        {
+            return Err(format!("A template named '{}' already exists.", tpl.name));
+        }
         let mut replaced = false;
         for existing in gui.lcd_templates.iter_mut() {
             if existing.id == tpl.id {
@@ -1062,7 +1553,6 @@ fn commit_save(state: &SharedEditor, shared: &Shared) {
         if !replaced {
             gui.lcd_templates.push(tpl.clone());
         }
-        // Point the target LCD at the saved template.
         if let (Some(idx), Some(cfg)) = (target_idx, gui.config.as_mut()) {
             if let Some(lcd) = cfg.lcds.get_mut(idx) {
                 lcd.template_id = Some(tpl.id.clone());
@@ -1071,14 +1561,9 @@ fn commit_save(state: &SharedEditor, shared: &Shared) {
         crate::user_templates_only(&gui.lcd_templates)
     };
     crate::send_set_templates(user_list);
+    Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Integration helpers for main.rs
-// ---------------------------------------------------------------------------
-
-/// Set the editor state's "currently editing" template + target LCD index.
-/// Called from `open()` before the window is shown.
 fn set_editing(state: &SharedEditor, tpl: LcdTemplate, lcd_index: usize) {
     let mut st = state.lock();
     st.template = Some(tpl);
