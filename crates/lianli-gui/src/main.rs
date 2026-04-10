@@ -910,8 +910,16 @@ fn wire_lcd_callbacks(
                                         lcd.path = None;
                                         lianli_shared::media::MediaType::Sensor
                                     }
-                                    "Doublegauge" => lianli_shared::media::MediaType::Doublegauge,
-                                    "Cooler" => lianli_shared::media::MediaType::Cooler,
+                                    "Doublegauge" => {
+                                        lcd.doublegauge.get_or_insert_with(default_doublegauge);
+                                        lcd.path = None;
+                                        lianli_shared::media::MediaType::Doublegauge
+                                    }
+                                    "Cooler" => {
+                                        lcd.doublegauge.get_or_insert_with(default_doublegauge);
+                                        lcd.path = None;
+                                        lianli_shared::media::MediaType::Cooler
+                                    }
                                     _ => lcd.media_type,
                                 };
                             }

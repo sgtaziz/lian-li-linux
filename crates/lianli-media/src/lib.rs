@@ -121,17 +121,27 @@ pub fn prepare_media_asset(
             Ok(MediaAssetKind::Sensor { asset })
         }
         MediaType::Doublegauge => {
-            let descriptor = cfg.doublegauge.as_ref().expect("validated doublegauge config");
-            let source_1 = resolve_sensor_config(&cfg.sensor_source_1, &all_sensors)?;
-            let source_2 = resolve_sensor_config(&cfg.sensor_source_2, &all_sensors)?;
-            let asset = DoublegaugeAsset::new(descriptor, cfg.orientation, screen,source_1,source_2)?;
+            let descriptor = cfg.doublegauge.as_ref().ok_or_else(|| {
+                MediaError::InvalidConfig(
+                    "doublegauge entry requires a 'doublegauge' section".into(),
+                )
+            })?;
+            let source_1 = resolve_sensor_config(&cfg.sensor_source_1, all_sensors)?;
+            let source_2 = resolve_sensor_config(&cfg.sensor_source_2, all_sensors)?;
+            let asset =
+                DoublegaugeAsset::new(descriptor, cfg.orientation, screen, source_1, source_2)?;
             Ok(MediaAssetKind::Doublegauge { asset })
         }
         MediaType::Cooler => {
-            let descriptor = cfg.doublegauge.as_ref().expect("validated doublegauge config");
-            let source_1 = resolve_sensor_config(&cfg.sensor_source_1, &all_sensors)?;
-            let source_2 = resolve_sensor_config(&cfg.sensor_source_2, &all_sensors)?;
-            let asset = CoolerAsset::new(descriptor, cfg.orientation, screen,source_1,source_2)?;
+            let descriptor = cfg.doublegauge.as_ref().ok_or_else(|| {
+                MediaError::InvalidConfig(
+                    "cooler entry requires a 'doublegauge' section".into(),
+                )
+            })?;
+            let source_1 = resolve_sensor_config(&cfg.sensor_source_1, all_sensors)?;
+            let source_2 = resolve_sensor_config(&cfg.sensor_source_2, all_sensors)?;
+            let asset =
+                CoolerAsset::new(descriptor, cfg.orientation, screen, source_1, source_2)?;
             Ok(MediaAssetKind::Cooler { asset })
         }
     }

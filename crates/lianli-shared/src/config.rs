@@ -76,7 +76,15 @@ impl LcdConfig {
                 })?;
                 descriptor.validate()?;
             }
-            _ => {}
+            MediaType::Doublegauge | MediaType::Cooler => {
+                let descriptor = self.doublegauge.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "LCD[{device_id}] {:?} configuration missing 'doublegauge' section",
+                        self.media_type
+                    )
+                })?;
+                descriptor.validate()?;
+            }
         }
 
         if let Some(fps) = self.fps {

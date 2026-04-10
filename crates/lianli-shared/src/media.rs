@@ -258,6 +258,26 @@ pub struct DoublegaugeDescriptor {
     pub decimals_2: usize,
 }
 
+impl DoublegaugeDescriptor {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.gauge_1_max == self.gauge_1_min {
+            anyhow::bail!("doublegauge gauge_1_min and gauge_1_max must differ");
+        }
+        if self.gauge_2_max == self.gauge_2_min {
+            anyhow::bail!("doublegauge gauge_2_min and gauge_2_max must differ");
+        }
+        if self.value_1_max == self.value_1_min {
+            anyhow::bail!("doublegauge value_1_min and value_1_max must differ");
+        }
+        if self.value_2_max == self.value_2_min {
+            anyhow::bail!("doublegauge value_2_min and value_2_max must differ");
+        }
+        if self.decimals_1 > 10 || self.decimals_2 > 10 {
+            anyhow::bail!("doublegauge decimals must be 10 or less");
+        }
+        Ok(())
+    }
+}
 
 fn default_text_color() -> [u8; 3] {
     [255, 255, 255]
