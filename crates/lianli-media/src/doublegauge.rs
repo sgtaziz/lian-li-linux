@@ -506,11 +506,9 @@ impl DoublegaugeAsset {
 
         let x_scale = (self.screen.width as f32) / 400.0;
         let y_scale = (self.screen.height as f32) / 400.0;
+        let uniform_scale = x_scale.min(y_scale);
 
-        let scale = Scale {
-            x: 70.0 * x_scale,
-            y: 70.0 * y_scale,
-        };
+        let scale = Scale::uniform(70.0 * uniform_scale);
 
         let (tw, th, ox, oy, _) =
             get_exact_text_metrics(&self.font, &metric_outer_gauge_text, scale);

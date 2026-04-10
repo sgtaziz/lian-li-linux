@@ -409,11 +409,12 @@ impl CoolerAsset {
 
         let x_scale = (self.screen.width as f32) / 480.0;
         let y_scale = (self.screen.height as f32) / 480.0;
+        let uniform_scale = x_scale.min(y_scale);
 
         let left_anchor_x = (220.0 * x_scale).round() as i32;
         let box_y = (277.0 * y_scale).round() as i32;
 
-        let scale = Scale::uniform(39.0);
+        let scale = Scale::uniform(39.0 * uniform_scale);
 
         let (tw, _, _, _, ascent) = get_exact_text_metrics(&font_label, &left_text, scale);
 
@@ -447,7 +448,10 @@ impl CoolerAsset {
             &right_text,
         );
 
-        // Now draw the inner part of the thermometer
+        // Thermometer bulb + stem.
+        let bulb_radius = (8.0 * uniform_scale).round().max(1.0) as i32;
+        let stem_width = (7.0 * x_scale).round().max(1.0) as u32;
+        let stem_max_height = (32.0 * y_scale).round().max(1.0) as i32;
 
         draw_filled_circle_mut(
             &mut frame,
@@ -455,11 +459,11 @@ impl CoolerAsset {
                 (317.0 * x_scale).round() as i32,
                 (229.0 * y_scale).round() as i32,
             ),
-            8,
+            bulb_radius,
             color,
         );
 
-        let bar_height = (sensor_right_range * 32.0) as i32;
+        let bar_height = (sensor_right_range * stem_max_height as f32).round() as i32;
 
         if bar_height > 0 {
             draw_filled_rect_mut(
@@ -468,7 +472,7 @@ impl CoolerAsset {
                     (314.0 * x_scale).round() as i32,
                     (222.0 * y_scale).round() as i32 - bar_height,
                 )
-                .of_size(7, bar_height as u32),
+                .of_size(stem_width, bar_height as u32),
                 color,
             );
         }
@@ -480,8 +484,9 @@ impl CoolerAsset {
         let needle_angle = 180.0 + sensor_left_range * 180.0;
 
         // Needle should be slightly longer than inner radius
-        let needle_start_length = 6.0;
-        let needle_length = 54.0 * x_scale;
+        let needle_start_length = 6.0 * uniform_scale;
+        let needle_length = 54.0 * uniform_scale;
+        let needle_width = (14.0 * uniform_scale).round().max(1.0) as i32;
         let needle_color = Rgba([224, 240, 255, 255]);
 
         draw_gauge_needle(
@@ -490,7 +495,7 @@ impl CoolerAsset {
             needle_angle,
             needle_start_length,
             needle_length,
-            14, // 14 pixel width
+            needle_width,
             needle_color,
         );
 
