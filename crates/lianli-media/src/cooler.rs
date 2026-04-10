@@ -66,6 +66,8 @@ pub struct CoolerAsset {
     screen: ScreenInfo,
     template_image: image::RgbaImage, // Pre-rendered background image
 
+    font_label: Font<'static>,
+
     // Each time a frame gets redrawn this index is "assigned" to the frame.
     frame_index: AtomicUsize,
 }
@@ -282,13 +284,14 @@ impl CoolerAsset {
             clamp_2: descriptor.clamp_2,
             decimals_2: descriptor.decimals_2,
             
-            sensor_1: sensor_1,
-            sensor_2: sensor_2,
+            sensor_1,
+            sensor_2,
             update_interval,
             orientation,
             sys_data,
             screen: *screen,
             template_image: resized,
+            font_label,
             frame_index: 1.into(),
         }))
     }
@@ -334,7 +337,7 @@ impl CoolerAsset {
         let rgb = hsl_to_rgb(hue, 1.0, 0.5); // Nutzt deine vorhandene Funktion
         let color = Rgba([rgb[0], rgb[1], rgb[2], 255]);
 
-        let font_label =Font::try_from_bytes(FONT_DATA_LABEL as &[u8]).expect("error while loading font");
+        let font_label = &self.font_label;
 
         let x_scale = (self.screen.width as f32) / 480.0;
         let y_scale = (self.screen.height as f32) / 480.0;
