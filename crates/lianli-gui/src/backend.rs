@@ -241,6 +241,11 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
             .and_then(ipc_client::unwrap_response)
             .unwrap_or_default();
 
+    let templates: Vec<lianli_shared::template::LcdTemplate> =
+        ipc_client::send_request(&IpcRequest::GetLcdTemplates)
+            .and_then(ipc_client::unwrap_response)
+            .unwrap_or_default();
+
     // Update shared state
     {
         let mut state = shared.lock().unwrap();
@@ -248,6 +253,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
         state.rgb_caps = rgb_caps.clone();
         state.devices = devices.clone();
         state.available_sensors = sensors.clone();
+        state.lcd_templates = templates.clone();
     }
 
     if let Some(config) = config {
@@ -280,11 +286,13 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 w.set_hid_driver(slint::SharedString::from(hid_driver));
 
                 // LCD entries
-                let lcd_model = conversions::lcd_entries_to_model(&config.lcds, &devices, &sensors);
+                let lcd_model =
+                    conversions::lcd_entries_to_model(&config.lcds, &devices, &sensors, &templates);
                 w.set_lcd_entries(lcd_model);
                 let lcd_opts = conversions::lcd_device_options(&devices);
                 w.set_lcd_device_options(lcd_opts);
                 w.set_lcd_sensor_options(conversions::sensor_options_model(&sensors, false));
+                w.set_lcd_template_labels(conversions::template_labels_model(&templates));
 
                 // Fan curves
                 let curves_model = conversions::fan_curves_to_model(&config.fan_curves, &sensors);

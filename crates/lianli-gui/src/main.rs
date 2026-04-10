@@ -886,11 +886,14 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared) {
                     | "sensor_source"
                     | "doublegauge_display_1"
                     | "doublegauge_display_2"
+                    | "template_label"
+                    | "template_id"
             ) || field_str == "gauge_range_add"
                 || field_str == "gauge_range_remove";
             {
                 let mut state = shared.lock().unwrap();
                 let devices = state.devices.clone();
+                let templates_snapshot = state.lcd_templates.clone();
                 let resolved_sensor_source: Option<lianli_shared::media::SensorSourceConfig> = {
                     let val_str = val.to_string();
                     let sensor_idx: usize = val_str
@@ -1004,6 +1007,18 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared) {
                             }
                             "path" => lcd.path = Some(std::path::PathBuf::from(val)),
                             "orientation" => lcd.orientation = val.parse().unwrap_or(0.0),
+                            "template_label" => {
+                                // Resolve label → id via the snapshot taken
+                                // before the mutable borrow of `state.config`.
+                                if let Some(id) =
+                                    conversions::template_id_for_label(&val, &templates_snapshot)
+                                {
+                                    lcd.template_id = Some(id);
+                                }
+                            }
+                            "template_id" => {
+                                lcd.template_id = Some(val);
+                            }
                             "sensor_label" => {
                                 lcd.sensor.get_or_insert_with(default_sensor).label = val;
                             }
@@ -1383,6 +1398,191 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared) {
             });
         });
     }
+
+    // ── Template management ──
+    // Create / edit / duplicate / delete buttons under the Custom media type.
+    // Each mutates `state.lcd_templates`, pushes the full list to the daemon
+    // via `SetLcdTemplates`, and refreshes the LCD UI so the dropdown reflects
+    // the change. Built-ins are read-only — edit triggers a duplicate flow,
+    // and delete silently ignores built-in ids.
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_lcd_create_template(move |idx| {
+            let new_tpl = make_blank_template();
+            push_template_and_assign(&shared, idx as usize, new_tpl);
+            refresh_lcd_ui(&weak, &shared);
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_lcd_duplicate_template(move |idx| {
+            duplicate_current_template(&shared, idx as usize);
+            refresh_lcd_ui(&weak, &shared);
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_lcd_delete_template(move |idx| {
+            delete_current_template(&shared, idx as usize);
+            refresh_lcd_ui(&weak, &shared);
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_lcd_edit_template(move |idx| {
+            // Commit 3 stub: the modal layout editor lands in Commit 4. For now
+            // we mirror the duplicate-to-edit guard that Commit 4 will wire to
+            // the actual editor, so the button doesn't silently do nothing on
+            // a built-in.
+            let is_builtin = {
+                let state = shared.lock().unwrap();
+                state
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.lcds.get(idx as usize))
+                    .and_then(|lcd| lcd.template_id.as_deref())
+                    .map(lianli_shared::template_defaults::is_builtin_id)
+                    .unwrap_or(false)
+            };
+            if is_builtin {
+                duplicate_current_template(&shared, idx as usize);
+                refresh_lcd_ui(&weak, &shared);
+            }
+            tracing::info!("Template editor (modal) lands in Commit 4");
+        });
+    }
+}
+
+/// Generate a unique user-template id. Built-in ids are reserved elsewhere.
+fn generate_template_id(prefix: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{prefix}-{:x}", nanos)
+}
+
+fn make_blank_template() -> lianli_shared::template::LcdTemplate {
+    lianli_shared::template::LcdTemplate {
+        id: generate_template_id("user"),
+        name: "New Template".to_string(),
+        base_width: 480,
+        base_height: 480,
+        background: lianli_shared::template::TemplateBackground::Color { rgb: [10, 14, 22] },
+        widgets: Vec::new(),
+        orientation: lianli_shared::template::TemplateOrientation::Portrait,
+    }
+}
+
+/// Append a template to the shared state, assign it to the LCD at `idx`,
+/// and persist the full user-template list to the daemon.
+fn push_template_and_assign(
+    shared: &Shared,
+    idx: usize,
+    template: lianli_shared::template::LcdTemplate,
+) {
+    let user_list = {
+        let mut state = shared.lock().unwrap();
+        let new_id = template.id.clone();
+        state.lcd_templates.push(template);
+        if let Some(ref mut c) = state.config {
+            if let Some(lcd) = c.lcds.get_mut(idx) {
+                lcd.template_id = Some(new_id);
+            }
+        }
+        user_templates_only(&state.lcd_templates)
+    };
+    send_set_templates(user_list);
+}
+
+fn duplicate_current_template(shared: &Shared, idx: usize) {
+    let user_list: Option<Vec<lianli_shared::template::LcdTemplate>> = {
+        let mut state = shared.lock().unwrap();
+        let current_id = state
+            .config
+            .as_ref()
+            .and_then(|c| c.lcds.get(idx))
+            .and_then(|lcd| lcd.template_id.clone());
+        let source = current_id
+            .as_ref()
+            .and_then(|id| state.lcd_templates.iter().find(|t| &t.id == id).cloned());
+        if let Some(source) = source {
+            let mut copy = source.clone();
+            copy.id = generate_template_id("user");
+            copy.name = format!("{} (copy)", source.name);
+            let new_id = copy.id.clone();
+            state.lcd_templates.push(copy);
+            if let Some(ref mut c) = state.config {
+                if let Some(lcd) = c.lcds.get_mut(idx) {
+                    lcd.template_id = Some(new_id);
+                }
+            }
+            Some(user_templates_only(&state.lcd_templates))
+        } else {
+            None
+        }
+    };
+    if let Some(list) = user_list {
+        send_set_templates(list);
+    }
+}
+
+fn delete_current_template(shared: &Shared, idx: usize) {
+    let user_list = {
+        let mut state = shared.lock().unwrap();
+        let target_id = state
+            .config
+            .as_ref()
+            .and_then(|c| c.lcds.get(idx))
+            .and_then(|lcd| lcd.template_id.clone());
+        let Some(target_id) = target_id else {
+            return;
+        };
+        if lianli_shared::template_defaults::is_builtin_id(&target_id) {
+            tracing::warn!("Refusing to delete built-in template '{target_id}'");
+            return;
+        }
+        state.lcd_templates.retain(|t| t.id != target_id);
+        // Any LCD pointing at the now-deleted template falls back to the
+        // built-in Cooler so the daemon doesn't fail the next render cycle.
+        if let Some(ref mut c) = state.config {
+            for lcd in c.lcds.iter_mut() {
+                if lcd.template_id.as_deref() == Some(target_id.as_str()) {
+                    lcd.template_id =
+                        Some(lianli_shared::template_defaults::BUILTIN_COOLER_ID.to_string());
+                }
+            }
+        }
+        user_templates_only(&state.lcd_templates)
+    };
+    send_set_templates(user_list);
+}
+
+fn user_templates_only(
+    all: &[lianli_shared::template::LcdTemplate],
+) -> Vec<lianli_shared::template::LcdTemplate> {
+    all.iter()
+        .filter(|t| !lianli_shared::template_defaults::is_builtin_id(&t.id))
+        .cloned()
+        .collect()
+}
+
+fn send_set_templates(templates: Vec<lianli_shared::template::LcdTemplate>) {
+    match ipc_client::send_request(&lianli_shared::ipc::IpcRequest::SetLcdTemplates { templates }) {
+        Ok(lianli_shared::ipc::IpcResponse::Error { message }) => {
+            tracing::warn!("SetLcdTemplates failed: {message}");
+        }
+        Err(e) => tracing::warn!("SetLcdTemplates IPC error: {e}"),
+        _ => {}
+    }
 }
 
 // ── Refresh helpers ──
@@ -1418,13 +1618,14 @@ fn refresh_fan_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
 }
 
 fn refresh_lcd_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
-    let (lcds, devices, sensors) = {
+    let (lcds, devices, sensors, templates) = {
         let state = shared.lock().unwrap();
         match state.config.as_ref() {
             Some(c) => (
                 c.lcds.clone(),
                 state.devices.clone(),
                 state.available_sensors.clone(),
+                state.lcd_templates.clone(),
             ),
             None => return,
         }
@@ -1433,7 +1634,10 @@ fn refresh_lcd_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
     let weak = weak.clone();
     slint::invoke_from_event_loop(move || {
         if let Some(w) = weak.upgrade() {
-            w.set_lcd_entries(conversions::lcd_entries_to_model(&lcds, &devices, &sensors));
+            w.set_lcd_entries(conversions::lcd_entries_to_model(
+                &lcds, &devices, &sensors, &templates,
+            ));
+            w.set_lcd_template_labels(conversions::template_labels_model(&templates));
             w.set_config_dirty(true);
         }
     })

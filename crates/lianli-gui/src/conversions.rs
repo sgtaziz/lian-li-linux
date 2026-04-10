@@ -277,6 +277,9 @@ pub fn lcd_to_slint(
         unit_2: SharedString::from(doublegauge.map(|dg| dg.unit_2.as_str()).unwrap_or("N/A")),
         label_2: SharedString::from(doublegauge.map(|dg| dg.label_2.as_str()).unwrap_or("N/A")),
         decimals_2: doublegauge.map(|dg| dg.decimals_2 as i32).unwrap_or(0),
+
+        template_id: SharedString::from(lcd.template_id.as_deref().unwrap_or("")),
+        template_name: SharedString::default(), // filled in by lcd_entries_to_model
     }
 }
 
@@ -284,12 +287,46 @@ pub fn lcd_entries_to_model(
     lcds: &[LcdConfig],
     devices: &[DeviceInfo],
     sensors: &[lianli_shared::sensors::SensorInfo],
+    templates: &[lianli_shared::template::LcdTemplate],
 ) -> ModelRc<super::LcdEntryData> {
     let items: Vec<_> = lcds
         .iter()
-        .map(|l| lcd_to_slint(l, devices, sensors))
+        .map(|l| {
+            let mut entry = lcd_to_slint(l, devices, sensors);
+            if let Some(tid) = &l.template_id {
+                if let Some(tpl) = templates.iter().find(|t| &t.id == tid) {
+                    entry.template_name = SharedString::from(tpl.name.as_str());
+                }
+            }
+            entry
+        })
         .collect();
     ModelRc::new(VecModel::from(items))
+}
+
+/// Pretty-label list of templates for the LCD page Custom dropdown.
+/// Order mirrors `templates` — Rust callback side resolves label → id by
+/// linear scan of the same slice.
+pub fn template_labels_model(
+    templates: &[lianli_shared::template::LcdTemplate],
+) -> ModelRc<SharedString> {
+    let items: Vec<SharedString> = templates
+        .iter()
+        .map(|t| SharedString::from(t.name.as_str()))
+        .collect();
+    ModelRc::new(VecModel::from(items))
+}
+
+/// Resolve a pretty label back to the template id. Used by the
+/// `update_lcd_field("template_label", ...)` handler.
+pub fn template_id_for_label(
+    label: &str,
+    templates: &[lianli_shared::template::LcdTemplate],
+) -> Option<String> {
+    templates
+        .iter()
+        .find(|t| t.name == label)
+        .map(|t| t.id.clone())
 }
 
 /// Format a device option label for LCD device selector: "FriendlyName (serial)"

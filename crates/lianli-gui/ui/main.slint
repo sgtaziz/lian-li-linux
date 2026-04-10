@@ -41,6 +41,7 @@ export component MainWindow inherits Window {
     in property <[LcdEntryData]> lcd-entries: [];
     in property <[string]> lcd-device-options: [];
     in property <[string]> lcd-sensor-options: [];
+    in property <[string]> lcd-template-labels: [];
     in property <bool> has-config: false;
 
     // RGB properties
@@ -69,6 +70,10 @@ export component MainWindow inherits Window {
     callback remove-lcd(int);
     callback update-lcd-field(int, string, string);
     callback pick-lcd-file(int);
+    callback lcd-create-template(int);
+    callback lcd-edit-template(int);
+    callback lcd-duplicate-template(int);
+    callback lcd-delete-template(int);
 
     // RGB callbacks
     callback rgb-set-mode(string, int, string);
@@ -126,12 +131,17 @@ export component MainWindow inherits Window {
                 lcd-entries: root.lcd-entries;
                 device-options: root.lcd-device-options;
                 sensor-options: root.lcd-sensor-options;
+                template-labels: root.lcd-template-labels;
                 has-config: root.has-config;
                 add-lcd => { root.add-lcd(); }
                 remove-lcd(idx) => { root.remove-lcd(idx); }
                 update-lcd-field(idx, field, val) => { root.update-lcd-field(idx, field, val); }
                 pick-lcd-file(idx) => { root.pick-lcd-file(idx); }
                 save-config => { root.save-config(); }
+                create-template(idx) => { root.lcd-create-template(idx); }
+                edit-template(idx) => { root.lcd-edit-template(idx); }
+                duplicate-template(idx) => { root.lcd-duplicate-template(idx); }
+                delete-template(idx) => { root.lcd-delete-template(idx); }
             }
 
             if root.current-page == 2: FansPage {

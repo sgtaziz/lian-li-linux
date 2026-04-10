@@ -83,6 +83,11 @@ export struct LcdEntryData {
     unit_2: string,
     label_2: string,
     decimals_2: int,
+
+    // Custom media type — template id selected for this LCD and the pretty
+    // label to show in the dropdown. Only meaningful when media-type == "Custom".
+    template-id: string,
+    template-name: string,
 }
 
 component OrientationButton inherits Rectangle {
@@ -114,10 +119,18 @@ component LcdConfigCard inherits Card {
     in property <[string]> media-types: ["Image", "Video", "GIF", "Solid Color", "Sensor Gauge", "Doublegauge", "Cooler", "Custom"];
     in property <[string]> device-options: [];
     in property <[string]> sensor-options: [];
+    // Custom media type — pretty-label list mirrored from the template store.
+    // Selection propagates via `update-field(idx, "template_label", label)`,
+    // and the Rust handler resolves the label back to the template id.
+    in property <[string]> template-labels: [];
 
     callback remove(int);
     callback update-field(int, string, string);
     callback pick-file(int);
+    callback create-template(int);
+    callback edit-template(int);
+    callback duplicate-template(int);
+    callback delete-template(int);
 
     VerticalLayout {
         spacing: 12px;
@@ -970,6 +983,43 @@ component LcdConfigCard inherits Card {
             }
         }
 
+        // Custom template picker — only visible for the Custom media type.
+        // Templates are shared across LCDs; edits to a built-in trigger a
+        // "Duplicate to edit" flow (wired in Commit 4 alongside the editor).
+        if root.lcd.media-type == "Custom": VerticalLayout {
+            spacing: 8px;
+            Text { text: "Template"; font-size: 12px; color: Theme.text-secondary; }
+            HorizontalLayout {
+                spacing: 8px;
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.template-labels;
+                    current-value: root.lcd.template-name;
+                    // Rust side resolves the pretty label back to the id via
+                    // the `template-labels` / `template-ids` parallel arrays.
+                    selected(val) => {
+                        root.update-field(root.index, "template_label", val);
+                    }
+                }
+                Button {
+                    text: "New";
+                    clicked => { root.create-template(root.index); }
+                }
+                Button {
+                    text: "Edit";
+                    clicked => { root.edit-template(root.index); }
+                }
+                Button {
+                    text: "Duplicate";
+                    clicked => { root.duplicate-template(root.index); }
+                }
+                Button {
+                    text: "Delete";
+                    clicked => { root.delete-template(root.index); }
+                }
+            }
+        }
+
         // FPS and Orientation
         HorizontalLayout {
             spacing: 16px;
@@ -1031,6 +1081,7 @@ export component LcdPage inherits VerticalLayout {
     in property <[LcdEntryData]> lcd-entries: [];
     in property <[string]> device-options: [];
     in property <[string]> sensor-options: [];
+    in property <[string]> template-labels: [];
     in property <bool> has-config: false;
 
     callback add-lcd();
@@ -1038,6 +1089,10 @@ export component LcdPage inherits VerticalLayout {
     callback update-lcd-field(int, string, string);
     callback pick-lcd-file(int);
     callback save-config();
+    callback create-template(int);
+    callback edit-template(int);
+    callback duplicate-template(int);
+    callback delete-template(int);
 
     PageHeader {
         title: "LCD";
@@ -1094,9 +1149,14 @@ export component LcdPage inherits VerticalLayout {
                 lcd: lcd-entry;
                 device-options: root.device-options;
                 sensor-options: root.sensor-options;
+                template-labels: root.template-labels;
                 remove(i) => { root.remove-lcd(i); }
                 update-field(i, field, val) => { root.update-lcd-field(i, field, val); }
                 pick-file(i) => { root.pick-lcd-file(i); }
+                create-template(i) => { root.create-template(i); }
+                edit-template(i) => { root.edit-template(i); }
+                duplicate-template(i) => { root.duplicate-template(i); }
+                delete-template(i) => { root.delete-template(i); }
             }
         }
     }
