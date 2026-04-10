@@ -310,7 +310,7 @@ impl DoublegaugeAsset {
         );
 
         let inner_arc_lut =
-            Self::create_lut(center, r_inner - 6.0, r_outer, screen.width, screen.height);
+            Self::create_lut(center, r_inner - 8.0, r_outer, screen.width, screen.height);
 
         Ok(Arc::new(Self {
             header: descriptor.header.clone(),
