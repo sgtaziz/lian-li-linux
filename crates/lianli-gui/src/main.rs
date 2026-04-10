@@ -855,35 +855,31 @@ fn wire_lcd_callbacks(
             {
                 let mut state = shared.lock().unwrap();
                 let devices = state.devices.clone();
-                let resolved_sensor_source: lianli_shared::media::SensorSourceConfig = {
+                let resolved_sensor_source: Option<lianli_shared::media::SensorSourceConfig> = {
                     let val_str = val.to_string();
                     let sensor_idx: usize = val_str.split('.').next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    if (field_str == "sensor_source" || field_str == "doublegauge_display_1" || field_str == "doublegauge_display_2") && !val_str.ends_with("Custom command") && sensor_idx > 0 {
-                        if let Some(sensor) = state.available_sensors.get(sensor_idx - 1) {
-                            match &sensor.source {
-                                lianli_shared::sensors::SensorSource::Hwmon { name, label, device_path } =>
-                                {
-                                    let ret = lianli_shared::media::SensorSourceConfig::Hwmon {
-                                        name: name.clone(), label: label.clone(), device_path: device_path.clone(),
-                                    };
-                                    ret
+                    let is_sensor_picker = field_str == "sensor_source"
+                        || field_str == "doublegauge_display_1"
+                        || field_str == "doublegauge_display_2";
+                    if is_sensor_picker && !val_str.ends_with("Custom command") && sensor_idx > 0 {
+                        state.available_sensors.get(sensor_idx - 1).map(|sensor| match &sensor.source {
+                            lianli_shared::sensors::SensorSource::Hwmon { name, label, device_path } =>
+                                lianli_shared::media::SensorSourceConfig::Hwmon {
+                                    name: name.clone(), label: label.clone(), device_path: device_path.clone(),
                                 },
-                                lianli_shared::sensors::SensorSource::NvidiaGpu { gpu_index } =>
-                                    lianli_shared::media::SensorSourceConfig::NvidiaGpu {gpu_index: *gpu_index},
-                                lianli_shared::sensors::SensorSource::Command { cmd } =>
-                                    lianli_shared::media::SensorSourceConfig::Command { cmd: cmd.clone() },
-                                lianli_shared::sensors::SensorSource::WirelessCoolant { device_id } =>
-                                    lianli_shared::media::SensorSourceConfig::WirelessCoolant { device_id: device_id.clone() },
-                                lianli_shared::sensors::SensorSource::CpuUsage => lianli_shared::media::SensorSourceConfig::CpuUsage,
-                                lianli_shared::sensors::SensorSource::MemUsage => lianli_shared::media::SensorSourceConfig::MemUsage,
-                                lianli_shared::sensors::SensorSource::MemUsed => lianli_shared::media::SensorSourceConfig::MemUsed,
-                                lianli_shared::sensors::SensorSource::MemFree => lianli_shared::media::SensorSourceConfig::MemFree,
-                            }
-                        } else {
-                            lianli_shared::media::SensorSourceConfig::Command { cmd: String::new() }
-                        }
+                            lianli_shared::sensors::SensorSource::NvidiaGpu { gpu_index } =>
+                                lianli_shared::media::SensorSourceConfig::NvidiaGpu {gpu_index: *gpu_index},
+                            lianli_shared::sensors::SensorSource::Command { cmd } =>
+                                lianli_shared::media::SensorSourceConfig::Command { cmd: cmd.clone() },
+                            lianli_shared::sensors::SensorSource::WirelessCoolant { device_id } =>
+                                lianli_shared::media::SensorSourceConfig::WirelessCoolant { device_id: device_id.clone() },
+                            lianli_shared::sensors::SensorSource::CpuUsage => lianli_shared::media::SensorSourceConfig::CpuUsage,
+                            lianli_shared::sensors::SensorSource::MemUsage => lianli_shared::media::SensorSourceConfig::MemUsage,
+                            lianli_shared::sensors::SensorSource::MemUsed => lianli_shared::media::SensorSourceConfig::MemUsed,
+                            lianli_shared::sensors::SensorSource::MemFree => lianli_shared::media::SensorSourceConfig::MemFree,
+                        })
                     } else {
-                        lianli_shared::media::SensorSourceConfig::Command { cmd: String::new() }
+                        None
                     }
                 };
                 if let Some(ref mut c) = state.config {
@@ -933,7 +929,11 @@ fn wire_lcd_callbacks(
                             }
                             "sensor_source" => {
                                 let sensor_cfg = lcd.sensor.get_or_insert_with(default_sensor);
-                                sensor_cfg.source = resolved_sensor_source;
+                                sensor_cfg.source = resolved_sensor_source.clone().unwrap_or(
+                                    lianli_shared::media::SensorSourceConfig::Command {
+                                        cmd: String::new(),
+                                    },
+                                );
                             }
                             "sensor_command" => {
                                 lcd.sensor.get_or_insert_with(default_sensor).source =
@@ -1039,14 +1039,21 @@ fn wire_lcd_callbacks(
                                 lcd.doublegauge.get_or_insert_with(default_doublegauge).header = val;
                             }
                             "doublegauge_display_1" => {
-                                lcd.sensor_source_1 = resolved_sensor_source;
+                                if let Some(source) = resolved_sensor_source.clone() {
+                                    lcd.sensor_source_1 = source;
+                                }
+                                // "Custom command" / no selection: leave the existing
+                                // sensor_source_1 untouched so the user can edit the
+                                // command in the sensor_command_1 field without losing it.
                             }
                             "sensor_command_1" => {
                                 lcd.sensor_source_1 =
                                     lianli_shared::media::SensorSourceConfig::Command { cmd: val };
                             }
                             "doublegauge_display_2" => {
-                                lcd.sensor_source_2 = resolved_sensor_source;
+                                if let Some(source) = resolved_sensor_source.clone() {
+                                    lcd.sensor_source_2 = source;
+                                }
                             }
                             "sensor_command_2" => {
                                 lcd.sensor_source_2 =
