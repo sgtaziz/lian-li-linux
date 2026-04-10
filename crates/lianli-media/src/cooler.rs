@@ -306,6 +306,11 @@ impl CoolerAsset {
         let mut data = self.sys_data.lock().unwrap();
 
         let usage_per_core = SysSensor::get_core_usage();
+        // Quantize per-core usage to whole percent (SysSensor reports 0..=10000),
+        // otherwise the dirty check below would fire on every sub-percent jitter
+        // and re-render at full update rate.
+        let usage_per_core_pct: Vec<u32> =
+            usage_per_core.iter().map(|u| u / 100).collect();
 
         let sensor_left_value = self.read_value(&self.sensor_1).unwrap_or(0.0);
         let sensor_right_value = self.read_value(&self.sensor_2).unwrap_or(0.0);
@@ -321,17 +326,20 @@ impl CoolerAsset {
             self.gauge_2_max as f32,
         );
 
-        if data.previous_sensor_left == (sensor_left_value as i32)
-            && data.previous_sensor_right == (sensor_right_value.round() as i32)
-            && data.previous_usage_per_core == usage_per_core
+        let sensor_left_rounded = sensor_left_value.round() as i32;
+        let sensor_right_rounded = sensor_right_value.round() as i32;
+
+        if data.previous_sensor_left == sensor_left_rounded
+            && data.previous_sensor_right == sensor_right_rounded
+            && data.previous_usage_per_core == usage_per_core_pct
             && !force
         {
             return Ok(None);
         }
 
-        data.previous_sensor_left = sensor_left_value as i32;
-        data.previous_sensor_right = sensor_right_value.round() as i32;
-        data.previous_usage_per_core = usage_per_core.clone();
+        data.previous_sensor_left = sensor_left_rounded;
+        data.previous_sensor_right = sensor_right_rounded;
+        data.previous_usage_per_core = usage_per_core_pct;
 
         let mut frame = self.template_image.clone();
 
@@ -614,10 +622,10 @@ fn draw_filled_polygon_with_border(
     // 2. At first draw the inner fill
     draw_polygon_mut(img, &poly_points, fill_color);
 
-    // 3. Now draw the border with anti aliasing
-    for i in 0..points.len() - 1 {
+    // 3. Now draw the border with anti aliasing — iterate over all edges so the
+    // final segment back to the first point closes the polygon.
+    for i in 0..points.len() {
         let start = points[i];
-
         let end = points[(i + 1) % points.len()];
 
         draw_antialiased_line_segment_mut(
