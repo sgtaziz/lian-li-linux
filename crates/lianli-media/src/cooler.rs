@@ -398,12 +398,6 @@ impl CoolerAsset {
             return Ok(None);
         }
 
-        data.previous_left_text = Some(left_text.clone());
-        data.previous_right_text = Some(right_text.clone());
-        data.previous_left_angle_q = left_angle_q;
-        data.previous_right_angle_q = right_angle_q;
-        data.previous_usage_per_core = usage_per_core_pct;
-
         let mut frame = self.template_image.clone();
 
         // Calculate color (120° -> 0°)
@@ -501,11 +495,10 @@ impl CoolerAsset {
         );
 
         let num_cores = usage_per_core.len().max(1);
-
-        let size_per_core = (256.0 * x_scale).round() as usize / num_cores;
-
-        let bar_width = size_per_core as u32 - 2;
-        let spacing = 2;
+        let chart_width = ((256.0 * x_scale).round() as usize).max(1);
+        let size_per_core = (chart_width / num_cores).max(1);
+        let bar_width = (size_per_core.saturating_sub(2)).max(1) as u32;
+        let spacing = (size_per_core - bar_width as usize) as i32;
         let max_height = (47.0 * y_scale).round() as u32;
         let y_base = (391.0 * y_scale).round() as i32;
         let x_offset = (114.0 * x_scale).round() as i32;
@@ -555,16 +548,23 @@ impl CoolerAsset {
         // 4. Convert to desired format
         
         let mut s = self.screen.clone();
-        s.jpeg_quality=40;
+        s.jpeg_quality = 40;
 
-        let encoded_jpeg_result = encode_jpeg(oriented, &s).map(Some);
-        let frame_result: Result<Option<FrameInfo>, MediaError> = encoded_jpeg_result.map(|opt| {
-            opt.map(|data| FrameInfo {
-                data,
-                frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
-            })
-        });
-        return frame_result;
+        let jpeg = encode_jpeg(oriented, &s)?;
+
+        // Only advance the dirty cache once we know the frame actually made it
+        // through the encoder; otherwise a transient encode failure would mark
+        // these values as already-rendered and skip retries.
+        data.previous_left_text = Some(left_text);
+        data.previous_right_text = Some(right_text);
+        data.previous_left_angle_q = left_angle_q;
+        data.previous_right_angle_q = right_angle_q;
+        data.previous_usage_per_core = usage_per_core_pct;
+
+        Ok(Some(FrameInfo {
+            data: jpeg,
+            frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
+        }))
     }
 
     pub fn blank_frame(&self) -> FrameInfo {
