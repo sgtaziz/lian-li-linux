@@ -20,10 +20,11 @@ use lianli_shared::sensors::ResolvedSensor;
 use lianli_shared::systeminfo::SysSensor;
 use rusttype::{Font, Scale};
 use std::f32::consts::PI;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tracing::warn;
 
 
 #[derive(Debug)]
@@ -67,6 +68,9 @@ pub struct CoolerAsset {
     template_image: image::RgbaImage, // Pre-rendered background image
 
     font_label: Font<'static>,
+
+    sensor_1_failed: AtomicBool,
+    sensor_2_failed: AtomicBool,
 
     // Each time a frame gets redrawn this index is "assigned" to the frame.
     frame_index: AtomicUsize,
@@ -292,6 +296,8 @@ impl CoolerAsset {
             screen: *screen,
             template_image: resized,
             font_label,
+            sensor_1_failed: AtomicBool::new(false),
+            sensor_2_failed: AtomicBool::new(false),
             frame_index: 1.into(),
         }))
     }
@@ -312,8 +318,18 @@ impl CoolerAsset {
         let usage_per_core_pct: Vec<u32> =
             usage_per_core.iter().map(|u| u / 100).collect();
 
-        let sensor_left_value = self.read_value(&self.sensor_1).unwrap_or(0.0);
-        let sensor_right_value = self.read_value(&self.sensor_2).unwrap_or(0.0);
+        let sensor_left_value = read_with_warn(
+            "cooler",
+            "sensor_1",
+            &self.sensor_1,
+            &self.sensor_1_failed,
+        );
+        let sensor_right_value = read_with_warn(
+            "cooler",
+            "sensor_2",
+            &self.sensor_2,
+            &self.sensor_2_failed,
+        );
 
         let sensor_left_range = normalize_range(
             sensor_left_value,
@@ -547,10 +563,6 @@ impl CoolerAsset {
         return frame_ret;
     }
 
-    fn read_value(&self, resolved_sensor: &ResolvedSensor) -> Result<f32, MediaError> {
-        lianli_shared::sensors::read_sensor_value(resolved_sensor)
-            .map_err(|e| MediaError::Sensor(e.to_string()))
-    }
 }
 
 /// Map `value` from the inclusive range [min, max] to [0, 1], clamping out-of-range
@@ -561,6 +573,29 @@ fn normalize_range(value: f32, min: f32, max: f32) -> f32 {
         return 0.0;
     }
     ((value - min) / span).clamp(0.0, 1.0)
+}
+
+/// Read a sensor and fall back to 0 on error. Logs the failure once per failure
+/// transition (suppresses spam from a 100ms render loop) and re-arms after the
+/// next successful read so transient errors aren't lost.
+fn read_with_warn(
+    asset: &'static str,
+    label: &'static str,
+    sensor: &ResolvedSensor,
+    failed: &AtomicBool,
+) -> f32 {
+    match lianli_shared::sensors::read_sensor_value(sensor) {
+        Ok(value) => {
+            failed.store(false, Ordering::Relaxed);
+            value
+        }
+        Err(err) => {
+            if !failed.swap(true, Ordering::Relaxed) {
+                warn!("{asset} {label} read failed: {err}");
+            }
+            0.0
+        }
+    }
 }
 
 fn draw_gauge_needle(

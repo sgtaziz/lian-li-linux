@@ -11,10 +11,11 @@ use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::ResolvedSensor;
 use rusttype::{Font, Scale};
 use std::f32::consts::PI;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tracing::warn;
 
 #[derive(Debug)]
 struct GaugePixel {
@@ -67,6 +68,9 @@ pub struct DoublegaugeAsset {
     // The whole frame will be rendered only if one of the following two values actually change.
     previous_outer_gauge_value: Mutex<Option<String>>, // previously drawn value for other gauge (as string, but basically a numerical value)
     previous_inner_gauge_value: Mutex<Option<String>>, // previously drawn value for inner gauge (as string, but basically a numerical value)
+
+    sensor_1_failed: AtomicBool,
+    sensor_2_failed: AtomicBool,
 
     /// here we store the screen info like width and height
     screen: ScreenInfo,
@@ -330,6 +334,8 @@ impl DoublegaugeAsset {
             font,
             previous_outer_gauge_value: Mutex::new(Option::None),
             previous_inner_gauge_value: Mutex::new(Option::None),
+            sensor_1_failed: AtomicBool::new(false),
+            sensor_2_failed: AtomicBool::new(false),
             screen: *screen,
             frame_index: 1.into(),
         }))
@@ -379,7 +385,12 @@ impl DoublegaugeAsset {
     /// Force flag: if true, frame gets rendered even if value has not changed. For example when we render the first frame, we set force=true
     /// Returns OK(Empty) in case of "nothing changed", OK(FrameInfo) in case a new frame has been rendered, and Error in case of an error
     pub fn render_frame(&self, force: bool) -> Result<Option<FrameInfo>, MediaError> {
-        let metric_outer_gauge_raw = self.read_value(&self.sensor_1).unwrap_or(0.0);
+        let metric_outer_gauge_raw = read_with_warn(
+            "doublegauge",
+            "sensor_1",
+            &self.sensor_1,
+            &self.sensor_1_failed,
+        );
 
         // Now map metric_outer_gauge: value_1_min to display_value_1_min upto value_1_max to display_value_1_max
         // And if clamp_1 is true, then clamp to display_value_1_min;display_value_1_max
@@ -404,7 +415,12 @@ impl DoublegaugeAsset {
             unit = self.unit_1
         );
 
-        let metric_inner_gauge_raw = self.read_value(&self.sensor_2).unwrap_or(0.0);
+        let metric_inner_gauge_raw = read_with_warn(
+            "doublegauge",
+            "sensor_2",
+            &self.sensor_2,
+            &self.sensor_2_failed,
+        );
 
         let mut metric_inner_gauge = self.display_value_2_min as f32
             + map_unit_interval(
@@ -556,10 +572,6 @@ impl DoublegaugeAsset {
         }
     }
 
-    fn read_value(&self, resolved_sensor: &ResolvedSensor) -> Result<f32, MediaError> {
-        lianli_shared::sensors::read_sensor_value(resolved_sensor)
-            .map_err(|e| MediaError::Sensor(e.to_string()))
-    }
 }
 
 /// Linearly map `value` from [min, max] to a unit interval (typically [0, 1] but
@@ -571,6 +583,29 @@ fn map_unit_interval(value: f32, min: f32, max: f32) -> f32 {
         return 0.0;
     }
     (value - min) / span
+}
+
+/// Read a sensor and fall back to 0 on error. Logs the failure once per failure
+/// transition (suppresses spam from a 100ms render loop) and re-arms after the
+/// next successful read so transient errors aren't lost.
+fn read_with_warn(
+    asset: &'static str,
+    label: &'static str,
+    sensor: &ResolvedSensor,
+    failed: &AtomicBool,
+) -> f32 {
+    match lianli_shared::sensors::read_sensor_value(sensor) {
+        Ok(value) => {
+            failed.store(false, Ordering::Relaxed);
+            value
+        }
+        Err(err) => {
+            if !failed.swap(true, Ordering::Relaxed) {
+                warn!("{asset} {label} read failed: {err}");
+            }
+            0.0
+        }
+    }
 }
 
 fn draw_rotated_text_on_circle(
