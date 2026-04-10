@@ -1,0 +1,628 @@
+// Template Editor — a separate top-level Slint Window for building Custom LCD
+// layouts. The main window instantiates this alongside MainWindow and shows it
+// on demand via `ComponentHandle::show()`. The editor owns its in-progress
+// template state; the main window doesn't read into the editor's interior, it
+// just seeds `in-out` properties before `show()` and listens for `save-requested`.
+
+import { Theme } from "../theme.slint";
+import {
+    Button, ComboBox, LineEdit, SpinBox, CheckBox, ScrollView, StandardButton, Palette,
+} from "std-widgets.slint";
+
+export struct EditorWidget {
+    id: string,
+    kind: string,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    rotation: float,
+    visible: bool,
+    update-interval-ms: int,
+
+    // Label / ValueText
+    text: string,
+    font-name: string,
+    font-size: float,
+    color-r: int,
+    color-g: int,
+    color-b: int,
+    align: string,
+
+    // ValueText
+    format: string,
+    unit: string,
+
+    // Sensor-bound widgets (ValueText, RadialGauge, VerticalBar, HorizontalBar, Speedometer)
+    source-index: int,
+    value-min: float,
+    value-max: float,
+
+    // Gauge geometry
+    start-angle: float,
+    sweep-angle: float,
+    inner-radius-pct: float,
+
+    // Backgrounds + tick colors
+    bg-r: int,
+    bg-g: int,
+    bg-b: int,
+    tick-count: int,
+
+    // Image / Video
+    image-path: string,
+    opacity: float,
+    fps: float,
+}
+
+component WidgetListRow inherits Rectangle {
+    in property <EditorWidget> widget;
+    in property <bool> selected;
+    in property <int> index;
+
+    callback clicked(int);
+
+    height: 28px;
+    background: selected ? Theme.accent.transparentize(0.6) : transparent;
+    border-radius: 3px;
+
+    touch := TouchArea {
+        clicked => { root.clicked(root.index); }
+    }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+        Text {
+            text: root.widget.kind;
+            font-size: 11px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+            width: 80px;
+        }
+        Text {
+            text: root.widget.id;
+            font-size: 12px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+component LabeledSpinBox inherits HorizontalLayout {
+    in property <string> label;
+    in property <int> value;
+    in property <int> minimum: -100000;
+    in property <int> maximum: 100000;
+    callback edited(int);
+    spacing: 4px;
+    Text {
+        text: root.label;
+        font-size: 11px;
+        color: Theme.text-secondary;
+        vertical-alignment: center;
+        width: 54px;
+    }
+    SpinBox {
+        horizontal-stretch: 1;
+        minimum: root.minimum;
+        maximum: root.maximum;
+        value: root.value;
+        edited(v) => { root.edited(v); }
+    }
+}
+
+component WidgetBox inherits Rectangle {
+    in property <EditorWidget> widget;
+    in property <bool> selected;
+    in property <int> index;
+    // Canvas→widget mapping so drag callbacks can convert back to template-space.
+    in property <length> canvas-x;
+    in property <length> canvas-y;
+    in property <length> canvas-w;
+    in property <length> canvas-h;
+    in property <float> base-w;
+    in property <float> base-h;
+    in property <bool> is-landscape;
+
+    callback selected-clicked(int);
+    callback moved(int, float, float);
+
+    property <float> screen-px-x: root.is-landscape
+        ? (root.base-h - root.widget.y) / root.base-h
+        : root.widget.x / root.base-w;
+    property <float> screen-px-y: root.is-landscape
+        ? root.widget.x / root.base-w
+        : root.widget.y / root.base-h;
+    property <float> screen-w: root.is-landscape
+        ? root.widget.height / root.base-h
+        : root.widget.width / root.base-w;
+    property <float> screen-h: root.is-landscape
+        ? root.widget.width / root.base-w
+        : root.widget.height / root.base-h;
+
+    x: root.canvas-x + (screen-px-x * root.canvas-w) - (screen-w * root.canvas-w / 2);
+    y: root.canvas-y + (screen-px-y * root.canvas-h) - (screen-h * root.canvas-h / 2);
+    width: screen-w * root.canvas-w;
+    height: screen-h * root.canvas-h;
+
+    border-width: selected ? 2px : 1px;
+    border-color: selected ? Theme.accent : Theme.border.transparentize(0.4);
+    border-radius: 2px;
+    background: selected ? Theme.accent.transparentize(0.85) : transparent;
+
+    property <float> frac-x: (root.x + touch.mouse-x - root.canvas-x) / root.canvas-w;
+    property <float> frac-y: (root.y + touch.mouse-y - root.canvas-y) / root.canvas-h;
+
+    touch := TouchArea {
+        mouse-cursor: move;
+        moved => {
+            root.moved(
+                root.index,
+                root.is-landscape ? root.frac-y * root.base-w : root.frac-x * root.base-w,
+                root.is-landscape ? (1 - root.frac-x) * root.base-h : root.frac-y * root.base-h
+            );
+        }
+        clicked => { root.selected-clicked(root.index); }
+    }
+}
+
+export component TemplateEditorWindow inherits Window {
+    title: "LCD Template Editor";
+    preferred-width: 1100px;
+    preferred-height: 720px;
+    min-width: 900px;
+    min-height: 540px;
+    background: Palette.background;
+
+    // Template metadata (seeded by parent before show()).
+    in-out property <string> template-id: "";
+    in-out property <string> template-name: "Untitled";
+    in-out property <int> base-width: 480;
+    in-out property <int> base-height: 480;
+    in-out property <string> orientation: "portrait"; // "portrait" | "landscape"
+    in-out property <string> bg-type: "color";        // "color" | "image"
+    in-out property <int> bg-r: 10;
+    in-out property <int> bg-g: 14;
+    in-out property <int> bg-b: 22;
+    in-out property <string> bg-image-path: "";
+
+    in-out property <[EditorWidget]> widgets: [];
+    in-out property <int> selected-index: -1;
+
+    in property <image> preview-image;
+    in property <[string]> device-presets: [];
+    in property <string> current-preset-label: "";
+    in property <[string]> sensor-options: [];
+    in property <[string]> widget-kinds: [
+        "label", "value_text", "radial_gauge", "vertical_bar",
+        "horizontal_bar", "speedometer", "core_bars", "image", "video",
+    ];
+    in property <[string]> font-names: ["Victor Mono", "JetBrains Mono", "Digital 7"];
+
+    callback save-requested();
+    callback cancel();
+    callback closed();
+
+    callback header-field(string, string);
+    callback widget-moved(int, float, float);
+    callback widget-added(string);
+    callback widget-removed(int);
+    callback widget-field(int, string, string);
+    callback pick-bg-image();
+    callback pick-widget-image(int);
+    callback preset-selected(string);
+    callback request-preview();
+
+    property <bool> is-landscape: root.orientation == "landscape";
+
+    VerticalLayout {
+        // ── Header ──
+        Rectangle {
+            height: 56px;
+            background: Theme.card-background;
+            border-width: 0px;
+            border-color: Theme.border;
+
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 12px;
+                alignment: start;
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "Template Name"; font-size: 10px; color: Theme.text-secondary; }
+                    LineEdit {
+                        width: 200px;
+                        text: root.template-name;
+                        edited(v) => { root.header-field("name", v); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "Target Device"; font-size: 10px; color: Theme.text-secondary; }
+                    ComboBox {
+                        width: 220px;
+                        model: root.device-presets;
+                        current-value: root.current-preset-label;
+                        selected(v) => { root.preset-selected(v); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "Layout"; font-size: 10px; color: Theme.text-secondary; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Button {
+                            text: "Portrait";
+                            primary: root.orientation == "portrait";
+                            clicked => { root.header-field("orientation", "portrait"); }
+                        }
+                        Button {
+                            text: "Landscape";
+                            primary: root.orientation == "landscape";
+                            clicked => { root.header-field("orientation", "landscape"); }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "Background"; font-size: 10px; color: Theme.text-secondary; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Button {
+                            text: "Color";
+                            primary: root.bg-type == "color";
+                            clicked => { root.header-field("bg_type", "color"); }
+                        }
+                        Button {
+                            text: "Image…";
+                            primary: root.bg-type == "image";
+                            clicked => { root.pick-bg-image(); }
+                        }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Button {
+                    text: "Close";
+                    clicked => { root.cancel(); }
+                }
+                Button {
+                    text: "Save";
+                    primary: true;
+                    clicked => { root.save-requested(); }
+                }
+            }
+        }
+
+        // ── Main three-pane layout ──
+        HorizontalLayout {
+            // Left: widget list
+            Rectangle {
+                width: 220px;
+                background: Theme.sidebar-background;
+                border-width: 0px;
+                border-color: Theme.border;
+
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+
+                    Text { text: "Widgets"; font-size: 12px; font-weight: 700; color: Theme.text-primary; }
+
+                    // Add widget dropdown
+                    HorizontalLayout {
+                        spacing: 4px;
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: root.widget-kinds;
+                            current-index: 0;
+                            selected(v) => { root.widget-added(v); }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 2px;
+                            for w[i] in root.widgets: WidgetListRow {
+                                widget: w;
+                                index: i;
+                                selected: i == root.selected-index;
+                                clicked(idx) => {
+                                    root.selected-index = idx;
+                                    root.widget-field(idx, "_select", "");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Center: preview canvas with draggable widget boxes.
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #1a1f29;
+                clip: true;
+
+                // Canvas area — square fit inside the available space.
+                property <length> pad: 24px;
+                property <length> avail-w: self.width - 2 * self.pad;
+                property <length> avail-h: self.height - 2 * self.pad;
+                // Aspect ratio as displayed (may differ from base_w/base_h
+                // when viewing a portrait template rotated into landscape).
+                property <float> disp-aspect: root.is-landscape
+                    ? root.base-height / root.base-width
+                    : root.base-width / root.base-height;
+                property <length> canvas-w: min(self.avail-w, self.avail-h * self.disp-aspect);
+                property <length> canvas-h: self.canvas-w / self.disp-aspect;
+                property <length> canvas-x: (self.width - self.canvas-w) / 2;
+                property <length> canvas-y: (self.height - self.canvas-h) / 2;
+
+                // Rendered preview image (daemon-rendered via IPC).
+                Image {
+                    x: parent.canvas-x;
+                    y: parent.canvas-y;
+                    width: parent.canvas-w;
+                    height: parent.canvas-h;
+                    source: root.preview-image;
+                    image-fit: ImageFit.contain;
+                }
+
+                // Widget boxes (draggable overlays).
+                for w[idx] in root.widgets: WidgetBox {
+                    widget: w;
+                    index: idx;
+                    selected: idx == root.selected-index;
+                    canvas-x: parent.canvas-x;
+                    canvas-y: parent.canvas-y;
+                    canvas-w: parent.canvas-w;
+                    canvas-h: parent.canvas-h;
+                    base-w: root.base-width;
+                    base-h: root.base-height;
+                    is-landscape: root.is-landscape;
+                    selected-clicked(i) => { root.selected-index = i; root.widget-field(i, "_select", ""); }
+                    moved(i, x, y) => { root.widget-moved(i, x, y); }
+                }
+            }
+
+            // Right: property inspector
+            Rectangle {
+                width: 280px;
+                background: Theme.sidebar-background;
+                border-width: 0px;
+                border-color: Theme.border;
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        if root.selected-index < 0: Text {
+                            text: "Select a widget to edit its properties.";
+                            font-size: 11px;
+                            color: Theme.text-secondary;
+                            wrap: word-wrap;
+                        }
+
+                        if root.selected-index >= 0 && root.selected-index < root.widgets.length: VerticalLayout {
+                            spacing: 8px;
+
+                            Text {
+                                text: "⚙ " + root.widgets[root.selected-index].kind;
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: Theme.text-primary;
+                            }
+
+                            // ── Common geometry ──
+                            LabeledSpinBox {
+                                label: "X";
+                                value: root.widgets[root.selected-index].x;
+                                minimum: 0;
+                                maximum: 10000;
+                                edited(v) => { root.widget-field(root.selected-index, "x", v); }
+                            }
+                            LabeledSpinBox {
+                                label: "Y";
+                                value: root.widgets[root.selected-index].y;
+                                minimum: 0;
+                                maximum: 10000;
+                                edited(v) => { root.widget-field(root.selected-index, "y", v); }
+                            }
+                            LabeledSpinBox {
+                                label: "Width";
+                                value: root.widgets[root.selected-index].width;
+                                minimum: 1;
+                                maximum: 10000;
+                                edited(v) => { root.widget-field(root.selected-index, "width", v); }
+                            }
+                            LabeledSpinBox {
+                                label: "Height";
+                                value: root.widgets[root.selected-index].height;
+                                minimum: 1;
+                                maximum: 10000;
+                                edited(v) => { root.widget-field(root.selected-index, "height", v); }
+                            }
+                            LabeledSpinBox {
+                                label: "Rotate°";
+                                value: root.widgets[root.selected-index].rotation;
+                                minimum: -360;
+                                maximum: 360;
+                                edited(v) => { root.widget-field(root.selected-index, "rotation", v); }
+                            }
+
+                            CheckBox {
+                                text: "Visible";
+                                checked: root.widgets[root.selected-index].visible;
+                                toggled => { root.widget-field(root.selected-index, "visible", self.checked ? "true" : "false"); }
+                            }
+
+                            Rectangle { height: 1px; background: Theme.border; }
+
+                            // ── Variant-specific ──
+                            if root.widgets[root.selected-index].kind == "label"
+                               || root.widgets[root.selected-index].kind == "value_text": VerticalLayout {
+                                spacing: 6px;
+                                Text { text: "Text"; font-size: 10px; color: Theme.text-secondary; }
+                                LineEdit {
+                                    text: root.widgets[root.selected-index].text;
+                                    edited(v) => { root.widget-field(root.selected-index, "text", v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Font sz";
+                                    value: root.widgets[root.selected-index].font-size;
+                                    minimum: 6;
+                                    maximum: 400;
+                                    edited(v) => { root.widget-field(root.selected-index, "font_size", v); }
+                                }
+                                Text { text: "Font"; font-size: 10px; color: Theme.text-secondary; }
+                                ComboBox {
+                                    model: root.font-names;
+                                    current-value: root.widgets[root.selected-index].font-name;
+                                    selected(v) => { root.widget-field(root.selected-index, "font", v); }
+                                }
+                                Text { text: "Color (R/G/B)"; font-size: 10px; color: Theme.text-secondary; }
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    SpinBox {
+                                        minimum: 0;
+                                        maximum: 255;
+                                        value: root.widgets[root.selected-index].color-r;
+                                        edited(v) => { root.widget-field(root.selected-index, "color_r", v); }
+                                    }
+                                    SpinBox {
+                                        minimum: 0;
+                                        maximum: 255;
+                                        value: root.widgets[root.selected-index].color-g;
+                                        edited(v) => { root.widget-field(root.selected-index, "color_g", v); }
+                                    }
+                                    SpinBox {
+                                        minimum: 0;
+                                        maximum: 255;
+                                        value: root.widgets[root.selected-index].color-b;
+                                        edited(v) => { root.widget-field(root.selected-index, "color_b", v); }
+                                    }
+                                }
+                            }
+
+                            if root.widgets[root.selected-index].kind == "value_text": VerticalLayout {
+                                spacing: 6px;
+                                Text { text: "Format (e.g. {:.1})"; font-size: 10px; color: Theme.text-secondary; }
+                                LineEdit {
+                                    text: root.widgets[root.selected-index].format;
+                                    edited(v) => { root.widget-field(root.selected-index, "format", v); }
+                                }
+                                Text { text: "Unit"; font-size: 10px; color: Theme.text-secondary; }
+                                LineEdit {
+                                    text: root.widgets[root.selected-index].unit;
+                                    edited(v) => { root.widget-field(root.selected-index, "unit", v); }
+                                }
+                            }
+
+                            if root.widgets[root.selected-index].kind == "radial_gauge"
+                               || root.widgets[root.selected-index].kind == "vertical_bar"
+                               || root.widgets[root.selected-index].kind == "horizontal_bar"
+                               || root.widgets[root.selected-index].kind == "speedometer"
+                               || root.widgets[root.selected-index].kind == "value_text": VerticalLayout {
+                                spacing: 6px;
+                                Text { text: "Sensor"; font-size: 10px; color: Theme.text-secondary; }
+                                ComboBox {
+                                    model: root.sensor-options;
+                                    current-index: root.widgets[root.selected-index].source-index;
+                                    selected(v) => { root.widget-field(root.selected-index, "source", v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Min";
+                                    value: root.widgets[root.selected-index].value-min;
+                                    minimum: -100000;
+                                    maximum: 100000;
+                                    edited(v) => { root.widget-field(root.selected-index, "value_min", v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Max";
+                                    value: root.widgets[root.selected-index].value-max;
+                                    minimum: -100000;
+                                    maximum: 100000;
+                                    edited(v) => { root.widget-field(root.selected-index, "value_max", v); }
+                                }
+                            }
+
+                            if root.widgets[root.selected-index].kind == "radial_gauge"
+                               || root.widgets[root.selected-index].kind == "speedometer": VerticalLayout {
+                                spacing: 6px;
+                                LabeledSpinBox {
+                                    label: "Start°";
+                                    value: root.widgets[root.selected-index].start-angle;
+                                    minimum: -360;
+                                    maximum: 720;
+                                    edited(v) => { root.widget-field(root.selected-index, "start_angle", v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Sweep°";
+                                    value: root.widgets[root.selected-index].sweep-angle;
+                                    minimum: 1;
+                                    maximum: 360;
+                                    edited(v) => { root.widget-field(root.selected-index, "sweep_angle", v); }
+                                }
+                            }
+
+                            if root.widgets[root.selected-index].kind == "image"
+                               || root.widgets[root.selected-index].kind == "video": VerticalLayout {
+                                spacing: 6px;
+                                Text { text: "File"; font-size: 10px; color: Theme.text-secondary; }
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        text: root.widgets[root.selected-index].image-path;
+                                        edited(v) => { root.widget-field(root.selected-index, "path", v); }
+                                    }
+                                    Button {
+                                        text: "…";
+                                        clicked => { root.pick-widget-image(root.selected-index); }
+                                    }
+                                }
+                            }
+
+                            if root.widgets[root.selected-index].kind == "video": LabeledSpinBox {
+                                label: "FPS";
+                                value: root.widgets[root.selected-index].fps;
+                                minimum: 1;
+                                maximum: 60;
+                                edited(v) => { root.widget-field(root.selected-index, "fps", v); }
+                            }
+
+                            if root.widgets[root.selected-index].kind != "label"
+                               && root.widgets[root.selected-index].kind != "image": LabeledSpinBox {
+                                label: "Update ms";
+                                value: root.widgets[root.selected-index].update-interval-ms;
+                                minimum: 100;
+                                maximum: 10000;
+                                edited(v) => { root.widget-field(root.selected-index, "update_interval_ms", v); }
+                            }
+
+                            Rectangle { height: 1px; background: Theme.border; }
+
+                            Button {
+                                text: "Delete Widget";
+                                clicked => { root.widget-removed(root.selected-index); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -2787,7 +2787,9 @@ name = "lianli-gui"
 version = "0.3.2"
 dependencies = [
  "anyhow",
+ "base64",
  "lianli-shared",
+ "parking_lot",
  "rfd",
  "serde",
  "serde_json",

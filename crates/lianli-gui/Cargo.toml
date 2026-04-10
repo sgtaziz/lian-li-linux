@@ -7,6 +7,8 @@ edition.workspace = true
 lianli-shared = { path = "../lianli-shared" }
 slint = { git = "https://github.com/slint-ui/slint", default-features = false, features = ["compat-1-2", "backend-winit", "renderer-femtovg"] }
 
+base64 = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
