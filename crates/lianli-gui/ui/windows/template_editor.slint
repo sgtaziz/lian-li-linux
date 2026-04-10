@@ -356,10 +356,9 @@ export component TemplateEditorWindow inherits Window {
     in-out property <int> base-height: 480;
     in-out property <bool> rotated: false;
     in-out property <string> bg-type: "color";
-    in-out property <int> bg-r: 10;
-    in-out property <int> bg-g: 14;
-    in-out property <int> bg-b: 22;
-    in-out property <int> bg-a: 255;
+    in-out property <int> bg-r: 0;
+    in-out property <int> bg-g: 0;
+    in-out property <int> bg-b: 0;
     in-out property <string> bg-image-path: "";
 
     in-out property <string> status-message: "";
@@ -466,10 +465,37 @@ export component TemplateEditorWindow inherits Window {
                             clicked => { root.header-field("bg_type", "color"); }
                         }
                         Button {
-                            text: "Image…";
+                            text: "Image";
                             height: 28px;
                             primary: root.bg-type == "image";
                             clicked => { root.pick-bg-image(); }
+                        }
+                    }
+                }
+
+                if root.bg-type == "color": VerticalLayout {
+                    spacing: 2px;
+                    alignment: end;
+                    Text { text: "BG R / G / B"; font-size: 10px; color: Theme.text-secondary; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: root.bg-r;
+                            edited(v) => { root.header-field("bg_r", v); }
+                        }
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: root.bg-g;
+                            edited(v) => { root.header-field("bg_g", v); }
+                        }
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: root.bg-b;
+                            edited(v) => { root.header-field("bg_b", v); }
                         }
                     }
                 }

@@ -1351,7 +1351,7 @@ pub(crate) fn make_blank_template() -> lianli_shared::template::LcdTemplate {
         base_width: 480,
         base_height: 480,
         background: lianli_shared::template::TemplateBackground::Color {
-            rgb: [10, 14, 22, 255],
+            rgb: [0, 0, 0, 255],
         },
         widgets: Vec::new(),
         rotated: false,

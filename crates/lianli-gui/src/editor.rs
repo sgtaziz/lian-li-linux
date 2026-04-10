@@ -115,6 +115,17 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                             tpl.background = TemplateBackground::Color { rgb: prev_color };
                         }
                     }
+                    "bg_r" | "bg_g" | "bg_b" => {
+                        let mut rgba = prev_color;
+                        rgba[3] = 255;
+                        let v = val.parse::<i32>().unwrap_or(0).clamp(0, 255) as u8;
+                        match field.as_str() {
+                            "bg_r" => rgba[0] = v,
+                            "bg_g" => rgba[1] = v,
+                            _ => rgba[2] = v,
+                        }
+                        tpl.background = TemplateBackground::Color { rgb: rgba };
+                    }
                     _ => {}
                 }
             }
@@ -1283,7 +1294,7 @@ fn editor_color_from_state(st: &EditorState) -> [u8; 4] {
             return rgb;
         }
     }
-    [10, 14, 22, 255]
+    [0, 0, 0, 255]
 }
 
 fn reflect_header(editor: &TemplateEditorWindow, state: &SharedEditor) {
@@ -1302,7 +1313,6 @@ fn reflect_header(editor: &TemplateEditorWindow, state: &SharedEditor) {
             editor.set_bg_r(rgb[0] as i32);
             editor.set_bg_g(rgb[1] as i32);
             editor.set_bg_b(rgb[2] as i32);
-            editor.set_bg_a(rgb[3] as i32);
             editor.set_bg_image_path(SharedString::default());
         }
         TemplateBackground::Image { path } => {
