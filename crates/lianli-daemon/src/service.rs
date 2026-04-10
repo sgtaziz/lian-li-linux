@@ -1684,17 +1684,18 @@ impl AsyncDoublegaugeRenderer {
                     break;
                 }
                 match asset_clone.render_frame(false) {
-                    Ok(new_frame) => {
-                        if new_frame.is_some() {
-                            if let Some(ref tx) = tx_for_thread {
-                                let event = DaemonEvent::FrameFinished {
-                                    asset: Arc::clone(&asset_for_thread),
-                                };
-                                tx.send(event).ok();
+                    Ok(Some(new_frame)) => {
+                        *frame_clone.lock() = new_frame;
+                        if let Some(ref tx) = tx_for_thread {
+                            let event = DaemonEvent::FrameFinished {
+                                asset: Arc::clone(&asset_for_thread),
+                            };
+                            if tx.send(event).is_err() {
+                                break;
                             }
-                            *frame_clone.lock() = new_frame.unwrap();
                         }
                     }
+                    Ok(None) => {}
                     Err(err) => {
                         warn!("Doublegauge background render failed: {err}");
                     }
@@ -1768,17 +1769,18 @@ impl AsyncCoolerRenderer {
                     break;
                 }
                 match asset_clone.render_frame(false) {
-                    Ok(new_frame) => {
-                        if new_frame.is_some() {
-                            if let Some(ref tx) = tx_for_thread {
-                                let event = DaemonEvent::FrameFinished {
-                                    asset: Arc::clone(&asset_for_thread),
-                                };
-                                tx.send(event).ok();
+                    Ok(Some(new_frame)) => {
+                        *frame_clone.lock() = new_frame;
+                        if let Some(ref tx) = tx_for_thread {
+                            let event = DaemonEvent::FrameFinished {
+                                asset: Arc::clone(&asset_for_thread),
+                            };
+                            if tx.send(event).is_err() {
+                                break;
                             }
-                            *frame_clone.lock() = new_frame.unwrap();
                         }
                     }
+                    Ok(None) => {}
                     Err(err) => {
                         warn!("Cooler background render failed: {err}");
                     }
