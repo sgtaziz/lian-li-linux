@@ -500,7 +500,7 @@ impl CoolerAsset {
             needle_color,
         );
 
-        let num_cores = usage_per_core.len();
+        let num_cores = usage_per_core.len().max(1);
 
         let size_per_core = (256.0 * x_scale).round() as usize / num_cores;
 
