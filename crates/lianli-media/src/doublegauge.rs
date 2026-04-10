@@ -425,10 +425,12 @@ impl DoublegaugeAsset {
                 self.value_1_max as f32,
             ) * (self.display_value_1_max - self.display_value_1_min) as f32;
         if self.clamp_1 {
-            metric_outer_gauge = metric_outer_gauge.clamp(
-                self.display_value_1_min as f32,
-                self.display_value_1_max as f32,
-            );
+            // display_value_*_min/max are user-provided example pairs and may
+            // be in descending order (e.g. mV -> V going downwards), so order
+            // them before calling f32::clamp which panics on min > max.
+            let lo = (self.display_value_1_min as f32).min(self.display_value_1_max as f32);
+            let hi = (self.display_value_1_min as f32).max(self.display_value_1_max as f32);
+            metric_outer_gauge = metric_outer_gauge.clamp(lo, hi);
         }
 
         let metric_outer_gauge_text = format!(
@@ -452,10 +454,9 @@ impl DoublegaugeAsset {
                 self.value_2_max as f32,
             ) * (self.display_value_2_max - self.display_value_2_min) as f32;
         if self.clamp_2 {
-            metric_inner_gauge = metric_inner_gauge.clamp(
-                self.display_value_2_min as f32,
-                self.display_value_2_max as f32,
-            );
+            let lo = (self.display_value_2_min as f32).min(self.display_value_2_max as f32);
+            let hi = (self.display_value_2_min as f32).max(self.display_value_2_max as f32);
+            metric_inner_gauge = metric_inner_gauge.clamp(lo, hi);
         }
 
         let metric_inner_gauge_text = format!(
