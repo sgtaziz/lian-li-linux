@@ -1,6 +1,8 @@
 //! `CustomAsset` — the data-driven renderer for `MediaType::Custom`.
 
-use crate::common::{apply_orientation, encode_jpeg, get_exact_text_metrics, MediaError};
+use crate::common::{
+    apply_orientation, encode_jpeg, get_exact_text_metrics, render_dimensions, MediaError,
+};
 use crate::sensor::FrameInfo;
 use crate::video::decode_frames_to_rgba;
 use image::imageops::FilterType;
@@ -116,21 +118,22 @@ impl CustomAsset {
             }
         }
 
-        let uniform_scale = (screen.width as f32 / template.base_width as f32)
-            .min(screen.height as f32 / template.base_height as f32)
+        let (canvas_w, canvas_h) = render_dimensions(screen, orientation);
+        let uniform_scale = (canvas_w as f32 / template.base_width as f32)
+            .min(canvas_h as f32 / template.base_height as f32)
             .max(0.01);
         let scaled_w = (template.base_width as f32 * uniform_scale).round() as u32;
         let scaled_h = (template.base_height as f32 * uniform_scale).round() as u32;
-        let offset_x = ((screen.width as i32) - scaled_w as i32) / 2;
-        let offset_y = ((screen.height as i32) - scaled_h as i32) / 2;
+        let offset_x = ((canvas_w as i32) - scaled_w as i32) / 2;
+        let offset_y = ((canvas_h as i32) - scaled_h as i32) / 2;
 
         let letterbox_rgb = match template.background {
             TemplateBackground::Color { rgb } => [rgb[0], rgb[1], rgb[2]],
             TemplateBackground::Image { .. } | TemplateBackground::Builtin { .. } => [0, 0, 0],
         };
         let mut composite = RgbaImage::from_pixel(
-            screen.width,
-            screen.height,
+            canvas_w,
+            canvas_h,
             Rgba([letterbox_rgb[0], letterbox_rgb[1], letterbox_rgb[2], 255]),
         );
 
@@ -273,8 +276,8 @@ impl CustomAsset {
             uniform_scale,
             offset_x,
             offset_y,
-            canonical_width: screen.width,
-            canonical_height: screen.height,
+            canonical_width: canvas_w,
+            canonical_height: canvas_h,
             fonts,
             default_font,
             frame_index: AtomicUsize::new(1),
