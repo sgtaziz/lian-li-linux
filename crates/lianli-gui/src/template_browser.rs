@@ -13,6 +13,7 @@ const DAEMON_VERSION_STR: &str = env!("CARGO_PKG_VERSION");
 
 pub struct BrowserHandle {
     pub window: TemplateBrowserWindow,
+    pub catalog: Arc<Mutex<Vec<CatalogTemplate>>>,
 }
 
 pub fn install(main: &MainWindow, shared: Shared) -> BrowserHandle {
@@ -27,6 +28,20 @@ pub fn install(main: &MainWindow, shared: Shared) -> BrowserHandle {
             let weak = weak.clone();
             let catalog = catalog.clone();
             start_fetch(weak, catalog);
+        });
+    }
+
+    {
+        window.on_publishing_guide_requested(|| {
+            const URL: &str = "https://github.com/sgtaziz/lian-li-linux/tree/main/templates";
+            if let Err(e) = std::process::Command::new("xdg-open")
+                .arg(URL)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                tracing::warn!("xdg-open failed for {URL}: {e}");
+            }
         });
     }
 
@@ -77,7 +92,7 @@ pub fn install(main: &MainWindow, shared: Shared) -> BrowserHandle {
         });
     }
 
-    BrowserHandle { window }
+    BrowserHandle { window, catalog }
 }
 
 pub fn open(handle: &BrowserHandle, _shared: &Shared) {
@@ -88,8 +103,7 @@ pub fn open(handle: &BrowserHandle, _shared: &Shared) {
     window.show().ok();
 
     let weak = window.as_weak();
-    let catalog: Arc<Mutex<Vec<CatalogTemplate>>> = Arc::new(Mutex::new(Vec::new()));
-    start_fetch(weak, catalog);
+    start_fetch(weak, handle.catalog.clone());
 }
 
 fn start_fetch(
@@ -135,6 +149,9 @@ fn on_manifest(
                     preview_loaded: false,
                     install_state: SharedString::from("idle"),
                     install_error: SharedString::default(),
+                    base_width: t.base_width as i32,
+                    base_height: t.base_height as i32,
+                    rotated: t.rotated,
                 })
                 .collect();
             *catalog.lock().unwrap() = supported.clone();
@@ -213,19 +230,12 @@ fn set_entry_state_local(
     }
 }
 
-fn persist_installed(shared: &Shared, tpl: lianli_shared::template::LcdTemplate) {
+fn persist_installed(shared: &Shared, mut tpl: lianli_shared::template::LcdTemplate) {
     let user_list = {
         let mut state = shared.lock().unwrap();
-        if !state.lcd_templates.iter().any(|t| t.id == tpl.id) {
-            state.lcd_templates.push(tpl);
-        } else {
-            for existing in state.lcd_templates.iter_mut() {
-                if existing.id == tpl.id {
-                    *existing = tpl.clone();
-                    break;
-                }
-            }
-        }
+        tpl.name = crate::next_unique_downloaded_name(&tpl.name, &state.lcd_templates);
+        tpl.id = crate::generate_template_id("downloaded");
+        state.lcd_templates.push(tpl);
         crate::user_templates_only(&state.lcd_templates)
     };
     crate::send_set_templates(user_list);

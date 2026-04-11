@@ -125,6 +125,7 @@ impl SensorAsset {
             SensorSourceConfig::Command { .. }
             | SensorSourceConfig::Hwmon { .. }
             | SensorSourceConfig::NvidiaGpu { .. }
+            | SensorSourceConfig::AmdGpuUsage { .. }
             | SensorSourceConfig::WirelessCoolant { .. }
             | SensorSourceConfig::CpuUsage
             | SensorSourceConfig::MemUsage

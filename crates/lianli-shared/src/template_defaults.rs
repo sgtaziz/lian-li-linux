@@ -59,6 +59,9 @@ fn sensor_source_to_config(s: &SensorSource) -> SensorSourceConfig {
             gpu_index: *gpu_index,
             metric: *metric,
         },
+        SensorSource::AmdGpuUsage { card_index } => SensorSourceConfig::AmdGpuUsage {
+            card_index: *card_index,
+        },
         SensorSource::Command { cmd } => SensorSourceConfig::Command { cmd: cmd.clone() },
         SensorSource::WirelessCoolant { device_id } => SensorSourceConfig::WirelessCoolant {
             device_id: device_id.clone(),

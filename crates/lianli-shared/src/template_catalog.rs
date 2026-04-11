@@ -18,6 +18,22 @@ const CATALOG_BASE_URL: &str =
     "https://raw.githubusercontent.com/sgtaziz/lian-li-linux/main/templates";
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
+fn fetch_bytes(url: &str) -> Result<Vec<u8>> {
+    if let Some(rest) = url.strip_prefix("file://") {
+        return std::fs::read(rest).with_context(|| format!("reading {rest}"));
+    }
+    let resp = client()?
+        .get(url)
+        .send()
+        .with_context(|| format!("GET {url}"))?
+        .error_for_status()
+        .with_context(|| format!("status for {url}"))?;
+    Ok(resp
+        .bytes()
+        .with_context(|| format!("body of {url}"))?
+        .to_vec())
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CatalogManifest {
     pub schema_version: u32,
@@ -38,6 +54,12 @@ pub struct CatalogTemplate {
     pub template_sha256: String,
     pub preview: String,
     pub preview_sha256: String,
+    #[serde(default)]
+    pub base_width: u32,
+    #[serde(default)]
+    pub base_height: u32,
+    #[serde(default)]
+    pub rotated: bool,
     #[serde(default)]
     pub files: Vec<CatalogFile>,
 }
@@ -63,13 +85,9 @@ fn asset_url(folder: &str, path: &str) -> String {
 pub fn fetch_manifest() -> Result<CatalogManifest> {
     let url = format!("{CATALOG_BASE_URL}/default_templates.json");
     debug!("fetching template catalog manifest from {url}");
-    let resp = client()?
-        .get(&url)
-        .send()
-        .with_context(|| format!("GET {url}"))?
-        .error_for_status()
-        .with_context(|| format!("status for {url}"))?;
-    let manifest: CatalogManifest = resp.json().context("parsing manifest JSON")?;
+    let bytes = fetch_bytes(&url)?;
+    let manifest: CatalogManifest =
+        serde_json::from_slice(&bytes).context("parsing manifest JSON")?;
     if manifest.schema_version != 1 {
         bail!(
             "unsupported catalog schema version {}; update lianli",
@@ -85,15 +103,9 @@ pub fn fetch_manifest() -> Result<CatalogManifest> {
 
 pub fn fetch_preview(template: &CatalogTemplate) -> Result<Vec<u8>> {
     let url = asset_url(&template.folder, &template.preview);
-    let bytes = client()?
-        .get(&url)
-        .send()
-        .with_context(|| format!("GET {url}"))?
-        .error_for_status()?
-        .bytes()
-        .with_context(|| format!("reading body of {url}"))?;
+    let bytes = fetch_bytes(&url)?;
     verify_sha256(&bytes, &template.preview_sha256).context("preview sha256 mismatch")?;
-    Ok(bytes.to_vec())
+    Ok(bytes)
 }
 
 pub fn is_supported(template: &CatalogTemplate, daemon_version: &str) -> bool {
@@ -115,16 +127,8 @@ pub fn install_template(template: &CatalogTemplate, sensors: &[SensorInfo]) -> R
     std::fs::create_dir_all(&staging_dir)
         .with_context(|| format!("creating {}", staging_dir.display()))?;
 
-    let client = client()?;
-
     let tpl_url = asset_url(&template.folder, &template.template_file);
-    let tpl_bytes = client
-        .get(&tpl_url)
-        .send()
-        .with_context(|| format!("GET {tpl_url}"))?
-        .error_for_status()?
-        .bytes()
-        .with_context(|| format!("reading body of {tpl_url}"))?;
+    let tpl_bytes = fetch_bytes(&tpl_url)?;
     verify_sha256(&tpl_bytes, &template.template_sha256)
         .context("template.json sha256 mismatch")?;
     std::fs::write(staging_dir.join(&template.template_file), &tpl_bytes)
@@ -132,13 +136,7 @@ pub fn install_template(template: &CatalogTemplate, sensors: &[SensorInfo]) -> R
 
     for file in &template.files {
         let url = asset_url(&template.folder, &file.path);
-        let bytes = client
-            .get(&url)
-            .send()
-            .with_context(|| format!("GET {url}"))?
-            .error_for_status()?
-            .bytes()
-            .with_context(|| format!("reading body of {url}"))?;
+        let bytes = fetch_bytes(&url)?;
         verify_sha256(&bytes, &file.sha256)
             .with_context(|| format!("{} sha256 mismatch", file.path))?;
         let dest = staging_dir.join(&file.path);

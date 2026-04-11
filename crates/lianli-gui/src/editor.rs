@@ -90,6 +90,45 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
     {
         let editor_state = editor_state.clone();
         let editor_weak = editor.as_weak();
+        editor.on_copy_json_requested(move || {
+            let json = {
+                let st = editor_state.lock();
+                match st.template.as_ref() {
+                    Some(tpl) => {
+                        let mut portable = tpl.clone();
+                        portablize_for_export(&mut portable);
+                        serde_json::to_string_pretty(&portable).ok()
+                    }
+                    None => None,
+                }
+            };
+            let Some(e) = editor_weak.upgrade() else {
+                return;
+            };
+            match json {
+                Some(text) => match copy_to_clipboard(text) {
+                    Ok(()) => {
+                        e.set_status_message(SharedString::from(
+                            "Template JSON copied to clipboard",
+                        ));
+                        e.set_status_is_error(false);
+                    }
+                    Err(err) => {
+                        e.set_status_message(SharedString::from(format!("Copy failed: {err}")));
+                        e.set_status_is_error(true);
+                    }
+                },
+                None => {
+                    e.set_status_message(SharedString::from("No template open to copy"));
+                    e.set_status_is_error(true);
+                }
+            }
+        });
+    }
+
+    {
+        let editor_state = editor_state.clone();
+        let editor_weak = editor.as_weak();
         let preview_version = preview_version.clone();
         let shared = shared.clone();
         editor.on_header_field(move |field, val| {
@@ -1339,6 +1378,9 @@ fn parse_sensor_source(label: &str, sensors: &[SensorInfo]) -> Option<SensorSour
             gpu_index: *gpu_index,
             metric: *metric,
         },
+        SensorSource::AmdGpuUsage { card_index } => SensorSourceConfig::AmdGpuUsage {
+            card_index: *card_index,
+        },
         SensorSource::WirelessCoolant { device_id } => SensorSourceConfig::WirelessCoolant {
             device_id: device_id.clone(),
         },
@@ -1369,6 +1411,41 @@ fn apply_rotation_swap(tpl: &mut LcdTemplate, to_rotated: bool) {
         w.width = wh;
         w.height = ww;
     }
+}
+
+fn portablize_for_export(tpl: &mut LcdTemplate) {
+    for widget in tpl.widgets.iter_mut() {
+        let Some(source) = widget.kind.source_config_mut() else {
+            continue;
+        };
+        if widget.sensor_category.is_some() {
+            continue;
+        }
+        if let Some(cat) = lianli_shared::sensors::infer_sensor_category(source) {
+            widget.sensor_category = Some(cat);
+            *source = SensorSourceConfig::CpuUsage;
+        }
+    }
+}
+
+fn copy_to_clipboard(text: String) -> Result<(), String> {
+    use arboard::{Clipboard, SetExtLinux};
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let mut clipboard = match Clipboard::new() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx.send(Err(e.to_string()));
+                return;
+            }
+        };
+        let _ = tx.send(Ok(()));
+        if let Err(e) = clipboard.set().wait().text(text) {
+            tracing::warn!("clipboard set(wait) failed: {e}");
+        }
+    });
+    rx.recv_timeout(std::time::Duration::from_millis(500))
+        .map_err(|_| "clipboard thread did not respond".to_string())?
 }
 
 fn editor_color_from_state(st: &EditorState) -> [u8; 4] {

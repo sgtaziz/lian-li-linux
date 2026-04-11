@@ -31,6 +31,10 @@ pub enum SensorSource {
         #[serde(default)]
         metric: NvidiaMetric,
     },
+    AmdGpuUsage {
+        #[serde(default)]
+        card_index: u32,
+    },
     Command {
         cmd: String,
     },
@@ -219,10 +223,46 @@ pub fn pick_source_for_category(
                     SensorSource::NvidiaGpu {
                         metric: NvidiaMetric::Usage,
                         ..
-                    }
+                    } | SensorSource::AmdGpuUsage { .. }
                 )
             })
             .map(|s| source_to_config(s.source.clone())),
+    }
+}
+
+pub fn infer_sensor_category(source: &crate::media::SensorSourceConfig) -> Option<SensorCategory> {
+    use crate::media::SensorSourceConfig;
+    match source {
+        SensorSourceConfig::CpuUsage => Some(SensorCategory::CpuUsage),
+        SensorSourceConfig::MemUsage
+        | SensorSourceConfig::MemUsed
+        | SensorSourceConfig::MemFree => Some(SensorCategory::MemUsage),
+        SensorSourceConfig::NvidiaGpu {
+            metric: NvidiaMetric::Temp,
+            ..
+        } => Some(SensorCategory::GpuTemp),
+        SensorSourceConfig::NvidiaGpu {
+            metric: NvidiaMetric::Usage,
+            ..
+        } => Some(SensorCategory::GpuUsage),
+        SensorSourceConfig::AmdGpuUsage { .. } => Some(SensorCategory::GpuUsage),
+        SensorSourceConfig::Hwmon { name, label, .. } => {
+            let l = label.to_lowercase();
+            if name == "k10temp" || name == "coretemp" {
+                if l.contains("tctl") || l.contains("package id 0") || l.starts_with("core") {
+                    return Some(SensorCategory::CpuTemp);
+                }
+                return Some(SensorCategory::CpuTemp);
+            }
+            if (name == "amdgpu" || name == "radeon") && (l.contains("edge") || l.contains("temp"))
+            {
+                return Some(SensorCategory::GpuTemp);
+            }
+            None
+        }
+        SensorSourceConfig::Command { .. }
+        | SensorSourceConfig::Constant { .. }
+        | SensorSourceConfig::WirelessCoolant { .. } => None,
     }
 }
 
@@ -241,6 +281,7 @@ fn source_to_config(source: SensorSource) -> crate::media::SensorSourceConfig {
         SensorSource::NvidiaGpu { gpu_index, metric } => {
             SensorSourceConfig::NvidiaGpu { gpu_index, metric }
         }
+        SensorSource::AmdGpuUsage { card_index } => SensorSourceConfig::AmdGpuUsage { card_index },
         SensorSource::Command { cmd } => SensorSourceConfig::Command { cmd },
         SensorSource::WirelessCoolant { device_id } => {
             SensorSourceConfig::WirelessCoolant { device_id }
@@ -423,7 +464,60 @@ pub fn enumerate_sensors() -> Vec<SensorInfo> {
             }
         }
     }
+
+    enumerate_amd_gpu_usage(&gpu_names, &mut sensors);
+
     sensors
+}
+
+fn enumerate_amd_gpu_usage(gpu_names: &HashMap<String, String>, sensors: &mut Vec<SensorInfo>) {
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+        return;
+    };
+    let mut cards: Vec<(u32, std::path::PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let idx: u32 = name.strip_prefix("card")?.parse().ok()?;
+            Some((idx, e.path()))
+        })
+        .collect();
+    cards.sort_by_key(|(idx, _)| *idx);
+
+    for (card_index, card_path) in cards {
+        let busy_path = card_path.join("device/gpu_busy_percent");
+        if !busy_path.exists() {
+            continue;
+        }
+        let vendor = std::fs::read_to_string(card_path.join("device/vendor"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if vendor != "0x1002" {
+            continue;
+        }
+
+        let pci_id = std::fs::read_link(card_path.join("device"))
+            .ok()
+            .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()))
+            .and_then(|s| s.strip_prefix("0000:").map(|t| t.to_string()));
+        let name = pci_id
+            .as_ref()
+            .and_then(|id| gpu_names.get(id).cloned())
+            .unwrap_or_else(|| format!("AMD GPU {card_index}"));
+
+        let current_value = std::fs::read_to_string(&busy_path)
+            .ok()
+            .and_then(|s| s.trim().parse::<f32>().ok());
+
+        sensors.push(SensorInfo {
+            source: SensorSource::AmdGpuUsage { card_index },
+            sensor_name: None,
+            display_name: Some(format!("{name}: Usage")),
+            current_value,
+            unit: Unit::PERCENT,
+            divider: 1,
+        });
+    }
 }
 
 pub fn get_pci_id_from_path(hwmon_path: PathBuf) -> String {
@@ -742,6 +836,16 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
             index: *gpu_index,
             metric: *metric,
         }),
+        SensorSource::AmdGpuUsage { card_index } => {
+            let path = PathBuf::from(format!(
+                "/sys/class/drm/card{card_index}/device/gpu_busy_percent"
+            ));
+            if path.exists() {
+                Some(ResolvedSensor::SysfsFile { path, divider: 1 })
+            } else {
+                None
+            }
+        }
         SensorSource::Command { cmd } => Some(ResolvedSensor::ShellCommand(cmd.clone())),
         SensorSource::WirelessCoolant { device_id } => {
             let path = coolant_runtime_path(device_id);

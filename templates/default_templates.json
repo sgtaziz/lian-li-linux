@@ -12,6 +12,9 @@
       "template_sha256": "e481b95a06203b94e8a10e8fd465caec3c4beac9da38a4a39c5bb0981e480ab0",
       "preview": "preview.png",
       "preview_sha256": "caad5444e723bb970a5276702c2d2b3b34f05e37afd3729cd0b54dd55c408684",
+      "base_width": 480,
+      "base_height": 480,
+      "rotated": false,
       "files": [
         {
           "path": "background.png",
@@ -34,6 +37,9 @@
       "template_sha256": "7744722ae2ec03d56429d7330bcdca4629081e331eab58d3981776b811a234b2",
       "preview": "preview.png",
       "preview_sha256": "00977837140cf85d175c7142413c4b791dfb391a580791e9b3feeab2535f084e",
+      "base_width": 400,
+      "base_height": 400,
+      "rotated": false,
       "files": [
         {
           "path": "background.png",

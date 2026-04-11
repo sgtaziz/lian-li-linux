@@ -10,6 +10,9 @@ export struct CatalogEntry {
     preview-loaded: bool,
     install-state: string,  // "idle", "installing", "installed", "error"
     install-error: string,
+    base-width: int,
+    base-height: int,
+    rotated: bool,
 }
 
 component CatalogCard inherits Rectangle {
@@ -65,7 +68,50 @@ component CatalogCard inherits Rectangle {
                 font-size: 11px;
                 color: Theme.text-secondary;
             }
-            Rectangle { height: 4px; }
+            Rectangle { height: 2px; }
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                Rectangle {
+                    background: Theme.accent.transparentize(0.85);
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: Theme.accent.transparentize(0.7);
+                    horizontal-stretch: 0;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        padding-top: 2px;
+                        padding-bottom: 2px;
+                        Text {
+                            text: root.entry.base-width + "×" + root.entry.base-height;
+                            font-size: 10px;
+                            color: Theme.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.entry.rotated: Rectangle {
+                    background: #3d2a14;
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: #5a4022;
+                    horizontal-stretch: 0;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        padding-top: 2px;
+                        padding-bottom: 2px;
+                        Text {
+                            text: "Rotated 90°";
+                            font-size: 10px;
+                            color: #f0c080;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+            Rectangle { height: 2px; }
             Text {
                 text: root.entry.description;
                 font-size: 12px;
@@ -106,7 +152,6 @@ export component TemplateBrowserWindow inherits Window {
     min-height: 400px;
     background: Palette.background;
     always-on-top: true;
-    no-frame: true;
     icon: @image-url("../../../../assets/icons/icon.png");
 
     in-out property <[CatalogEntry]> templates: [];
@@ -115,6 +160,7 @@ export component TemplateBrowserWindow inherits Window {
 
     callback refresh-requested();
     callback install-requested(string);
+    callback publishing-guide-requested();
 
     VerticalLayout {
         padding: 16px;
@@ -129,6 +175,10 @@ export component TemplateBrowserWindow inherits Window {
                 color: Theme.text-primary;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
+            }
+            Button {
+                text: "Publishing Guide";
+                clicked => { root.publishing-guide-requested(); }
             }
             Button {
                 text: "Refresh";

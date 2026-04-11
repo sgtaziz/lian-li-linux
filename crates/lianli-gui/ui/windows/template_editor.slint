@@ -435,6 +435,7 @@ export component TemplateEditorWindow inherits Window {
     callback save-requested();
     callback cancel();
     callback closed();
+    callback copy-json-requested();
 
     callback header-field(string, string);
     callback widget-moved(int, float, float);
@@ -580,6 +581,16 @@ export component TemplateEditorWindow inherits Window {
                     }
                 }
 
+                VerticalLayout {
+                    spacing: 2px;
+                    alignment: end;
+                    Text { text: " "; font-size: 10px; }
+                    Button {
+                        text: "Copy JSON";
+                        height: 28px;
+                        clicked => { root.copy-json-requested(); }
+                    }
+                }
                 VerticalLayout {
                     spacing: 2px;
                     alignment: end;

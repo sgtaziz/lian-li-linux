@@ -928,6 +928,11 @@ fn wire_lcd_callbacks(
                                     gpu_index: *gpu_index,
                                     metric: *metric,
                                 },
+                                lianli_shared::sensors::SensorSource::AmdGpuUsage {
+                                    card_index,
+                                } => lianli_shared::media::SensorSourceConfig::AmdGpuUsage {
+                                    card_index: *card_index,
+                                },
                                 lianli_shared::sensors::SensorSource::Command { cmd } => {
                                     lianli_shared::media::SensorSourceConfig::Command {
                                         cmd: cmd.clone(),
@@ -1346,16 +1351,18 @@ fn wire_lcd_callbacks(
     {
         let shared = shared.clone();
         let browser_window = browser.window.clone_strong();
+        let browser_catalog = browser.catalog.clone();
         window.on_lcd_browse_templates(move || {
             let handle = template_browser::BrowserHandle {
                 window: browser_window.clone_strong(),
+                catalog: browser_catalog.clone(),
             };
             template_browser::open(&handle, &shared);
         });
     }
 }
 
-fn generate_template_id(prefix: &str) -> String {
+pub(crate) fn generate_template_id(prefix: &str) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1444,6 +1451,24 @@ fn strip_copy_suffix(name: &str) -> &str {
         }
     }
     name
+}
+
+pub(crate) fn next_unique_downloaded_name(
+    base: &str,
+    existing: &[lianli_shared::template::LcdTemplate],
+) -> String {
+    let names: std::collections::HashSet<&str> = existing.iter().map(|t| t.name.as_str()).collect();
+    let first = format!("{base} (Downloaded)");
+    if !names.contains(first.as_str()) {
+        return first;
+    }
+    for i in 2..1000 {
+        let candidate = format!("{base} (Downloaded {i})");
+        if !names.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    format!("{base} (Downloaded {})", generate_template_id(""))
 }
 
 fn delete_current_template(shared: &Shared, idx: usize) {
