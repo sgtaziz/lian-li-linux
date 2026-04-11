@@ -13,10 +13,12 @@ use crate::crypto::PacketBuilder;
 use crate::traits::LcdDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
-use lianli_transport::usb::{UsbTransport, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
+use lianli_transport::usb::{UsbTransport, EP_OUT, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use rusb::{Device, GlobalContext};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
+
+const RESET_COOLDOWN: Duration = Duration::from_secs(5);
 
 /// Generic WinUSB LCD device.
 ///
@@ -32,6 +34,9 @@ pub struct WinUsbLcdDevice {
     serial: String,
     initialized: bool,
     last_read_ok: bool,
+    consecutive_failures: u32,
+    last_reset: Option<Instant>,
+    device_gone: bool,
 }
 
 impl WinUsbLcdDevice {
@@ -69,6 +74,9 @@ impl WinUsbLcdDevice {
             serial,
             initialized: false,
             last_read_ok: false,
+            consecutive_failures: 0,
+            last_reset: None,
+            device_gone: false,
         })
     }
 
@@ -108,12 +116,17 @@ impl WinUsbLcdDevice {
         packet[..512].copy_from_slice(&header);
         packet[512..total].copy_from_slice(frame);
 
-        if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
-            warn!("Frame write failed: {e}, resetting transport");
-            self.reinit_transport();
-            self.transport
-                .write(&packet, LCD_WRITE_TIMEOUT)
-                .context("writing LCD frame (retry)")?;
+        match self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
+            Ok(_) => self.note_write_success(),
+            Err(e) => {
+                warn!("Frame write failed: {e}");
+                self.try_recover()
+                    .with_context(|| format!("recovering from frame write error: {e}"))?;
+                self.transport
+                    .write(&packet, LCD_WRITE_TIMEOUT)
+                    .context("writing LCD frame after recovery")?;
+                self.note_write_success();
+            }
         }
 
         let resp = self.read_response("frame ack", Duration::from_millis(200));
@@ -190,12 +203,17 @@ impl WinUsbLcdDevice {
             packet[..512].copy_from_slice(&header);
             packet[512..512 + n].copy_from_slice(&file_buf[..n]);
 
-            if let Err(e) = self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
-                warn!("H264 chunk write failed: {e}, resetting transport");
-                self.reinit_transport();
-                self.transport
-                    .write(&packet, LCD_WRITE_TIMEOUT)
-                    .context("h264 chunk write (retry)")?;
+            match self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
+                Ok(_) => self.note_write_success(),
+                Err(e) => {
+                    warn!("H264 chunk write failed: {e}");
+                    self.try_recover()
+                        .with_context(|| format!("recovering from h264 write error: {e}"))?;
+                    self.transport
+                        .write(&packet, LCD_WRITE_TIMEOUT)
+                        .context("h264 chunk write after recovery")?;
+                    self.note_write_success();
+                }
             }
 
             let resp = self.read_response("h264 chunk", LCD_READ_TIMEOUT);
@@ -340,22 +358,76 @@ impl WinUsbLcdDevice {
     }
 
     fn send_command(&mut self, header: Vec<u8>, label: &str) {
-        if let Err(e) = self.transport.write(&header, LCD_WRITE_TIMEOUT) {
-            warn!("{label} write failed: {e}, resetting transport");
-            self.reinit_transport();
-            if let Err(e2) = self.transport.write(&header, LCD_WRITE_TIMEOUT) {
-                warn!("{label} write retry failed: {e2}");
-                return;
+        match self.transport.write(&header, LCD_WRITE_TIMEOUT) {
+            Ok(_) => self.note_write_success(),
+            Err(e) => {
+                warn!("{label} write failed: {e}");
+                if let Err(rec_err) = self.try_recover() {
+                    warn!("{label} recovery skipped: {rec_err}");
+                    return;
+                }
+                if let Err(e2) = self.transport.write(&header, LCD_WRITE_TIMEOUT) {
+                    warn!("{label} write retry failed: {e2}");
+                    return;
+                }
+                self.note_write_success();
             }
         }
         self.read_response(label, LCD_READ_TIMEOUT);
     }
 
-    fn reinit_transport(&mut self) {
-        let _ = self.transport.reset();
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        if let Err(e) = self.transport.detach_and_configure(&self.name) {
-            warn!("Transport reinit failed: {e}");
+    fn note_write_success(&mut self) {
+        self.consecutive_failures = 0;
+    }
+
+    fn try_recover(&mut self) -> Result<()> {
+        if self.device_gone {
+            bail!("device handle is stale; re-discovery required");
+        }
+
+        self.consecutive_failures += 1;
+
+        if self.consecutive_failures <= 2 {
+            match self.transport.clear_halt(EP_OUT) {
+                Ok(()) => {
+                    debug!("recovered EP_OUT stall via clear_halt");
+                    return Ok(());
+                }
+                Err(e) => warn!("clear_halt(EP_OUT) failed: {e}"),
+            }
+        }
+
+        let now = Instant::now();
+        if let Some(last) = self.last_reset {
+            let since = now.saturating_duration_since(last);
+            if since < RESET_COOLDOWN {
+                bail!(
+                    "USB reset on cooldown ({:.1}s remaining)",
+                    (RESET_COOLDOWN - since).as_secs_f32()
+                );
+            }
+        }
+        self.last_reset = Some(now);
+
+        match self.transport.reset() {
+            Ok(()) => {
+                std::thread::sleep(Duration::from_millis(300));
+                if let Err(e) = self.transport.detach_and_configure(&self.name) {
+                    warn!("post-reset detach_and_configure failed: {e}");
+                    bail!("recovery failed: {e}");
+                }
+                self.initialized = false;
+                info!("USB reset + reconfigure succeeded");
+                Ok(())
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("not found") || msg.contains("No such device") {
+                    self.device_gone = true;
+                    bail!("device disappeared during reset: {e}");
+                }
+                bail!("USB reset failed: {e}");
+            }
         }
     }
 

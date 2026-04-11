@@ -159,6 +159,10 @@ impl UsbTransport {
         Ok(self.handle.reset()?)
     }
 
+    pub fn clear_halt(&self, endpoint: u8) -> Result<(), TransportError> {
+        Ok(self.handle.clear_halt(endpoint)?)
+    }
+
     pub fn inner(&self) -> &DeviceHandle<GlobalContext> {
         &self.handle
     }

@@ -540,6 +540,13 @@ fn sensor_index_for_source(source: &SensorSourceConfig, sensors: &[SensorInfo]) 
     }
 }
 
+fn command_text_for_source(source: &SensorSourceConfig) -> SharedString {
+    match source {
+        SensorSourceConfig::Command { cmd } => SharedString::from(cmd.as_str()),
+        _ => SharedString::default(),
+    }
+}
+
 fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
     let kind_str = w.kind.kind_id();
     let kind_label = WidgetKind::friendly_name_for(kind_str);
@@ -565,6 +572,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
         format: SharedString::from("{:.0}"),
         unit: SharedString::default(),
         source_index: 0,
+        command: SharedString::default(),
         value_min: 0.0,
         value_max: 100.0,
         start_angle: 0.0,
@@ -627,6 +635,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
+            out.command = command_text_for_source(source);
             out.format = SharedString::from(format.as_str());
             out.unit = SharedString::from(unit.as_str());
             out.font_name = SharedString::from(font_ref_to_label(font));
@@ -650,6 +659,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
+            out.command = command_text_for_source(source);
             out.value_min = *value_min;
             out.value_max = *value_max;
             out.start_angle = *start_angle;
@@ -675,6 +685,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
+            out.command = command_text_for_source(source);
             out.value_min = *value_min;
             out.value_max = *value_max;
             out.bg_r = background_color[0] as i32;
@@ -701,6 +712,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
+            out.command = command_text_for_source(source);
             out.value_min = *value_min;
             out.value_max = *value_max;
             out.start_angle = *start_angle;
@@ -994,6 +1006,15 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
                     *source = new;
                 }
             }
+            "command" => {
+                if let SensorSourceConfig::Command { cmd } = source {
+                    *cmd = val.to_string();
+                } else {
+                    *source = SensorSourceConfig::Command {
+                        cmd: val.to_string(),
+                    };
+                }
+            }
             "value_min" => {
                 if let Ok(v) = val.parse() {
                     *value_min = v;
@@ -1019,6 +1040,15 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "source" => {
                 if let Some(new) = parse_sensor_source(val, sensors) {
                     *source = new;
+                }
+            }
+            "command" => {
+                if let SensorSourceConfig::Command { cmd } = source {
+                    *cmd = val.to_string();
+                } else {
+                    *source = SensorSourceConfig::Command {
+                        cmd: val.to_string(),
+                    };
                 }
             }
             "value_min" => {
@@ -1066,6 +1096,15 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
                     *source = new;
                 }
             }
+            "command" => {
+                if let SensorSourceConfig::Command { cmd } = source {
+                    *cmd = val.to_string();
+                } else {
+                    *source = SensorSourceConfig::Command {
+                        cmd: val.to_string(),
+                    };
+                }
+            }
             "value_min" => {
                 if let Ok(v) = val.parse() {
                     *value_min = v;
@@ -1102,6 +1141,15 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "source" => {
                 if let Some(new) = parse_sensor_source(val, sensors) {
                     *source = new;
+                }
+            }
+            "command" => {
+                if let SensorSourceConfig::Command { cmd } = source {
+                    *cmd = val.to_string();
+                } else {
+                    *source = SensorSourceConfig::Command {
+                        cmd: val.to_string(),
+                    };
                 }
             }
             "value_min" => {
@@ -1429,6 +1477,7 @@ fn blank_editor_widget() -> EditorWidget {
         format: SharedString::from("{:.0}"),
         unit: SharedString::default(),
         source_index: 0,
+        command: SharedString::default(),
         value_min: 0.0,
         value_max: 100.0,
         start_angle: 0.0,

@@ -37,6 +37,7 @@ export struct EditorWidget {
     unit: string,
 
     source-index: int,
+    command: string,
     value-min: float,
     value-max: float,
 
@@ -831,6 +832,11 @@ export component TemplateEditorWindow inherits Window {
                                     model: root.sensor-options;
                                     index: root.selected-widget.source-index;
                                     selected(v) => { root.widget-field(root.selected-index, "source", v); }
+                                }
+                                if root.selected-widget.source-index == root.sensor-options.length - 1: LabeledLineEdit {
+                                    label: "Command";
+                                    value: root.selected-widget.command;
+                                    edited(v) => { root.widget-field(root.selected-index, "command", v); }
                                 }
                                 LabeledSpinBox {
                                     label: "Min";
