@@ -155,13 +155,14 @@ A default config is created automatically at `~/.config/lianli/config.json` on f
 cp target/release/lianli-gui ~/.local/bin/
 
 # Install icons
-for size in 32x32 128x128 256x256; do mkdir -p ~/.local/share/icons/hicolor/$size/apps; done
-cp assets/icons/32x32.png ~/.local/share/icons/hicolor/32x32/apps/lianli-gui.png
-cp assets/icons/128x128.png ~/.local/share/icons/hicolor/128x128/apps/lianli-gui.png
-cp assets/icons/128x128@2x.png ~/.local/share/icons/hicolor/256x256/apps/lianli-gui.png
+for size in 32x32 128x128 256x256 scalable; do mkdir -p ~/.local/share/icons/hicolor/$size/apps; done
+cp assets/icons/32x32.png ~/.local/share/icons/hicolor/32x32/apps/com.sgtaziz.lianlilinux.png
+cp assets/icons/128x128.png ~/.local/share/icons/hicolor/128x128/apps/com.sgtaziz.lianlilinux.png
+cp assets/icons/128x128@2x.png ~/.local/share/icons/hicolor/256x256/apps/com.sgtaziz.lianlilinux.png
+cp assets/icons/icon.svg ~/.local/share/icons/hicolor/scalable/apps/com.sgtaziz.lianlilinux.svg
 
 # Install desktop entry
-cp lianli-gui.desktop ~/.local/share/applications/
+cp com.sgtaziz.lianlilinux.desktop ~/.local/share/applications/
 update-desktop-database ~/.local/share/applications/
 ```
 
