@@ -9,4 +9,5 @@ pub mod screen;
 pub mod sensors;
 pub mod systeminfo;
 pub mod template;
+pub mod template_catalog;
 pub mod template_defaults;

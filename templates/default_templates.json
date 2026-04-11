@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "templates": [
+    {
+      "id": "cooler",
+      "name": "Cooler",
+      "description": "CPU cooler dashboard with speedometer, temperature bar, and per-core usage.",
+      "author": "Martin-Pfingstl",
+      "min_daemon_version": "0.3.3",
+      "folder": "cooler",
+      "template_file": "template.json",
+      "template_sha256": "e481b95a06203b94e8a10e8fd465caec3c4beac9da38a4a39c5bb0981e480ab0",
+      "preview": "preview.png",
+      "preview_sha256": "caad5444e723bb970a5276702c2d2b3b34f05e37afd3729cd0b54dd55c408684",
+      "files": [
+        {
+          "path": "background.png",
+          "sha256": "eb44186d4c46e861ee972bec550dbbc6cdd80ffeb6eb1bedee561f36ffae2bb8"
+        },
+        {
+          "path": "thermometer.png",
+          "sha256": "258870af82c033137c2af01322dab1e6d3eaba255d46b26d1643c3961505be7e"
+        }
+      ]
+    },
+    {
+      "id": "doublegauge",
+      "name": "Doublegauge",
+      "description": "Concentric radial gauges for CPU usage and temperature.",
+      "author": "Martin-Pfingstl",
+      "min_daemon_version": "0.3.3",
+      "folder": "doublegauge",
+      "template_file": "template.json",
+      "template_sha256": "7744722ae2ec03d56429d7330bcdca4629081e331eab58d3981776b811a234b2",
+      "preview": "preview.png",
+      "preview_sha256": "00977837140cf85d175c7142413c4b791dfb391a580791e9b3feeab2535f084e",
+      "files": [
+        {
+          "path": "background.png",
+          "sha256": "cdf1109db93d2fdde6f8b3c00b501a721e153e58b781475c537e03e9bed6f8d6"
+        }
+      ]
+    }
+  ]
+}
