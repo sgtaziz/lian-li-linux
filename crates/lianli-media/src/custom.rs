@@ -20,8 +20,8 @@ use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::{read_sensor_value, resolve_sensor, ResolvedSensor, SensorInfo};
 use lianli_shared::systeminfo::SysSensor;
 use lianli_shared::template::{
-    BarOrientation, BuiltinAsset, FontRef, ImageFit, LcdTemplate, TemplateBackground, TextAlign,
-    Widget, WidgetKind,
+    BarOrientation, FontRef, ImageFit, LcdTemplate, TemplateBackground, TextAlign, Widget,
+    WidgetKind,
 };
 use parking_lot::Mutex;
 use rusttype::{Font, Scale};
@@ -129,7 +129,7 @@ impl CustomAsset {
 
         let letterbox_rgb = match template.background {
             TemplateBackground::Color { rgb } => [rgb[0], rgb[1], rgb[2]],
-            TemplateBackground::Image { .. } | TemplateBackground::Builtin { .. } => [0, 0, 0],
+            TemplateBackground::Image { .. } => [0, 0, 0],
         };
         let mut composite = RgbaImage::from_pixel(
             canvas_w,
@@ -156,29 +156,6 @@ impl CustomAsset {
                     path.display()
                 ),
             },
-            TemplateBackground::Builtin { asset } => {
-                if let Some(rgba) = decode_builtin_asset(*asset, scaled_w, scaled_h) {
-                    imageops::overlay(&mut composite, &rgba, offset_x as i64, offset_y as i64);
-                }
-                if matches!(asset, BuiltinAsset::CoolerBackground) {
-                    if let Some(thermo) = decode_builtin_asset_native(BuiltinAsset::Thermometer) {
-                        let tx = (300.0 * (scaled_w as f32 / 480.0)) as i64;
-                        let ty = (184.0 * (scaled_h as f32 / 480.0)) as i64;
-                        let scaled_thermo = ::image::imageops::resize(
-                            &thermo,
-                            ((thermo.width() as f32) * (scaled_w as f32 / 480.0)) as u32,
-                            ((thermo.height() as f32) * (scaled_h as f32 / 480.0)) as u32,
-                            FilterType::Lanczos3,
-                        );
-                        imageops::overlay(
-                            &mut composite,
-                            &scaled_thermo,
-                            offset_x as i64 + tx,
-                            offset_y as i64 + ty,
-                        );
-                    }
-                }
-            }
         }
 
         let mut widget_states: Vec<WidgetState> = Vec::with_capacity(template.widgets.len());
@@ -273,7 +250,7 @@ impl CustomAsset {
     pub fn blank_frame(&self) -> FrameInfo {
         let fill = match self.template.background {
             TemplateBackground::Color { rgb } => Rgb([rgb[0], rgb[1], rgb[2]]),
-            TemplateBackground::Image { .. } | TemplateBackground::Builtin { .. } => Rgb([0, 0, 0]),
+            TemplateBackground::Image { .. } => Rgb([0, 0, 0]),
         };
         let image = ImageBuffer::from_pixel(self.canonical_width, self.canonical_height, fill);
         let oriented = apply_orientation(image, self.orientation);
@@ -791,25 +768,6 @@ fn unit_interval(value: f32, min: f32, max: f32) -> f32 {
     } else {
         ((value - min) / span).clamp(0.0, 1.0)
     }
-}
-
-fn decode_builtin_asset_native(asset: BuiltinAsset) -> Option<RgbaImage> {
-    let bytes: &[u8] = match asset {
-        BuiltinAsset::CoolerBackground => include_bytes!("../assets/cooler.png"),
-        BuiltinAsset::DoublegaugeBackground => include_bytes!("../assets/gauge.png"),
-        BuiltinAsset::Thermometer => include_bytes!("../assets/thermometer.png"),
-    };
-    ::image::load_from_memory(bytes)
-        .ok()
-        .map(|img| img.to_rgba8())
-}
-
-fn decode_builtin_asset(asset: BuiltinAsset, w: u32, h: u32) -> Option<RgbaImage> {
-    let img = decode_builtin_asset_native(asset)?;
-    if img.width() == w && img.height() == h {
-        return Some(img);
-    }
-    Some(::image::imageops::resize(&img, w, h, FilterType::Lanczos3))
 }
 
 #[allow(clippy::too_many_arguments)]

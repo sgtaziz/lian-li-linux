@@ -13,7 +13,6 @@ use lianli_shared::config::{ConfigKey, LcdConfig};
 use lianli_shared::media::MediaType;
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::template::LcdTemplate;
-use lianli_shared::template_defaults::builtin_template_resolved;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -143,8 +142,10 @@ pub fn prepare_media_asset(
             let template_id = cfg.template_id.as_deref().ok_or_else(|| {
                 MediaError::InvalidConfig("custom entry requires a 'template_id' field".into())
             })?;
-            let template = builtin_template_resolved(template_id, all_sensors)
-                .or_else(|| user_templates.iter().find(|t| t.id == template_id).cloned())
+            let template = user_templates
+                .iter()
+                .find(|t| t.id == template_id)
+                .cloned()
                 .ok_or_else(|| {
                     MediaError::InvalidConfig(format!("unknown template id '{template_id}'"))
                 })?;

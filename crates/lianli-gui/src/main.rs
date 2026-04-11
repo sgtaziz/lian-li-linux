@@ -986,17 +986,6 @@ fn wire_lcd_callbacks(
                                         lianli_shared::media::MediaType::Sensor
                                     }
                                     "Custom" => {
-                                        if lcd
-                                            .template_id
-                                            .as_ref()
-                                            .map(|s| s.trim().is_empty())
-                                            .unwrap_or(true)
-                                        {
-                                            lcd.template_id = Some(
-                                                lianli_shared::template_defaults::BUILTIN_COOLER_ID
-                                                    .to_string(),
-                                            );
-                                        }
                                         lcd.path = None;
                                         lianli_shared::media::MediaType::Custom
                                     }
@@ -1325,26 +1314,12 @@ fn wire_lcd_callbacks(
                 (source, idx as usize)
             };
 
-            let starting = match starting_template {
-                Some(tpl) if lianli_shared::template_defaults::is_builtin_id(&tpl.id) => {
-                    duplicate_current_template(&shared, target_idx);
-                    refresh_lcd_ui(&weak, &shared);
-                    let state = shared.lock().unwrap();
-                    state
-                        .config
-                        .as_ref()
-                        .and_then(|c| c.lcds.get(target_idx))
-                        .and_then(|l| l.template_id.clone())
-                        .and_then(|id| state.lcd_templates.iter().find(|t| t.id == id).cloned())
-                }
-                other => other,
-            };
-
             let handle = editor::EditorHandle {
                 window: editor_window.clone_strong(),
                 state: editor_state.clone(),
             };
-            editor::open(&handle, &shared, target_idx, starting);
+            editor::open(&handle, &shared, target_idx, starting_template);
+            let _ = weak;
         });
     }
 
@@ -1482,16 +1457,11 @@ fn delete_current_template(shared: &Shared, idx: usize) {
         let Some(target_id) = target_id else {
             return;
         };
-        if lianli_shared::template_defaults::is_builtin_id(&target_id) {
-            tracing::warn!("Refusing to delete built-in template '{target_id}'");
-            return;
-        }
         state.lcd_templates.retain(|t| t.id != target_id);
         if let Some(ref mut c) = state.config {
             for lcd in c.lcds.iter_mut() {
                 if lcd.template_id.as_deref() == Some(target_id.as_str()) {
-                    lcd.template_id =
-                        Some(lianli_shared::template_defaults::BUILTIN_COOLER_ID.to_string());
+                    lcd.template_id = None;
                 }
             }
         }
@@ -1503,10 +1473,7 @@ fn delete_current_template(shared: &Shared, idx: usize) {
 pub(crate) fn user_templates_only(
     all: &[lianli_shared::template::LcdTemplate],
 ) -> Vec<lianli_shared::template::LcdTemplate> {
-    all.iter()
-        .filter(|t| !lianli_shared::template_defaults::is_builtin_id(&t.id))
-        .cloned()
-        .collect()
+    all.to_vec()
 }
 
 pub(crate) fn send_set_templates(templates: Vec<lianli_shared::template::LcdTemplate>) {

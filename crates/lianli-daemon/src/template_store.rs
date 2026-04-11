@@ -1,13 +1,8 @@
-//! Persistence + resolution for LCD templates. Built-ins live in
-//! `lianli_shared::template_defaults` and are merged in at read time.
+//! Persistence for LCD templates.
 
 use anyhow::{Context, Result};
 use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
-use lianli_shared::template_defaults::{
-    builtin_template_resolved, builtin_templates, is_builtin_id, BUILTIN_COOLER_ID,
-    BUILTIN_DOUBLEGAUGE_ID,
-};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::warn;
@@ -32,21 +27,7 @@ pub fn load_user_templates(path: &Path) -> Vec<LcdTemplate> {
     }
     match fs::read_to_string(path) {
         Ok(json) => match serde_json::from_str::<TemplateFile>(&json) {
-            Ok(file) => file
-                .templates
-                .into_iter()
-                .filter(|t| {
-                    if is_builtin_id(&t.id) {
-                        warn!(
-                            "Ignoring user template with reserved built-in id '{}'",
-                            t.id
-                        );
-                        false
-                    } else {
-                        true
-                    }
-                })
-                .collect(),
+            Ok(file) => file.templates,
             Err(e) => {
                 warn!("Failed to parse {}: {e}", path.display());
                 Vec::new()
@@ -65,37 +46,22 @@ pub fn save_user_templates(path: &Path, templates: &[LcdTemplate]) -> Result<()>
             .with_context(|| format!("creating parent dir for {}", path.display()))?;
     }
     let file = TemplateFile {
-        templates: templates
-            .iter()
-            .filter(|t| !is_builtin_id(&t.id))
-            .cloned()
-            .collect(),
+        templates: templates.to_vec(),
     };
     let json = serde_json::to_string_pretty(&file)?;
     fs::write(path, json).with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
 
-pub fn all_templates(user: &[LcdTemplate], sensors: &[SensorInfo]) -> Vec<LcdTemplate> {
-    let mut out: Vec<LcdTemplate> = [BUILTIN_COOLER_ID, BUILTIN_DOUBLEGAUGE_ID]
-        .iter()
-        .filter_map(|id| {
-            builtin_template_resolved(id, sensors)
-                .or_else(|| builtin_templates().into_iter().find(|t| &t.id == id))
-        })
-        .collect();
-    out.extend(user.iter().cloned());
-    out
+pub fn all_templates(user: &[LcdTemplate], _sensors: &[SensorInfo]) -> Vec<LcdTemplate> {
+    user.to_vec()
 }
 
 #[allow(dead_code)]
 pub fn resolve_template(
     id: &str,
     user: &[LcdTemplate],
-    sensors: &[SensorInfo],
+    _sensors: &[SensorInfo],
 ) -> Option<LcdTemplate> {
-    if let Some(t) = builtin_template_resolved(id, sensors) {
-        return Some(t);
-    }
     user.iter().find(|t| t.id == id).cloned()
 }

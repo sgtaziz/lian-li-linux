@@ -1479,10 +1479,6 @@ fn reflect_header(editor: &TemplateEditorWindow, state: &SharedEditor) {
             editor.set_bg_type(SharedString::from("image"));
             editor.set_bg_image_path(SharedString::from(path.display().to_string()));
         }
-        TemplateBackground::Builtin { asset } => {
-            editor.set_bg_type(SharedString::from("builtin"));
-            editor.set_bg_image_path(SharedString::from(format!("builtin:{:?}", asset)));
-        }
     }
     editor.set_current_preset_label(SharedString::from(
         screen_preset_label(tpl.base_width, tpl.base_height).as_str(),

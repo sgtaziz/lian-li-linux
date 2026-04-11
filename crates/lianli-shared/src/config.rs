@@ -188,16 +188,9 @@ impl AppConfig {
             }
 
             match device.media_type {
-                MediaType::Doublegauge => {
+                MediaType::Doublegauge | MediaType::Cooler => {
                     device.media_type = MediaType::Custom;
-                    device.template_id =
-                        Some(crate::template_defaults::BUILTIN_DOUBLEGAUGE_ID.to_string());
-                    device.doublegauge = None;
-                }
-                MediaType::Cooler => {
-                    device.media_type = MediaType::Custom;
-                    device.template_id =
-                        Some(crate::template_defaults::BUILTIN_COOLER_ID.to_string());
+                    device.template_id = None;
                     device.doublegauge = None;
                 }
                 _ => {}

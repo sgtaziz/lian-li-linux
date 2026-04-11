@@ -51,9 +51,6 @@ pub enum TemplateBackground {
     Image {
         path: PathBuf,
     },
-    Builtin {
-        asset: BuiltinAsset,
-    },
 }
 
 impl Default for TemplateBackground {
@@ -62,14 +59,6 @@ impl Default for TemplateBackground {
             rgb: [0, 0, 0, 255],
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BuiltinAsset {
-    CoolerBackground,
-    DoublegaugeBackground,
-    Thermometer,
 }
 
 /// `x`/`y` are the widget center; `width`/`height` are pre-rotation bounds.

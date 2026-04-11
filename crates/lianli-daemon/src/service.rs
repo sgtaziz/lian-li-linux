@@ -21,12 +21,11 @@ use lianli_shared::config::HidDriver;
 use lianli_shared::config::{config_identity, AppConfig, ConfigKey, LcdConfig};
 use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
-use lianli_shared::template_defaults::builtin_template_resolved;
 
 fn asset_cache_key(
     device: &LcdConfig,
     user_templates: &[LcdTemplate],
-    sensors: &[SensorInfo],
+    _sensors: &[SensorInfo],
 ) -> ConfigKey {
     let base = config_identity(device);
     if device.media_type != MediaType::Custom {
@@ -35,9 +34,7 @@ fn asset_cache_key(
     let Some(id) = device.template_id.as_deref() else {
         return base;
     };
-    let resolved = builtin_template_resolved(id, sensors)
-        .or_else(|| user_templates.iter().find(|t| t.id == id).cloned());
-    let Some(tpl) = resolved else {
+    let Some(tpl) = user_templates.iter().find(|t| t.id == id).cloned() else {
         return base;
     };
     let body = serde_json::to_string(&tpl).unwrap_or_default();
