@@ -1316,7 +1316,7 @@ fn parse_align(s: &str) -> TextAlign {
 }
 
 fn parse_sensor_source(label: &str, sensors: &[SensorInfo]) -> Option<SensorSourceConfig> {
-    if label == "Custom command" {
+    if label.ends_with(". Custom command") || label == "Custom command" {
         return Some(SensorSourceConfig::Command { cmd: String::new() });
     }
     let idx: usize = label.split('.').next()?.parse().ok()?;

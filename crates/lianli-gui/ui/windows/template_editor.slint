@@ -833,7 +833,7 @@ export component TemplateEditorWindow inherits Window {
                                     index: root.selected-widget.source-index;
                                     selected(v) => { root.widget-field(root.selected-index, "source", v); }
                                 }
-                                if root.selected-widget.source-index == root.sensor-options.length - 1: LabeledLineEdit {
+                                if root.selected-widget.source-index == (root.sensor-options.length - 1): LabeledLineEdit {
                                     label: "Command";
                                     value: root.selected-widget.command;
                                     edited(v) => { root.widget-field(root.selected-index, "command", v); }
