@@ -8,6 +8,14 @@ use crate::systeminfo::SysSensor;
 /// SensorSource stores the information of a sensor in a way so that we can store it in a file, reboot, reload the file and are still able to find the sensor.
 /// In order to actually read the sensor value the implemented way is to create a ResolvedSensor from SensorSource and use that.
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NvidiaMetric {
+    #[default]
+    Temp,
+    Usage,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SensorSource {
@@ -20,6 +28,8 @@ pub enum SensorSource {
     NvidiaGpu {
         #[serde(default)]
         gpu_index: u32,
+        #[serde(default)]
+        metric: NvidiaMetric,
     },
     Command {
         cmd: String,
@@ -96,7 +106,10 @@ pub enum ResolvedSensor {
         path: PathBuf,
         divider: usize,
     },
-    NvidiaGpu(u32),
+    NvidiaGpu {
+        index: u32,
+        metric: NvidiaMetric,
+    },
     ShellCommand(String),
     RuntimeFile(PathBuf),
     Virtual {
@@ -264,7 +277,7 @@ pub fn enumerate_sensors() -> Vec<SensorInfo> {
     // Check for NVIDIA GPU
     if let Ok(output) = Command::new("nvidia-smi")
         .args([
-            "--query-gpu=index,name,temperature.gpu",
+            "--query-gpu=index,name,temperature.gpu,utilization.gpu",
             "--format=csv,noheader,nounits",
         ])
         .output()
@@ -273,17 +286,33 @@ pub fn enumerate_sensors() -> Vec<SensorInfo> {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let parts: Vec<&str> = line.split(", ").collect();
-                if parts.len() >= 3 {
+                if parts.len() >= 4 {
                     let gpu_index: u32 = parts[0].trim().parse().unwrap_or(0);
                     let gpu_name = parts[1].trim();
                     let temp: Option<f32> = parts[2].trim().parse().ok();
+                    let usage: Option<f32> = parts[3].trim().parse().ok();
 
                     sensors.push(SensorInfo {
-                        source: SensorSource::NvidiaGpu { gpu_index },
+                        source: SensorSource::NvidiaGpu {
+                            gpu_index,
+                            metric: NvidiaMetric::Temp,
+                        },
                         sensor_name: None,
-                        display_name: Some(format!("{gpu_name} (GPU)")),
+                        display_name: Some(format!("{gpu_name}: Temp")),
                         current_value: temp,
                         unit: Unit::C,
+                        divider: 1,
+                    });
+
+                    sensors.push(SensorInfo {
+                        source: SensorSource::NvidiaGpu {
+                            gpu_index,
+                            metric: NvidiaMetric::Usage,
+                        },
+                        sensor_name: None,
+                        display_name: Some(format!("{gpu_name}: Usage")),
+                        current_value: usage,
+                        unit: Unit::PERCENT,
                         divider: 1,
                     });
                 }
@@ -605,7 +634,10 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
             }
             None
         }
-        SensorSource::NvidiaGpu { gpu_index } => Some(ResolvedSensor::NvidiaGpu(*gpu_index)),
+        SensorSource::NvidiaGpu { gpu_index, metric } => Some(ResolvedSensor::NvidiaGpu {
+            index: *gpu_index,
+            metric: *metric,
+        }),
         SensorSource::Command { cmd } => Some(ResolvedSensor::ShellCommand(cmd.clone())),
         SensorSource::WirelessCoolant { device_id } => {
             let path = coolant_runtime_path(device_id);
@@ -650,10 +682,14 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
             }
             _ => anyhow::bail!("unexpected virtual sensor source"),
         },
-        ResolvedSensor::NvidiaGpu(index) => {
+        ResolvedSensor::NvidiaGpu { index, metric } => {
+            let query = match metric {
+                NvidiaMetric::Temp => "--query-gpu=temperature.gpu",
+                NvidiaMetric::Usage => "--query-gpu=utilization.gpu",
+            };
             let output = Command::new("nvidia-smi")
                 .args([
-                    "--query-gpu=temperature.gpu",
+                    query,
                     "--format=csv,noheader,nounits",
                     "-i",
                     &index.to_string(),
@@ -664,11 +700,11 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
                 anyhow::bail!("nvidia-smi failed");
             }
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let temp: f32 = stdout
+            let value: f32 = stdout
                 .trim()
                 .parse()
                 .map_err(|e| anyhow::anyhow!("parsing nvidia-smi output: {e}"))?;
-            Ok(temp)
+            Ok(value)
         }
         ResolvedSensor::RuntimeFile(path) => {
             let content = std::fs::read_to_string(path)

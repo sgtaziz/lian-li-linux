@@ -55,8 +55,9 @@ fn sensor_source_to_config(s: &SensorSource) -> SensorSourceConfig {
             label: label.clone(),
             device_path: device_path.clone(),
         },
-        SensorSource::NvidiaGpu { gpu_index } => SensorSourceConfig::NvidiaGpu {
+        SensorSource::NvidiaGpu { gpu_index, metric } => SensorSourceConfig::NvidiaGpu {
             gpu_index: *gpu_index,
+            metric: *metric,
         },
         SensorSource::Command { cmd } => SensorSourceConfig::Command { cmd: cmd.clone() },
         SensorSource::WirelessCoolant { device_id } => SensorSourceConfig::WirelessCoolant {

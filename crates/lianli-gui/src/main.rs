@@ -914,11 +914,13 @@ fn wire_lcd_callbacks(window: &MainWindow, shared: &Shared, editor: &editor::Edi
                                     label: label.clone(),
                                     device_path: device_path.clone(),
                                 },
-                                lianli_shared::sensors::SensorSource::NvidiaGpu { gpu_index } => {
-                                    lianli_shared::media::SensorSourceConfig::NvidiaGpu {
-                                        gpu_index: *gpu_index,
-                                    }
-                                }
+                                lianli_shared::sensors::SensorSource::NvidiaGpu {
+                                    gpu_index,
+                                    metric,
+                                } => lianli_shared::media::SensorSourceConfig::NvidiaGpu {
+                                    gpu_index: *gpu_index,
+                                    metric: *metric,
+                                },
                                 lianli_shared::sensors::SensorSource::Command { cmd } => {
                                     lianli_shared::media::SensorSourceConfig::Command {
                                         cmd: cmd.clone(),

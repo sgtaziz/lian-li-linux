@@ -33,6 +33,8 @@ pub enum SensorSourceConfig {
     NvidiaGpu {
         #[serde(default)]
         gpu_index: u32,
+        #[serde(default)]
+        metric: crate::sensors::NvidiaMetric,
     },
     #[serde(rename = "wireless_coolant")]
     WirelessCoolant {
@@ -70,8 +72,9 @@ impl SensorSourceConfig {
                 label: label.clone(),
                 device_path: device_path.clone(),
             },
-            Self::NvidiaGpu { gpu_index } => crate::sensors::SensorSource::NvidiaGpu {
+            Self::NvidiaGpu { gpu_index, metric } => crate::sensors::SensorSource::NvidiaGpu {
                 gpu_index: *gpu_index,
+                metric: *metric,
             },
             Self::WirelessCoolant { device_id } => crate::sensors::SensorSource::WirelessCoolant {
                 device_id: device_id.clone(),

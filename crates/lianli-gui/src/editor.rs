@@ -1334,8 +1334,9 @@ fn parse_sensor_source(label: &str, sensors: &[SensorInfo]) -> Option<SensorSour
             label: label.clone(),
             device_path: device_path.clone(),
         },
-        SensorSource::NvidiaGpu { gpu_index } => SensorSourceConfig::NvidiaGpu {
+        SensorSource::NvidiaGpu { gpu_index, metric } => SensorSourceConfig::NvidiaGpu {
             gpu_index: *gpu_index,
+            metric: *metric,
         },
         SensorSource::WirelessCoolant { device_id } => SensorSourceConfig::WirelessCoolant {
             device_id: device_id.clone(),
