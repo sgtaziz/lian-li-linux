@@ -3,19 +3,23 @@
 //! Usage:
 //!   cargo run -p lianli-media --bin render-preview -- <template-dir> [--out <file>]
 //!
-//! Loads `<template-dir>/template.json`, substitutes a fixed mock value for
-//! every sensor-bearing widget, renders one frame at the template's native
-//! `base_width × base_height`, and writes the result to
+//! Loads `<template-dir>/template.json`, injects deterministic mock sensor
+//! values (seeded per widget id for reproducible PRs), renders one frame at
+//! the template's native `base_width × base_height`, and writes the result to
 //! `<template-dir>/preview.png` (or `--out` if given).
 
 use anyhow::{anyhow, Context, Result};
 use lianli_media::CustomAsset;
 use lianli_shared::media::SensorSourceConfig;
 use lianli_shared::screen::ScreenInfo;
-use lianli_shared::template::{LcdTemplate, WidgetKind};
+use lianli_shared::sensors::SensorCategory;
+use lianli_shared::systeminfo::SysSensor;
+use lianli_shared::template::{LcdTemplate, Widget, WidgetKind};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-const MOCK_VALUE: f32 = 65.0;
+const MOCK_CORE_COUNT: usize = 24;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -51,10 +55,13 @@ fn main() -> Result<()> {
         .with_context(|| format!("parsing {}", template_path.display()))?;
 
     stub_sensor_sources(&mut template);
+    SysSensor::set_mock_cores(mock_core_values(MOCK_CORE_COUNT));
 
-    // Render 1:1 in the template's own coordinate space. orientation=0 means
-    // `render_dimensions` returns (base_width, base_height) and apply_orientation
-    // is a no-op, giving a pixel-perfect preview at native resolution.
+    let abs_template_dir = std::fs::canonicalize(&template_dir)
+        .with_context(|| format!("canonicalizing {}", template_dir.display()))?;
+    std::env::set_current_dir(&abs_template_dir)
+        .with_context(|| format!("chdir {}", abs_template_dir.display()))?;
+
     let screen = ScreenInfo {
         width: template.base_width,
         height: template.base_height,
@@ -75,7 +82,7 @@ fn main() -> Result<()> {
     let decoded =
         image::load_from_memory(&frame.data).context("decoding rendered JPEG for PNG re-encode")?;
 
-    let out = out_path.unwrap_or_else(|| template_dir.join("preview.png"));
+    let out = out_path.unwrap_or_else(|| abs_template_dir.join("preview.png"));
     decoded
         .save(&out)
         .with_context(|| format!("writing {}", out.display()))?;
@@ -89,19 +96,48 @@ fn print_usage() {
 
 fn stub_sensor_sources(template: &mut LcdTemplate) {
     for widget in template.widgets.iter_mut() {
-        if let Some(source) = widget_source_mut(&mut widget.kind) {
-            *source = SensorSourceConfig::Constant { value: MOCK_VALUE };
+        let value = mock_value_for_widget(widget);
+        if let Some(source) = widget.kind.source_config_mut() {
+            *source = SensorSourceConfig::Constant { value };
         }
     }
 }
 
-fn widget_source_mut(kind: &mut WidgetKind) -> Option<&mut SensorSourceConfig> {
-    match kind {
-        WidgetKind::ValueText { source, .. }
-        | WidgetKind::RadialGauge { source, .. }
-        | WidgetKind::VerticalBar { source, .. }
-        | WidgetKind::HorizontalBar { source, .. }
-        | WidgetKind::Speedometer { source, .. } => Some(source),
-        _ => None,
+const MOCK_TEMP_C: f32 = 48.0;
+const MOCK_USAGE_PCT: f32 = 28.0;
+
+fn mock_value_for_widget(widget: &Widget) -> f32 {
+    if let Some(cat) = widget.sensor_category {
+        return match cat {
+            SensorCategory::CpuTemp | SensorCategory::GpuTemp => MOCK_TEMP_C,
+            SensorCategory::CpuUsage | SensorCategory::GpuUsage | SensorCategory::MemUsage => {
+                MOCK_USAGE_PCT
+            }
+        };
     }
+    if let WidgetKind::ValueText { unit, .. } = &widget.kind {
+        let u = unit.to_lowercase();
+        if u.contains("°c") || u == "c" {
+            return MOCK_TEMP_C;
+        }
+        if u.contains('%') {
+            return MOCK_USAGE_PCT;
+        }
+        if u.contains("rpm") {
+            return 1400.0;
+        }
+    }
+    MOCK_USAGE_PCT
+}
+
+fn mock_core_values(count: usize) -> Vec<u32> {
+    (0..count)
+        .map(|i| {
+            let mut hasher = DefaultHasher::new();
+            ("lianli-mock-core", i).hash(&mut hasher);
+            let r = (hasher.finish() % 10_000) as f32 / 10_000.0;
+            let pct = 5.0 + r * 35.0;
+            (pct * 100.0) as u32
+        })
+        .collect()
 }

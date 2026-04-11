@@ -17,6 +17,7 @@ pub struct SysSensor {
 }
 
 static INSTANCE: OnceLock<SysSensor> = OnceLock::new();
+static MOCK_CORES: OnceLock<Vec<u32>> = OnceLock::new();
 
 impl SysSensor {
     pub fn init() {
@@ -41,6 +42,9 @@ impl SysSensor {
     }
 
     pub fn get_core_usage() -> Vec<u32> {
+        if let Some(mock) = MOCK_CORES.get() {
+            return mock.clone();
+        }
         if let Some(s) = INSTANCE.get() {
             let cores: Vec<u32> = s
                 .per_core_usage
@@ -52,6 +56,10 @@ impl SysSensor {
         } else {
             vec![]
         }
+    }
+
+    pub fn set_mock_cores(values: Vec<u32>) {
+        let _ = MOCK_CORES.set(values);
     }
 
     /// ranges from 0 to 10000 (i.e. multiplied by 100 to be able to have 2 decimal places after the percent value (e.g. 78.67%), so mathematically 4 decimals...)

@@ -1,0 +1,181 @@
+{
+  "id": "cooler",
+  "name": "Cooler",
+  "base_width": 480,
+  "base_height": 480,
+  "rotated": false,
+  "background": {
+    "type": "image",
+    "path": "background.png"
+  },
+  "widgets": [
+    {
+      "id": "thermometer",
+      "x": 317.5,
+      "y": 213,
+      "width": 35,
+      "height": 58,
+      "kind": {
+        "type": "image",
+        "path": "thermometer.png",
+        "opacity": 1.0,
+        "fit": "stretch"
+      }
+    },
+    {
+      "id": "label-cpu",
+      "x": 170,
+      "y": 232,
+      "width": 100,
+      "height": 28,
+      "kind": {
+        "type": "label",
+        "text": "CPU",
+        "font": { "path": null },
+        "font_size": 26,
+        "color": [230, 238, 246, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-temp",
+      "x": 318,
+      "y": 167,
+      "width": 100,
+      "height": 28,
+      "kind": {
+        "type": "label",
+        "text": "TEMP",
+        "font": { "path": null },
+        "font_size": 26,
+        "color": [230, 238, 246, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-cores",
+      "x": 240,
+      "y": 334,
+      "width": 200,
+      "height": 28,
+      "kind": {
+        "type": "label",
+        "text": "CPU CORES",
+        "font": { "path": null },
+        "font_size": 26,
+        "color": [230, 238, 246, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-cpu",
+      "x": 168,
+      "y": 206,
+      "width": 120,
+      "height": 120,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "speedometer",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 180,
+        "sweep_angle": 180,
+        "needle_color": [224, 240, 255, 255],
+        "tick_color": [120, 140, 160, 255],
+        "tick_count": 10,
+        "background_color": [40, 40, 40, 255],
+        "ranges": [
+          { "max": 50, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "show_gauge": false,
+        "show_needle": true,
+        "needle_width": 14,
+        "needle_length_pct": 0.95,
+        "needle_border_color": [174, 10, 16, 255],
+        "needle_border_width": 1.5
+      }
+    },
+    {
+      "id": "bar-temp",
+      "x": 317,
+      "y": 206,
+      "width": 7,
+      "height": 32,
+      "sensor_category": "cpu_temp",
+      "kind": {
+        "type": "vertical_bar",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0,
+        "value_max": 100,
+        "background_color": [40, 40, 40, 255],
+        "corner_radius": 0,
+        "ranges": [
+          { "max": 50, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      }
+    },
+    {
+      "id": "value-cpu",
+      "x": 170,
+      "y": 270,
+      "width": 140,
+      "height": 48,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": { "path": null },
+        "font_size": 39,
+        "color": [224, 240, 255, 255],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "value-temp",
+      "x": 318,
+      "y": 270,
+      "width": 140,
+      "height": 48,
+      "sensor_category": "cpu_temp",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": { "path": null },
+        "font_size": 39,
+        "color": [224, 240, 255, 255],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "core-bars",
+      "x": 242,
+      "y": 367,
+      "width": 256,
+      "height": 47,
+      "kind": {
+        "type": "core_bars",
+        "orientation": "horizontal",
+        "background_color": [40, 40, 40, 255],
+        "show_labels": true,
+        "ranges": [
+          { "max": 50, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      }
+    }
+  ]
+}

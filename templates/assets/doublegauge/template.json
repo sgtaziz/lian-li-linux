@@ -1,0 +1,140 @@
+{
+  "id": "doublegauge",
+  "name": "Doublegauge",
+  "base_width": 400,
+  "base_height": 400,
+  "rotated": false,
+  "background": {
+    "type": "image",
+    "path": "background.png"
+  },
+  "widgets": [
+    {
+      "id": "label-header",
+      "x": 200,
+      "y": 50,
+      "width": 160,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "CPU",
+        "font": { "path": null },
+        "font_size": 50,
+        "color": [0, 0, 0, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-1",
+      "x": 200,
+      "y": 113,
+      "width": 240,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "USAGE",
+        "font": { "path": null },
+        "font_size": 34,
+        "color": [230, 238, 246, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-2",
+      "x": 200,
+      "y": 227,
+      "width": 240,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "TEMP",
+        "font": { "path": null },
+        "font_size": 34,
+        "color": [230, 238, 246, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-usage",
+      "x": 200,
+      "y": 200,
+      "width": 352,
+      "height": 352,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 302,
+        "sweep_angle": 296,
+        "inner_radius_pct": 0.89,
+        "background_color": [0, 0, 0, 0],
+        "ranges": [
+          { "max": null, "color": [40, 255, 137], "alpha": 220 }
+        ]
+      }
+    },
+    {
+      "id": "gauge-temp",
+      "x": 200,
+      "y": 200,
+      "width": 290,
+      "height": 290,
+      "sensor_category": "cpu_temp",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 302,
+        "sweep_angle": 296,
+        "inner_radius_pct": 0.86,
+        "background_color": [0, 0, 0, 0],
+        "ranges": [
+          { "max": null, "color": [32, 209, 255], "alpha": 220 }
+        ]
+      }
+    },
+    {
+      "id": "value-usage",
+      "x": 200,
+      "y": 160,
+      "width": 160,
+      "height": 72,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": { "path": null },
+        "font_size": 70,
+        "color": [40, 255, 137, 255],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "value-temp",
+      "x": 200,
+      "y": 274,
+      "width": 160,
+      "height": 72,
+      "sensor_category": "cpu_temp",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": { "path": null },
+        "font_size": 70,
+        "color": [32, 209, 255, 255],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    }
+  ]
+}
