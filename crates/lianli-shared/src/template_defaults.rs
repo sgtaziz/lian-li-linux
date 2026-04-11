@@ -93,6 +93,7 @@ fn widget(id: &str, kind: WidgetKind, x: f32, y: f32, width: f32, height: f32) -
         visible: true,
         update_interval_ms: None,
         fps: None,
+        sensor_category: None,
     }
 }
 

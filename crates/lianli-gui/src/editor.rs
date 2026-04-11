@@ -882,6 +882,7 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
         visible: true,
         update_interval_ms: None,
         fps: None,
+        sensor_category: None,
     }
 }
 

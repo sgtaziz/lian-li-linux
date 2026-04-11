@@ -1,6 +1,7 @@
 //! Data model for the `MediaType::Custom` template system.
 
 use crate::media::{SensorRange, SensorSourceConfig};
+use crate::sensors::{pick_source_for_category, SensorCategory, SensorInfo};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -88,6 +89,8 @@ pub struct Widget {
     pub update_interval_ms: Option<u64>,
     #[serde(default)]
     pub fps: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensor_category: Option<SensorCategory>,
 }
 
 fn default_true() -> bool {
@@ -344,6 +347,31 @@ impl WidgetKind {
             "image",
             "video",
         ]
+    }
+
+    pub fn source_config_mut(&mut self) -> Option<&mut SensorSourceConfig> {
+        match self {
+            Self::ValueText { source, .. }
+            | Self::RadialGauge { source, .. }
+            | Self::VerticalBar { source, .. }
+            | Self::HorizontalBar { source, .. }
+            | Self::Speedometer { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+pub fn resolve_sensor_categories(template: &mut LcdTemplate, sensors: &[SensorInfo]) {
+    for widget in template.widgets.iter_mut() {
+        let Some(category) = widget.sensor_category.take() else {
+            continue;
+        };
+        let Some(source_ref) = widget.kind.source_config_mut() else {
+            continue;
+        };
+        if let Some(new_source) = pick_source_for_category(category, sensors) {
+            *source_ref = new_source;
+        }
     }
 }
 

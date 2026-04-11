@@ -119,6 +119,19 @@ pub enum ResolvedSensor {
     Constant(f32),
 }
 
+/// Abstract sensor categories used by downloadable templates to bind widgets
+/// to whichever concrete sensor the user's machine exposes. Resolved once at
+/// template install time into a concrete `SensorSourceConfig`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SensorCategory {
+    CpuTemp,
+    GpuTemp,
+    CpuUsage,
+    GpuUsage,
+    MemUsage,
+}
+
 /// Picks the most likely "CPU control temp" sensor — k10temp's `Tctl` /
 /// coretemp's `Package id 0` first, then any other CPU temp sensor as a
 /// fallback. Returns `None` if no CPU temp is exposed.
@@ -146,6 +159,97 @@ pub fn find_default_cpu_temp(sensors: &[SensorInfo]) -> Option<SensorSource> {
         })
         .or_else(|| cpu_temps.first())
         .map(|s| s.source.clone())
+}
+
+/// Picks the most likely "GPU edge temp" sensor — NVIDIA first (if present),
+/// then amdgpu's `edge` label, then any GPU-ish hwmon temp.
+pub fn find_default_gpu_temp(sensors: &[SensorInfo]) -> Option<SensorSource> {
+    if let Some(s) = sensors.iter().find(|s| {
+        matches!(
+            &s.source,
+            SensorSource::NvidiaGpu {
+                metric: NvidiaMetric::Temp,
+                ..
+            }
+        )
+    }) {
+        return Some(s.source.clone());
+    }
+    let gpu_temps: Vec<&SensorInfo> = sensors
+        .iter()
+        .filter(|s| {
+            s.unit == Unit::C
+                && matches!(
+                    &s.source,
+                    SensorSource::Hwmon { name, .. } if name == "amdgpu" || name == "radeon"
+                )
+        })
+        .collect();
+    gpu_temps
+        .iter()
+        .find(|s| {
+            if let SensorSource::Hwmon { label, .. } = &s.source {
+                label.to_lowercase().contains("edge")
+            } else {
+                false
+            }
+        })
+        .or_else(|| gpu_temps.first())
+        .map(|s| s.source.clone())
+}
+
+/// Resolve a `SensorCategory` to a concrete `SensorSourceConfig` based on
+/// what the current machine exposes. Returns `None` when no suitable sensor
+/// is available so the caller can leave the widget's existing source intact.
+pub fn pick_source_for_category(
+    category: SensorCategory,
+    sensors: &[SensorInfo],
+) -> Option<crate::media::SensorSourceConfig> {
+    use crate::media::SensorSourceConfig;
+    match category {
+        SensorCategory::CpuUsage => Some(SensorSourceConfig::CpuUsage),
+        SensorCategory::MemUsage => Some(SensorSourceConfig::MemUsage),
+        SensorCategory::CpuTemp => find_default_cpu_temp(sensors).map(source_to_config),
+        SensorCategory::GpuTemp => find_default_gpu_temp(sensors).map(source_to_config),
+        SensorCategory::GpuUsage => sensors
+            .iter()
+            .find(|s| {
+                matches!(
+                    &s.source,
+                    SensorSource::NvidiaGpu {
+                        metric: NvidiaMetric::Usage,
+                        ..
+                    }
+                )
+            })
+            .map(|s| source_to_config(s.source.clone())),
+    }
+}
+
+fn source_to_config(source: SensorSource) -> crate::media::SensorSourceConfig {
+    use crate::media::SensorSourceConfig;
+    match source {
+        SensorSource::Hwmon {
+            name,
+            label,
+            device_path,
+        } => SensorSourceConfig::Hwmon {
+            name,
+            label,
+            device_path,
+        },
+        SensorSource::NvidiaGpu { gpu_index, metric } => {
+            SensorSourceConfig::NvidiaGpu { gpu_index, metric }
+        }
+        SensorSource::Command { cmd } => SensorSourceConfig::Command { cmd },
+        SensorSource::WirelessCoolant { device_id } => {
+            SensorSourceConfig::WirelessCoolant { device_id }
+        }
+        SensorSource::CpuUsage => SensorSourceConfig::CpuUsage,
+        SensorSource::MemUsage => SensorSourceConfig::MemUsage,
+        SensorSource::MemUsed => SensorSourceConfig::MemUsed,
+        SensorSource::MemFree => SensorSourceConfig::MemFree,
+    }
 }
 
 pub fn enumerate_sensors() -> Vec<SensorInfo> {
