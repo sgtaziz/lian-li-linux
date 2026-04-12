@@ -43,6 +43,34 @@ pub enum IpcRequest {
         /// RGB triplets, one per LED.
         colors: Vec<[u8; 3]>,
     },
+    /// Set a single LED's color by index within a zone.
+    /// Convenience wrapper around SetRgbDirect that modifies one LED
+    /// without requiring the caller to track the full zone state.
+    SetLedColor {
+        device_id: String,
+        zone: u8,
+        led_index: u16,
+        color: [u8; 3],
+    },
+    /// Save current direct-mode colors as a named preset.
+    SaveRgbPreset {
+        name: String,
+        device_id: String,
+    },
+    /// Delete a named RGB preset. Scoped by (name, device_id) to match save.
+    DeleteRgbPreset {
+        name: String,
+        device_id: String,
+    },
+    /// List all saved RGB presets.
+    ListRgbPresets,
+    /// Apply a named preset (sends stored colors to device).
+    /// Scoped by (name, device_id) to avoid ambiguity when multiple devices
+    /// share the same preset name.
+    ApplyRgbPreset {
+        name: String,
+        device_id: String,
+    },
     /// Enable/disable motherboard ARGB sync for a device.
     SetMbRgbSync {
         device_id: String,
