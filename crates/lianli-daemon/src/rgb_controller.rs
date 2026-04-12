@@ -477,7 +477,10 @@ impl RgbController {
     }
 
     /// Refresh wireless device list (call after rediscovery / hot-plug).
-    #[allow(dead_code)]
+    pub fn set_wireless(&mut self, wireless: Option<Arc<WirelessController>>) {
+        self.wireless = wireless;
+    }
+
     pub fn refresh_wireless_devices(&mut self) {
         if let Some(ref w) = self.wireless {
             let mut new_state = HashMap::new();

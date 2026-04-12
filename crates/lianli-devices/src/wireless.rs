@@ -548,9 +548,13 @@ impl WirelessController {
         let mobo_pwm = Arc::clone(&self.mobo_pwm);
         let master_mac = Arc::clone(&self.master_mac);
 
+        let discovery_done = Arc::new(AtomicBool::new(false));
+        let discovery_signal = discovery_done.clone();
+
         self.poll_thread = Some(thread::spawn(move || {
             let mut found_devices = false;
             let mut consecutive_errors = 0u32;
+            let mut first_success = false;
             while !stop_flag.load(Ordering::SeqCst) {
                 if let Err(err) =
                     poll_and_discover(&rx, &discovered_devices, &mobo_pwm, &master_mac)
@@ -561,12 +565,20 @@ impl WirelessController {
                     } else if consecutive_errors == 4 {
                         warn!("RX polling errors continuing, suppressing further logs");
                     }
-                    // Back off: 1s, 2s, 4s, ... capped at 30s
-                    let backoff = Duration::from_secs((1 << consecutive_errors.min(5)).min(30));
+                    // Short retry for initial discovery, then exponential backoff
+                    let backoff = if !first_success {
+                        Duration::from_millis(200)
+                    } else {
+                        Duration::from_secs((1 << consecutive_errors.min(5)).min(30))
+                    };
                     thread::sleep(backoff);
                     continue;
                 }
                 consecutive_errors = 0;
+                if !first_success {
+                    first_success = true;
+                    discovery_signal.store(true, Ordering::Release);
+                }
                 if !found_devices && !discovered_devices.lock().is_empty() {
                     found_devices = true;
                 }
@@ -574,7 +586,17 @@ impl WirelessController {
             }
         }));
 
-        thread::sleep(Duration::from_millis(1500));
+        // Wait for first successful GetDev or timeout after 5s
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !discovery_done.load(Ordering::Acquire) {
+            if std::time::Instant::now() >= deadline {
+                warn!("Wireless discovery timed out waiting for first successful GetDev");
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        // Give one more poll cycle for device records to populate
+        thread::sleep(Duration::from_millis(1200));
         Ok(())
     }
 
@@ -1187,8 +1209,8 @@ fn poll_and_discover(
     match handle.read(&mut response, Duration::from_millis(200)) {
         Ok(len) if len >= 4 => {
             if response[0] != USB_CMD_SEND_RF {
-                debug!("GetDev: unexpected response 0x{:02x}", response[0]);
-                return Ok(());
+                warn!("GetDev: unexpected response 0x{:02x}, will retry", response[0]);
+                bail!("GetDev: unexpected response 0x{:02x}", response[0]);
             }
 
             let device_count = response[1] as usize;

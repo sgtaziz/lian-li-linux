@@ -90,6 +90,7 @@ pub struct ServiceManager {
     hid_backends: HashMap<String, Arc<Mutex<HidBackend>>>,
     /// Cached USB device list from enumerate_devices() — refreshed every USB_ENUM_INTERVAL.
     cached_usb_devices: Vec<DeviceInfo>,
+    last_wireless_count: usize,
     restart_requested: bool,
     ipc_state: Arc<Mutex<DaemonState>>, // the (shared) state of the deamon. Shared between daemon itself and IPC thread.
     ipc_stop: Arc<AtomicBool>, // Flag which allows the deamon thread (on shutdown) to tell the IPC thread to stop.
@@ -119,6 +120,7 @@ impl ServiceManager {
             wired_fan_devices: Arc::new(HashMap::new()),
             hid_backends: HashMap::new(),
             cached_usb_devices: Vec::new(),
+            last_wireless_count: 0,
             restart_requested: false,
             ipc_state,
             ipc_stop: Arc::new(AtomicBool::new(false)),
@@ -178,6 +180,20 @@ impl ServiceManager {
     }
 
     pub fn device_poll(&mut self) {
+        // Check for late wireless device discovery
+        let current_wireless = self.wireless.devices().len();
+        if current_wireless != self.last_wireless_count {
+            if current_wireless > self.last_wireless_count {
+                info!(
+                    "Wireless device count changed ({} -> {}), rebuilding RGB controller",
+                    self.last_wireless_count, current_wireless
+                );
+                self.rebuild_rgb_controller();
+                self.restart_fan_control();
+            }
+            self.last_wireless_count = current_wireless;
+        }
+
         self.refresh_targets();
         self.sync_ipc_telemetry();
     }
@@ -230,6 +246,7 @@ impl ServiceManager {
             tx_cloned,
         ));
         self.try_wireless();
+        self.last_wireless_count = self.wireless.devices().len();
         if !self.use_rusb() {
             ensure_hid_devices_bound();
         }
@@ -780,6 +797,31 @@ impl ServiceManager {
         let rgb_arc = Arc::new(Mutex::new(controller));
         self.rgb_controller = Some(Arc::clone(&rgb_arc));
         self.ipc_state.lock().rgb_controller = Some(rgb_arc);
+    }
+
+    /// Rebuild RGB controller to pick up newly discovered wireless devices.
+    fn rebuild_rgb_controller(&mut self) {
+        let wireless = if self.wireless.has_discovered_devices() {
+            Some(Arc::new(self.wireless.clone()))
+        } else {
+            None
+        };
+        if let Some(ref rgb) = self.rgb_controller {
+            let mut ctrl = rgb.lock();
+            ctrl.set_wireless(wireless);
+            ctrl.refresh_wireless_devices();
+            if let Some(ref cfg) = self.config {
+                if let Some(ref rgb_cfg) = cfg.rgb {
+                    let presets = self.ipc_state.lock().rgb_presets.clone();
+                    ctrl.apply_config(rgb_cfg, &presets);
+                }
+            }
+        }
+    }
+
+    /// Restart the fan controller to pick up newly discovered wireless devices.
+    fn restart_fan_control(&mut self) {
+        self.start_fan_control();
     }
 
     /// Apply RGB config from the current AppConfig to the RGB controller.
