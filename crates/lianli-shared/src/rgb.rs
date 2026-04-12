@@ -307,6 +307,21 @@ impl Default for RgbAppConfig {
     }
 }
 
+/// A single zone's colors within a named RGB preset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RgbPresetZone {
+    pub zone: u8,
+    pub colors: Vec<[u8; 3]>,
+}
+
+/// A named per-LED color preset that can be saved to config and applied later.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RgbPreset {
+    pub name: String,
+    pub device_id: String,
+    pub zones: Vec<RgbPresetZone>,
+}
+
 /// Information about an RGB zone, reported to GUI/OpenRGB.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RgbZoneInfo {

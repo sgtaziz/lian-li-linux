@@ -6,7 +6,9 @@
 
 use lianli_devices::traits::RgbDevice;
 use lianli_devices::wireless::{WirelessController, WirelessFanType};
-use lianli_shared::rgb::{RgbAppConfig, RgbDeviceCapabilities, RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{
+    RgbAppConfig, RgbDeviceCapabilities, RgbEffect, RgbMode, RgbPresetZone, RgbZoneInfo,
+};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -385,6 +387,52 @@ impl RgbController {
                 }
             }
         }
+    }
+
+    /// Compute zone count and LEDs-per-zone for a wireless device state.
+    ///
+    /// Override-based devices (V150, Strimer, LC217, Led88) are single-zone
+    /// with all LEDs in one flat buffer — matches `WirelessRgbState::new`.
+    fn zone_layout(state: &WirelessRgbState) -> (usize, usize) {
+        if state.fan_type.total_led_count_override().is_some() {
+            return (1, state.led_state.len());
+        }
+        let total_zones = if state.fan_type.is_aio() {
+            state.fan_count as usize + 1
+        } else {
+            state.fan_count as usize
+        };
+        (total_zones, state.leds_per_fan as usize)
+    }
+
+    /// Get the current per-LED color buffer for a wireless device zone.
+    pub fn get_zone_colors(&self, device_id: &str, zone: u8) -> Option<Vec<[u8; 3]>> {
+        let state = self.wireless_state.get(device_id)?;
+        let (_, leds_in_zone) = Self::zone_layout(state);
+        let start = zone as usize * leds_in_zone;
+        let end = (start + leds_in_zone).min(state.led_state.len());
+        if start >= state.led_state.len() {
+            return None;
+        }
+        Some(state.led_state[start..end].to_vec())
+    }
+
+    /// Get all zone colors for a wireless device (for saving presets).
+    pub fn get_all_zone_colors(&self, device_id: &str) -> Option<Vec<RgbPresetZone>> {
+        let state = self.wireless_state.get(device_id)?;
+        let (total_zones, leds_in_zone) = Self::zone_layout(state);
+        let mut zones = Vec::new();
+        for z in 0..total_zones {
+            let start = z * leds_in_zone;
+            let end = (start + leds_in_zone).min(state.led_state.len());
+            if start < state.led_state.len() {
+                zones.push(RgbPresetZone {
+                    zone: z as u8,
+                    colors: state.led_state[start..end].to_vec(),
+                });
+            }
+        }
+        Some(zones)
     }
 
     /// Check if a device_id refers to a wireless device.
