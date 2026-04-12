@@ -237,6 +237,16 @@ impl TlFanController {
         Ok(())
     }
 
+    fn send_speed_locked(dev: &HidBackend, port: u8, fan_index: u8, duty: u8) -> Result<()> {
+        let addr = (port << 4) | (fan_index & 0x0F);
+        let pkt = Self::build_packet(CMD_SET_FAN_SPEED, &[addr, duty]);
+        Self::drain_read_buffer(dev);
+        dev.write(&pkt).context("TL Fan: write fan speed")?;
+        let mut buf = [0u8; PACKET_SIZE];
+        let _ = dev.read_timeout(&mut buf, READ_TIMEOUT_MS);
+        Ok(())
+    }
+
     /// Set the same speed for all fans on a port.
     pub fn set_port_speed(&self, port: u8, duty: u8) -> Result<()> {
         let fan_count = self
@@ -248,6 +258,24 @@ impl TlFanController {
 
         for idx in 0..fan_count {
             self.set_fan_speed_single(port, idx, duty)?;
+        }
+        Ok(())
+    }
+
+    /// Set all port speeds atomically under one device lock to prevent
+    /// interleaving with RGB commands from other threads.
+    pub fn set_all_port_speeds(&self, duties: &[u8]) -> Result<()> {
+        let fan_counts: [u8; 4] = self
+            .last_handshake
+            .lock()
+            .as_ref()
+            .map(|hs| hs.port_fan_counts)
+            .unwrap_or([1, 1, 1, 1]);
+        let dev = self.device.lock();
+        for (port, &duty) in duties.iter().take(4).enumerate() {
+            for idx in 0..fan_counts[port] {
+                Self::send_speed_locked(&dev, port as u8, idx, duty)?;
+            }
         }
         Ok(())
     }
@@ -486,15 +514,11 @@ impl TlFanController {
 
 impl FanDevice for TlFanController {
     fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()> {
-        // Treat slot as port index, set all fans on that port
         self.set_port_speed(slot, duty)
     }
 
     fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
-        for (port, &duty) in duties.iter().take(4).enumerate() {
-            self.set_port_speed(port as u8, duty)?;
-        }
-        Ok(())
+        self.set_all_port_speeds(duties)
     }
 
     fn read_fan_rpm(&self) -> Result<Vec<u16>> {

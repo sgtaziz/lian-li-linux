@@ -266,10 +266,19 @@ impl Ene6k77Controller {
         Ok(())
     }
 
-    /// Set fan speeds for all 4 groups at once.
+    /// Set fan speeds for all 4 groups atomically (single lock hold so
+    /// RGB writes from another thread can't interleave between groups).
     pub fn set_all_speeds(&self, duties: &[u8; 4]) -> Result<()> {
+        let dev = self.device.lock();
         for (group, &duty) in duties.iter().enumerate() {
-            self.set_group_speed(group as u8, duty)?;
+            let data = [REPORT_ID, 0x20 | (group as u8), 0x00, duty];
+            dev.send_feature_report(&data)
+                .with_context(|| format!("ENE set group {group} speed"))?;
+            debug!(
+                "Set group {group} speed to duty={duty} ({:.0}%)",
+                duty as f32 / 2.55
+            );
+            thread::sleep(CMD_DELAY);
         }
         Ok(())
     }
@@ -483,10 +492,11 @@ impl FanDevice for Ene6k77Controller {
     }
 
     fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
-        for (i, &duty) in duties.iter().take(4).enumerate() {
-            self.set_group_speed(i as u8, duty)?;
+        let mut arr = [0u8; 4];
+        for (i, &d) in duties.iter().take(4).enumerate() {
+            arr[i] = d;
         }
-        Ok(())
+        self.set_all_speeds(&arr)
     }
 
     fn read_fan_rpm(&self) -> Result<Vec<u16>> {
