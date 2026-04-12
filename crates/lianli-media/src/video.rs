@@ -161,8 +161,10 @@ pub fn encode_h264(
     let temp = TempDir::new()?;
     let output = temp.path().join("stream.h264");
 
-    let (rw, rh) = render_dimensions(screen, orientation);
-    let mut vf_parts = vec![format!("scale={rw}:{rh}:flags=lanczos")];
+    let mut vf_parts = vec![format!(
+        "scale={}:{}:flags=lanczos",
+        screen.width, screen.height
+    )];
     if screen.device_rotation == 90 {
         vf_parts.push("transpose=1".into());
     } else if screen.device_rotation == 180 {

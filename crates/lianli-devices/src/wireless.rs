@@ -1209,7 +1209,10 @@ fn poll_and_discover(
     match handle.read(&mut response, Duration::from_millis(200)) {
         Ok(len) if len >= 4 => {
             if response[0] != USB_CMD_SEND_RF {
-                warn!("GetDev: unexpected response 0x{:02x}, will retry", response[0]);
+                warn!(
+                    "GetDev: unexpected response 0x{:02x}, will retry",
+                    response[0]
+                );
                 bail!("GetDev: unexpected response 0x{:02x}", response[0]);
             }
 
