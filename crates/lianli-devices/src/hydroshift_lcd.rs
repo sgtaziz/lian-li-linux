@@ -36,7 +36,7 @@ const C_PACKET_SIZE: usize = 512;
 const C_HEADER_LEN: usize = 11;
 const C_MAX_PAYLOAD: usize = C_PACKET_SIZE - C_HEADER_LEN; // 501
 
-const READ_TIMEOUT_MS: i32 = 200;
+const READ_TIMEOUT_MS: i32 = 1000;
 const INIT_READ_TIMEOUT_MS: i32 = 3000;
 
 // A-Commands
@@ -180,7 +180,7 @@ impl HydroShiftLcdController {
         match self.read_firmware_internal(INIT_READ_TIMEOUT_MS) {
             Ok(fw) => {
                 if let Some(ver) = parse_firmware_version(&fw) {
-                    if ver >= (1, 2) {
+                    if ver > (1, 2) {
                         info!("  Firmware: {fw} (using 512-byte frame mode)");
                         self.use_c_command = true;
                     } else {
@@ -216,8 +216,6 @@ impl HydroShiftLcdController {
         } else {
             INIT_READ_TIMEOUT_MS
         };
-        // Flush stale data so we read the actual handshake response
-        self.device.lock().read_flush();
         let resp = self.send_a_command(CMD_HANDSHAKE, &[], timeout)?;
         let data = &resp[A_HEADER_LEN..];
         let data_len = resp[5] as usize;
@@ -305,7 +303,6 @@ impl HydroShiftLcdController {
 
     /// Reset device (A-command 0x8E). Returns true on success.
     pub fn reset_device(&self) -> bool {
-        self.device.lock().read_flush();
         match self.send_a_command(CMD_RESET_DEVICE, &[], READ_TIMEOUT_MS) {
             Ok(resp) if resp.len() > A_HEADER_LEN && resp[1] == CMD_RESET_DEVICE => {
                 let data_len = resp[5] as usize;
@@ -316,7 +313,11 @@ impl HydroShiftLcdController {
     }
 
     /// Check LCD availability and attempt recovery if unavailable.
+    /// Only relevant when using C-packets; B-packet mode doesn't need this.
     pub fn check_and_recover_lcd(&mut self) -> Result<()> {
+        if !self.use_c_command {
+            return Ok(());
+        }
         match self.is_lcd_available() {
             Ok(true) => Ok(()),
             Ok(false) => {
@@ -340,48 +341,49 @@ impl HydroShiftLcdController {
     fn read_firmware_internal(&self, timeout_ms: i32) -> Result<String> {
         let dev = self.device.lock();
 
-        // Flush stale data before reading firmware
-        dev.read_flush();
-
         let mut pkt = [0u8; A_PACKET_SIZE];
         pkt[0] = REPORT_ID_A;
         pkt[1] = CMD_GET_FIRMWARE;
         let written = dev.write(&pkt).context("AIO LCD: write firmware request")?;
         debug!("firmware request: wrote {written} bytes");
 
-        // Response 1: version string
+        // Loop reading until we get a firmware response, discarding stale responses
+        // from a previous session (e.g. 0x81 handshake, 0x8E reset) as they arrive.
         let mut buf = [0u8; A_PACKET_SIZE];
-        let n = dev
-            .read_timeout(&mut buf, timeout_ms)
-            .context("AIO LCD: read firmware")?;
+        let version_str = loop {
+            let n = dev
+                .read_timeout(&mut buf, timeout_ms)
+                .context("AIO LCD: read firmware")?;
 
-        debug!(
-            "firmware response 1: {n} bytes, raw={:02x?}",
-            &buf[..n.min(20)]
-        );
+            if n == 0 {
+                bail!("AIO LCD: no firmware response (timeout after {timeout_ms}ms)");
+            }
 
-        if n == 0 {
-            bail!("AIO LCD: no firmware response (timeout after {timeout_ms}ms)");
-        }
+            debug!(
+                "firmware read: {n} bytes, cmd={:#04x}",
+                buf[1]
+            );
 
-        let data_len = buf[5] as usize;
-        let data = &buf[A_HEADER_LEN..A_HEADER_LEN + data_len.min(58)];
-        let version_str = String::from_utf8_lossy(data)
-            .trim_end_matches('\0')
-            .to_string();
+            if buf[1] == CMD_GET_FIRMWARE {
+                let data_len = buf[5] as usize;
+                let data = &buf[A_HEADER_LEN..A_HEADER_LEN + data_len.min(58)];
+                break String::from_utf8_lossy(data)
+                    .trim_end_matches('\0')
+                    .to_string();
+            }
+
+            debug!("firmware read: skipping stale response {:#04x}", buf[1]);
+        };
 
         // Response 2: date/time string (must be consumed to keep buffer in sync)
-        let n2 = dev
-            .read_timeout(&mut buf, timeout_ms)
-            .unwrap_or(0);
-
+        let n2 = dev.read_timeout(&mut buf, timeout_ms).unwrap_or(0);
         if n2 > 0 {
             let len2 = buf[5] as usize;
             let data2 = &buf[A_HEADER_LEN..A_HEADER_LEN + len2.min(58)];
-            let date_str = String::from_utf8_lossy(data2)
-                .trim_end_matches('\0')
-                .to_string();
-            debug!("firmware response 2 (date): {date_str}");
+            debug!(
+                "firmware date: {}",
+                String::from_utf8_lossy(data2).trim_end_matches('\0')
+            );
         }
 
         Ok(version_str)
