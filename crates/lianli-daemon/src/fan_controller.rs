@@ -114,8 +114,7 @@ fn fan_control_thread(
     let mut temp_ema: HashMap<SensorSource, f32> = HashMap::new();
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
 
-    // Initialize MB RPM sync state for all wired groups at startup.
-    // Groups with MbSync speeds get sync enabled; others get it disabled.
+    // Initialize MB sync state for all wired groups at startup.
     for (group_idx, group) in config.speeds.iter().enumerate() {
         let is_mb_sync = group.speeds.iter().any(|s| s.is_mb_sync());
         if let Some(ref device_id) = group.device_id {
@@ -131,7 +130,6 @@ fn fan_control_thread(
                 }
             } else if let Some(dev) = wired.get(device_id) {
                 if dev.supports_mb_sync() {
-                    // For non-port devices, use port 0
                     if let Err(err) = dev.set_mb_rpm_sync(0, is_mb_sync) {
                         warn!("Failed to set MB sync for {device_id}: {err}");
                     } else if is_mb_sync {
@@ -160,38 +158,34 @@ fn fan_control_thread(
         last_update = tick_start;
 
         for (group_idx, group) in config.speeds.iter().enumerate() {
-            // MB RPM sync mode: wired hardware handles it natively, but wireless
-            // devices need software relay of the motherboard PWM signal.
-            if group.speeds.iter().any(|s| s.is_mb_sync()) {
+            let is_wireless = group
+                .device_id
+                .as_ref()
+                .map(|id| id.starts_with("wireless:"))
+                .unwrap_or(false);
+
+            // Wired MB sync: hardware handles it natively, skip
+            if !is_wireless && group.speeds.iter().any(|s| s.is_mb_sync()) {
+                continue;
+            }
+
+            // SLV3 hardware sync: all slots must be MB sync, send [6,6,6,6]
+            if is_wireless && group.speeds.iter().all(|s| s.is_mb_sync()) {
                 if let Some(ref device_id) = group.device_id {
-                    if device_id.starts_with("wireless:") {
-                        if let Some(ref w) = wireless {
-                            let mac_str = device_id.strip_prefix("wireless:").unwrap_or(device_id);
-                            if let Some(dev) =
-                                w.devices().into_iter().find(|d| d.mac_str() == mac_str)
-                            {
-                                if dev.fan_type.supports_hw_mobo_sync() {
-                                    // SLV3: firmware reads its local PWM header
-                                    apply_wireless_by_id(
-                                        &wireless,
-                                        device_id,
-                                        &[6, 6, 6, 6],
-                                        group_idx,
-                                    );
-                                } else if let Some(pwm) = w.motherboard_pwm() {
-                                    // RX dongle reports valid mobo PWM — relay it
-                                    apply_wireless_by_id(
-                                        &wireless,
-                                        device_id,
-                                        &[pwm, pwm, pwm, pwm],
-                                        group_idx,
-                                    );
-                                }
-                            }
+                    if let Some(ref w) = wireless {
+                        let mac_str = device_id.strip_prefix("wireless:").unwrap_or(device_id);
+                        let is_hw_sync = w
+                            .devices()
+                            .iter()
+                            .find(|d| d.mac_str() == mac_str)
+                            .map(|d| d.fan_type.supports_hw_mobo_sync())
+                            .unwrap_or(false);
+                        if is_hw_sync {
+                            apply_wireless_by_id(&wireless, device_id, &[6, 6, 6, 6], group_idx);
+                            continue;
                         }
                     }
                 }
-                continue;
             }
 
             let speeds = match calculate_fan_speeds(
@@ -295,6 +289,13 @@ fn calculate_fan_speeds(
     for (i, fan_speed) in fan_speeds.iter().enumerate() {
         pwm_values[i] = match fan_speed {
             FanSpeed::Constant(value) => *value,
+            _ if fan_speed.is_mb_sync() => {
+                if let Some(source) = fan_speed.mb_sync_source() {
+                    lianli_shared::sensors::read_pwm_header(source).unwrap_or(0)
+                } else {
+                    0
+                }
+            }
             FanSpeed::Curve(curve_name) => {
                 let curve = curves
                     .get(curve_name)

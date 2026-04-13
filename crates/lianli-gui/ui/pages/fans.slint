@@ -16,10 +16,11 @@ export struct FanCurveData {
 }
 
 export struct FanSpeedSlot {
-    // "Off", "Constant", curve name, or "__mb_sync__"
     dropdown-value: string,
     pwm-percent: int,
     display-mode: string,  // "off", "constant", "curve", "mb_sync"
+    pwm-header: string,
+    pwm-header-label: string,
 }
 
 export struct FanGroupData {
@@ -28,6 +29,7 @@ export struct FanGroupData {
     fan-count: int,
     per-fan-control: bool,
     mb-sync-support: bool,
+    is-wireless: bool,
     has-pump-control: bool,
     pump-slot: FanSpeedSlot,
     slots: [FanSpeedSlot],
@@ -112,9 +114,11 @@ component FanGroupCard inherits Card {
     in property <FanGroupData> group;
     in property <[string]> speed-options: [];
     in property <[string]> curve-names: [];
+    in property <[string]> pwm-header-options: [];
 
     callback set-slot-speed(string, int, string);
     callback set-slot-pwm(string, int, int);
+    callback set-pwm-header(string, int, string);
 
     VerticalLayout {
         spacing: 8px;
@@ -163,6 +167,12 @@ component FanGroupCard inherits Card {
                     model: root.speed-options;
                     current-value: slot.dropdown-value;
                     selected(val) => { root.set-slot-speed(root.group.device-id, sidx, val); }
+                }
+
+                if slot.display-mode == "mb_sync" && root.group.is-wireless: ComboBox {
+                    model: root.pwm-header-options;
+                    current-value: slot.pwm-header-label;
+                    selected(val) => { root.set-pwm-header(root.group.device-id, sidx, val); }
                 }
 
                 if slot.display-mode == "constant": HorizontalLayout {
@@ -239,8 +249,11 @@ export component FansPage inherits VerticalLayout {
     callback point-moved(int, int, float, float);
     callback point-added(int, float, float);
     callback point-removed(int, int);
+    in property <[string]> pwm-header-options: [];
+
     callback set-slot-speed(string, int, string);
     callback set-slot-pwm(string, int, int);
+    callback set-pwm-header(string, int, string);
     callback set-update-interval(int);
     callback save-config();
 
@@ -321,8 +334,10 @@ export component FansPage inherits VerticalLayout {
                     group: group-data;
                     speed-options: root.speed-options;
                     curve-names: root.curve-names;
+                    pwm-header-options: root.pwm-header-options;
                     set-slot-speed(dev-id, slot, val) => { root.set-slot-speed(dev-id, slot, val); }
                     set-slot-pwm(dev-id, slot, pct) => { root.set-slot-pwm(dev-id, slot, pct); }
+                    set-pwm-header(dev-id, slot, val) => { root.set-pwm-header(dev-id, slot, val); }
                 }
             }
 

@@ -443,27 +443,48 @@ pub fn speed_options_model(curves: &[FanCurve], _has_mb_sync: bool) -> ModelRc<S
     ModelRc::new(VecModel::from(items))
 }
 
-fn fan_speed_to_slot(s: &FanSpeed) -> super::FanSpeedSlot {
+fn fan_speed_to_slot(s: &FanSpeed, pwm_headers: &[lianli_shared::sensors::PwmHeader]) -> super::FanSpeedSlot {
+    if s.is_mb_sync() {
+        let source_id = s.mb_sync_source().unwrap_or("");
+        let label = pwm_headers
+            .iter()
+            .find(|h| h.id == source_id)
+            .map(|h| {
+                let pct = lianli_shared::sensors::read_pwm_header(&h.id)
+                    .map(|v| (v as f32 / 255.0 * 100.0).round() as u8)
+                    .unwrap_or(0);
+                format!("{} ({}%)", h.label, pct)
+            })
+            .unwrap_or_default();
+        return super::FanSpeedSlot {
+            dropdown_value: SharedString::from("MB Sync"),
+            pwm_percent: 0,
+            display_mode: SharedString::from("mb_sync"),
+            pwm_header: SharedString::from(source_id),
+            pwm_header_label: SharedString::from(&label),
+        };
+    }
     match s {
         FanSpeed::Constant(0) => super::FanSpeedSlot {
             dropdown_value: SharedString::from("Off"),
             pwm_percent: 0,
             display_mode: SharedString::from("off"),
+            pwm_header: SharedString::default(),
+            pwm_header_label: SharedString::default(),
         },
         FanSpeed::Constant(pwm) => super::FanSpeedSlot {
             dropdown_value: SharedString::from("Constant PWM"),
             pwm_percent: ((*pwm as f32 / 255.0) * 100.0).round() as i32,
             display_mode: SharedString::from("constant"),
-        },
-        FanSpeed::Curve(name) if name == "__mb_sync__" => super::FanSpeedSlot {
-            dropdown_value: SharedString::from("MB Sync"),
-            pwm_percent: 0,
-            display_mode: SharedString::from("mb_sync"),
+            pwm_header: SharedString::default(),
+            pwm_header_label: SharedString::default(),
         },
         FanSpeed::Curve(name) => super::FanSpeedSlot {
             dropdown_value: SharedString::from(name.as_str()),
             pwm_percent: 0,
             display_mode: SharedString::from("curve"),
+            pwm_header: SharedString::default(),
+            pwm_header_label: SharedString::default(),
         },
     }
 }
@@ -478,8 +499,8 @@ const DEFAULT_SPEEDS: [FanSpeed; 4] = [
 pub fn fan_groups_to_model(
     fan_config: &FanConfig,
     devices: &[DeviceInfo],
+    pwm_headers: &[lianli_shared::sensors::PwmHeader],
 ) -> ModelRc<super::FanGroupData> {
-    // Iterate live devices, look up config group for each.
     let fan_devices: Vec<&DeviceInfo> = devices
         .iter()
         .filter(|d| (d.has_fan && d.fan_count.unwrap_or(0) > 0) || d.has_pump_control)
@@ -500,12 +521,15 @@ pub fn fan_groups_to_model(
                 dev.name.clone()
             };
 
-            let slots: Vec<super::FanSpeedSlot> = speeds.iter().map(fan_speed_to_slot).collect();
+            let slots: Vec<super::FanSpeedSlot> = speeds
+                .iter()
+                .map(|s| fan_speed_to_slot(s, pwm_headers))
+                .collect();
 
             let pump_slot = if dev.has_pump_control {
-                fan_speed_to_slot(speeds.get(3).unwrap_or(&FanSpeed::Constant(0)))
+                fan_speed_to_slot(speeds.get(3).unwrap_or(&FanSpeed::Constant(0)), pwm_headers)
             } else {
-                fan_speed_to_slot(&FanSpeed::Constant(0))
+                fan_speed_to_slot(&FanSpeed::Constant(0), pwm_headers)
             };
 
             super::FanGroupData {
@@ -514,6 +538,7 @@ pub fn fan_groups_to_model(
                 fan_count: dev.fan_count.unwrap_or(4) as i32,
                 per_fan_control: dev.per_fan_control.unwrap_or(false),
                 mb_sync_support: dev.mb_sync_support,
+                is_wireless: dev.device_id.starts_with("wireless:"),
                 has_pump_control: dev.has_pump_control,
                 pump_slot,
                 slots: ModelRc::new(VecModel::from(slots)),

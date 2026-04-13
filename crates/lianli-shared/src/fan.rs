@@ -43,10 +43,24 @@ pub enum FanSpeed {
 /// Reserved curve name used to represent motherboard RPM sync mode.
 pub const MB_SYNC_KEY: &str = "__mb_sync__";
 
+/// Prefix for MB sync with a specific hwmon PWM source.
+pub const MB_SYNC_PREFIX: &str = "__mb_sync__:";
+
 impl FanSpeed {
-    /// True if this speed represents motherboard RPM sync mode.
     pub fn is_mb_sync(&self) -> bool {
-        matches!(self, FanSpeed::Curve(name) if name == MB_SYNC_KEY)
+        match self {
+            FanSpeed::Curve(name) => name == MB_SYNC_KEY || name.starts_with(MB_SYNC_PREFIX),
+            _ => false,
+        }
+    }
+
+    pub fn mb_sync_source(&self) -> Option<&str> {
+        match self {
+            FanSpeed::Curve(name) if name.starts_with(MB_SYNC_PREFIX) => {
+                Some(&name[MB_SYNC_PREFIX.len()..])
+            }
+            _ => None,
+        }
     }
 }
 

@@ -991,6 +991,46 @@ fn wire_fan_callbacks(window: &MainWindow, _backend: &backend::BackendHandle, sh
             }
         });
     }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_fan_set_pwm_header(move |dev_id, slot, label| {
+            let dev_id = dev_id.to_string();
+            let slot = slot as usize;
+            let label = label.to_string();
+            let pwm_headers = lianli_shared::sensors::enumerate_pwm_headers();
+            // Match label prefix (before the " (XX%)" suffix)
+            let header_id = pwm_headers
+                .iter()
+                .find(|h| label.starts_with(&h.label))
+                .map(|h| h.id.clone())
+                .unwrap_or_default();
+            {
+                let mut state = shared.lock().unwrap();
+                if let Some(ref mut c) = state.config {
+                    let fc = c.fans.get_or_insert_with(|| FanConfig {
+                        speeds: vec![],
+                        update_interval_ms: 500,
+                    });
+                    if let Some(group) = fc
+                        .speeds
+                        .iter_mut()
+                        .find(|g| g.device_id.as_deref() == Some(&dev_id))
+                    {
+                        if slot < 4 {
+                            group.speeds[slot] = FanSpeed::Curve(format!(
+                                "{}{}",
+                                lianli_shared::fan::MB_SYNC_PREFIX,
+                                header_id
+                            ));
+                        }
+                    }
+                }
+            }
+            refresh_fan_ui(&weak, &shared);
+        });
+    }
 }
 
 fn wire_lcd_callbacks(
@@ -1676,7 +1716,8 @@ fn refresh_fan_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
             w.set_fan_speed_options(conversions::speed_options_model(&curves, true));
             w.set_config_dirty(true);
             let fc = fans.unwrap_or_default();
-            w.set_fan_groups(conversions::fan_groups_to_model(&fc, &devices));
+            let pwm_headers = lianli_shared::sensors::enumerate_pwm_headers();
+            w.set_fan_groups(conversions::fan_groups_to_model(&fc, &devices, &pwm_headers));
         }
     })
     .ok();

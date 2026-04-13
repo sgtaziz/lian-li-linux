@@ -59,6 +59,7 @@ export component MainWindow inherits Window {
     in property <[string]> curve-names: [];
     in property <[string]> fan-speed-options: [];
     in property <[string]> fan-sensor-options: [];
+    in property <[string]> fan-pwm-header-options: [];
     in property <int> fan-update-interval: 500;
 
     // Callbacks for Rust backend
@@ -113,6 +114,7 @@ export component MainWindow inherits Window {
     callback fan-point-removed(int, int);
     callback fan-set-slot-speed(string, int, string);
     callback fan-set-slot-pwm(string, int, int);
+    callback fan-set-pwm-header(string, int, string);
     callback fan-set-update-interval(int);
 
     HorizontalLayout {
@@ -165,6 +167,7 @@ export component MainWindow inherits Window {
                 curve-names: root.curve-names;
                 speed-options: root.fan-speed-options;
                 sensor-options: root.fan-sensor-options;
+                pwm-header-options: root.fan-pwm-header-options;
                 update-interval: root.fan-update-interval;
                 has-config: root.has-config;
                 add-curve => { root.fan-add-curve(); }
@@ -177,6 +180,7 @@ export component MainWindow inherits Window {
                 point-removed(cidx, pidx) => { root.fan-point-removed(cidx, pidx); }
                 set-slot-speed(dev-id, slot, val) => { root.fan-set-slot-speed(dev-id, slot, val); }
                 set-slot-pwm(dev-id, slot, pct) => { root.fan-set-slot-pwm(dev-id, slot, pct); }
+                set-pwm-header(dev-id, slot, val) => { root.fan-set-pwm-header(dev-id, slot, val); }
                 set-update-interval(ms) => { root.fan-set-update-interval(ms); }
                 save-config => { root.save-config(); }
             }

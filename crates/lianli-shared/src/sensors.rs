@@ -984,3 +984,63 @@ fn extract_mem_value(input: &str, target: &str) -> Option<f32> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     parts.get(1)?.parse::<f32>().ok()
 }
+
+#[derive(Debug, Clone)]
+pub struct PwmHeader {
+    pub id: String,
+    pub label: String,
+    pub path: PathBuf,
+}
+
+pub fn enumerate_pwm_headers() -> Vec<PwmHeader> {
+    let gpu_names = get_amd_gpu_names();
+    let mut headers = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/sys/class/hwmon") else {
+        return headers;
+    };
+    let mut mem_idx = 0usize;
+    let mut gfx_idx = 0usize;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let pci_id = dir
+            .join("device")
+            .read_link()
+            .ok()
+            .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()))
+            .unwrap_or_default()
+            .replace("0000:", "");
+        let (friendly, mi, gi) =
+            get_display_name(&dir, &pci_id, &gpu_names, mem_idx, gfx_idx);
+        mem_idx = mi;
+        gfx_idx = gi;
+        let chip_label = friendly.unwrap_or_else(|| {
+            std::fs::read_to_string(dir.join("name"))
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        });
+        for i in 1..=10 {
+            let pwm_path = dir.join(format!("pwm{i}"));
+            if !pwm_path.exists() {
+                break;
+            }
+            let hwmon = dir.file_name().unwrap_or_default().to_string_lossy();
+            let id = format!("{hwmon}/pwm{i}");
+            let label = format!("{chip_label} Fan{i}");
+            headers.push(PwmHeader {
+                id,
+                label,
+                path: pwm_path,
+            });
+        }
+    }
+    headers.sort_by(|a, b| a.id.cmp(&b.id));
+    headers
+}
+
+pub fn read_pwm_header(id: &str) -> Option<u8> {
+    let path = Path::new("/sys/class/hwmon").join(id);
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u8>().ok())
+}
