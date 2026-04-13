@@ -148,7 +148,12 @@ impl UsbTransport {
     /// Drain any remaining data from the read pipe.
     pub fn read_flush(&self) {
         let mut buf = [0u8; 512];
-        let _ = self.read(&mut buf, Duration::from_millis(1));
+        loop {
+            match self.read(&mut buf, Duration::from_millis(5)) {
+                Ok(n) if n > 0 => continue,
+                _ => break,
+            }
+        }
     }
 
     pub fn release(&self) {

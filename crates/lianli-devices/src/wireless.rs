@@ -9,7 +9,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// TX dongle VID:PID pairs (V1 and V2 hardware).
 const TX_IDS: [(u16, u16); 2] = [(0x0416, 0x8040), (0x1A86, 0xE304)];
@@ -449,6 +449,7 @@ impl WirelessController {
         let rx_arc = match open_any(&RX_IDS) {
             Ok(mut rx) => {
                 rx.detach_and_configure("RX")?;
+                rx.read_flush();
                 Some(Arc::new(Mutex::new(rx)))
             }
             Err(_) => {
@@ -540,6 +541,9 @@ impl WirelessController {
                 .context("sending TX reset")?;
         }
 
+        // Brief settle after TX reset before polling
+        thread::sleep(Duration::from_millis(500));
+
         self.video_mode_active.store(false, Ordering::Release);
         self.poll_stop.store(false, Ordering::SeqCst);
 
@@ -554,19 +558,43 @@ impl WirelessController {
         self.poll_thread = Some(thread::spawn(move || {
             let mut found_devices = false;
             let mut consecutive_errors = 0u32;
-            let mut first_success = false;
+            let mut consecutive_successes = 0u32;
+            let mut total_resets = 0u32;
+            const MAX_RESETS: u32 = 3;
             while !stop_flag.load(Ordering::SeqCst) {
                 if let Err(err) =
                     poll_and_discover(&rx, &discovered_devices, &mobo_pwm, &master_mac)
                 {
                     consecutive_errors += 1;
-                    if consecutive_errors <= 3 {
-                        warn!("RX polling error ({consecutive_errors}): {err:?}");
-                    } else if consecutive_errors == 4 {
-                        warn!("RX polling errors continuing, suppressing further logs");
+                    consecutive_successes = 0;
+                    info!("RX polling ({consecutive_errors}): {err:?}, continuing");
+                    if consecutive_errors >= 5 {
+                        total_resets += 1;
+                        if total_resets > MAX_RESETS {
+                            error!(
+                                "RX dongle unresponsive after {MAX_RESETS} resets, \
+                                 stopping wireless polling"
+                            );
+                            break;
+                        }
+                        warn!(
+                            "5 consecutive RX errors, sending RX reset ({total_resets}/{MAX_RESETS})"
+                        );
+                        let handle = rx.lock();
+                        let mut reset_cmd = vec![0u8; 64];
+                        reset_cmd[0] = 0x15; // USB_ResetAnother
+                        if handle.write(&reset_cmd, USB_TIMEOUT).is_ok() {
+                            let mut resp = [0u8; 64];
+                            let _ = handle.read(&mut resp, Duration::from_millis(2000));
+                        }
+                        drop(handle);
+                        thread::sleep(Duration::from_millis(500));
+                        consecutive_errors = 0;
+                        continue;
                     }
-                    // Short retry for initial discovery, then exponential backoff
-                    let backoff = if !first_success {
+                    let backoff = if consecutive_successes == 0
+                        && !discovery_signal.load(Ordering::Acquire)
+                    {
                         Duration::from_millis(200)
                     } else {
                         Duration::from_secs((1 << consecutive_errors.min(5)).min(30))
@@ -575,28 +603,32 @@ impl WirelessController {
                     continue;
                 }
                 consecutive_errors = 0;
-                if !first_success {
-                    first_success = true;
+                consecutive_successes += 1;
+                total_resets = 0;
+                if consecutive_successes >= 2 && !discovery_signal.load(Ordering::Acquire) {
                     discovery_signal.store(true, Ordering::Release);
                 }
                 if !found_devices && !discovered_devices.lock().is_empty() {
                     found_devices = true;
                 }
-                thread::sleep(Duration::from_millis(1000));
+                thread::sleep(Duration::from_millis(500));
             }
         }));
 
-        // Wait for first successful GetDev or timeout after 5s
+        // Wait for 2 consecutive successful GetDev responses (up to 5s)
+        // so the device list is reliably populated before creating controllers.
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while !discovery_done.load(Ordering::Acquire) {
+        loop {
+            if discovery_done.load(Ordering::Acquire) {
+                info!("Wireless discovery stable, proceeding with device list");
+                break;
+            }
             if std::time::Instant::now() >= deadline {
-                warn!("Wireless discovery timed out waiting for first successful GetDev");
+                warn!("Wireless discovery timed out (5s) — will retry in background");
                 break;
             }
             thread::sleep(Duration::from_millis(50));
         }
-        // Give one more poll cycle for device records to populate
-        thread::sleep(Duration::from_millis(1200));
         Ok(())
     }
 
@@ -852,9 +884,11 @@ impl WirelessController {
     pub fn set_fan_speeds_by_mac(&self, mac: &[u8; 6], fan_pwm: &[u8; 4]) -> Result<()> {
         let tx = self.tx.as_ref().context("TX device not connected")?;
 
-        let device = self
-            .discovered_devices
-            .lock()
+        let devices = self.discovered_devices.lock();
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+
+        let device = devices
             .iter()
             .find(|d| &d.mac == mac)
             .cloned()
@@ -863,15 +897,19 @@ impl WirelessController {
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
             ))?;
 
-        let master_mac = *self.master_mac.lock();
-        let master_ch = *self.master_channel.lock();
+        // Sequential 1-based index of bound devices (matches L-Connect's SyncPwm counter)
+        let seq_index = devices
+            .iter()
+            .filter(|d| d.master_mac == master_mac && d.device_type != 0xFF)
+            .position(|d| d.mac == *mac)
+            .map(|i| (i + 1) as u8)
+            .unwrap_or(1);
+
+        drop(devices);
 
         let mut pwm = *fan_pwm;
         apply_pwm_constraints(&mut pwm, &device);
 
-        // Compare against the device's REPORTED PWM (from RX poll), not what
-        // we last sent. If an RF packet was lost, the device still shows the
-        // old value and the delta triggers a re-send automatically.
         let needs_send = pwm
             .iter()
             .zip(device.current_pwm.iter())
@@ -884,13 +922,13 @@ impl WirelessController {
 
         // Build RF PWM packet (240 bytes)
         let mut rf_data = vec![0u8; RF_DATA_SIZE];
-        rf_data[0] = RF_SELECT; // RF_Select envelope command
-        rf_data[1] = RF_PWM_CMD; // PWM sub-command (0x10)
+        rf_data[0] = RF_SELECT;
+        rf_data[1] = RF_PWM_CMD;
         rf_data[2..8].copy_from_slice(&device.mac);
         rf_data[8..14].copy_from_slice(&master_mac);
         rf_data[14] = device.rx_type;
         rf_data[15] = master_ch;
-        rf_data[16] = device.list_index.wrapping_add(1); // 1-based slave index
+        rf_data[16] = seq_index;
         rf_data[17..21].copy_from_slice(&pwm);
 
         // Send as 4 USB packets (60-byte chunks)
@@ -1196,10 +1234,11 @@ fn poll_and_discover(
 ) -> Result<()> {
     // GetDev command: [0x10, page_number, ...pad...]
     let mut cmd = vec![0u8; 64];
-    cmd[0] = USB_CMD_SEND_RF; // GetDev uses the same command byte
+    cmd[0] = USB_CMD_SEND_RF;
     cmd[1] = 0x01; // Page 1
 
     let handle = rx.lock();
+    handle.read_flush();
     handle
         .write(&cmd, USB_TIMEOUT)
         .context("sending GetDev command")?;
@@ -1209,7 +1248,7 @@ fn poll_and_discover(
     match handle.read(&mut response, Duration::from_millis(200)) {
         Ok(len) if len >= 4 => {
             if response[0] != USB_CMD_SEND_RF {
-                warn!(
+                info!(
                     "GetDev: unexpected response 0x{:02x}, will retry",
                     response[0]
                 );
