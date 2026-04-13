@@ -44,6 +44,7 @@ const CMD_HANDSHAKE: u8 = 0x81;
 const CMD_GET_FIRMWARE: u8 = 0x86;
 const CMD_SET_PUMP_PWM: u8 = 0x8A;
 const CMD_SET_FAN_PWM: u8 = 0x8B;
+const CMD_UNKNOWN: u8 = 0x8E; // Don't know what this does, but know what it returns. Used for sync with buffer
 
 // B-Commands
 const CMD_LCD_CONTROL: u8 = 0x0C;
@@ -176,7 +177,7 @@ impl HydroShiftLcdController {
         match self.read_firmware_internal(INIT_READ_TIMEOUT_MS) {
             Ok(fw) => {
                 if let Some(ver) = parse_firmware_version(&fw) {
-                    if ver >= (1, 2) {
+                    if ver >= (1, 3) {
                         info!("  Firmware: {fw} (using 512-byte frame mode)");
                         self.use_c_command = true;
                     } else {
@@ -275,6 +276,8 @@ impl HydroShiftLcdController {
     }
 
     fn read_firmware_internal(&self, timeout_ms: i32) -> Result<String> {
+        self.sync_on_command(timeout_ms)?;
+
         let mut pkt = [0u8; A_PACKET_SIZE];
         pkt[0] = REPORT_ID_A;
         pkt[1] = CMD_GET_FIRMWARE;
@@ -284,7 +287,30 @@ impl HydroShiftLcdController {
         debug!("firmware request: wrote {written} bytes");
 
         let mut buf = [0u8; A_PACKET_SIZE];
-        let n = dev
+        let line1;
+
+        let mut n = dev
+            .read_timeout(&mut buf, timeout_ms)
+            .context("AIO LCD: read firmware")?;
+        if n == 0 {
+            debug!("Timeout while reading firmware info");
+            bail!("AIO LCD: no firmware response (timeout after {timeout_ms}ms)");
+        }
+        debug!(
+            "firmware response (1): {n} bytes, raw={:02x?}",
+            &buf[..n.min(64)]
+        );
+        let data_len = buf[5] as usize;
+        let data = &buf[A_HEADER_LEN..A_HEADER_LEN + data_len.min(58)];
+        line1 = String::from_utf8_lossy(data)
+            .trim_end_matches('\0')
+            .to_string();
+
+        debug!("As-String: {}",line1);
+
+        // Now read the second string
+
+        n = dev
             .read_timeout(&mut buf, timeout_ms)
             .context("AIO LCD: read firmware")?;
 
@@ -299,9 +325,11 @@ impl HydroShiftLcdController {
 
         let data_len = buf[5] as usize;
         let data = &buf[A_HEADER_LEN..A_HEADER_LEN + data_len.min(58)];
-        Ok(String::from_utf8_lossy(data)
+        let line2 = String::from_utf8_lossy(data)
             .trim_end_matches('\0')
-            .to_string())
+            .to_string();
+
+        Ok(format!("{}\n{}",line1,line2))
     }
 
     fn send_a_command(&self, cmd: u8, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
@@ -334,6 +362,59 @@ impl HydroShiftLcdController {
         }
 
         Ok(buf[..n].to_vec())
+    }
+
+    fn sync_on_command(&self, timeout_ms: i32) -> Result<()> {
+        // I need to empty the read buffer...read until timeout occurs
+        // I'm sending the command 0x01 0x8e: It will always return a payload of one single byte. If that single byte is 0x01, we are ready. If it is 0x02, then there is an additional response with payload size=1 and byte=0x01 (found out by experimenting, not by knowing)
+        // So the logic is: Send out 0x01 0x8e and read responses until a timeout occurs or you encounter a response as follows: 01, 8e, 00, 00, 00, 01, 01
+        let dev = self.device.lock();
+
+        let mut pkt = [0u8; A_PACKET_SIZE];
+        pkt[0] = REPORT_ID_A;
+        pkt[1] = CMD_UNKNOWN;
+
+        let written = dev.write(&pkt).context("AIO LCD: sync_on_command")?;
+        debug!("sync_on_command {CMD_UNKNOWN:#04x}: wrote {written} bytes");
+
+        let mut buf = [0u8; A_PACKET_SIZE];
+        let n = dev
+            .read_timeout(&mut buf, timeout_ms)
+            .context("AIO LCD: read A-response")?;
+
+        debug!(
+            "sync_on_command {CMD_UNKNOWN:#04x}: response {n} bytes, raw={:02x?}",
+            &buf[..n.min(64)]
+        );
+
+        if n == 0 {
+            bail!("AIO LCD: no response to sync_on_command {CMD_UNKNOWN:#04x} (timeout after {timeout_ms}ms)");
+        }
+
+        while buf[1]!=CMD_UNKNOWN || buf[6]!=0x01 {
+            debug!("Did not find correct response, continue reading with timeout_ms={}",timeout_ms);
+            buf.fill(0);
+            let n = dev.read_timeout(&mut buf, timeout_ms).context("AIO LCD: sync_on_command")?;
+
+            debug!(
+                "sync_on_command {CMD_UNKNOWN:#04x}: response {n} bytes, raw={:02x?}",
+                &buf[..n.min(64)]
+            );
+
+            if n == 0 {
+                bail!("AIO LCD: no response to sync_on_command {CMD_UNKNOWN:#04x} (timeout after {timeout_ms}ms)");
+            }
+
+            let data_len = buf[5] as usize;
+            let data = &buf[A_HEADER_LEN..A_HEADER_LEN + data_len.min(58)];
+            
+            debug!("As-String: {}",String::from_utf8_lossy(data)
+                .trim_end_matches('\0')
+                .to_string());
+        }
+
+        debug!("Ok, found correct response. Assuming we are in-sync...");
+        Ok(())
     }
 
     fn send_b_command(&self, cmd: u8, data: &[u8]) -> Result<()> {
