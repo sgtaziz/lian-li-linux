@@ -148,7 +148,8 @@ impl TlLcdDevice {
 
         // Response 1: version string
         let mut buf = [0u8; 64];
-        let n = dev.read_timeout(&mut buf, READ_TIMEOUT_MS)
+        let n = dev
+            .read_timeout(&mut buf, READ_TIMEOUT_MS)
             .context("TLLCD: read firmware")?;
         if n == 0 {
             bail!("TLLCD: no firmware response");

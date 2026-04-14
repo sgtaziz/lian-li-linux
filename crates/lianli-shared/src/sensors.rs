@@ -1009,8 +1009,7 @@ pub fn enumerate_pwm_headers() -> Vec<PwmHeader> {
             .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()))
             .unwrap_or_default()
             .replace("0000:", "");
-        let (friendly, mi, gi) =
-            get_display_name(&dir, &pci_id, &gpu_names, mem_idx, gfx_idx);
+        let (friendly, mi, gi) = get_display_name(&dir, &pci_id, &gpu_names, mem_idx, gfx_idx);
         mem_idx = mi;
         gfx_idx = gi;
         let chip_label = friendly.unwrap_or_else(|| {

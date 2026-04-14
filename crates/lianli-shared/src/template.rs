@@ -131,6 +131,10 @@ pub enum WidgetKind {
         background_color: [u8; 4],
         #[serde(default)]
         ranges: Vec<SensorRange>,
+        #[serde(default)]
+        bg_corner_radius: f32,
+        #[serde(default)]
+        value_corner_radius: f32,
     },
     VerticalBar {
         source: SensorSourceConfig,

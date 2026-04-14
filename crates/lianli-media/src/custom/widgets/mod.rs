@@ -122,6 +122,8 @@ pub(super) fn draw_widget(
             inner_radius_pct,
             background_color,
             ranges,
+            bg_corner_radius,
+            value_corner_radius,
             ..
         } => {
             let raw = state
@@ -139,6 +141,8 @@ pub(super) fn draw_widget(
                 *inner_radius_pct,
                 *background_color,
                 ranges,
+                *bg_corner_radius,
+                *value_corner_radius,
             );
         }
         WidgetKind::VerticalBar {

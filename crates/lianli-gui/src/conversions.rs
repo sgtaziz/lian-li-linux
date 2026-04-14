@@ -443,7 +443,10 @@ pub fn speed_options_model(curves: &[FanCurve], _has_mb_sync: bool) -> ModelRc<S
     ModelRc::new(VecModel::from(items))
 }
 
-fn fan_speed_to_slot(s: &FanSpeed, pwm_headers: &[lianli_shared::sensors::PwmHeader]) -> super::FanSpeedSlot {
+fn fan_speed_to_slot(
+    s: &FanSpeed,
+    pwm_headers: &[lianli_shared::sensors::PwmHeader],
+) -> super::FanSpeedSlot {
     if s.is_mb_sync() {
         let source_id = s.mb_sync_source().unwrap_or("");
         let label = pwm_headers

@@ -1717,7 +1717,11 @@ fn refresh_fan_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
             w.set_config_dirty(true);
             let fc = fans.unwrap_or_default();
             let pwm_headers = lianli_shared::sensors::enumerate_pwm_headers();
-            w.set_fan_groups(conversions::fan_groups_to_model(&fc, &devices, &pwm_headers));
+            w.set_fan_groups(conversions::fan_groups_to_model(
+                &fc,
+                &devices,
+                &pwm_headers,
+            ));
         }
     })
     .ok();

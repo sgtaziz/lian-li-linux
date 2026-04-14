@@ -144,11 +144,13 @@ impl Galahad2TrinityController {
         let mut pkt = [0u8; PACKET_SIZE];
         pkt[0] = REPORT_ID;
         pkt[1] = CMD_GET_FIRMWARE;
-        dev.write(&pkt).context("Galahad2 Trinity: write firmware request")?;
+        dev.write(&pkt)
+            .context("Galahad2 Trinity: write firmware request")?;
 
         // Response 1: version string
         let mut buf = [0u8; PACKET_SIZE];
-        let n = dev.read_timeout(&mut buf, READ_TIMEOUT_MS)
+        let n = dev
+            .read_timeout(&mut buf, READ_TIMEOUT_MS)
             .context("Galahad2 Trinity: read firmware")?;
         if n == 0 {
             bail!("Galahad2 Trinity: no firmware response");

@@ -56,7 +56,7 @@ pub(in super::super) fn draw(
         }
 
         let tick = Rgba(tick_color);
-        if tick_count > 0 {
+        if tick_count > 0 && tick[3] > 0 {
             for i in 0..=tick_count {
                 let t = i as f32 / tick_count as f32;
                 let angle = (start_angle + sweep_angle * t).to_radians();

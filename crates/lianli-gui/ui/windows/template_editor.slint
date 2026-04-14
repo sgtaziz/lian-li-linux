@@ -43,13 +43,17 @@ export struct EditorWidget {
 
     start-angle: float,
     sweep-angle: float,
-    inner-radius-pct: float,
+    ring-thickness-pct: int,
 
     bg-r: int,
     bg-g: int,
     bg-b: int,
     bg-a: int,
     tick-count: int,
+
+    corner-radius: int,
+    bg-corner-radius: int,
+    value-corner-radius: int,
 
     show-gauge: bool,
     show-needle: bool,
@@ -174,7 +178,7 @@ component LabeledSpinBox inherits Rectangle {
             font-size: 11px;
             color: Theme.text-secondary;
             vertical-alignment: center;
-            width: 64px;
+            width: 124px;
         }
         spin := SpinBox {
             horizontal-stretch: 1;
@@ -202,7 +206,7 @@ component LabeledLineEdit inherits Rectangle {
             font-size: 11px;
             color: Theme.text-secondary;
             vertical-alignment: center;
-            width: 64px;
+            width: 124px;
         }
         line := LineEdit {
             horizontal-stretch: 1;
@@ -267,7 +271,7 @@ component LabeledComboValue inherits Rectangle {
             font-size: 11px;
             color: Theme.text-secondary;
             vertical-alignment: center;
-            width: 64px;
+            width: 124px;
         }
         combo := ComboBox {
             horizontal-stretch: 1;
@@ -295,7 +299,7 @@ component LabeledComboIndex inherits Rectangle {
             font-size: 11px;
             color: Theme.text-secondary;
             vertical-alignment: center;
-            width: 64px;
+            width: 124px;
         }
         combo := ComboBox {
             horizontal-stretch: 1;
@@ -883,6 +887,40 @@ export component TemplateEditorWindow inherits Window {
                                     maximum: 360;
                                     edited(v) => { root.widget-field(root.selected-index, "sweep_angle", v); }
                                 }
+                            }
+
+                            if root.selected-widget.kind == "radial_gauge": VerticalLayout {
+                                spacing: 6px;
+                                LabeledSpinBox {
+                                    label: "Ring thickness %";
+                                    value: root.selected-widget.ring-thickness-pct;
+                                    minimum: 1;
+                                    maximum: 100;
+                                    edited(v) => { root.widget-field(root.selected-index, "ring_thickness_pct", v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Bg corner radius";
+                                    value: root.selected-widget.bg-corner-radius;
+                                    minimum: 0;
+                                    maximum: 200;
+                                    edited(v) => { root.widget-field(root.selected-index, "bg_corner_radius", v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Value corner radius";
+                                    value: root.selected-widget.value-corner-radius;
+                                    minimum: 0;
+                                    maximum: 200;
+                                    edited(v) => { root.widget-field(root.selected-index, "value_corner_radius", v); }
+                                }
+                            }
+
+                            if root.selected-widget.kind == "vertical_bar"
+                               || root.selected-widget.kind == "horizontal_bar": LabeledSpinBox {
+                                label: "Corner radius";
+                                value: root.selected-widget.corner-radius;
+                                minimum: 0;
+                                maximum: 200;
+                                edited(v) => { root.widget-field(root.selected-index, "corner_radius", v); }
                             }
 
                             if root.selected-widget.kind == "speedometer": VerticalLayout {

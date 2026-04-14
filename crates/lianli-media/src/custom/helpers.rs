@@ -3,7 +3,8 @@
 use crate::common::{get_exact_text_metrics, MediaError};
 use image::imageops::FilterType;
 use image::{imageops, DynamicImage, Rgba, RgbaImage};
-use imageproc::drawing::draw_text_mut;
+use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
+use imageproc::rect::Rect;
 use lianli_shared::media::{SensorRange, SensorSourceConfig};
 use lianli_shared::sensors::{resolve_sensor, ResolvedSensor, SensorInfo};
 use lianli_shared::template::{FontRef, ImageFit, TextAlign, Widget, WidgetKind};
@@ -203,6 +204,9 @@ pub(super) fn draw_annulus(
     sweep_deg: f32,
     color: Rgba<u8>,
 ) {
+    if color[3] == 0 {
+        return;
+    }
     let r_in_sq = r_in * r_in;
     let r_out_sq = r_out * r_out;
     let start_rad = start_deg.to_radians();
@@ -240,8 +244,107 @@ pub(super) fn draw_annulus(
     }
 }
 
+pub(super) fn fill_rounded_rect(
+    img: &mut RgbaImage,
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    radius: f32,
+    color: Rgba<u8>,
+) {
+    if color[3] == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let max_r = (w.min(h) as f32 / 2.0).floor();
+    let r = radius.clamp(0.0, max_r);
+    if r <= 0.5 {
+        draw_filled_rect_mut(img, Rect::at(x, y).of_size(w, h), color);
+        return;
+    }
+    let (iw, ih) = (img.width() as i32, img.height() as i32);
+    let x0 = x.max(0);
+    let y0 = y.max(0);
+    let x1 = (x + w as i32).min(iw);
+    let y1 = (y + h as i32).min(ih);
+    let inner_x0 = x as f32 + r;
+    let inner_y0 = y as f32 + r;
+    let inner_x1 = x as f32 + w as f32 - 1.0 - r;
+    let inner_y1 = y as f32 + h as f32 - 1.0 - r;
+    let r_sq = r * r;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let fx = px as f32;
+            let fy = py as f32;
+            let cx = fx.clamp(inner_x0, inner_x1);
+            let cy = fy.clamp(inner_y0, inner_y1);
+            let dx = fx - cx;
+            let dy = fy - cy;
+            if dx * dx + dy * dy <= r_sq {
+                img.put_pixel(px as u32, py as u32, color);
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fill_rect_clipped_rounded(
+    img: &mut RgbaImage,
+    rect_x: i32,
+    rect_y: i32,
+    rect_w: u32,
+    rect_h: u32,
+    clip_x: i32,
+    clip_y: i32,
+    clip_w: u32,
+    clip_h: u32,
+    clip_radius: f32,
+    color: Rgba<u8>,
+) {
+    if color[3] == 0 || rect_w == 0 || rect_h == 0 || clip_w == 0 || clip_h == 0 {
+        return;
+    }
+    let max_r = (clip_w.min(clip_h) as f32 / 2.0).floor();
+    let r = clip_radius.clamp(0.0, max_r);
+    let (iw, ih) = (img.width() as i32, img.height() as i32);
+    let x0 = rect_x.max(clip_x).max(0);
+    let y0 = rect_y.max(clip_y).max(0);
+    let x1 = (rect_x + rect_w as i32).min(clip_x + clip_w as i32).min(iw);
+    let y1 = (rect_y + rect_h as i32).min(clip_y + clip_h as i32).min(ih);
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    if r <= 0.5 {
+        let w = (x1 - x0) as u32;
+        let h = (y1 - y0) as u32;
+        draw_filled_rect_mut(img, Rect::at(x0, y0).of_size(w, h), color);
+        return;
+    }
+    let inner_x0 = clip_x as f32 + r;
+    let inner_y0 = clip_y as f32 + r;
+    let inner_x1 = clip_x as f32 + clip_w as f32 - 1.0 - r;
+    let inner_y1 = clip_y as f32 + clip_h as f32 - 1.0 - r;
+    let r_sq = r * r;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let fx = px as f32;
+            let fy = py as f32;
+            let cx = fx.clamp(inner_x0, inner_x1);
+            let cy = fy.clamp(inner_y0, inner_y1);
+            let dx = fx - cx;
+            let dy = fy - cy;
+            if dx * dx + dy * dy <= r_sq {
+                img.put_pixel(px as u32, py as u32, color);
+            }
+        }
+    }
+}
+
 pub(super) fn blit_with_opacity(dst: &mut RgbaImage, src: &RgbaImage, opacity: f32) {
     let o = opacity.clamp(0.0, 1.0);
+    if o <= 0.0 {
+        return;
+    }
     if o >= 0.999 && src.width() == dst.width() && src.height() == dst.height() {
         imageops::overlay(dst, src, 0, 0);
         return;
@@ -272,7 +375,7 @@ pub(super) fn draw_text_widget(
     ww: u32,
     wh: u32,
 ) {
-    if text.is_empty() {
+    if text.is_empty() || color[3] == 0 {
         return;
     }
     let scale = Scale::uniform(size.max(1.0));

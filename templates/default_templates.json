@@ -46,6 +46,22 @@
           "sha256": "cdf1109db93d2fdde6f8b3c00b501a721e153e58b781475c537e03e9bed6f8d6"
         }
       ]
+    },
+    {
+      "id": "sensor_gauge",
+      "name": "Sensor Gauge",
+      "description": "Single-sensor radial gauge matching the legacy Sensor media type.",
+      "author": "sgtaziz",
+      "min_daemon_version": "0.3.4",
+      "folder": "sensor_gauge",
+      "template_file": "template.json",
+      "template_sha256": "1bfec2a0479b771e6ad79abaad40e8a74be38c2d61b7b177920b986c5d312475",
+      "preview": "preview.png",
+      "preview_sha256": "aa1538a601b782e567c8ca24c5852ac33c658a9ad4cb4c3f4143967dbccb0ba8",
+      "base_width": 400,
+      "base_height": 400,
+      "rotated": false,
+      "files": []
     }
   ]
 }

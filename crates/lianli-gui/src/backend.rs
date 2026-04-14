@@ -338,7 +338,9 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 let fan_cfg = config.fans.clone().unwrap_or_default();
                 let pwm_headers = lianli_shared::sensors::enumerate_pwm_headers();
                 w.set_fan_groups(conversions::fan_groups_to_model(
-                    &fan_cfg, &devices, &pwm_headers,
+                    &fan_cfg,
+                    &devices,
+                    &pwm_headers,
                 ));
 
                 // PWM header options for MB Sync dropdown
@@ -351,9 +353,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                         slint::SharedString::from(format!("{} ({}%)", h.label, pct))
                     })
                     .collect();
-                w.set_fan_pwm_header_options(slint::ModelRc::new(
-                    slint::VecModel::from(pwm_opts),
-                ));
+                w.set_fan_pwm_header_options(slint::ModelRc::new(slint::VecModel::from(pwm_opts)));
 
                 // RGB devices
                 let rgb_model = conversions::rgb_devices_to_model(&rgb_caps, &config, &rgb_presets);

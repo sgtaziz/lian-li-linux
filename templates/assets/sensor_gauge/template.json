@@ -1,0 +1,88 @@
+{
+  "id": "sensor_gauge",
+  "name": "Sensor Gauge",
+  "base_width": 400,
+  "base_height": 400,
+  "rotated": false,
+  "background": {
+    "type": "color",
+    "rgb": [0, 0, 0, 255]
+  },
+  "widgets": [
+    {
+      "id": "gauge",
+      "x": 200,
+      "y": 200,
+      "width": 360,
+      "height": 360,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.778,
+        "background_color": [0, 0, 0, 255],
+        "bg_corner_radius": 20,
+        "value_corner_radius": 20,
+        "ranges": [
+          { "max": 50, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 80, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      }
+    },
+    {
+      "id": "label",
+      "x": 200,
+      "y": 76,
+      "width": 200,
+      "height": 50,
+      "kind": {
+        "type": "label",
+        "text": "CPU",
+        "font": { "path": null },
+        "font_size": 40,
+        "color": [255, 255, 255, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "value",
+      "x": 200,
+      "y": 182,
+      "width": 280,
+      "height": 200,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "",
+        "font": { "path": null },
+        "font_size": 180,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "unit",
+      "x": 200,
+      "y": 296,
+      "width": 100,
+      "height": 50,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": { "path": null },
+        "font_size": 40,
+        "color": [255, 255, 255, 255],
+        "align": "center"
+      }
+    }
+  ]
+}

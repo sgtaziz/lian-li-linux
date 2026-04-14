@@ -616,7 +616,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
         value_max: 100.0,
         start_angle: 0.0,
         sweep_angle: 270.0,
-        inner_radius_pct: 0.78,
+        ring_thickness_pct: 22,
         bg_r: 40,
         bg_g: 40,
         bg_b: 40,
@@ -643,6 +643,9 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
         image_path: SharedString::default(),
         opacity: 1.0,
         fps: w.fps.unwrap_or(30.0),
+        corner_radius: 0,
+        bg_corner_radius: 0,
+        value_corner_radius: 0,
     };
     match &w.kind {
         WidgetKind::Label {
@@ -695,6 +698,8 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             sweep_angle,
             inner_radius_pct,
             background_color,
+            bg_corner_radius,
+            value_corner_radius,
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
@@ -703,17 +708,22 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             out.value_max = *value_max;
             out.start_angle = *start_angle;
             out.sweep_angle = *sweep_angle;
-            out.inner_radius_pct = *inner_radius_pct;
+            out.ring_thickness_pct = ((1.0 - inner_radius_pct.clamp(0.0, 0.99)) * 100.0)
+                .round()
+                .clamp(1.0, 100.0) as i32;
             out.bg_r = background_color[0] as i32;
             out.bg_g = background_color[1] as i32;
             out.bg_b = background_color[2] as i32;
             out.bg_a = background_color[3] as i32;
+            out.bg_corner_radius = bg_corner_radius.max(0.0).round() as i32;
+            out.value_corner_radius = value_corner_radius.max(0.0).round() as i32;
         }
         WidgetKind::VerticalBar {
             source,
             value_min,
             value_max,
             background_color,
+            corner_radius,
             ..
         }
         | WidgetKind::HorizontalBar {
@@ -721,6 +731,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             value_min,
             value_max,
             background_color,
+            corner_radius,
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
@@ -731,6 +742,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             out.bg_g = background_color[1] as i32;
             out.bg_b = background_color[2] as i32;
             out.bg_a = background_color[3] as i32;
+            out.corner_radius = corner_radius.round() as i32;
         }
         WidgetKind::Speedometer {
             source,
@@ -850,6 +862,8 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             inner_radius_pct: 0.78,
             background_color: [40, 40, 40, 255],
             ranges: default_ranges(),
+            bg_corner_radius: 0.0,
+            value_corner_radius: 0.0,
         },
         "vertical_bar" => WidgetKind::VerticalBar {
             source: SensorSourceConfig::CpuUsage,
@@ -1073,9 +1087,11 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             value_max,
             start_angle,
             sweep_angle,
-            inner_radius_pct: _,
+            inner_radius_pct,
             background_color,
             ranges: _,
+            bg_corner_radius,
+            value_corner_radius,
         } => match field {
             "source" => {
                 if let Some(new) = parse_sensor_source(val, sensors) {
@@ -1111,10 +1127,25 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
                     *sweep_angle = v;
                 }
             }
+            "ring_thickness_pct" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *inner_radius_pct = 1.0 - (v.clamp(1, 100) as f32) / 100.0;
+                }
+            }
             "bg_r" => background_color[0] = parse_u8(val),
             "bg_g" => background_color[1] = parse_u8(val),
             "bg_b" => background_color[2] = parse_u8(val),
             "bg_a" => background_color[3] = parse_u8(val),
+            "bg_corner_radius" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *bg_corner_radius = v.max(0.0);
+                }
+            }
+            "value_corner_radius" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *value_corner_radius = v.max(0.0);
+                }
+            }
             _ => {}
         },
         WidgetKind::VerticalBar {
@@ -1122,6 +1153,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             value_min,
             value_max,
             background_color,
+            corner_radius,
             ..
         }
         | WidgetKind::HorizontalBar {
@@ -1129,6 +1161,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             value_min,
             value_max,
             background_color,
+            corner_radius,
             ..
         } => match field {
             "source" => {
@@ -1159,6 +1192,11 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "bg_g" => background_color[1] = parse_u8(val),
             "bg_b" => background_color[2] = parse_u8(val),
             "bg_a" => background_color[3] = parse_u8(val),
+            "corner_radius" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *corner_radius = v.max(0.0);
+                }
+            }
             _ => {}
         },
         WidgetKind::Speedometer {
@@ -1557,7 +1595,7 @@ fn blank_editor_widget() -> EditorWidget {
         value_max: 100.0,
         start_angle: 0.0,
         sweep_angle: 270.0,
-        inner_radius_pct: 0.78,
+        ring_thickness_pct: 22,
         bg_r: 40,
         bg_g: 40,
         bg_b: 40,
@@ -1584,6 +1622,9 @@ fn blank_editor_widget() -> EditorWidget {
         image_path: SharedString::default(),
         opacity: 1.0,
         fps: 30.0,
+        corner_radius: 0,
+        bg_corner_radius: 0,
+        value_corner_radius: 0,
     }
 }
 

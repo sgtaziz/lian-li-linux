@@ -21,7 +21,9 @@ pub(in super::super) fn draw(
 ) {
     let (w, h) = (sub.width(), sub.height());
     let bg = Rgba(background_color);
-    draw_filled_rect_mut(sub, Rect::at(0, 0).of_size(w, h), bg);
+    if bg[3] > 0 {
+        draw_filled_rect_mut(sub, Rect::at(0, 0).of_size(w, h), bg);
+    }
 
     let usage = SysSensor::get_core_usage();
     let num_cores = usage.len().max(1);

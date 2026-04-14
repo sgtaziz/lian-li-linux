@@ -286,7 +286,8 @@ impl HydroShiftLcdController {
         let mut pkt = vec![0u8; B_PACKET_SIZE];
         pkt[0] = REPORT_ID_B;
         pkt[1] = CMD_LCD_AVAILABLE;
-        dev.write(&pkt).context("AIO LCD: write LCD available check")?;
+        dev.write(&pkt)
+            .context("AIO LCD: write LCD available check")?;
 
         let mut buf = vec![0u8; B_PACKET_SIZE];
         let n = dev
@@ -359,10 +360,7 @@ impl HydroShiftLcdController {
                 bail!("AIO LCD: no firmware response (timeout after {timeout_ms}ms)");
             }
 
-            debug!(
-                "firmware read: {n} bytes, cmd={:#04x}",
-                buf[1]
-            );
+            debug!("firmware read: {n} bytes, cmd={:#04x}", buf[1]);
 
             if buf[1] == CMD_GET_FIRMWARE {
                 let data_len = buf[5] as usize;
