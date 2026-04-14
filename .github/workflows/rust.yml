@@ -26,7 +26,10 @@ jobs:
           libudev-dev \
           libusb-1.0-0-dev \
           libfontconfig-dev \
-          pkg-config
+          pkg-config \
+          nasm \
+          libjpeg-turbo8 \
+          libjpeg-turbo8-dev
 
     - name: Build
       run: cargo build --verbose
