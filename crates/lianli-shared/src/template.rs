@@ -98,6 +98,8 @@ pub enum WidgetKind {
         color: [u8; 4],
         #[serde(default)]
         align: TextAlign,
+        #[serde(default)]
+        letter_spacing: f32,
     },
     ValueText {
         source: SensorSourceConfig,
@@ -118,6 +120,8 @@ pub enum WidgetKind {
         value_max: f32,
         #[serde(default)]
         ranges: Vec<SensorRange>,
+        #[serde(default)]
+        letter_spacing: f32,
     },
     RadialGauge {
         source: SensorSourceConfig,

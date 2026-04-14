@@ -76,6 +76,7 @@ pub(super) fn draw_widget(
             font_size,
             color,
             align,
+            letter_spacing,
         } => {
             let f = resolve_font(font, fonts, default_font);
             label::draw(
@@ -87,6 +88,7 @@ pub(super) fn draw_widget(
                 *align,
                 ww,
                 wh,
+                *letter_spacing * uniform_scale,
             );
         }
         WidgetKind::ValueText {
@@ -97,6 +99,7 @@ pub(super) fn draw_widget(
             value_min,
             value_max,
             ranges,
+            letter_spacing,
             ..
         } => {
             let f = resolve_font(font, fonts, default_font);
@@ -112,6 +115,7 @@ pub(super) fn draw_widget(
                 ranges,
                 ww,
                 wh,
+                *letter_spacing * uniform_scale,
             );
         }
         WidgetKind::RadialGauge {

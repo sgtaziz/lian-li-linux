@@ -21,6 +21,7 @@ pub(in super::super) fn draw(
     ranges: &[SensorRange],
     ww: u32,
     wh: u32,
+    letter_spacing: f32,
 ) {
     let text = state.last_render_text.clone().unwrap_or_default();
     if text.is_empty() {
@@ -37,5 +38,15 @@ pub(in super::super) fn draw(
         let u = unit_interval(raw, value_min, value_max);
         range_color(ranges, u).0
     };
-    draw_text_widget(sub, &text, font, size, resolved_color, align, ww, wh);
+    draw_text_widget(
+        sub,
+        &text,
+        font,
+        size,
+        resolved_color,
+        align,
+        ww,
+        wh,
+        letter_spacing,
+    );
 }

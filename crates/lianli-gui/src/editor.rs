@@ -646,6 +646,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
         corner_radius: 0,
         bg_corner_radius: 0,
         value_corner_radius: 0,
+        letter_spacing: 0,
     };
     match &w.kind {
         WidgetKind::Label {
@@ -654,6 +655,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             font_size,
             color,
             align,
+            letter_spacing,
         } => {
             out.text = SharedString::from(text.as_str());
             out.font_name = SharedString::from(font_ref_to_label(font));
@@ -663,6 +665,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             out.color_b = color[2] as i32;
             out.color_a = color[3] as i32;
             out.align = SharedString::from(text_align_name(*align));
+            out.letter_spacing = letter_spacing.round() as i32;
         }
         WidgetKind::ValueText {
             source,
@@ -674,6 +677,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             align,
             value_min,
             value_max,
+            letter_spacing,
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
@@ -689,6 +693,7 @@ fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidget {
             out.align = SharedString::from(text_align_name(*align));
             out.value_min = *value_min;
             out.value_max = *value_max;
+            out.letter_spacing = letter_spacing.round() as i32;
         }
         WidgetKind::RadialGauge {
             source,
@@ -840,6 +845,7 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             font_size: 32.0,
             color: [255, 255, 255, 255],
             align: TextAlign::Center,
+            letter_spacing: 0.0,
         },
         "value_text" => WidgetKind::ValueText {
             source: SensorSourceConfig::CpuUsage,
@@ -852,6 +858,7 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             value_min: 0.0,
             value_max: 100.0,
             ranges: default_ranges(),
+            letter_spacing: 0.0,
         },
         "radial_gauge" => WidgetKind::RadialGauge {
             source: SensorSourceConfig::CpuUsage,
@@ -922,6 +929,7 @@ fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) -> Widget {
             font_size: 32.0,
             color: [255, 255, 255, 255],
             align: TextAlign::Center,
+            letter_spacing: 0.0,
         },
     };
     Widget {
@@ -1014,6 +1022,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             font_size,
             color,
             align,
+            letter_spacing,
         } => match field {
             "text" => *text = val.to_string(),
             "font" => *font = label_to_font_ref(val),
@@ -1027,6 +1036,11 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "color_b" => color[2] = parse_u8(val),
             "color_a" => color[3] = parse_u8(val),
             "align" => *align = parse_align(val),
+            "letter_spacing" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *letter_spacing = v;
+                }
+            }
             _ => {}
         },
         WidgetKind::ValueText {
@@ -1039,6 +1053,7 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             align,
             value_min,
             value_max,
+            letter_spacing,
             ..
         } => match field {
             "text" => {}
@@ -1077,6 +1092,11 @@ fn apply_kind_field(kind: &mut WidgetKind, field: &str, val: &str, sensors: &[Se
             "value_max" => {
                 if let Ok(v) = val.parse() {
                     *value_max = v;
+                }
+            }
+            "letter_spacing" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *letter_spacing = v;
                 }
             }
             _ => {}
@@ -1622,6 +1642,7 @@ fn blank_editor_widget() -> EditorWidget {
         image_path: SharedString::default(),
         opacity: 1.0,
         fps: 30.0,
+        letter_spacing: 0,
         corner_radius: 0,
         bg_corner_radius: 0,
         value_corner_radius: 0,

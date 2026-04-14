@@ -15,6 +15,7 @@ pub(in super::super) fn draw(
     align: TextAlign,
     ww: u32,
     wh: u32,
+    letter_spacing: f32,
 ) {
-    draw_text_widget(sub, text, font, size, color, align, ww, wh);
+    draw_text_widget(sub, text, font, size, color, align, ww, wh, letter_spacing);
 }

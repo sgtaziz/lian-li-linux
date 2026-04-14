@@ -54,6 +54,7 @@ export struct EditorWidget {
     corner-radius: int,
     bg-corner-radius: int,
     value-corner-radius: int,
+    letter-spacing: int,
 
     show-gauge: bool,
     show-needle: bool,
@@ -820,6 +821,13 @@ export component TemplateEditorWindow inherits Window {
                                     b: root.selected-widget.color-b;
                                     a: root.selected-widget.color-a;
                                     edited(ch, v) => { root.widget-field(root.selected-index, "color_" + ch, v); }
+                                }
+                                LabeledSpinBox {
+                                    label: "Letter spacing";
+                                    value: root.selected-widget.letter-spacing;
+                                    minimum: -20;
+                                    maximum: 80;
+                                    edited(v) => { root.widget-field(root.selected-index, "letter_spacing", v); }
                                 }
                             }
 
