@@ -540,7 +540,10 @@ pub fn open(
     handle.window.set_status_message(SharedString::default());
     handle.window.set_status_is_error(false);
 
-    let tpl = initial.unwrap_or_else(crate::make_blank_template);
+    let tpl = initial.unwrap_or_else(|| {
+        let existing = shared.lock().unwrap().lcd_templates.clone();
+        crate::make_blank_template(&existing)
+    });
     set_editing(&handle.state, tpl, lcd_index);
 
     let sensors = shared.lock().unwrap().available_sensors.clone();

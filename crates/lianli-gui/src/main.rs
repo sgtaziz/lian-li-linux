@@ -1550,10 +1550,12 @@ pub(crate) fn generate_template_id(prefix: &str) -> String {
     format!("{prefix}-{:x}", nanos)
 }
 
-pub(crate) fn make_blank_template() -> lianli_shared::template::LcdTemplate {
+pub(crate) fn make_blank_template(
+    existing: &[lianli_shared::template::LcdTemplate],
+) -> lianli_shared::template::LcdTemplate {
     lianli_shared::template::LcdTemplate {
         id: generate_template_id("user"),
-        name: "New Template".to_string(),
+        name: unique_template_name("New Template", existing),
         base_width: 480,
         base_height: 480,
         background: lianli_shared::template::TemplateBackground::Color {
@@ -1563,6 +1565,23 @@ pub(crate) fn make_blank_template() -> lianli_shared::template::LcdTemplate {
         rotated: false,
         target_device: None,
     }
+}
+
+pub(crate) fn unique_template_name(
+    base: &str,
+    existing: &[lianli_shared::template::LcdTemplate],
+) -> String {
+    let in_use = |candidate: &str| existing.iter().any(|t| t.name == candidate);
+    if !in_use(base) {
+        return base.to_string();
+    }
+    for n in 2..u32::MAX {
+        let candidate = format!("{base} {n}");
+        if !in_use(&candidate) {
+            return candidate;
+        }
+    }
+    base.to_string()
 }
 
 fn duplicate_current_template(shared: &Shared, idx: usize) {
