@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 lianli-shared = { path = "../lianli-shared" }
 image = { workspace = true }
+turbojpeg = { workspace = true }
 rusttype = { workspace = true }
 tempfile = { workspace = true }
 anyhow = { workspace = true }

@@ -32,6 +32,7 @@ des = "0.8"
 
 # Media
 image = { version = "0.24", features = ["jpeg", "png", "bmp", "gif"] }
+turbojpeg = "1.4"
 rusttype = "0.9"
 tempfile = "3.10"
 imageproc = "0.23"

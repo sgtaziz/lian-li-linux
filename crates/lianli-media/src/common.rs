@@ -28,12 +28,22 @@ pub enum MediaError {
 
 pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
     let final_image = apply_device_rotation(image, screen.device_rotation);
-    let mut buf = Vec::new();
-    {
-        let mut encoder =
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, screen.jpeg_quality);
-        encoder.encode_image(&final_image)?;
-    }
+    let width = final_image.width() as usize;
+    let height = final_image.height() as usize;
+    let tj_image = turbojpeg::Image {
+        pixels: final_image.as_raw().as_slice(),
+        width,
+        pitch: width * 3,
+        height,
+        format: turbojpeg::PixelFormat::RGB,
+    };
+    let buf = turbojpeg::compress(
+        tj_image,
+        screen.jpeg_quality as i32,
+        turbojpeg::Subsamp::Sub2x2,
+    )
+    .map_err(|e| MediaError::ImageError(format!("turbojpeg encode: {e}")))?
+    .to_vec();
     if buf.len() > screen.max_payload {
         return Err(MediaError::PayloadTooLarge { size: buf.len() });
     }
