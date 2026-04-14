@@ -214,6 +214,7 @@ pub fn lcd_to_slint(
 
         template_id: SharedString::from(lcd.template_id.as_deref().unwrap_or("")),
         template_name: SharedString::default(),
+        template_preview: slint::Image::default(),
     }
 }
 
@@ -230,6 +231,15 @@ pub fn lcd_entries_to_model(
             if let Some(tid) = &l.template_id {
                 if let Some(tpl) = templates.iter().find(|t| &t.id == tid) {
                     entry.template_name = SharedString::from(tpl.name.as_str());
+                    if let Some(path) =
+                        lianli_shared::template_catalog::template_preview_path(&tpl.id)
+                    {
+                        if path.exists() {
+                            if let Ok(img) = slint::Image::load_from_path(&path) {
+                                entry.template_preview = img;
+                            }
+                        }
+                    }
                 }
             }
             entry

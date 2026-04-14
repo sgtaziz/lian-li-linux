@@ -1,11 +1,17 @@
 //! Persistence for LCD templates.
 
 use anyhow::{Context, Result};
+use lianli_media::CustomAsset;
+use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
+use lianli_shared::template_catalog::template_preview_path;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::warn;
+
+const PREVIEW_WIDTH: u32 = 240;
+const PREVIEW_HEIGHT: u32 = 240;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct TemplateFile {
@@ -64,4 +70,35 @@ pub fn resolve_template(
     _sensors: &[SensorInfo],
 ) -> Option<LcdTemplate> {
     user.iter().find(|t| t.id == id).cloned()
+}
+
+pub fn regenerate_template_previews(templates: &[LcdTemplate], sensors: &[SensorInfo]) {
+    for template in templates {
+        if let Err(e) = render_template_preview(template, sensors) {
+            warn!("preview render failed for template '{}': {e}", template.id);
+        }
+    }
+}
+
+fn render_template_preview(template: &LcdTemplate, sensors: &[SensorInfo]) -> Result<()> {
+    let out_path = template_preview_path(&template.id)
+        .context("computing preview path (no XDG_CONFIG_HOME / HOME)")?;
+    let screen = ScreenInfo {
+        width: PREVIEW_WIDTH,
+        height: PREVIEW_HEIGHT,
+        max_fps: 30,
+        jpeg_quality: 85,
+        max_payload: 4 * 1024 * 1024,
+        device_rotation: 0,
+        h264: false,
+    };
+    let asset = CustomAsset::new(template, 0.0, &screen, sensors).context("CustomAsset::new")?;
+    let frame = match asset.render_frame(true).context("render_frame")? {
+        Some(f) => f,
+        None => asset.blank_frame(),
+    };
+    let img = image::load_from_memory(&frame.data).context("decoding rendered JPEG")?;
+    img.save(&out_path)
+        .with_context(|| format!("writing {}", out_path.display()))?;
+    Ok(())
 }

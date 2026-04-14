@@ -2930,6 +2930,7 @@ dependencies = [
  "base64",
  "clap",
  "hidapi",
+ "image 0.24.9",
  "lianli-devices",
  "lianli-media",
  "lianli-shared",

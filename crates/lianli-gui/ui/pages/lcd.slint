@@ -60,6 +60,7 @@ export struct LcdEntryData {
 
     template-id: string,
     template-name: string,
+    template-preview: image,
 }
 
 component OrientationButton inherits Rectangle {
@@ -494,35 +495,57 @@ component LcdConfigCard inherits Card {
             Text { text: "Template"; font-size: 12px; color: Theme.text-secondary; }
             HorizontalLayout {
                 spacing: 8px;
-                ComboBox {
-                    horizontal-stretch: 1;
-                    model: root.template-labels;
-                    current-value: root.lcd.template-name;
-                    // Rust side resolves the pretty label back to the id via
-                    // the `template-labels` / `template-ids` parallel arrays.
-                    selected(val) => {
-                        root.update-field(root.index, "template_label", val);
+                vertical-stretch: 0;
+                Rectangle {
+                    width: 96px;
+                    height: 96px;
+                    background: #1a1a1a;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    clip: true;
+                    Image {
+                        source: root.lcd.template-preview;
+                        width: parent.width;
+                        height: parent.height;
+                        image-fit: contain;
                     }
                 }
-                Button {
-                    text: "New";
-                    clicked => { root.create-template(root.index); }
-                }
-                Button {
-                    text: "Edit";
-                    clicked => { root.edit-template(root.index); }
-                }
-                Button {
-                    text: "Duplicate";
-                    clicked => { root.duplicate-template(root.index); }
-                }
-                Button {
-                    text: "Delete";
-                    clicked => { root.delete-template(root.index); }
-                }
-                Button {
-                    text: "Browse Online";
-                    clicked => { root.browse-templates(); }
+                VerticalLayout {
+                    spacing: 8px;
+                    horizontal-stretch: 1;
+                    ComboBox {
+                        model: root.template-labels;
+                        current-value: root.lcd.template-name;
+                        // Rust side resolves the pretty label back to the id via
+                        // the `template-labels` / `template-ids` parallel arrays.
+                        selected(val) => {
+                            root.update-field(root.index, "template_label", val);
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            text: "New";
+                            clicked => { root.create-template(root.index); }
+                        }
+                        Button {
+                            text: "Edit";
+                            clicked => { root.edit-template(root.index); }
+                        }
+                        Button {
+                            text: "Duplicate";
+                            clicked => { root.duplicate-template(root.index); }
+                        }
+                        Button {
+                            text: "Delete";
+                            clicked => { root.delete-template(root.index); }
+                        }
+                        Button {
+                            text: "Browse Online";
+                            clicked => { root.browse-templates(); }
+                        }
+                    }
                 }
             }
         }

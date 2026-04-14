@@ -937,6 +937,8 @@ impl ServiceManager {
                 warn!("Template: {e}");
             }
         }
+        let sensors_for_preview = lianli_shared::sensors::enumerate_sensors();
+        template_store::regenerate_template_previews(&user_templates, &sensors_for_preview);
         self.ipc_state.lock().user_templates = user_templates;
 
         match AppConfig::load(&self.config_path) {

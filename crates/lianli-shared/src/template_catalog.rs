@@ -202,13 +202,28 @@ fn verify_sha256(bytes: &[u8], expected_hex: &str) -> Result<()> {
 }
 
 fn templates_install_dir() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .ok_or_else(|| anyhow!("neither $XDG_CONFIG_HOME nor $HOME is set"))?;
+    let base = config_base_dir()?;
     let dir = base.join("lianli").join("templates");
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     Ok(dir)
+}
+
+fn config_base_dir() -> Result<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .ok_or_else(|| anyhow!("neither $XDG_CONFIG_HOME nor $HOME is set"))
+}
+
+pub fn template_previews_dir() -> Option<PathBuf> {
+    let base = config_base_dir().ok()?;
+    let dir = base.join("lianli").join("template_previews");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+pub fn template_preview_path(template_id: &str) -> Option<PathBuf> {
+    template_previews_dir().map(|d| d.join(format!("{template_id}.png")))
 }
 
 fn version_ge(have: &str, need: &str) -> bool {
