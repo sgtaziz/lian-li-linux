@@ -29,7 +29,7 @@ impl DetectedDevice {
     /// Stable device ID: serial if unique, otherwise USB port path (bus-port topology).
     pub fn device_id(&self) -> String {
         match &self.serial {
-            Some(s) if !NON_UNIQUE_SERIALS.contains(&s.as_str()) => {
+            Some(s) if !is_non_unique_serial(s.as_str()) => {
                 format!("hid:{}", s)
             }
             _ => {
@@ -62,14 +62,19 @@ pub struct DetectedHidDevice {
     pub usb_port_path: Option<String>,
 }
 
-/// Known non-unique HID serial strings (chip manufacturer names, not device serials).
+/// Known non-unique HID serial strings (chip manufacturer names, firmware
+/// version markers, etc. — not actual per-device serials).
 const NON_UNIQUE_SERIALS: &[&str] = &["Nuvoton"];
+
+fn is_non_unique_serial(s: &str) -> bool {
+    NON_UNIQUE_SERIALS.contains(&s) || s.starts_with("TL_LCDV")
+}
 
 impl DetectedHidDevice {
     /// Stable device ID: serial if unique, otherwise USB port path.
     pub fn device_id(&self) -> String {
         match &self.serial {
-            Some(s) if !NON_UNIQUE_SERIALS.contains(&s.as_str()) => {
+            Some(s) if !is_non_unique_serial(s.as_str()) => {
                 format!("hid:{}", s)
             }
             _ => match &self.usb_port_path {
@@ -243,15 +248,22 @@ pub fn find_hid_devices_by_family(api: &HidApi, family: DeviceFamily) -> Vec<Det
 pub fn open_hid_lcd_device(
     api: &HidApi,
     det: &DetectedHidDevice,
-) -> Option<Result<crate::hydroshift_lcd::HydroShiftLcdController>> {
+) -> Option<Result<Box<dyn crate::traits::LcdDevice>>> {
     let pid = det.pid;
     match det.family {
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => {
             Some(open_hidapi_with_retry(api, det, |backend| {
                 let backend = Arc::new(Mutex::new(backend));
                 crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid)
+                    .map(|d| Box::new(d) as Box<dyn crate::traits::LcdDevice>)
             }))
         }
+        DeviceFamily::TlLcd => Some(open_hidapi_with_retry(api, det, |backend| {
+            let backend = Arc::new(Mutex::new(backend));
+            let mut tl = crate::tl_lcd::TlLcdDevice::new(backend);
+            crate::traits::LcdDevice::initialize(&mut tl)?;
+            Ok(Box::new(tl) as Box<dyn crate::traits::LcdDevice>)
+        })),
         _ => None,
     }
 }
@@ -265,7 +277,7 @@ pub fn open_hid_lcd_by_vid_pid(
     vid: u16,
     pid: u16,
     family: DeviceFamily,
-) -> Result<crate::hydroshift_lcd::HydroShiftLcdController> {
+) -> Result<Box<dyn crate::traits::LcdDevice>> {
     let usb_device = find_usb_device(vid, pid);
 
     for attempt in 0..=3u32 {
@@ -419,7 +431,7 @@ fn find_usb_device(vid: u16, pid: u16) -> Option<Device<GlobalContext>> {
 /// Open a detected HID device as an LCD controller via rusb.
 pub fn open_hid_lcd_device_rusb(
     det: &DetectedDevice,
-) -> Option<Result<crate::hydroshift_lcd::HydroShiftLcdController>> {
+) -> Option<Result<Box<dyn crate::traits::LcdDevice>>> {
     match det.family {
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => {
             let pid = det.pid;
@@ -428,8 +440,17 @@ pub fn open_hid_lcd_device_rusb(
                     RusbHidTransport::open_by_usage(det.device.clone(), det.hid_usage_page)?;
                 let backend = Arc::new(Mutex::new(HidBackend::Rusb(transport)));
                 crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid)
+                    .map(|d| Box::new(d) as Box<dyn crate::traits::LcdDevice>)
             }))
         }
+        DeviceFamily::TlLcd => Some(open_with_retry(&det.device, || {
+            let transport =
+                RusbHidTransport::open_by_usage(det.device.clone(), det.hid_usage_page)?;
+            let backend = Arc::new(Mutex::new(HidBackend::Rusb(transport)));
+            let mut tl = crate::tl_lcd::TlLcdDevice::new(backend);
+            crate::traits::LcdDevice::initialize(&mut tl)?;
+            Ok(Box::new(tl) as Box<dyn crate::traits::LcdDevice>)
+        })),
         _ => None,
     }
 }
@@ -575,11 +596,19 @@ pub fn create_hid_lcd_device(
     family: DeviceFamily,
     pid: u16,
     backend: Arc<Mutex<HidBackend>>,
-) -> Option<Result<crate::hydroshift_lcd::HydroShiftLcdController>> {
+) -> Option<Result<Box<dyn crate::traits::LcdDevice>>> {
     match family {
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => Some(
-            crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid),
+            crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid)
+                .map(|d| Box::new(d) as Box<dyn crate::traits::LcdDevice>),
         ),
+        DeviceFamily::TlLcd => {
+            let mut tl = crate::tl_lcd::TlLcdDevice::new(backend);
+            Some(
+                crate::traits::LcdDevice::initialize(&mut tl)
+                    .map(|_| Box::new(tl) as Box<dyn crate::traits::LcdDevice>),
+            )
+        }
         _ => None,
     }
 }

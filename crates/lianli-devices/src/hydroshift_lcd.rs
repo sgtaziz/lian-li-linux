@@ -265,11 +265,6 @@ impl HydroShiftLcdController {
     }
 
     /// Send a JPEG frame to the LCD.
-    pub fn send_frame(&mut self, frame: &[u8]) -> Result<()> {
-        self.send_chunked(CMD_SEND_JPEG, frame)
-    }
-
-    /// Send a JPEG frame to the LCD (no initialization check).
     pub fn send_jpeg(&self, jpeg_data: &[u8]) -> Result<()> {
         self.send_chunked(CMD_SEND_JPEG, jpeg_data)
     }
@@ -583,6 +578,10 @@ impl LcdDevice for HydroShiftLcdController {
         }
         self.init()?;
         Ok(())
+    }
+
+    fn check_and_recover_lcd(&mut self) -> Result<()> {
+        HydroShiftLcdController::check_and_recover_lcd(self)
     }
 }
 

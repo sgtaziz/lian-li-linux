@@ -10,9 +10,8 @@ use lianli_devices::detect::{
     enumerate_hid_devices, open_hid_backend_hidapi, open_hid_backend_rusb, open_hid_lcd_by_vid_pid,
     open_hid_lcd_device_rusb,
 };
-use lianli_devices::hydroshift_lcd::HydroShiftLcdController;
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
-use lianli_devices::traits::FanDevice;
+use lianli_devices::traits::{FanDevice, LcdDevice};
 use lianli_devices::winusb_lcd::WinUsbLcdDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_media::sensor::FrameInfo;
@@ -1058,6 +1057,7 @@ impl ServiceManager {
             DeviceFamily::UniversalScreen,
             DeviceFamily::HydroShiftLcd,
             DeviceFamily::Galahad2Lcd,
+            DeviceFamily::TlLcd,
         ];
 
         struct LcdCandidate {
@@ -1173,7 +1173,9 @@ impl ServiceManager {
                         lianli_devices::universal_screen::open(device)
                             .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
                     }
-                    DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => {
+                    DeviceFamily::HydroShiftLcd
+                    | DeviceFamily::Galahad2Lcd
+                    | DeviceFamily::TlLcd => {
                         // Try to reuse a shared HID backend (opened by init_rgb_controller).
                         if let Some(backend) = self.hid_backends.get(&candidate.device_id) {
                             match create_hid_lcd_device(
@@ -1358,7 +1360,7 @@ impl ServiceManager {
 enum LcdBackend {
     Slv3(Slv3LcdDevice),
     WinUsb(ThreadedWinUsbSender),
-    HidLcd(HydroShiftLcdController),
+    HidLcd(Box<dyn LcdDevice>),
 }
 
 impl LcdBackend {
@@ -1374,7 +1376,7 @@ impl LcdBackend {
                 d.send_frame(builder, frame)
             }
             Self::WinUsb(d) => d.send_frame(frame),
-            Self::HidLcd(d) => d.send_frame(frame),
+            Self::HidLcd(d) => d.send_jpeg_frame(frame),
         }
     }
 

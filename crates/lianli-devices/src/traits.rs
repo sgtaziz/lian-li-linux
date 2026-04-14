@@ -50,6 +50,9 @@ pub trait LcdDevice: Send + Sync {
     fn set_brightness(&self, brightness: u8) -> Result<()>;
     fn set_rotation(&self, degrees: u16) -> Result<()>;
     fn initialize(&mut self) -> Result<()>;
+    fn check_and_recover_lcd(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// An AIO device with pump, fans, and optionally LCD.

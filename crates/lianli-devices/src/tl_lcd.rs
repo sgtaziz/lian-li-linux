@@ -25,6 +25,7 @@ const READ_TIMEOUT_MS: i32 = 200;
 const CMD_GET_HANDSHAKE: u8 = 60;
 const CMD_GET_PRODUCT_INFO: u8 = 61;
 const CMD_READ_SERIAL: u8 = 62;
+const CMD_WRITE_SERIAL: u8 = 63;
 const CMD_LCD_CONTROL: u8 = 64;
 const CMD_WRITE_JPG: u8 = 65;
 const CMD_WRITE_SYNC_JPG: u8 = 70;
@@ -100,27 +101,49 @@ impl TlLcdDevice {
         }
     }
 
-    /// Read the device serial number, port, and index.
+    /// Read the device serial number, port, and index. If the device returns a
+    /// firmware string (e.g. `TL_LCDV0.1`) rather than a persistent unique ID,
+    /// generate a UUID-like serial, write it via CMD 63, and re-read.
     pub fn read_identity(&mut self) -> Result<TlLcdIdentity> {
+        let mut ident = self.read_identity_raw()?;
+        if !looks_like_unique_serial(&ident.serial) {
+            let new_serial = generate_unique_serial();
+            if let Err(e) = self.write_serial(&new_serial) {
+                warn!("TLLCD: failed to persist unique serial: {e}");
+            } else {
+                match self.read_identity_raw() {
+                    Ok(refreshed) => ident = refreshed,
+                    Err(e) => warn!("TLLCD: failed to re-read serial after write: {e}"),
+                }
+            }
+        }
+        self.identity = Some(ident.clone());
+        Ok(ident)
+    }
+
+    fn read_identity_raw(&self) -> Result<TlLcdIdentity> {
         let resp = self.send_command_with_response(CMD_READ_SERIAL, &[])?;
         let data = &resp[HEADER_LEN..];
-
-        // First 32 bytes: serial (ASCII, null-terminated)
         let serial_bytes = &data[..32.min(data.len())];
         let serial = String::from_utf8_lossy(serial_bytes)
             .trim_end_matches('\0')
             .to_string();
-
         let port = if data.len() > 32 { data[32] } else { 0 };
         let index = if data.len() > 33 { data[33] } else { 0 };
-
-        let ident = TlLcdIdentity {
+        Ok(TlLcdIdentity {
             serial,
             port,
             index,
-        };
-        self.identity = Some(ident.clone());
-        Ok(ident)
+        })
+    }
+
+    fn write_serial(&self, serial: &str) -> Result<()> {
+        let mut payload = [0u8; 32];
+        let bytes = serial.as_bytes();
+        let n = bytes.len().min(32);
+        payload[..n].copy_from_slice(&bytes[..n]);
+        self.send_command_no_response(CMD_WRITE_SERIAL, &payload)?;
+        Ok(())
     }
 
     /// Read handshake info (current mode and frame index).
@@ -243,6 +266,14 @@ impl TlLcdDevice {
                 .context("TLLCD: read response")?;
         }
 
+        Ok(())
+    }
+
+    /// Send a command with payload and don't wait for any response.
+    fn send_command_no_response(&self, cmd: u8, payload: &[u8]) -> Result<()> {
+        let dev = self.device.lock();
+        let pkt = build_packet(cmd, payload.len() as u32, 0, payload);
+        dev.write(&pkt).context("TLLCD: write command (no resp)")?;
         Ok(())
     }
 
@@ -376,4 +407,32 @@ fn payload_length(pkt: &[u8]) -> usize {
     } else {
         0
     }
+}
+
+/// A serial we wrote ourselves looks like `lcd-<32 hex chars>`. Anything else
+/// (firmware version strings like `TL_LCDV0.1`, empty, etc.) means the device
+/// hasn't been claimed by us yet.
+fn looks_like_unique_serial(s: &str) -> bool {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("lcd-") {
+        hex.len() >= 16 && hex.chars().all(|c| c.is_ascii_hexdigit())
+    } else {
+        false
+    }
+}
+
+/// Build a UUID-like serial fitting in 32 ASCII bytes.
+fn generate_unique_serial() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut entropy: u64 = nanos as u64;
+    if let Ok(bytes) = std::fs::read("/proc/sys/kernel/random/uuid") {
+        for b in bytes.iter().take(32) {
+            entropy = entropy.wrapping_mul(1099511628211).wrapping_add(*b as u64);
+        }
+    }
+    format!("lcd-{:016x}{:08x}", entropy, nanos as u32)
 }
