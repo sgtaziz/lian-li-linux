@@ -217,6 +217,79 @@ pub enum WidgetKind {
         #[serde(default)]
         fit: ImageFit,
     },
+    Sparkline {
+        source: SensorSourceConfig,
+        value_min: f32,
+        value_max: f32,
+        #[serde(default)]
+        auto_range: bool,
+        #[serde(default = "default_sparkline_history")]
+        history_length: u32,
+        #[serde(default = "default_sparkline_line_width")]
+        line_width: f32,
+        #[serde(with = "rgba_serde", default = "default_sparkline_line_color")]
+        line_color: [u8; 4],
+        #[serde(with = "rgba_serde", default = "default_sparkline_fill_color")]
+        fill_color: [u8; 4],
+        #[serde(with = "rgba_serde")]
+        background_color: [u8; 4],
+        #[serde(default)]
+        ranges: Vec<SensorRange>,
+        #[serde(with = "rgba_serde", default = "default_sparkline_border_color")]
+        border_color: [u8; 4],
+        #[serde(default)]
+        border_width: f32,
+        #[serde(default)]
+        corner_radius: f32,
+        #[serde(default)]
+        padding: f32,
+        #[serde(default)]
+        show_points: bool,
+        #[serde(default = "default_sparkline_point_radius")]
+        point_radius: f32,
+        #[serde(default)]
+        show_baseline: bool,
+        #[serde(default)]
+        baseline_value: f32,
+        #[serde(with = "rgba_serde", default = "default_sparkline_baseline_color")]
+        baseline_color: [u8; 4],
+        #[serde(default = "default_sparkline_baseline_width")]
+        baseline_width: f32,
+        #[serde(default)]
+        smooth: bool,
+        #[serde(default)]
+        scroll_rtl: bool,
+        #[serde(default)]
+        fill_from_ranges: bool,
+        #[serde(default)]
+        range_blend: bool,
+        #[serde(default)]
+        show_gridlines: bool,
+        #[serde(default = "default_sparkline_gridline_h")]
+        gridlines_horizontal: u32,
+        #[serde(default)]
+        gridlines_vertical: u32,
+        #[serde(with = "rgba_serde", default = "default_sparkline_gridline_color")]
+        gridline_color: [u8; 4],
+        #[serde(default = "default_sparkline_gridline_width")]
+        gridline_width: f32,
+        #[serde(default)]
+        show_axis_labels: bool,
+        #[serde(default = "default_sparkline_axis_label_count")]
+        axis_label_count: u32,
+        #[serde(default)]
+        axis_labels_on_right: bool,
+        #[serde(default = "default_sparkline_axis_label_format")]
+        axis_label_format: String,
+        #[serde(default)]
+        axis_label_font: FontRef,
+        #[serde(default = "default_sparkline_axis_label_size")]
+        axis_label_size: f32,
+        #[serde(with = "rgba_serde", default = "default_sparkline_axis_label_color")]
+        axis_label_color: [u8; 4],
+        #[serde(default = "default_sparkline_axis_label_padding")]
+        axis_label_padding: f32,
+    },
     ClockDigital {
         #[serde(default = "default_clock_format")]
         format: String,
@@ -322,6 +395,70 @@ fn default_needle_border_width() -> f32 {
 
 fn default_opacity() -> f32 {
     1.0
+}
+
+fn default_sparkline_history() -> u32 {
+    60
+}
+
+fn default_sparkline_line_width() -> f32 {
+    2.0
+}
+
+fn default_sparkline_line_color() -> [u8; 4] {
+    [80, 180, 240, 255]
+}
+
+fn default_sparkline_fill_color() -> [u8; 4] {
+    [80, 180, 240, 80]
+}
+
+fn default_sparkline_border_color() -> [u8; 4] {
+    [80, 90, 110, 255]
+}
+
+fn default_sparkline_baseline_color() -> [u8; 4] {
+    [140, 140, 160, 160]
+}
+
+fn default_sparkline_baseline_width() -> f32 {
+    1.0
+}
+
+fn default_sparkline_point_radius() -> f32 {
+    2.5
+}
+
+fn default_sparkline_gridline_h() -> u32 {
+    3
+}
+
+fn default_sparkline_gridline_color() -> [u8; 4] {
+    [120, 120, 140, 90]
+}
+
+fn default_sparkline_gridline_width() -> f32 {
+    1.0
+}
+
+fn default_sparkline_axis_label_count() -> u32 {
+    3
+}
+
+fn default_sparkline_axis_label_format() -> String {
+    "{:.0}".to_string()
+}
+
+fn default_sparkline_axis_label_size() -> f32 {
+    11.0
+}
+
+fn default_sparkline_axis_label_color() -> [u8; 4] {
+    [200, 200, 210, 220]
+}
+
+fn default_sparkline_axis_label_padding() -> f32 {
+    4.0
 }
 
 fn default_clock_format() -> String {
@@ -442,6 +579,7 @@ impl WidgetKind {
             Self::Video { .. } => "video",
             Self::ClockDigital { .. } => "clock_digital",
             Self::ClockAnalog { .. } => "clock_analog",
+            Self::Sparkline { .. } => "sparkline",
         }
     }
 
@@ -462,6 +600,7 @@ impl WidgetKind {
             "video" => "Video",
             "clock_digital" => "Clock (Digital)",
             "clock_analog" => "Clock (Analog)",
+            "sparkline" => "Sparkline",
             _ => "Widget",
         }
     }
@@ -486,6 +625,7 @@ impl WidgetKind {
             "video",
             "clock_digital",
             "clock_analog",
+            "sparkline",
         ]
     }
 
@@ -495,7 +635,8 @@ impl WidgetKind {
             | Self::RadialGauge { source, .. }
             | Self::VerticalBar { source, .. }
             | Self::HorizontalBar { source, .. }
-            | Self::Speedometer { source, .. } => Some(source),
+            | Self::Speedometer { source, .. }
+            | Self::Sparkline { source, .. } => Some(source),
             _ => None,
         }
     }

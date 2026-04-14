@@ -126,6 +126,56 @@ pub(super) fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidg
         clock_hour_tick_width: 3,
         clock_minor_tick_width: 2,
         clock_hub_radius: 6,
+        sparkline_history: 60,
+        sparkline_line_width: 2.0,
+        sparkline_auto_range: false,
+        sparkline_line_r: 80,
+        sparkline_line_g: 180,
+        sparkline_line_b: 240,
+        sparkline_line_a: 255,
+        sparkline_fill_r: 80,
+        sparkline_fill_g: 180,
+        sparkline_fill_b: 240,
+        sparkline_fill_a: 80,
+        sparkline_border_r: 80,
+        sparkline_border_g: 90,
+        sparkline_border_b: 110,
+        sparkline_border_a: 255,
+        sparkline_border_width: 0.0,
+        sparkline_corner_radius: 0,
+        sparkline_padding: 4,
+        sparkline_show_points: false,
+        sparkline_point_radius: 2.5,
+        sparkline_show_baseline: false,
+        sparkline_baseline_value: 0.0,
+        sparkline_baseline_r: 140,
+        sparkline_baseline_g: 140,
+        sparkline_baseline_b: 160,
+        sparkline_baseline_a: 160,
+        sparkline_baseline_width: 1.0,
+        sparkline_smooth: false,
+        sparkline_rtl: false,
+        sparkline_fill_from_ranges: false,
+        sparkline_range_blend: false,
+        sparkline_show_gridlines: false,
+        sparkline_gridlines_h: 3,
+        sparkline_gridlines_v: 0,
+        sparkline_gridline_r: 120,
+        sparkline_gridline_g: 120,
+        sparkline_gridline_b: 140,
+        sparkline_gridline_a: 90,
+        sparkline_gridline_width: 1.0,
+        sparkline_show_axis_labels: false,
+        sparkline_axis_label_count: 3,
+        sparkline_axis_labels_on_right: false,
+        sparkline_axis_label_format: SharedString::from("{:.0}"),
+        sparkline_axis_font_name: SharedString::from(DEFAULT_FONT_LABEL),
+        sparkline_axis_label_size: 11.0,
+        sparkline_axis_label_r: 200,
+        sparkline_axis_label_g: 200,
+        sparkline_axis_label_b: 210,
+        sparkline_axis_label_a: 220,
+        sparkline_axis_label_padding: 4,
     };
     match &w.kind {
         WidgetKind::Label {
@@ -285,6 +335,104 @@ pub(super) fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) -> EditorWidg
             out.bg_b = background_color[2] as i32;
             out.bg_a = background_color[3] as i32;
             out.show_labels = *show_labels;
+        }
+        WidgetKind::Sparkline {
+            source,
+            value_min,
+            value_max,
+            auto_range,
+            history_length,
+            line_width,
+            line_color,
+            fill_color,
+            fill_from_ranges,
+            range_blend,
+            background_color,
+            border_color,
+            border_width,
+            corner_radius,
+            padding,
+            show_points,
+            point_radius,
+            show_baseline,
+            baseline_value,
+            baseline_color,
+            baseline_width,
+            smooth,
+            scroll_rtl,
+            show_gridlines,
+            gridlines_horizontal,
+            gridlines_vertical,
+            gridline_color,
+            gridline_width,
+            show_axis_labels,
+            axis_label_count,
+            axis_labels_on_right,
+            axis_label_format,
+            axis_label_font,
+            axis_label_size,
+            axis_label_color,
+            axis_label_padding,
+            ..
+        } => {
+            out.source_index = sensor_index_for_source(source, sensors);
+            out.command = command_text_for_source(source);
+            out.value_min = *value_min;
+            out.value_max = *value_max;
+            out.bg_r = background_color[0] as i32;
+            out.bg_g = background_color[1] as i32;
+            out.bg_b = background_color[2] as i32;
+            out.bg_a = background_color[3] as i32;
+            out.sparkline_history = *history_length as i32;
+            out.sparkline_line_width = *line_width;
+            out.sparkline_auto_range = *auto_range;
+            out.sparkline_line_r = line_color[0] as i32;
+            out.sparkline_line_g = line_color[1] as i32;
+            out.sparkline_line_b = line_color[2] as i32;
+            out.sparkline_line_a = line_color[3] as i32;
+            out.sparkline_fill_r = fill_color[0] as i32;
+            out.sparkline_fill_g = fill_color[1] as i32;
+            out.sparkline_fill_b = fill_color[2] as i32;
+            out.sparkline_fill_a = fill_color[3] as i32;
+            out.sparkline_border_r = border_color[0] as i32;
+            out.sparkline_border_g = border_color[1] as i32;
+            out.sparkline_border_b = border_color[2] as i32;
+            out.sparkline_border_a = border_color[3] as i32;
+            out.sparkline_border_width = *border_width;
+            out.sparkline_corner_radius = corner_radius.round() as i32;
+            out.sparkline_padding = padding.round() as i32;
+            out.sparkline_show_points = *show_points;
+            out.sparkline_point_radius = *point_radius;
+            out.sparkline_show_baseline = *show_baseline;
+            out.sparkline_baseline_value = *baseline_value;
+            out.sparkline_baseline_r = baseline_color[0] as i32;
+            out.sparkline_baseline_g = baseline_color[1] as i32;
+            out.sparkline_baseline_b = baseline_color[2] as i32;
+            out.sparkline_baseline_a = baseline_color[3] as i32;
+            out.sparkline_baseline_width = *baseline_width;
+            out.sparkline_smooth = *smooth;
+            out.sparkline_rtl = *scroll_rtl;
+            out.sparkline_fill_from_ranges = *fill_from_ranges;
+            out.sparkline_range_blend = *range_blend;
+            out.sparkline_show_gridlines = *show_gridlines;
+            out.sparkline_gridlines_h = *gridlines_horizontal as i32;
+            out.sparkline_gridlines_v = *gridlines_vertical as i32;
+            out.sparkline_gridline_r = gridline_color[0] as i32;
+            out.sparkline_gridline_g = gridline_color[1] as i32;
+            out.sparkline_gridline_b = gridline_color[2] as i32;
+            out.sparkline_gridline_a = gridline_color[3] as i32;
+            out.sparkline_gridline_width = *gridline_width;
+            out.sparkline_show_axis_labels = *show_axis_labels;
+            out.sparkline_axis_label_count = *axis_label_count as i32;
+            out.sparkline_axis_labels_on_right = *axis_labels_on_right;
+            out.sparkline_axis_label_format = SharedString::from(axis_label_format.as_str());
+            out.sparkline_axis_font_name = SharedString::from(font_ref_to_label(axis_label_font));
+            out.sparkline_axis_label_size = *axis_label_size;
+            out.sparkline_axis_label_r = axis_label_color[0] as i32;
+            out.sparkline_axis_label_g = axis_label_color[1] as i32;
+            out.sparkline_axis_label_b = axis_label_color[2] as i32;
+            out.sparkline_axis_label_a = axis_label_color[3] as i32;
+            out.sparkline_axis_label_padding = axis_label_padding.round() as i32;
         }
         WidgetKind::Image { path, opacity, .. } => {
             out.image_path = SharedString::from(path.display().to_string());
@@ -496,6 +644,45 @@ pub(super) fn make_default_widget(id: &str, kind_str: &str, cx: f32, cy: f32) ->
             loop_playback: true,
             opacity: 1.0,
             fit: ImageFit::Stretch,
+        },
+        "sparkline" => WidgetKind::Sparkline {
+            source: SensorSourceConfig::Constant { value: 0.0 },
+            value_min: 0.0,
+            value_max: 100.0,
+            auto_range: false,
+            history_length: 60,
+            line_width: 2.0,
+            line_color: [80, 180, 240, 255],
+            fill_color: [80, 180, 240, 80],
+            fill_from_ranges: false,
+            range_blend: false,
+            background_color: [30, 30, 30, 255],
+            ranges: Vec::new(),
+            border_color: [80, 90, 110, 255],
+            border_width: 0.0,
+            corner_radius: 0.0,
+            padding: 4.0,
+            show_points: false,
+            point_radius: 2.5,
+            show_baseline: false,
+            baseline_value: 0.0,
+            baseline_color: [140, 140, 160, 160],
+            baseline_width: 1.0,
+            smooth: false,
+            scroll_rtl: false,
+            show_gridlines: false,
+            gridlines_horizontal: 3,
+            gridlines_vertical: 0,
+            gridline_color: [120, 120, 140, 90],
+            gridline_width: 1.0,
+            show_axis_labels: false,
+            axis_label_count: 3,
+            axis_labels_on_right: false,
+            axis_label_format: "{:.0}".to_string(),
+            axis_label_font: FontRef::default(),
+            axis_label_size: 11.0,
+            axis_label_color: [200, 200, 210, 220],
+            axis_label_padding: 4.0,
         },
         "clock_digital" => WidgetKind::ClockDigital {
             format: "%H:%M".to_string(),
@@ -714,5 +901,55 @@ pub(super) fn blank_editor_widget() -> EditorWidget {
         corner_radius: 0,
         bg_corner_radius: 0,
         value_corner_radius: 0,
+        sparkline_history: 60,
+        sparkline_line_width: 2.0,
+        sparkline_auto_range: false,
+        sparkline_line_r: 80,
+        sparkline_line_g: 180,
+        sparkline_line_b: 240,
+        sparkline_line_a: 255,
+        sparkline_fill_r: 80,
+        sparkline_fill_g: 180,
+        sparkline_fill_b: 240,
+        sparkline_fill_a: 80,
+        sparkline_border_r: 80,
+        sparkline_border_g: 90,
+        sparkline_border_b: 110,
+        sparkline_border_a: 255,
+        sparkline_border_width: 0.0,
+        sparkline_corner_radius: 0,
+        sparkline_padding: 4,
+        sparkline_show_points: false,
+        sparkline_point_radius: 2.5,
+        sparkline_show_baseline: false,
+        sparkline_baseline_value: 0.0,
+        sparkline_baseline_r: 140,
+        sparkline_baseline_g: 140,
+        sparkline_baseline_b: 160,
+        sparkline_baseline_a: 160,
+        sparkline_baseline_width: 1.0,
+        sparkline_smooth: false,
+        sparkline_rtl: false,
+        sparkline_fill_from_ranges: false,
+        sparkline_range_blend: false,
+        sparkline_show_gridlines: false,
+        sparkline_gridlines_h: 3,
+        sparkline_gridlines_v: 0,
+        sparkline_gridline_r: 120,
+        sparkline_gridline_g: 120,
+        sparkline_gridline_b: 140,
+        sparkline_gridline_a: 90,
+        sparkline_gridline_width: 1.0,
+        sparkline_show_axis_labels: false,
+        sparkline_axis_label_count: 3,
+        sparkline_axis_labels_on_right: false,
+        sparkline_axis_label_format: SharedString::from("{:.0}"),
+        sparkline_axis_font_name: SharedString::from(DEFAULT_FONT_LABEL),
+        sparkline_axis_label_size: 11.0,
+        sparkline_axis_label_r: 200,
+        sparkline_axis_label_g: 200,
+        sparkline_axis_label_b: 210,
+        sparkline_axis_label_a: 220,
+        sparkline_axis_label_padding: 4,
     }
 }

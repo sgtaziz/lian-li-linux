@@ -93,6 +93,7 @@ fn render_template_preview(template: &LcdTemplate, sensors: &[SensorInfo]) -> Re
         h264: false,
     };
     let asset = CustomAsset::new(template, 0.0, &screen, sensors).context("CustomAsset::new")?;
+    asset.seed_preview_history();
     let frame = match asset.render_frame(true).context("render_frame")? {
         Some(f) => f,
         None => asset.blank_frame(),

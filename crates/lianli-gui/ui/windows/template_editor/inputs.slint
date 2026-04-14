@@ -186,10 +186,13 @@ export component LabeledCheckBox inherits Rectangle {
 
     changed checked => { box.checked = root.checked; }
 
-    box := CheckBox {
-        text: root.text;
-        checked: root.checked;
-        toggled => { root.toggled(self.checked); }
+    HorizontalLayout {
+        alignment: start;
+        box := CheckBox {
+            text: root.text;
+            checked: root.checked;
+            toggled => { root.toggled(self.checked); }
+        }
     }
 }
 

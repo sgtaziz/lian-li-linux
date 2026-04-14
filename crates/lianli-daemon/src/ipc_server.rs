@@ -465,18 +465,21 @@ fn handle_request(
             };
             let all_sensors = lianli_shared::sensors::enumerate_sensors();
             match CustomAsset::new(&template, 0.0, &preview_screen, &all_sensors) {
-                Ok(asset) => match asset.render_frame(true) {
-                    Ok(Some(frame)) => IpcResponse::ok(serde_json::json!({
-                        "jpeg_base64": base64_encode(&frame.data),
-                    })),
-                    Ok(None) => {
-                        let blank = asset.blank_frame();
-                        IpcResponse::ok(serde_json::json!({
-                            "jpeg_base64": base64_encode(&blank.data),
-                        }))
+                Ok(asset) => {
+                    asset.seed_preview_history();
+                    match asset.render_frame(true) {
+                        Ok(Some(frame)) => IpcResponse::ok(serde_json::json!({
+                            "jpeg_base64": base64_encode(&frame.data),
+                        })),
+                        Ok(None) => {
+                            let blank = asset.blank_frame();
+                            IpcResponse::ok(serde_json::json!({
+                                "jpeg_base64": base64_encode(&blank.data),
+                            }))
+                        }
+                        Err(e) => IpcResponse::error(format!("preview render failed: {e}")),
                     }
-                    Err(e) => IpcResponse::error(format!("preview render failed: {e}")),
-                },
+                }
                 Err(e) => IpcResponse::error(format!("preview asset creation failed: {e}")),
             }
         }

@@ -11,6 +11,7 @@ pub(super) mod core_bars;
 pub(super) mod image_widget;
 pub(super) mod label;
 pub(super) mod radial_gauge;
+pub(super) mod sparkline;
 pub(super) mod speedometer;
 pub(super) mod value_text;
 pub(super) mod video_widget;
@@ -21,7 +22,7 @@ use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use lianli_shared::sensors::{read_sensor_value, ResolvedSensor};
 use lianli_shared::template::{Widget, WidgetKind};
 use rusttype::Font;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -36,6 +37,7 @@ pub(super) struct WidgetState {
     pub last_render_text: Option<String>,
     pub last_quantized: i32,
     pub failed: AtomicBool,
+    pub history: VecDeque<f32>,
 }
 
 impl WidgetState {
@@ -48,6 +50,7 @@ impl WidgetState {
             last_render_text: None,
             last_quantized: i32::MIN,
             failed: AtomicBool::new(false),
+            history: VecDeque::new(),
         }
     }
 }
@@ -226,6 +229,87 @@ pub(super) fn draw_widget(
                 *needle_border_color,
                 *needle_border_width,
                 uniform_scale,
+            );
+        }
+        WidgetKind::Sparkline {
+            value_min,
+            value_max,
+            auto_range,
+            line_color,
+            line_width,
+            fill_color,
+            fill_from_ranges,
+            range_blend,
+            background_color,
+            ranges,
+            border_color,
+            border_width,
+            corner_radius,
+            padding,
+            show_points,
+            point_radius,
+            show_baseline,
+            baseline_value,
+            baseline_color,
+            baseline_width,
+            smooth,
+            scroll_rtl,
+            show_gridlines,
+            gridlines_horizontal,
+            gridlines_vertical,
+            gridline_color,
+            gridline_width,
+            show_axis_labels,
+            axis_label_count,
+            axis_labels_on_right,
+            axis_label_format,
+            axis_label_font,
+            axis_label_size,
+            axis_label_color,
+            axis_label_padding,
+            ..
+        } => {
+            let af = resolve_font(axis_label_font, fonts, default_font);
+            sparkline::draw(
+                &mut sub,
+                sparkline::DrawArgs {
+                    history: &state.history,
+                    value_min: *value_min,
+                    value_max: *value_max,
+                    auto_range: *auto_range,
+                    line_color: *line_color,
+                    line_width: *line_width * uniform_scale,
+                    fill_color: *fill_color,
+                    fill_from_ranges: *fill_from_ranges,
+                    range_blend: *range_blend,
+                    background_color: *background_color,
+                    ranges,
+                    border_color: *border_color,
+                    border_width: *border_width * uniform_scale,
+                    corner_radius: *corner_radius * uniform_scale,
+                    padding: *padding * uniform_scale,
+                    show_points: *show_points,
+                    point_radius: *point_radius * uniform_scale,
+                    show_baseline: *show_baseline,
+                    baseline_value: *baseline_value,
+                    baseline_color: *baseline_color,
+                    baseline_width: *baseline_width * uniform_scale,
+                    smooth: *smooth,
+                    scroll_rtl: *scroll_rtl,
+                    show_gridlines: *show_gridlines,
+                    gridlines_horizontal: *gridlines_horizontal,
+                    gridlines_vertical: *gridlines_vertical,
+                    gridline_color: *gridline_color,
+                    gridline_width: *gridline_width * uniform_scale,
+                    show_axis_labels: *show_axis_labels,
+                    axis_label_count: *axis_label_count,
+                    axis_labels_on_right: *axis_labels_on_right,
+                    axis_label_format,
+                    axis_label_font: af,
+                    axis_label_size: *axis_label_size * uniform_scale,
+                    axis_label_color: *axis_label_color,
+                    axis_label_padding: *axis_label_padding * uniform_scale,
+                },
             );
         }
         WidgetKind::CoreBars {

@@ -368,6 +368,183 @@ pub(super) fn apply_kind_field(
             "path" => *path = std::path::PathBuf::from(val),
             _ => {}
         },
+        WidgetKind::Sparkline {
+            source,
+            value_min,
+            value_max,
+            auto_range,
+            history_length,
+            line_width,
+            line_color,
+            fill_color,
+            fill_from_ranges,
+            range_blend,
+            background_color,
+            ranges: _,
+            border_color,
+            border_width,
+            corner_radius,
+            padding,
+            show_points,
+            point_radius,
+            show_baseline,
+            baseline_value,
+            baseline_color,
+            baseline_width,
+            smooth,
+            scroll_rtl,
+            show_gridlines,
+            gridlines_horizontal,
+            gridlines_vertical,
+            gridline_color,
+            gridline_width,
+            show_axis_labels,
+            axis_label_count,
+            axis_labels_on_right,
+            axis_label_format,
+            axis_label_font,
+            axis_label_size,
+            axis_label_color,
+            axis_label_padding,
+        } => match field {
+            "source" => {
+                if let Some(new) = super::mapping::parse_sensor_source(val, sensors) {
+                    *source = new;
+                }
+            }
+            "command" => {
+                if let SensorSourceConfig::Command { cmd } = source {
+                    *cmd = val.to_string();
+                } else {
+                    *source = SensorSourceConfig::Command {
+                        cmd: val.to_string(),
+                    };
+                }
+            }
+            "value_min" => {
+                if let Ok(v) = val.parse() {
+                    *value_min = v;
+                }
+            }
+            "value_max" => {
+                if let Ok(v) = val.parse() {
+                    *value_max = v;
+                }
+            }
+            "sparkline_auto_range" => *auto_range = val == "true",
+            "sparkline_history" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *history_length = v.clamp(2, 2000) as u32;
+                }
+            }
+            "sparkline_line_width" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *line_width = v.max(0.1);
+                }
+            }
+            "sparkline_line_r" => line_color[0] = super::mapping::parse_u8(val),
+            "sparkline_line_g" => line_color[1] = super::mapping::parse_u8(val),
+            "sparkline_line_b" => line_color[2] = super::mapping::parse_u8(val),
+            "sparkline_line_a" => line_color[3] = super::mapping::parse_u8(val),
+            "sparkline_fill_r" => fill_color[0] = super::mapping::parse_u8(val),
+            "sparkline_fill_g" => fill_color[1] = super::mapping::parse_u8(val),
+            "sparkline_fill_b" => fill_color[2] = super::mapping::parse_u8(val),
+            "sparkline_fill_a" => fill_color[3] = super::mapping::parse_u8(val),
+            "bg_r" => background_color[0] = super::mapping::parse_u8(val),
+            "bg_g" => background_color[1] = super::mapping::parse_u8(val),
+            "bg_b" => background_color[2] = super::mapping::parse_u8(val),
+            "bg_a" => background_color[3] = super::mapping::parse_u8(val),
+            "sparkline_border_r" => border_color[0] = super::mapping::parse_u8(val),
+            "sparkline_border_g" => border_color[1] = super::mapping::parse_u8(val),
+            "sparkline_border_b" => border_color[2] = super::mapping::parse_u8(val),
+            "sparkline_border_a" => border_color[3] = super::mapping::parse_u8(val),
+            "sparkline_border_width" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *border_width = v.max(0.0);
+                }
+            }
+            "sparkline_corner_radius" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *corner_radius = v.max(0) as f32;
+                }
+            }
+            "sparkline_padding" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *padding = v.max(0) as f32;
+                }
+            }
+            "sparkline_show_points" => *show_points = val == "true",
+            "sparkline_point_radius" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *point_radius = v.max(0.0);
+                }
+            }
+            "sparkline_show_baseline" => *show_baseline = val == "true",
+            "sparkline_baseline_value" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *baseline_value = v;
+                }
+            }
+            "sparkline_baseline_r" => baseline_color[0] = super::mapping::parse_u8(val),
+            "sparkline_baseline_g" => baseline_color[1] = super::mapping::parse_u8(val),
+            "sparkline_baseline_b" => baseline_color[2] = super::mapping::parse_u8(val),
+            "sparkline_baseline_a" => baseline_color[3] = super::mapping::parse_u8(val),
+            "sparkline_baseline_width" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *baseline_width = v.max(0.0);
+                }
+            }
+            "sparkline_smooth" => *smooth = val == "true",
+            "sparkline_rtl" => *scroll_rtl = val == "true",
+            "sparkline_fill_from_ranges" => *fill_from_ranges = val == "true",
+            "sparkline_range_blend" => *range_blend = val == "true",
+            "sparkline_show_gridlines" => *show_gridlines = val == "true",
+            "sparkline_gridlines_h" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *gridlines_horizontal = v.clamp(0, 50) as u32;
+                }
+            }
+            "sparkline_gridlines_v" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *gridlines_vertical = v.clamp(0, 50) as u32;
+                }
+            }
+            "sparkline_gridline_r" => gridline_color[0] = super::mapping::parse_u8(val),
+            "sparkline_gridline_g" => gridline_color[1] = super::mapping::parse_u8(val),
+            "sparkline_gridline_b" => gridline_color[2] = super::mapping::parse_u8(val),
+            "sparkline_gridline_a" => gridline_color[3] = super::mapping::parse_u8(val),
+            "sparkline_gridline_width" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *gridline_width = v.max(0.0);
+                }
+            }
+            "sparkline_show_axis_labels" => *show_axis_labels = val == "true",
+            "sparkline_axis_label_count" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *axis_label_count = v.clamp(2, 20) as u32;
+                }
+            }
+            "sparkline_axis_labels_on_right" => *axis_labels_on_right = val == "true",
+            "sparkline_axis_label_format" => *axis_label_format = val.to_string(),
+            "sparkline_axis_font" => {
+                *axis_label_font = super::mapping::label_to_font_ref(val);
+            }
+            "sparkline_axis_label_size" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    *axis_label_size = v.max(6.0);
+                }
+            }
+            "sparkline_axis_label_r" => axis_label_color[0] = super::mapping::parse_u8(val),
+            "sparkline_axis_label_g" => axis_label_color[1] = super::mapping::parse_u8(val),
+            "sparkline_axis_label_b" => axis_label_color[2] = super::mapping::parse_u8(val),
+            "sparkline_axis_label_a" => axis_label_color[3] = super::mapping::parse_u8(val),
+            "sparkline_axis_label_padding" => {
+                if let Ok(v) = val.parse::<i32>() {
+                    *axis_label_padding = v.max(0) as f32;
+                }
+            }
+            _ => {}
+        },
         WidgetKind::ClockDigital {
             format,
             font,
@@ -531,7 +708,8 @@ pub(super) fn widget_ranges_mut(kind: &mut WidgetKind) -> Option<&mut Vec<Sensor
         | WidgetKind::HorizontalBar { ranges, .. }
         | WidgetKind::Speedometer { ranges, .. }
         | WidgetKind::CoreBars { ranges, .. }
-        | WidgetKind::ValueText { ranges, .. } => Some(ranges),
+        | WidgetKind::ValueText { ranges, .. }
+        | WidgetKind::Sparkline { ranges, .. } => Some(ranges),
         _ => None,
     }
 }
@@ -543,7 +721,8 @@ pub(super) fn widget_ranges(kind: &WidgetKind) -> Option<&[SensorRange]> {
         | WidgetKind::HorizontalBar { ranges, .. }
         | WidgetKind::Speedometer { ranges, .. }
         | WidgetKind::CoreBars { ranges, .. }
-        | WidgetKind::ValueText { ranges, .. } => Some(ranges.as_slice()),
+        | WidgetKind::ValueText { ranges, .. }
+        | WidgetKind::Sparkline { ranges, .. } => Some(ranges.as_slice()),
         _ => None,
     }
 }

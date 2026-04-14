@@ -453,7 +453,6 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                 }
             }
             if let Some(e) = editor_weak.upgrade() {
-                reflect::reflect_ranges(&e, &editor_state);
                 reflect::reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
             }
             preview::request_preview(&editor_weak, &editor_state, &preview_version, &shared);

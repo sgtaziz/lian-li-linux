@@ -29,7 +29,8 @@ pub(super) fn widget_sensor_source(kind: &WidgetKind) -> Option<&SensorSourceCon
         | WidgetKind::RadialGauge { source, .. }
         | WidgetKind::VerticalBar { source, .. }
         | WidgetKind::HorizontalBar { source, .. }
-        | WidgetKind::Speedometer { source, .. } => Some(source),
+        | WidgetKind::Speedometer { source, .. }
+        | WidgetKind::Sparkline { source, .. } => Some(source),
         _ => None,
     }
 }
@@ -83,6 +84,11 @@ pub(super) fn format_sensor_readout(kind: &WidgetKind, raw: f32) -> (String, i32
             value_min,
             value_max,
             ..
+        }
+        | WidgetKind::Sparkline {
+            value_min,
+            value_max,
+            ..
         } => {
             let span = (value_max - value_min).abs().max(f32::EPSILON);
             let q = (((raw - value_min) / span) * 1000.0).round() as i32;
@@ -92,23 +98,19 @@ pub(super) fn format_sensor_readout(kind: &WidgetKind, raw: f32) -> (String, i32
     }
 }
 
-fn render_value_format(fmt: &str, value: f32) -> String {
-    if let Some(rest) = fmt.strip_prefix("{:.") {
-        if let Some(n_str) = rest.strip_suffix("}") {
-            if let Ok(n) = n_str.parse::<usize>() {
-                return format!("{:.*}", n, value);
-            }
+pub(super) fn render_value_format(fmt: &str, value: f32) -> String {
+    if let Some(open) = fmt.find('{') {
+        if let Some(close_rel) = fmt[open..].find('}') {
+            let close = open + close_rel;
+            let spec = &fmt[open + 1..close];
+            let decimals = spec
+                .strip_prefix(":.")
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or(0);
+            let prefix = &fmt[..open];
+            let suffix = &fmt[close + 1..];
+            return format!("{prefix}{:.*}{suffix}", decimals, value);
         }
-    }
-    if fmt == "{}" {
-        return format!("{:.0}", value);
-    }
-    if let Some(pos) = fmt.find("{}") {
-        let mut out = String::with_capacity(fmt.len() + 8);
-        out.push_str(&fmt[..pos]);
-        out.push_str(&format!("{:.0}", value));
-        out.push_str(&fmt[pos + 2..]);
-        return out;
     }
     format!("{:.0}", value)
 }
@@ -153,6 +155,9 @@ pub(super) fn widget_font_refs(kind: &WidgetKind) -> Vec<&FontRef> {
         WidgetKind::Label { font, .. } | WidgetKind::ValueText { font, .. } => vec![font],
         WidgetKind::ClockDigital { font, .. } => vec![font],
         WidgetKind::ClockAnalog { numbers_font, .. } => vec![numbers_font],
+        WidgetKind::Sparkline {
+            axis_label_font, ..
+        } => vec![axis_label_font],
         _ => Vec::new(),
     }
 }
@@ -186,6 +191,51 @@ pub(super) fn range_color(ranges: &[SensorRange], unit_interval: f32) -> Rgba<u8
     }
     let last = ranges.last().unwrap();
     Rgba([last.color[0], last.color[1], last.color[2], last.alpha])
+}
+
+pub(super) fn range_color_blended(ranges: &[SensorRange], unit_interval: f32) -> Rgba<u8> {
+    if ranges.is_empty() {
+        return Rgba([255, 255, 255, 255]);
+    }
+    let pct = unit_interval.clamp(0.0, 1.0) * 100.0;
+    let stops: Vec<(f32, [u8; 4])> = {
+        let mut v = Vec::with_capacity(ranges.len());
+        let mut prev_max = 0.0_f32;
+        for r in ranges {
+            let max = r.max.unwrap_or(100.0);
+            let mid = (prev_max + max) * 0.5;
+            v.push((mid, [r.color[0], r.color[1], r.color[2], r.alpha]));
+            prev_max = max;
+        }
+        v
+    };
+    if pct <= stops[0].0 {
+        return Rgba(stops[0].1);
+    }
+    let last = stops.last().unwrap();
+    if pct >= last.0 {
+        return Rgba(last.1);
+    }
+    for i in 0..stops.len() - 1 {
+        let (x0, c0) = stops[i];
+        let (x1, c1) = stops[i + 1];
+        if pct >= x0 && pct < x1 {
+            let t = (pct - x0) / (x1 - x0).max(f32::EPSILON);
+            return Rgba([
+                lerp_u8(c0[0], c1[0], t),
+                lerp_u8(c0[1], c1[1], t),
+                lerp_u8(c0[2], c1[2], t),
+                lerp_u8(c0[3], c1[3], t),
+            ]);
+        }
+    }
+    Rgba(last.1)
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0))
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 pub(super) fn unit_interval(value: f32, min: f32, max: f32) -> f32 {

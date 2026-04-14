@@ -238,6 +238,31 @@ impl CustomAsset {
         self.update_interval
     }
 
+    pub fn seed_preview_history(&self) {
+        let mut states = self.widget_states.lock();
+        for (widget, state) in self.template.widgets.iter().zip(states.iter_mut()) {
+            if let WidgetKind::Sparkline {
+                history_length,
+                value_min,
+                value_max,
+                ..
+            } = &widget.kind
+            {
+                let cap = (*history_length).max(8) as usize;
+                let span = (value_max - value_min).abs().max(1.0);
+                let base = (value_min + value_max) * 0.5;
+                state.history.clear();
+                state.history.reserve(cap);
+                for i in 0..cap {
+                    let t = i as f32 / (cap - 1).max(1) as f32;
+                    let phase = t * std::f32::consts::PI * 3.0;
+                    let v = base + span * 0.35 * phase.sin();
+                    state.history.push_back(v);
+                }
+            }
+        }
+    }
+
     pub fn blank_frame(&self) -> FrameInfo {
         let fill = match self.template.background {
             TemplateBackground::Color { rgb } => Rgb([rgb[0], rgb[1], rgb[2]]),
@@ -283,6 +308,14 @@ impl CustomAsset {
                     any_dynamic_changed = true;
                     state.last_render_text = Some(text);
                     state.last_quantized = quantized;
+                }
+                if let WidgetKind::Sparkline { history_length, .. } = &widget.kind {
+                    let cap = (*history_length).max(2) as usize;
+                    state.history.push_back(raw);
+                    while state.history.len() > cap {
+                        state.history.pop_front();
+                    }
+                    any_dynamic_changed = true;
                 }
             }
             if matches!(

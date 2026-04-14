@@ -74,6 +74,7 @@ fn main() -> Result<()> {
 
     let asset = CustomAsset::new(&template, 0.0, &screen, &[])
         .map_err(|e| anyhow!("building custom asset: {e}"))?;
+    asset.seed_preview_history();
     let frame = asset
         .render_frame(true)
         .map_err(|e| anyhow!("rendering frame: {e}"))?

@@ -174,7 +174,8 @@ export component PropertiesPanel inherits Rectangle {
                    || root.selected-widget.kind == "vertical_bar"
                    || root.selected-widget.kind == "horizontal_bar"
                    || root.selected-widget.kind == "speedometer"
-                   || root.selected-widget.kind == "value_text": VerticalLayout {
+                   || root.selected-widget.kind == "value_text"
+                   || root.selected-widget.kind == "sparkline": VerticalLayout {
                     spacing: 6px;
                     LabeledComboIndex {
                         label: "Sensor";
@@ -326,13 +327,225 @@ export component PropertiesPanel inherits Rectangle {
                 if root.selected-widget.kind == "vertical_bar"
                    || root.selected-widget.kind == "horizontal_bar"
                    || root.selected-widget.kind == "radial_gauge"
-                   || root.selected-widget.kind == "core_bars": RgbaRow {
+                   || root.selected-widget.kind == "core_bars"
+                   || root.selected-widget.kind == "sparkline": RgbaRow {
                     title: "Background (R / G / B / A)";
                     r: root.selected-widget.bg-r;
                     g: root.selected-widget.bg-g;
                     b: root.selected-widget.bg-b;
                     a: root.selected-widget.bg-a;
                     edited(ch, v) => { root.widget-field(root.selected-index, "bg_" + ch, v); }
+                }
+
+                if root.selected-widget.kind == "sparkline": VerticalLayout {
+                    spacing: 6px;
+                    LabeledCheckBox {
+                        text: "Auto range (ignore min/max)";
+                        checked: root.selected-widget.sparkline-auto-range;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_auto_range", c ? "true" : "false"); }
+                    }
+                    LabeledSpinBox {
+                        label: "History samples";
+                        value: root.selected-widget.sparkline-history;
+                        minimum: 2;
+                        maximum: 2000;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_history", v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Line width";
+                        value: root.selected-widget.sparkline-line-width;
+                        minimum: 1;
+                        maximum: 40;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_line_width", v); }
+                    }
+                    RgbaRow {
+                        title: "Line color (R / G / B / A)";
+                        r: root.selected-widget.sparkline-line-r;
+                        g: root.selected-widget.sparkline-line-g;
+                        b: root.selected-widget.sparkline-line-b;
+                        a: root.selected-widget.sparkline-line-a;
+                        edited(ch, v) => { root.widget-field(root.selected-index, "sparkline_line_" + ch, v); }
+                    }
+                    RgbaRow {
+                        title: "Fill under curve (alpha 0 = disabled)";
+                        r: root.selected-widget.sparkline-fill-r;
+                        g: root.selected-widget.sparkline-fill-g;
+                        b: root.selected-widget.sparkline-fill-b;
+                        a: root.selected-widget.sparkline-fill-a;
+                        edited(ch, v) => { root.widget-field(root.selected-index, "sparkline_fill_" + ch, v); }
+                    }
+                    LabeledCheckBox {
+                        text: "Fill uses color ranges (alpha above scales it)";
+                        checked: root.selected-widget.sparkline-fill-from-ranges;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_fill_from_ranges", c ? "true" : "false"); }
+                    }
+                    LabeledCheckBox {
+                        text: "Blend range colors (gradient transitions)";
+                        checked: root.selected-widget.sparkline-range-blend;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_range_blend", c ? "true" : "false"); }
+                    }
+                    LabeledCheckBox {
+                        text: "Smooth (curve interpolation)";
+                        checked: root.selected-widget.sparkline-smooth;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_smooth", c ? "true" : "false"); }
+                    }
+                    LabeledCheckBox {
+                        text: "Scroll right-to-left (newest on left)";
+                        checked: root.selected-widget.sparkline-rtl;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_rtl", c ? "true" : "false"); }
+                    }
+                    LabeledSpinBox {
+                        label: "Padding (px)";
+                        value: root.selected-widget.sparkline-padding;
+                        minimum: 0;
+                        maximum: 200;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_padding", v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Corner radius";
+                        value: root.selected-widget.sparkline-corner-radius;
+                        minimum: 0;
+                        maximum: 200;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_corner_radius", v); }
+                    }
+                    RgbaRow {
+                        title: "Border color (R / G / B / A)";
+                        r: root.selected-widget.sparkline-border-r;
+                        g: root.selected-widget.sparkline-border-g;
+                        b: root.selected-widget.sparkline-border-b;
+                        a: root.selected-widget.sparkline-border-a;
+                        edited(ch, v) => { root.widget-field(root.selected-index, "sparkline_border_" + ch, v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Border width";
+                        value: root.selected-widget.sparkline-border-width;
+                        minimum: 0;
+                        maximum: 40;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_border_width", v); }
+                    }
+                    LabeledCheckBox {
+                        text: "Show points (dots at samples)";
+                        checked: root.selected-widget.sparkline-show-points;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_show_points", c ? "true" : "false"); }
+                    }
+                    LabeledSpinBox {
+                        label: "Point radius";
+                        value: root.selected-widget.sparkline-point-radius;
+                        minimum: 0;
+                        maximum: 40;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_point_radius", v); }
+                    }
+                    LabeledCheckBox {
+                        text: "Show baseline line";
+                        checked: root.selected-widget.sparkline-show-baseline;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_show_baseline", c ? "true" : "false"); }
+                    }
+                    LabeledSpinBox {
+                        label: "Baseline value";
+                        value: root.selected-widget.sparkline-baseline-value;
+                        minimum: -100000;
+                        maximum: 100000;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_baseline_value", v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Baseline width";
+                        value: root.selected-widget.sparkline-baseline-width;
+                        minimum: 0;
+                        maximum: 40;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_baseline_width", v); }
+                    }
+                    RgbaRow {
+                        title: "Baseline color (R / G / B / A)";
+                        r: root.selected-widget.sparkline-baseline-r;
+                        g: root.selected-widget.sparkline-baseline-g;
+                        b: root.selected-widget.sparkline-baseline-b;
+                        a: root.selected-widget.sparkline-baseline-a;
+                        edited(ch, v) => { root.widget-field(root.selected-index, "sparkline_baseline_" + ch, v); }
+                    }
+                    LabeledCheckBox {
+                        text: "Show gridlines";
+                        checked: root.selected-widget.sparkline-show-gridlines;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_show_gridlines", c ? "true" : "false"); }
+                    }
+                    LabeledSpinBox {
+                        label: "Horizontal gridlines";
+                        value: root.selected-widget.sparkline-gridlines-h;
+                        minimum: 0;
+                        maximum: 50;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_gridlines_h", v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Vertical gridlines";
+                        value: root.selected-widget.sparkline-gridlines-v;
+                        minimum: 0;
+                        maximum: 50;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_gridlines_v", v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Gridline width";
+                        value: root.selected-widget.sparkline-gridline-width;
+                        minimum: 0;
+                        maximum: 40;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_gridline_width", v); }
+                    }
+                    RgbaRow {
+                        title: "Gridline color (R / G / B / A)";
+                        r: root.selected-widget.sparkline-gridline-r;
+                        g: root.selected-widget.sparkline-gridline-g;
+                        b: root.selected-widget.sparkline-gridline-b;
+                        a: root.selected-widget.sparkline-gridline-a;
+                        edited(ch, v) => { root.widget-field(root.selected-index, "sparkline_gridline_" + ch, v); }
+                    }
+                    LabeledCheckBox {
+                        text: "Show axis labels";
+                        checked: root.selected-widget.sparkline-show-axis-labels;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_show_axis_labels", c ? "true" : "false"); }
+                    }
+                    LabeledSpinBox {
+                        label: "Label count";
+                        value: root.selected-widget.sparkline-axis-label-count;
+                        minimum: 2;
+                        maximum: 20;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_axis_label_count", v); }
+                    }
+                    LabeledCheckBox {
+                        text: "Labels on right side";
+                        checked: root.selected-widget.sparkline-axis-labels-on-right;
+                        toggled(c) => { root.widget-field(root.selected-index, "sparkline_axis_labels_on_right", c ? "true" : "false"); }
+                    }
+                    LabeledLineEdit {
+                        label: "Label format";
+                        value: root.selected-widget.sparkline-axis-label-format;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_axis_label_format", v); }
+                    }
+                    LabeledComboValue {
+                        label: "Label font";
+                        model: root.font-names;
+                        value: root.selected-widget.sparkline-axis-font-name;
+                        selected(v) => { root.widget-field(root.selected-index, "sparkline_axis_font", v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Label size";
+                        value: root.selected-widget.sparkline-axis-label-size;
+                        minimum: 6;
+                        maximum: 100;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_axis_label_size", v); }
+                    }
+                    RgbaRow {
+                        title: "Label color (R / G / B / A)";
+                        r: root.selected-widget.sparkline-axis-label-r;
+                        g: root.selected-widget.sparkline-axis-label-g;
+                        b: root.selected-widget.sparkline-axis-label-b;
+                        a: root.selected-widget.sparkline-axis-label-a;
+                        edited(ch, v) => { root.widget-field(root.selected-index, "sparkline_axis_label_" + ch, v); }
+                    }
+                    LabeledSpinBox {
+                        label: "Label padding";
+                        value: root.selected-widget.sparkline-axis-label-padding;
+                        minimum: 0;
+                        maximum: 100;
+                        edited(v) => { root.widget-field(root.selected-index, "sparkline_axis_label_padding", v); }
+                    }
                 }
 
                 if root.selected-widget.kind == "core_bars": LabeledCheckBox {
@@ -503,7 +716,8 @@ export component PropertiesPanel inherits Rectangle {
                    || root.selected-widget.kind == "horizontal_bar"
                    || root.selected-widget.kind == "speedometer"
                    || root.selected-widget.kind == "core_bars"
-                   || root.selected-widget.kind == "value_text": VerticalLayout {
+                   || root.selected-widget.kind == "value_text"
+                   || root.selected-widget.kind == "sparkline": VerticalLayout {
                     spacing: 6px;
                     Text { text: "Color ranges (max value / R / G / B / A)"; font-size: 10px; color: Theme.text-secondary; }
                     for r[ri] in root.selected-ranges: HorizontalLayout {
