@@ -69,6 +69,7 @@ pub enum DaemonEvent {
     DisplaySwitch { device_id: String }, // Device ID pending display mode switch (LCD→Desktop). Handled by main event loop.
     Bind { mac_address: String }, // MAC address pending wireless device bind. Handled by main event loop.
     FrameFinished { asset: Arc<MediaAsset> }, // A device has calculated a new frame, let's update the display
+    Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
 }
 
 pub struct ServiceManager {
@@ -100,6 +101,7 @@ pub struct ServiceManager {
     openrgb_state: Arc<Mutex<openrgb_server::OpenRgbServerState>>,
     direct_color_buffer: Arc<Mutex<crate::rgb_controller::DirectColorBuffer>>,
     direct_color_writer: Option<JoinHandle<()>>,
+    desktop_displays: crate::desktop_display::DesktopDisplayRegistry,
     tx: Option<Sender<DaemonEvent>>,
 }
 
@@ -133,6 +135,7 @@ impl ServiceManager {
                 crate::rgb_controller::DirectColorBuffer::new(),
             )),
             direct_color_writer: None,
+            desktop_displays: crate::desktop_display::DesktopDisplayRegistry::new(),
             tx: None,
         })
     }
@@ -286,8 +289,22 @@ impl ServiceManager {
         });
         SysSensor::init();
 
+        let shutdown_tx = tx.clone();
+        thread::spawn(move || {
+            use signal_hook::consts::{SIGINT, SIGTERM};
+            if let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGINT, SIGTERM]) {
+                if let Some(sig) = signals.forever().next() {
+                    info!("received signal {sig}, shutting down");
+                    let _ = shutdown_tx.send(DaemonEvent::Shutdown);
+                }
+            }
+        });
+
         for event in rx {
             match event {
+                DaemonEvent::Shutdown => {
+                    break;
+                }
                 DaemonEvent::USBCheck => {
                     // Refresh USB device enumeration
                     // Wireless discovery is handled by its own RX polling thread.
@@ -394,6 +411,11 @@ impl ServiceManager {
             Err(e) => {
                 warn!("USB enumeration failed: {e}");
             }
+        }
+
+        match crate::desktop_display::enumerate_turzx() {
+            Ok(present) => self.desktop_displays.sync(&present),
+            Err(e) => warn!("TURZX enumeration failed: {e:#}"),
         }
     }
 
@@ -569,6 +591,8 @@ impl ServiceManager {
     }
 
     fn shutdown(&mut self) {
+        self.desktop_displays.shutdown();
+
         for target in self.targets.values_mut() {
             target.stop();
         }

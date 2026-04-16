@@ -1450,6 +1450,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ffmpeg-next"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c4bd5ab1ac61f29c634df1175d350ded29cf74c3c6d4f7030431a5ae3c7d5d"
+dependencies = [
+ "bitflags 2.11.0",
+ "ffmpeg-sys-next",
+ "libc",
+]
+
+[[package]]
+name = "ffmpeg-sys-next"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a314bc0e022a33a99567ed4bd2576bd58ffd8fcff7891c29194cfecc26a62547"
+dependencies = [
+ "bindgen",
+ "cc",
+ "libc",
+ "num_cpus",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "field-offset"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2944,9 +2969,11 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "ffmpeg-next",
  "hidapi",
  "image 0.24.9",
  "lianli-devices",
+ "lianli-evdi",
  "lianli-media",
  "lianli-shared",
  "lianli-transport",
@@ -2955,6 +2982,7 @@ dependencies = [
  "rusb",
  "serde",
  "serde_json",
+ "signal-hook",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2966,6 +2994,7 @@ dependencies = [
  "anyhow",
  "cbc",
  "cc",
+ "clap",
  "des",
  "hex",
  "hidapi",
@@ -2977,6 +3006,18 @@ dependencies = [
  "rusb",
  "thiserror 2.0.18",
  "time",
+ "tracing",
+ "tracing-subscriber",
+ "turbojpeg",
+]
+
+[[package]]
+name = "lianli-evdi"
+version = "0.3.5"
+dependencies = [
+ "anyhow",
+ "libc",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -3552,6 +3593,16 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "num_cpus"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
+dependencies = [
+ "hermit-abi 0.5.2",
+ "libc",
 ]
 
 [[package]]
@@ -5091,6 +5142,16 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "signal-hook"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2"
+dependencies = [
+ "libc",
+ "signal-hook-registry",
+]
 
 [[package]]
 name = "signal-hook-registry"

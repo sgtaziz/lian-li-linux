@@ -12,6 +12,7 @@ pub mod tinyuz;
 pub mod tl_fan;
 pub mod tl_lcd;
 pub mod traits;
+pub mod turzx;
 pub mod universal_screen;
 pub mod universal_screen_lighting;
 pub mod winusb_lcd;

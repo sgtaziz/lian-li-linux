@@ -11,6 +11,7 @@ path = "src/main.rs"
 lianli-shared = { path = "../lianli-shared" }
 lianli-transport = { path = "../lianli-transport" }
 lianli-devices = { path = "../lianli-devices" }
+lianli-evdi = { path = "../lianli-evdi" }
 lianli-media = { path = "../lianli-media" }
 base64 = { workspace = true }
 clap = { workspace = true }
@@ -24,3 +25,5 @@ rusb = { workspace = true }
 hidapi = { workspace = true }
 notify = { workspace = true }
 image = { workspace = true }
+ffmpeg-next = { workspace = true }
+signal-hook = "0.3"

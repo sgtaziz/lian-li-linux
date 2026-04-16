@@ -145,6 +145,34 @@ impl UsbTransport {
         }
     }
 
+    pub fn control_in(
+        &self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        buf: &mut [u8],
+        timeout: Duration,
+    ) -> Result<usize, TransportError> {
+        Ok(self
+            .handle
+            .read_control(request_type, request, value, index, buf, timeout)?)
+    }
+
+    pub fn control_out(
+        &self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        data: &[u8],
+        timeout: Duration,
+    ) -> Result<usize, TransportError> {
+        Ok(self
+            .handle
+            .write_control(request_type, request, value, index, data, timeout)?)
+    }
+
     /// Drain any remaining data from the read pipe.
     pub fn read_flush(&self) {
         let mut buf = [0u8; 512];
