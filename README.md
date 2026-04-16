@@ -64,12 +64,15 @@ additionally driven as a native secondary monitor via [evdi](https://github.com/
 The daemon auto-attaches an evdi virtual output on detection, the device shows up in your
 compositor's display settings with its real EDID, and any window can be dragged onto it.
 
-Requirements (only needed if you have a desktop-mode device):
-- `evdi-dkms` — kernel module for the virtual display. **Optional**: the daemon runs fine without
-  it, but attach will fail for desktop-mode devices and they'll be skipped.
-- `libevdi` userspace library — required (daemon binary is linked against it)
+Requirements:
+- `evdi-dkms` — bundles the userspace library (required to link the daemon) and the kernel
+  module (required at runtime for virtual display attach). On Arch this is the `evdi-dkms` AUR
+  package; on Debian/Ubuntu both pieces are packaged separately (`libevdi0-dev` + `evdi-dkms`).
 - System `ffmpeg` libraries (libavcodec/libavformat/libswscale) for H.264 encoding — already
   pulled in by the base `ffmpeg` dependency.
+
+The daemon will still start without the kernel module loaded, but desktop-mode devices (HydroShift II,
+Lancool 207, Universal Screen 8.8") won't get attached as virtual displays until the module is present.
 
 ### Other
 
@@ -126,8 +129,7 @@ git clone --recurse-submodules https://github.com/sgtaziz/lian-li-linux.git && c
 ```bash
 # Arch
 sudo pacman -S hidapi libusb ffmpeg fontconfig mesa libxkbcommon wayland libx11 libinput libdrm clang cmake pkg-config
-yay -S libevdi           # AUR - required to build/link the daemon
-yay -S evdi-dkms         # AUR - optional, only needed at runtime for desktop-mode devices
+yay -S evdi-dkms         # AUR - bundles both libevdi (required) and the DKMS kernel module
 
 # Ubuntu / Debian
 sudo apt install libhidapi-dev libusb-1.0-0-dev libudev-dev libfontconfig-dev \
