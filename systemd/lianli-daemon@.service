@@ -1,0 +1,14 @@
+[Unit]
+Description=Lian Li Device Daemon (for %i)
+After=multi-user.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/bin/lianli-daemon
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

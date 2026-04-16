@@ -100,11 +100,13 @@ The GUI connects over `$XDG_RUNTIME_DIR/lianli-daemon.sock`.
 yay -S lianli-linux-git
 ```
 
-Or with any AUR helper (`paru`, `trizen`, etc.). This installs both binaries, udev rules, systemd service (auto-enabled), desktop entry, and icons. After installing, reboot or run:
+Or with any AUR helper (`paru`, `trizen`, etc.). This installs both binaries, udev rules, systemd service, desktop entry, and icons. After installing, enable the daemon for your user:
 ```bash
 sudo udevadm control --reload-rules && sudo udevadm trigger
-systemctl --user daemon-reload && systemctl --user start lianli-daemon
+sudo systemctl enable --now lianli-daemon@$USER.service
 ```
+
+The daemon runs as a templated system service (`lianli-daemon@USER.service`) so it starts independently of user-session login, but still runs under your user account and reads `~/.config/lianli/config.json`.
 
 ### From Source
 
@@ -158,13 +160,12 @@ sudo udevadm trigger
 5) Install and start the daemon:
 ```bash
 # Copy binary
-cp target/release/lianli-daemon ~/.local/bin/
+sudo install -Dm755 target/release/lianli-daemon /usr/bin/lianli-daemon
 
-# Install and start user systemd service
-mkdir -p ~/.config/systemd/user
-cp systemd/lianli-daemon.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now lianli-daemon
+# Install and start templated system systemd service
+sudo install -Dm644 systemd/lianli-daemon@.service /etc/systemd/system/lianli-daemon@.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now lianli-daemon@$USER.service
 ```
 
 A default config is created automatically at `~/.config/lianli/config.json` on first run.
