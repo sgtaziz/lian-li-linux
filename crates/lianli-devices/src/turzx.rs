@@ -210,7 +210,9 @@ pub fn fragment_stream_a(packet: &[u8], urb_max: usize) -> Vec<Vec<u8>> {
             out.push(pack_frame(STREAM_A_FINAL, offset as u32, &packet[offset..]));
             return out;
         }
-        let chunk = budget_frag;
+        // Reserve at least one byte for the trailing FINAL URB (the commit marker
+        // is mandatory), otherwise a packet in (budget_final, budget_frag] overruns.
+        let chunk = budget_frag.min(remaining.saturating_sub(1));
         out.push(pack_fragment(
             STREAM_A_FRAG,
             offset as u32,
@@ -753,6 +755,27 @@ mod tests {
         let c = fnv1a_u32(b"1a86:ad21:1-8.3");
         assert_eq!(a, c);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn stream_a_boundary_between_final_and_frag_budget_does_not_panic() {
+        // urb_max=32768 → budget_final=32758, budget_frag=32760.
+        // Payload sizes in (budget_final, budget_frag] used to overrun the slice
+        // because the code sliced by fixed budget_frag without clamping to remaining.
+        for len in [32758usize, 32759, 32760, 32761, 32762] {
+            let payload: Vec<u8> = (0..len).map(|i| (i & 0xFF) as u8).collect();
+            let urbs = fragment_stream_a(&payload, 32768);
+            let mut reassembled = Vec::new();
+            for urb in &urbs {
+                let size = u32::from_be_bytes([0, urb[5], urb[6], urb[7]]) as usize;
+                reassembled.extend_from_slice(&urb[8..8 + size]);
+            }
+            assert_eq!(reassembled, payload, "len={len}");
+            let last = urbs.last().unwrap();
+            assert_eq!(last[1], STREAM_A_FINAL, "len={len}: last urb must be FINAL");
+            let last_two = &last[last.len() - 2..];
+            assert_eq!(last_two, &[MAGIC, COMMIT], "len={len}: commit marker missing");
+        }
     }
 
     #[test]
