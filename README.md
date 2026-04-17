@@ -74,13 +74,9 @@ Requirements:
 The daemon will still start without the kernel module loaded, but desktop-mode devices (HydroShift II,
 Lancool 207, Universal Screen 8.8") won't get attached as virtual displays until the module is present.
 
-Because `/sys/devices/evdi/add` is root-only, the package also ships a small root oneshot
-`lianli-evdi-setup.service` that pre-creates one evdi node at boot. The per-user daemon then
-opens the existing node unprivileged. Enable it alongside the daemon:
-
-```bash
-sudo systemctl enable --now lianli-evdi-setup.service
-```
+`/sys/devices/evdi/add` is root-only by default; the package ships a udev rule that grants the
+active user write access to it (and a `modules-load.d` drop-in that auto-loads the `evdi` module
+at boot), so the per-user daemon creates and opens its own evdi nodes with no root setup step.
 
 ### Other
 
@@ -113,15 +109,9 @@ The GUI connects over `$XDG_RUNTIME_DIR/lianli-daemon.sock`.
 yay -S lianli-linux-git
 ```
 
-Or with any AUR helper (`paru`, `trizen`, etc.). This installs both binaries, udev rules, systemd service, desktop entry, and icons. After installing, enable the daemon for your user:
-```bash
-sudo udevadm control --reload-rules && sudo udevadm trigger
-sudo systemctl enable --now lianli-daemon@$USER.service
-# If you have a desktop-mode device (HydroShift II, Lancool 207, Universal Screen):
-sudo systemctl enable --now lianli-evdi-setup.service
-```
+Or with any AUR helper (`paru`, `trizen`, etc.). This installs binaries, udev rules, the systemd user service, desktop entry, and icons. The package also globally enables `lianli-daemon.service` and attempts to start it in the current session — no manual `systemctl` step is required.
 
-The daemon runs as a templated system service (`lianli-daemon@USER.service`) so it starts independently of user-session login, but still runs under your user account and reads `~/.config/lianli/config.json`.
+The daemon runs as a systemd user service and reads `~/.config/lianli/config.json`. If you want it to stay active when no desktop session is logged in, enable linger: `sudo loginctl enable-linger $USER`.
 
 ### From Source
 
@@ -167,9 +157,11 @@ Binaries: `target/release/lianli-daemon` and `target/release/lianli-gui`
 
 4) Install udev rules (required for USB access without root):
 ```bash
-sudo cp udev/99-lianli.rules /etc/udev/rules.d/
+sudo cp packaging/udev/99-lianli.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
+# If evdi is already loaded, apply the new evdi chmod rule without a reboot:
+[ -e /sys/module/evdi ] && sudo udevadm trigger --action=add /sys/module/evdi
 ```
 
 5) Install and start the daemon:
@@ -177,13 +169,14 @@ sudo udevadm trigger
 # Copy binary
 sudo install -Dm755 target/release/lianli-daemon /usr/bin/lianli-daemon
 
-# Install and start templated system systemd service
-sudo install -Dm644 systemd/lianli-daemon@.service /etc/systemd/system/lianli-daemon@.service
-# Optional: evdi setup oneshot for desktop-mode virtual display support
-sudo install -Dm644 systemd/lianli-evdi-setup.service /etc/systemd/system/lianli-evdi-setup.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now lianli-daemon@$USER.service
-sudo systemctl enable --now lianli-evdi-setup.service   # if you have a desktop-mode device
+# Install user service
+sudo install -Dm644 packaging/systemd/lianli-daemon.service /usr/lib/systemd/user/lianli-daemon.service
+
+# Auto-load evdi at boot (for desktop-mode LCD support)
+sudo install -Dm644 packaging/modules-load.d/lianli-evdi.conf /usr/lib/modules-load.d/lianli-evdi.conf
+
+systemctl --user daemon-reload
+systemctl --user enable --now lianli-daemon.service
 ```
 
 A default config is created automatically at `~/.config/lianli/config.json` on first run.
@@ -200,7 +193,7 @@ cp assets/icons/128x128@2x.png ~/.local/share/icons/hicolor/256x256/apps/com.sgt
 cp assets/icons/icon.svg ~/.local/share/icons/hicolor/scalable/apps/com.sgtaziz.lianlilinux.svg
 
 # Install desktop entry
-cp com.sgtaziz.lianlilinux.desktop ~/.local/share/applications/
+cp packaging/desktop/com.sgtaziz.lianlilinux.desktop ~/.local/share/applications/
 update-desktop-database ~/.local/share/applications/
 ```
 
