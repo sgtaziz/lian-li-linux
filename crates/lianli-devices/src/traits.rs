@@ -3,6 +3,9 @@ use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_shared::screen::ScreenInfo;
 
 /// A device that can control fan speeds.
+///
+/// `duty` values passed to `set_fan_speed`, `set_fan_speeds`, and `set_pump_speed`
+/// are raw PWM in the range 0-255. Implementations scale to device-native units.
 pub trait FanDevice: Send + Sync {
     fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()>;
     fn set_fan_speeds(&self, duties: &[u8]) -> Result<()>;
@@ -37,7 +40,7 @@ pub trait FanDevice: Send + Sync {
         false
     }
 
-    /// Set pump speed (0-100% duty). Only for devices where `has_pump_control()` is true.
+    /// Only for devices where `has_pump_control()` is true.
     fn set_pump_speed(&self, _duty: u8) -> Result<()> {
         anyhow::bail!("Pump speed control not supported by this device")
     }

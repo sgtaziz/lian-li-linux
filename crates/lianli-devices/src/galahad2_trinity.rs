@@ -292,10 +292,13 @@ impl Galahad2TrinityController {
     }
 }
 
+fn duty_to_percent(duty: u8) -> u8 {
+    ((duty as u32 * 100) / 255) as u8
+}
+
 impl FanDevice for Galahad2TrinityController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
-        // Single fan channel, duty 0-100%
-        let pwm = duty.min(100);
+        let pwm = duty_to_percent(duty);
         self.send_a_command(CMD_SET_FAN_PWM, &[0x00, pwm])?;
         debug!("Set fan PWM to {pwm}%");
         Ok(())
@@ -325,7 +328,7 @@ impl FanDevice for Galahad2TrinityController {
     }
 
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
-        let pwm = duty.min(100);
+        let pwm = duty_to_percent(duty);
         self.send_a_command(CMD_SET_PUMP_PWM, &[0x00, pwm])?;
         debug!("Set pump PWM to {pwm}%");
         Ok(())

@@ -303,39 +303,40 @@ impl HydroShiftLcdController {
         Ok(data_len == 1 && buf[B_HEADER_LEN] == 0)
     }
 
-    /// Reset device (A-command 0x8E). Returns true on success.
+    /// Reset device (A-command 0x8E). Device may emit a transient status byte `2`
+    /// before the final `1` — both must be drained.
     pub fn reset_device(&self) -> bool {
-        let mut dev = self.device.lock();
-        let _ = match self.write_a_command_internal(&mut *dev, CMD_RESET_DEVICE, &[]) {
-            Ok(_) => true,
-            Err(e) => {
-                warn!("AIO LCD: reset device failed: {}", e);
-                return false;
-            }
-        };
+        const MAX_ATTEMPTS: u32 = 20;
 
-        // Loop reading until we get a firmware response, discarding stale responses
-        // from a previous session (e.g. 0x81 handshake, 0x8E reset) as they arrive.
+        let mut dev = self.device.lock();
+        if let Err(e) = self.write_a_command_internal(&mut *dev, CMD_RESET_DEVICE, &[]) {
+            warn!("AIO LCD: reset device failed: {e}");
+            return false;
+        }
+
         let mut buf = [0u8; A_PACKET_SIZE];
-        loop {
+        for _ in 0..MAX_ATTEMPTS {
             let n = match dev.read_timeout(&mut buf, 1000) {
-                Ok(written) => written,
+                Ok(n) => n,
                 Err(e) => {
-                    warn!("AIO LCD: reset device - read response 1: {}", e);
+                    warn!("AIO LCD: reset device read failed: {e}");
                     return false;
                 }
             };
-            debug!(
-                "Reset device:  response {n} bytes, raw={:02x?}",
-                &buf[..n.min(20)]
-            );
-            if buf[1] == CMD_RESET_DEVICE && buf[6]==1 {
-                debug!("device-reset successful");
-                return true;
+            if n == 0 {
+                warn!("AIO LCD: reset device timed out");
+                return false;
             }
-            // If we have buf[1] == CMD_RESET_DEVICE and buf[6]==2, then the LCD tells us that it needs more time to complete the reset
-        };
-
+            if n > A_HEADER_LEN && buf[1] == CMD_RESET_DEVICE {
+                match buf[A_HEADER_LEN] {
+                    1 => return true,
+                    2 => continue,
+                    _ => {}
+                }
+            }
+        }
+        warn!("AIO LCD: reset device did not converge after {MAX_ATTEMPTS} reads");
+        false
     }
 
     /// Check LCD availability and attempt recovery if unavailable.
@@ -410,7 +411,7 @@ impl HydroShiftLcdController {
 
     fn send_a_command(&self, cmd: u8, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
         let mut dev = self.device.lock();
-        self.write_a_command_internal(&mut *dev,cmd,data)?;
+        self.write_a_command_internal(&mut *dev, cmd, data)?;
 
         let mut buf = [0u8; A_PACKET_SIZE];
         let n = dev
@@ -437,18 +438,24 @@ impl HydroShiftLcdController {
         self.write_a_command_internal(&mut *dev, cmd, data)
     }
 
-    fn write_a_command_internal(&self, dev: &mut HidBackend,cmd: u8, data: &[u8]) -> Result<()> {
+    fn write_a_command_internal(&self, dev: &mut HidBackend, cmd: u8, data: &[u8]) -> Result<()> {
+        let max_payload = A_PACKET_SIZE - A_HEADER_LEN;
+        if data.len() > max_payload {
+            bail!(
+                "AIO LCD: A-command {cmd:#04x} payload too large ({} > {max_payload})",
+                data.len()
+            );
+        }
         let mut pkt = [0u8; A_PACKET_SIZE];
         pkt[0] = REPORT_ID_A;
         pkt[1] = cmd;
         pkt[5] = data.len() as u8;
-        let copy_len = data.len().min(58);
-        pkt[A_HEADER_LEN..A_HEADER_LEN + copy_len].copy_from_slice(&data[..copy_len]);
+        pkt[A_HEADER_LEN..A_HEADER_LEN + data.len()].copy_from_slice(data);
 
         let written = dev.write(&pkt).context("AIO LCD: write A-command")?;
         debug!(
             "A-cmd {cmd:#04x}: wrote {written} bytes, payload={:02x?}",
-            &data[..copy_len]
+            data
         );
         Ok(())
     }
@@ -501,9 +508,13 @@ impl HydroShiftLcdController {
     }
 }
 
+fn duty_to_percent(duty: u8) -> u8 {
+    ((duty as u32 * 100) / 255) as u8
+}
+
 impl FanDevice for HydroShiftLcdController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
-        let pwm = duty.min(100);
+        let pwm = duty_to_percent(duty);
         self.write_a_command(CMD_SET_FAN_PWM, &[0x00, pwm])?;
         debug!("Set fan PWM to {pwm}%");
         Ok(())
@@ -533,8 +544,7 @@ impl FanDevice for HydroShiftLcdController {
     }
 
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
-        // Duty ranges from 0 to 255, but pump speed ranges from 0 to 100
-        let pwm= (duty as i32*100/255).clamp(0,100) as u8;
+        let pwm = duty_to_percent(duty);
         self.write_a_command(CMD_SET_PUMP_PWM, &[0x00, pwm])?;
         debug!("Set pump PWM to {pwm}%");
         Ok(())

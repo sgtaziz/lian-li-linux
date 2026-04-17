@@ -325,16 +325,25 @@ export component TemplateEditorWindow inherits Window {
             Rectangle {
                 width: 5px;
                 background: gray;
-                
+
                 splitter-touch := TouchArea {
                     mouse-cursor: ew-resize;
-                    
+                    property <length> drag-start-width: 0px;
+
+                    pointer-event(ev) => {
+                        if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down) {
+                            self.drag-start-width = root.right-width;
+                        }
+                    }
+
                     moved => {
                         if (self.pressed) {
-                            root.right-width -= self.mouse-x - self.pressed-x;
-                            
-                            if (root.right-width < 554px) { root.right-width = 554px; } // Right pane should be 554px min.
-                            else if (root.right-width > root.width - 240px - 100px) {root.right-width = root.width - 240px - 100px;} // If right pane is too large (left and middle pane would be too small), then limit it.
+                            root.right-width = self.drag-start-width - (self.mouse-x - self.pressed-x);
+                            if (root.right-width < 554px) {
+                                root.right-width = 554px;
+                            } else if (root.right-width > root.width - 240px - 5px - 100px) {
+                                root.right-width = root.width - 240px - 5px - 100px;
+                            }
                         }
                     }
                 }
