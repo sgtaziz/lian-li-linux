@@ -66,7 +66,8 @@ pub enum DaemonEvent {
     IpcUpdate, // Somebody changed the DaemonState in the mutex
     USBCheck,
     DevicePoll,
-    DisplaySwitch { device_id: String }, // Device ID pending display mode switch (LCD→Desktop). Handled by main event loop.
+    DisplaySwitch { device_id: String }, // LCD→Desktop. Handled by main event loop.
+    DisplaySwitchToLcd { device_id: String, pid: u16 }, // Desktop→LCD. Handled by main event loop.
     Bind { mac_address: String }, // MAC address pending wireless device bind. Handled by main event loop.
     FrameFinished { asset: Arc<MediaAsset> }, // A device has calculated a new frame, let's update the display
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
@@ -103,6 +104,7 @@ pub struct ServiceManager {
     direct_color_writer: Option<JoinHandle<()>>,
     desktop_displays: crate::desktop_display::DesktopDisplayRegistry,
     tx: Option<Sender<DaemonEvent>>,
+    mode_switch_suppression: HashMap<String, Instant>,
 }
 
 impl ServiceManager {
@@ -137,6 +139,7 @@ impl ServiceManager {
             direct_color_writer: None,
             desktop_displays: crate::desktop_display::DesktopDisplayRegistry::new(),
             tx: None,
+            mode_switch_suppression: HashMap::new(),
         })
     }
 
@@ -315,6 +318,9 @@ impl ServiceManager {
                 }
                 DaemonEvent::DisplaySwitch { device_id } => {
                     self.handle_display_switch_to_desktop(&device_id);
+                }
+                DaemonEvent::DisplaySwitchToLcd { device_id, pid } => {
+                    self.handle_display_switch_to_lcd(&device_id, pid);
                 }
                 DaemonEvent::Bind {
                     mac_address: mac_str,
@@ -1149,12 +1155,19 @@ impl ServiceManager {
 
         let mut candidates: Vec<LcdCandidate> = Vec::new();
 
+        self.mode_switch_suppression
+            .retain(|_, until| Instant::now() < *until);
+
         if let Ok(usb_devs) = enumerate_devices() {
             for det in usb_devs {
                 if !LCD_FAMILIES.contains(&det.family) {
                     continue;
                 }
                 let device_id = det.device_id();
+                if self.mode_switch_suppressed(&device_id) {
+                    debug!("LCD candidate skipped (recent mode switch): {device_id}");
+                    continue;
+                }
                 let transport = if lianli_shared::device_id::uses_hid(det.family) {
                     "HID"
                 } else {
@@ -1341,7 +1354,10 @@ impl ServiceManager {
                 target.stop();
                 if let LcdBackend::WinUsb(ref mut lcd) = target.lcd {
                     match lcd.switch_to_desktop_mode() {
-                        Ok(()) => info!("Switched {device_id} to desktop mode"),
+                        Ok(()) => {
+                            info!("Switched {device_id} to desktop mode");
+                            self.mark_mode_switch(device_id);
+                        }
                         Err(e) => warn!("Failed to switch {device_id} to desktop mode: {e}"),
                     }
                 } else {
@@ -1349,7 +1365,6 @@ impl ServiceManager {
                 }
             }
         } else {
-            // No active target — try opening a temporary connection
             info!("No active LCD target for {device_id}, opening temporary connection");
             let det = self
                 .cached_usb_devices
@@ -1364,7 +1379,10 @@ impl ServiceManager {
                                 .unwrap_or(lianli_shared::screen::ScreenInfo::AIO_LCD_480);
                             match WinUsbLcdDevice::new(usb_det.device, screen, det.name.as_str()) {
                                 Ok(mut lcd) => match lcd.switch_to_desktop_mode() {
-                                    Ok(()) => info!("Switched {device_id} to desktop mode"),
+                                    Ok(()) => {
+                                        info!("Switched {device_id} to desktop mode");
+                                        self.mark_mode_switch(device_id);
+                                    }
                                     Err(e) => warn!("Switch to desktop failed: {e}"),
                                 },
                                 Err(e) => warn!("Failed to open {device_id} for mode switch: {e}"),
@@ -1377,6 +1395,32 @@ impl ServiceManager {
                 warn!("Device {device_id} not found in cached devices");
             }
         }
+    }
+
+    fn handle_display_switch_to_lcd(&mut self, device_id: &str, pid: u16) {
+        self.desktop_displays.stop_for_pid(pid);
+        self.mark_mode_switch(device_id);
+
+        match hidapi::HidApi::new() {
+            Ok(api) => match lianli_devices::display_switcher::switch_to_lcd_mode(&api, pid) {
+                Ok(()) => info!("Switched {device_id} to LCD mode"),
+                Err(e) => warn!("Failed to switch {device_id} to LCD mode: {e:#}"),
+            },
+            Err(e) => warn!("Failed to open HID for switch-to-LCD: {e:#}"),
+        }
+    }
+
+    fn mark_mode_switch(&mut self, device_id: &str) {
+        self.mode_switch_suppression.insert(
+            device_id.to_string(),
+            Instant::now() + Duration::from_secs(8),
+        );
+    }
+
+    fn mode_switch_suppressed(&self, device_id: &str) -> bool {
+        self.mode_switch_suppression
+            .get(device_id)
+            .is_some_and(|until| Instant::now() < *until)
     }
 
     fn stream_target(&mut self, this_asset: Arc<MediaAsset>) {

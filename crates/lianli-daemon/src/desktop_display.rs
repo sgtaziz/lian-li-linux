@@ -107,6 +107,25 @@ impl DesktopDisplayRegistry {
         }
     }
 
+    /// Stop (and join) any running worker for the given PID. Used when the
+    /// user initiates a desktop→LCD mode switch on a device and we want the
+    /// stream loop out of the way before the reboot flood.
+    pub fn stop_for_pid(&self, pid: u16) {
+        let mut inner = self.inner.lock();
+        inner.retain(|_, h| {
+            if h.pid == pid {
+                info!(
+                    "TURZX {:04x}:{:04x} — stopping worker for mode switch",
+                    turzx::VID,
+                    pid
+                );
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     pub fn shutdown(&self) {
         let mut inner = self.inner.lock();
         inner.clear();
@@ -333,6 +352,10 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                     let t2 = Instant::now();
                     let packet_len = packet.len() as u64;
                     if let Err(e) = display.send_stream_a(&packet) {
+                        if is_device_gone(&e) {
+                            info!("TURZX {pid:04x} disconnected mid-stream, stopping worker");
+                            break;
+                        }
                         warn!("TURZX {pid:04x} send_stream_a failed: {e:#}");
                     }
                     let t3 = Instant::now();
@@ -376,6 +399,11 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
         debug!("TURZX {pid:04x} final power_off ignored: {e:#}");
     }
     Ok(())
+}
+
+fn is_device_gone(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| matches!(cause.downcast_ref::<rusb::Error>(), Some(rusb::Error::NoDevice)))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

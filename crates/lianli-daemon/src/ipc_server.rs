@@ -389,22 +389,14 @@ fn handle_request(
             };
             match family {
                 Some(f) if f.is_desktop_mode() => {
-                    // Desktop -> LCD: send switch bytes via HID to CH340
                     if pid == 0 {
                         return IpcResponse::error("device PID not available");
                     }
-                    match hidapi::HidApi::new() {
-                        Ok(api) => {
-                            match lianli_devices::display_switcher::switch_to_lcd_mode(&api, pid) {
-                                Ok(()) => IpcResponse::ok(serde_json::json!({
-                                    "switched": "to_lcd",
-                                    "message": "Device is rebooting into LCD mode. It will appear shortly."
-                                })),
-                                Err(e) => IpcResponse::error(format!("switch failed: {e}")),
-                            }
-                        }
-                        Err(e) => IpcResponse::error(format!("failed to open HID: {e}")),
-                    }
+                    tx.send(DaemonEvent::DisplaySwitchToLcd { device_id, pid }).ok();
+                    IpcResponse::ok(serde_json::json!({
+                        "switched": "to_lcd",
+                        "message": "Device is rebooting into LCD mode. It will appear shortly."
+                    }))
                 }
                 Some(f) if f.supports_display_mode_switch() => {
                     // LCD -> Desktop: service loop owns the WinUSB transport
