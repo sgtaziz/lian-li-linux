@@ -46,7 +46,8 @@ impl Drop for DesktopDisplayHandle {
             if let Err(e) = j.join() {
                 warn!(
                     "TURZX {:04x}:{:04x} worker panicked on shutdown: {e:?}",
-                    turzx::VID, self.pid
+                    turzx::VID,
+                    self.pid
                 );
             }
         }
@@ -76,7 +77,10 @@ impl DesktopDisplayRegistry {
             if present_keys.contains(key) {
                 true
             } else {
-                info!("TURZX {:02x}:{:02x} disappeared — stopping worker", key.0, key.1);
+                info!(
+                    "TURZX {:02x}:{:02x} disappeared — stopping worker",
+                    key.0, key.1
+                );
                 false
             }
         });
@@ -255,9 +259,7 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
             .map(|m| Duration::from_millis((1000 / m.refresh_hz.max(1)) as u64))
             .unwrap_or_else(|| Duration::from_millis(200));
 
-        let events = evdi
-            .poll_events(timeout)
-            .context("evdi poll_events")?;
+        let events = evdi.poll_events(timeout).context("evdi poll_events")?;
 
         if !events.is_empty() {
             debug!("TURZX {pid:04x} got {} evdi event(s)", events.len());
@@ -268,10 +270,14 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                 EvdiEvent::ModeChanged(mode) => {
                     info!(
                         "TURZX {pid:04x} evdi mode: {}×{} @ {}Hz (bpp {}, fmt {:#x})",
-                        mode.width, mode.height, mode.refresh_hz, mode.bits_per_pixel, mode.pixel_format
+                        mode.width,
+                        mode.height,
+                        mode.refresh_hz,
+                        mode.bits_per_pixel,
+                        mode.pixel_format
                     );
-                    let resolved = ResolvedMode::from_evdi(mode)
-                        .context("negotiated mode unsupported")?;
+                    let resolved =
+                        ResolvedMode::from_evdi(mode).context("negotiated mode unsupported")?;
                     if let Some(mut old) = buffer.take() {
                         evdi.unregister_buffer(&mut old);
                     }
@@ -402,8 +408,12 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
 }
 
 fn is_device_gone(err: &anyhow::Error) -> bool {
-    err.chain()
-        .any(|cause| matches!(cause.downcast_ref::<rusb::Error>(), Some(rusb::Error::NoDevice)))
+    err.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<rusb::Error>(),
+            Some(rusb::Error::NoDevice)
+        )
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,11 +470,8 @@ impl H264Encoder {
                         ffmpeg::software::scaling::Flags::BILINEAR,
                     )
                     .context("building sws scaler BGRA→YUV420P")?;
-                    let frame_in = ffmpeg::frame::Video::new(
-                        ffmpeg::util::format::Pixel::BGRA,
-                        width,
-                        height,
-                    );
+                    let frame_in =
+                        ffmpeg::frame::Video::new(ffmpeg::util::format::Pixel::BGRA, width, height);
                     let frame_out = ffmpeg::frame::Video::new(
                         ffmpeg::util::format::Pixel::YUV420P,
                         width,

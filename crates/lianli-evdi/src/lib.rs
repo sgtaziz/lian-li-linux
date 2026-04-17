@@ -46,7 +46,12 @@ pub struct Rect {
 
 impl From<ffi::evdi_rect> for Rect {
     fn from(r: ffi::evdi_rect) -> Self {
-        Self { x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2 }
+        Self {
+            x1: r.x1,
+            y1: r.y1,
+            x2: r.x2,
+            y2: r.y2,
+        }
     }
 }
 
@@ -99,7 +104,11 @@ extern "C" fn on_dpms(dpms_mode: c_int, user_data: *mut c_void) {
 extern "C" fn on_mode(mode: ffi::evdi_mode, user_data: *mut c_void) {
     trace!(
         "on_mode cb fired: {}x{} @ {} Hz bpp={} fmt={:#x}",
-        mode.width, mode.height, mode.refresh_rate, mode.bits_per_pixel, mode.pixel_format
+        mode.width,
+        mode.height,
+        mode.refresh_rate,
+        mode.bits_per_pixel,
+        mode.pixel_format
     );
     unsafe {
         if let Some(sink) = (user_data as *mut EventSink).as_mut() {
@@ -134,16 +143,17 @@ extern "C" fn on_cursor_move(_m: ffi::evdi_cursor_move, _user_data: *mut c_void)
     trace!("on_cursor_move cb fired");
 }
 
-extern "C" fn on_ddcci(
-    data: ffi::evdi_ddcci_data,
-    user_data: *mut c_void,
-) {
+extern "C" fn on_ddcci(data: ffi::evdi_ddcci_data, user_data: *mut c_void) {
     trace!(
         "on_ddcci cb fired: address={:#06x} flags={:#06x} buffer_length={}",
-        data.address, data.flags, data.buffer_length
+        data.address,
+        data.flags,
+        data.buffer_length
     );
     unsafe {
-        let Some(sink) = (user_data as *mut EventSink).as_mut() else { return };
+        let Some(sink) = (user_data as *mut EventSink).as_mut() else {
+            return;
+        };
         let handle = sink.handle_raw;
         if handle.is_null() {
             return;
@@ -168,7 +178,11 @@ pub struct EvdiHandle {
 
 impl EvdiHandle {
     pub fn lib_version() -> (i32, i32, i32) {
-        let mut v = ffi::evdi_lib_version { version_major: 0, version_minor: 0, version_patchlevel: 0 };
+        let mut v = ffi::evdi_lib_version {
+            version_major: 0,
+            version_minor: 0,
+            version_patchlevel: 0,
+        };
         unsafe { ffi::evdi_get_lib_version(&mut v) };
         (v.version_major, v.version_minor, v.version_patchlevel)
     }
@@ -315,7 +329,11 @@ impl EvdiHandle {
             fd
         };
         let millis = timeout.as_millis().min(i32::MAX as u128) as i32;
-        let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
         let rc = unsafe { libc::poll(&mut pfd, 1, millis) };
         if rc < 0 {
             return Err(EvdiError::Poll(std::io::Error::last_os_error()).into());
@@ -401,7 +419,15 @@ impl EvdiBuffer {
         let stride = width * 4;
         let pixels = vec![0u8; (stride * height) as usize];
         let rects = vec![ffi::evdi_rect::default(); MAX_DIRTY_RECTS];
-        Self { id, width, height, stride, pixels, rects, registered_by: None }
+        Self {
+            id,
+            width,
+            height,
+            stride,
+            pixels,
+            rects,
+            registered_by: None,
+        }
     }
 
     pub fn pixels(&self) -> &[u8] {
@@ -443,7 +469,10 @@ fn explain_add_failure() -> anyhow::Error {
              kernel module loaded? Try: sudo modprobe evdi"
         );
     }
-    let writable = std::fs::OpenOptions::new().write(true).open(ADD_SYSFS).is_ok();
+    let writable = std::fs::OpenOptions::new()
+        .write(true)
+        .open(ADD_SYSFS)
+        .is_ok();
     if writable {
         return anyhow!(
             "evdi_add_device failed despite {ADD_SYSFS} being writable — \

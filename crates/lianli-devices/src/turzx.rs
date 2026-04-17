@@ -59,16 +59,28 @@ pub fn parse_vendor_desc(buf: &[u8]) -> Result<VendorCaps> {
     }
     let total_len = buf[0] as usize;
     if total_len > buf.len() {
-        bail!("vendor descriptor header len {} > returned {}", total_len, buf.len());
+        bail!(
+            "vendor descriptor header len {} > returned {}",
+            total_len,
+            buf.len()
+        );
     }
     if buf[1] != 0x5F {
         bail!("vendor descriptor magic {:#04x} (want 0x5F)", buf[1]);
     }
     if buf[2] != 0x01 || buf[3] != 0x00 {
-        bail!("vendor descriptor version {:02x}{:02x} (want 01 00)", buf[2], buf[3]);
+        bail!(
+            "vendor descriptor version {:02x}{:02x} (want 01 00)",
+            buf[2],
+            buf[3]
+        );
     }
     if buf[4] as usize != total_len.saturating_sub(2) {
-        bail!("vendor descriptor payload len {} != header-2 {}", buf[4], total_len - 2);
+        bail!(
+            "vendor descriptor payload len {} != header-2 {}",
+            buf[4],
+            total_len - 2
+        );
     }
 
     let mut caps = VendorCaps::default();
@@ -110,9 +122,17 @@ pub fn parse_vendor_desc(buf: &[u8]) -> Result<VendorCaps> {
                 let h = u16::from_le_bytes([p[2], p[3]]);
                 let refresh = p[4] & 0x7F;
                 let flag = (p[4] & 0x80) != 0;
-                caps.modes.push(Mode { width: w, height: h, refresh_hz: refresh });
+                caps.modes.push(Mode {
+                    width: w,
+                    height: h,
+                    refresh_hz: refresh,
+                });
                 if !flag && refresh == 0x1E {
-                    caps.modes.push(Mode { width: w, height: h, refresh_hz: 0x3C });
+                    caps.modes.push(Mode {
+                        width: w,
+                        height: h,
+                        refresh_hz: 0x3C,
+                    });
                 }
             }
             _ => {}
@@ -309,7 +329,10 @@ impl TurzxDisplay {
         if n != 128 {
             warn!("TURZX EDID returned {n} bytes (expected 128) — ignoring");
         } else {
-            debug!("TURZX {:04x} raw device EDID captured (discarded — invalid DTDs)", self.pid);
+            debug!(
+                "TURZX {:04x} raw device EDID captured (discarded — invalid DTDs)",
+                self.pid
+            );
         }
 
         // The device ships an EDID with broken Detailed Timing Descriptors
@@ -415,10 +438,10 @@ pub fn build_edid(caps: &VendorCaps, serial: u32) -> [u8; 128] {
     edid[11] = 0x00;
     // Serial number (LE).
     edid[12..16].copy_from_slice(&serial.to_le_bytes());
-    edid[16] = 1;   // mfg week
-    edid[17] = 35;  // mfg year = 1990 + 35 = 2025
+    edid[16] = 1; // mfg week
+    edid[17] = 35; // mfg year = 1990 + 35 = 2025
     edid[18] = 1;
-    edid[19] = 4;   // EDID 1.4
+    edid[19] = 4; // EDID 1.4
 
     // Basic display parameters (digital, 8 bpc, HDMI-a).
     edid[20] = 0xA5;
@@ -426,8 +449,8 @@ pub fn build_edid(caps: &VendorCaps, serial: u32) -> [u8; 128] {
     edid[21] = 48;
     edid[22] = 12;
     edid[23] = 120; // gamma 2.2
-    // Feature support: digital display, active off, no standby/suspend,
-    // continuous frequency, sRGB, native format = first DTD, preferred mode.
+                    // Feature support: digital display, active off, no standby/suspend,
+                    // continuous frequency, sRGB, native format = first DTD, preferred mode.
     edid[24] = 0x06;
     // Chromaticity coords — copy standard sRGB.
     edid[25..35].copy_from_slice(&[0xEE, 0x95, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54]);
@@ -444,9 +467,10 @@ pub fn build_edid(caps: &VendorCaps, serial: u32) -> [u8; 128] {
     // Deduplicate modes preserving order, highest-refresh first for DTD slot 0.
     let mut modes: Vec<Mode> = Vec::new();
     for m in &caps.modes {
-        if !modes.iter().any(|u| {
-            u.width == m.width && u.height == m.height && u.refresh_hz == m.refresh_hz
-        }) {
+        if !modes
+            .iter()
+            .any(|u| u.width == m.width && u.height == m.height && u.refresh_hz == m.refresh_hz)
+        {
             modes.push(*m);
         }
     }
@@ -486,10 +510,9 @@ fn build_dtd(width: u16, height: u16, refresh_hz: u8) -> [u8; 18] {
     const V_FRONT: u16 = 4;
     const V_SYNC: u16 = 5;
 
-    let pixel_clock_khz = ((width as u32 + H_BLANK as u32)
-        * (height as u32 + V_BLANK as u32)
-        * refresh_hz as u32)
-        / 1000;
+    let pixel_clock_khz =
+        ((width as u32 + H_BLANK as u32) * (height as u32 + V_BLANK as u32) * refresh_hz as u32)
+            / 1000;
     let pixel_clock_10khz = (pixel_clock_khz / 10).min(u16::MAX as u32) as u16;
 
     let mut dtd = [0u8; 18];
@@ -528,7 +551,7 @@ fn build_dtd(width: u16, height: u16, refresh_hz: u8) -> [u8; 18] {
 
     dtd[15] = 0; // H border
     dtd[16] = 0; // V border
-    // Byte 17: digital separate sync, positive H + V polarity, non-interlaced.
+                 // Byte 17: digital separate sync, positive H + V polarity, non-interlaced.
     dtd[17] = 0x1E;
     dtd
 }
@@ -587,14 +610,21 @@ fn resolve_identity(transport: &UsbTransport, pid: u16) -> DeviceIdentity {
     };
     let edid_serial = fnv1a_u32(identity_input.as_bytes()).max(1);
 
-    DeviceIdentity { usb_serial, port_path, edid_serial }
+    DeviceIdentity {
+        usb_serial,
+        port_path,
+        edid_serial,
+    }
 }
 
 impl Drop for TurzxDisplay {
     fn drop(&mut self) {
         if self.streaming {
             if let Err(e) = self.transport.write(&build_power_off(), LCD_WRITE_TIMEOUT) {
-                debug!("TURZX {VID:04x}:{:04x} Drop power-off failed: {e}", self.pid);
+                debug!(
+                    "TURZX {VID:04x}:{:04x} Drop power-off failed: {e}",
+                    self.pid
+                );
             }
         }
     }
@@ -620,8 +650,14 @@ mod tests {
         assert_eq!(caps.max_transfer, 131040);
         assert!(caps.supports_mjpeg && caps.supports_h264);
         assert_eq!(caps.modes.len(), 3);
-        assert!(caps.modes.iter().any(|m| m.width == 1920 && m.height == 480 && m.refresh_hz == 60));
-        assert!(caps.modes.iter().any(|m| m.width == 1920 && m.height == 480 && m.refresh_hz == 30));
+        assert!(caps
+            .modes
+            .iter()
+            .any(|m| m.width == 1920 && m.height == 480 && m.refresh_hz == 60));
+        assert!(caps
+            .modes
+            .iter()
+            .any(|m| m.width == 1920 && m.height == 480 && m.refresh_hz == 30));
     }
 
     #[test]
@@ -640,7 +676,10 @@ mod tests {
     #[test]
     fn pack_frame_has_commit() {
         let pkt = pack_frame(STREAM_B_FINAL, 0, &[0xAA, 0xBB]);
-        assert_eq!(pkt, vec![0xAF, 0x69, 0, 0, 0, 0, 0, 2, 0xAA, 0xBB, 0xAF, 0x66]);
+        assert_eq!(
+            pkt,
+            vec![0xAF, 0x69, 0, 0, 0, 0, 0, 2, 0xAA, 0xBB, 0xAF, 0x66]
+        );
     }
 
     #[test]
@@ -709,12 +748,23 @@ mod tests {
             max_h: 2047,
             ..VendorCaps::default()
         };
-        caps.modes.push(Mode { width: 1920, height: 480, refresh_hz: 60 });
-        caps.modes.push(Mode { width: 1920, height: 480, refresh_hz: 30 });
+        caps.modes.push(Mode {
+            width: 1920,
+            height: 480,
+            refresh_hz: 60,
+        });
+        caps.modes.push(Mode {
+            width: 1920,
+            height: 480,
+            refresh_hz: 30,
+        });
         let edid = build_edid(&caps, 0xF73B_8A15);
 
         // Header magic
-        assert_eq!(&edid[..8], &[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+        assert_eq!(
+            &edid[..8],
+            &[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]
+        );
         // "TUR" manufacturer
         assert_eq!(&edid[8..10], &[0x52, 0xB2]);
         // Serial
@@ -744,8 +794,10 @@ mod tests {
         );
         assert!(v_blank > 0);
         // Pixel clock sanity: should land between 30 and 150 MHz for our modes.
-        assert!((30_000..=150_000).contains(&px_clock_khz),
-            "pixel clock {px_clock_khz} kHz outside sane range");
+        assert!(
+            (30_000..=150_000).contains(&px_clock_khz),
+            "pixel clock {px_clock_khz} kHz outside sane range"
+        );
     }
 
     #[test]
@@ -774,7 +826,11 @@ mod tests {
             let last = urbs.last().unwrap();
             assert_eq!(last[1], STREAM_A_FINAL, "len={len}: last urb must be FINAL");
             let last_two = &last[last.len() - 2..];
-            assert_eq!(last_two, &[MAGIC, COMMIT], "len={len}: commit marker missing");
+            assert_eq!(
+                last_two,
+                &[MAGIC, COMMIT],
+                "len={len}: commit marker missing"
+            );
         }
     }
 

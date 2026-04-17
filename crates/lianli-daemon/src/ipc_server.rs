@@ -392,7 +392,8 @@ fn handle_request(
                     if pid == 0 {
                         return IpcResponse::error("device PID not available");
                     }
-                    tx.send(DaemonEvent::DisplaySwitchToLcd { device_id, pid }).ok();
+                    tx.send(DaemonEvent::DisplaySwitchToLcd { device_id, pid })
+                        .ok();
                     IpcResponse::ok(serde_json::json!({
                         "switched": "to_lcd",
                         "message": "Device is rebooting into LCD mode. It will appear shortly."

@@ -8,8 +8,8 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use image::{ImageBuffer, Rgb};
 use lianli_devices::turzx::{
-    self, build_config_packet, build_power_off, parse_vendor_desc, pick_format, pick_mode,
-    Mode, TurzxDisplay, VendorCaps, FMT_H264, FMT_MJPEG,
+    self, build_config_packet, build_power_off, parse_vendor_desc, pick_format, pick_mode, Mode,
+    TurzxDisplay, VendorCaps, FMT_H264, FMT_MJPEG,
 };
 use lianli_transport::usb::{UsbTransport, LCD_READ_TIMEOUT};
 use std::io::{BufRead, Write};
@@ -51,7 +51,11 @@ fn parse_color(s: &str) -> Result<[u8; 3]> {
     if parts.len() != 3 {
         bail!("color must be 'r,g,b' e.g. 255,0,0");
     }
-    Ok([parts[0].trim().parse()?, parts[1].trim().parse()?, parts[2].trim().parse()?])
+    Ok([
+        parts[0].trim().parse()?,
+        parts[1].trim().parse()?,
+        parts[2].trim().parse()?,
+    ])
 }
 
 fn press_enter(no_pause: bool, prompt: &str) {
@@ -67,13 +71,20 @@ fn press_enter(no_pause: bool, prompt: &str) {
 
 fn hex_first(label: &str, data: &[u8], n: usize) {
     let n = data.len().min(n);
-    println!("  {label} [{} bytes, first {n}]: {:02x?}", data.len(), &data[..n]);
+    println!(
+        "  {label} [{} bytes, first {n}]: {:02x?}",
+        data.len(),
+        &data[..n]
+    );
 }
 
 fn print_caps_summary(caps: &VendorCaps) {
     println!();
     println!("  capability summary:");
-    println!("    size range : {}×{} .. {}×{}", caps.min_w, caps.min_h, caps.max_w, caps.max_h);
+    println!(
+        "    size range : {}×{} .. {}×{}",
+        caps.min_w, caps.min_h, caps.max_w, caps.max_h
+    );
     println!("    max xfer   : {} bytes", caps.max_transfer);
     println!(
         "    codecs     : {}{}",
@@ -102,7 +113,9 @@ fn parse_edid(buf: &[u8]) {
     }
     let m = ((buf[8] as u16) << 8) | buf[9] as u16;
     let letter = |v: u16| (((v & 0x1F) as u8).saturating_sub(1) + b'A') as char;
-    let mfr: String = [letter(m >> 10), letter(m >> 5), letter(m)].iter().collect();
+    let mfr: String = [letter(m >> 10), letter(m >> 5), letter(m)]
+        .iter()
+        .collect();
     let product = u16::from_le_bytes([buf[10], buf[11]]);
     let serial = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
     let week = buf[16];
@@ -113,7 +126,10 @@ fn parse_edid(buf: &[u8]) {
     let pixel_clock_khz = u16::from_le_bytes([buf[54], buf[55]]) as u32 * 10;
     let h_active = (((buf[58] as u16) & 0xF0) << 4) | buf[56] as u16;
     let v_active = (((buf[61] as u16) & 0xF0) << 4) | buf[59] as u16;
-    let checksum: u8 = buf[..128].iter().copied().fold(0u8, |a, b| a.wrapping_add(b));
+    let checksum: u8 = buf[..128]
+        .iter()
+        .copied()
+        .fold(0u8, |a, b| a.wrapping_add(b));
     println!();
     println!("  EDID decoded:");
     println!("    manufacturer     : {mfr}");
@@ -176,7 +192,14 @@ fn control_in(
         req_type, b_request, w_value, w_index
     );
     let mut buf = vec![0u8; len as usize];
-    match transport.control_in(req_type, b_request, w_value, w_index, &mut buf, LCD_READ_TIMEOUT) {
+    match transport.control_in(
+        req_type,
+        b_request,
+        w_value,
+        w_index,
+        &mut buf,
+        LCD_READ_TIMEOUT,
+    ) {
         Ok(n) => {
             buf.truncate(n);
             println!("    ok: {n} bytes");
@@ -197,8 +220,8 @@ fn main() -> Result<()> {
 
     println!("Target: {:04x}:{:04x}", turzx::VID, pid);
 
-    let mut transport = UsbTransport::open(turzx::VID, pid)
-        .map_err(|e| anyhow::anyhow!("open: {e}"))?;
+    let mut transport =
+        UsbTransport::open(turzx::VID, pid).map_err(|e| anyhow::anyhow!("open: {e}"))?;
 
     press_enter(args.no_pause, "Phase 0: USB reset + claim interface 0");
     match transport.reset() {
@@ -212,7 +235,15 @@ fn main() -> Result<()> {
     println!("  claimed interface 0 alt 0");
 
     press_enter(args.no_pause, "Phase 1: read vendor mode descriptor (0x5F)");
-    let desc = control_in(&transport, "vendor mode descriptor", 0x81, 0x06, 0x5F00, 0, 512)?;
+    let desc = control_in(
+        &transport,
+        "vendor mode descriptor",
+        0x81,
+        0x06,
+        0x5F00,
+        0,
+        512,
+    )?;
     hex_first("  raw", &desc, desc.len().min(64));
     let caps = parse_vendor_desc(&desc).context("parsing vendor descriptor")?;
     print_caps_summary(&caps);
@@ -259,9 +290,16 @@ fn main() -> Result<()> {
     let format = pick_format(&caps, Some(format_forced))?;
     let mode: Mode = pick_mode(&caps)?;
     let (width, height) = (mode.width, mode.height);
-    let fmt_name = if format == FMT_MJPEG { "MJPEG" } else { "H.264" };
+    let fmt_name = if format == FMT_MJPEG {
+        "MJPEG"
+    } else {
+        "H.264"
+    };
     println!();
-    println!("  chosen: {width}×{height} @ {}Hz, {fmt_name} ({:#06x})", mode.refresh_hz, format);
+    println!(
+        "  chosen: {width}×{height} @ {}Hz, {fmt_name} ({:#06x})",
+        mode.refresh_hz, format
+    );
 
     // Probe releases the low-level transport and hands off to TurzxDisplay for
     // the post-init streaming phases. That way we exercise the exact code path
@@ -271,15 +309,23 @@ fn main() -> Result<()> {
 
     let mut display = TurzxDisplay::open(pid).context("reopening via TurzxDisplay")?;
 
-    press_enter(args.no_pause, "Phase 4: start_streaming (display info + fmt + power on)");
+    press_enter(
+        args.no_pause,
+        "Phase 4: start_streaming (display info + fmt + power on)",
+    );
     let cfg = build_config_packet(width, height, format);
     dump_config_packet(&cfg);
-    display.start_streaming(mode, format).context("start_streaming")?;
+    display
+        .start_streaming(mode, format)
+        .context("start_streaming")?;
     println!("    ok");
     std::thread::sleep(Duration::from_millis(50));
 
     if format == FMT_MJPEG {
-        press_enter(args.no_pause, "Phase 5: send one JPEG frame via send_jpeg_frame");
+        press_enter(
+            args.no_pause,
+            "Phase 5: send one JPEG frame via send_jpeg_frame",
+        );
         let jpeg = make_jpeg(width as u32, height as u32, color, args.quality)?;
         println!("  encoded JPEG: {} bytes", jpeg.len());
         display.send_jpeg_frame(&jpeg).context("send_jpeg_frame")?;

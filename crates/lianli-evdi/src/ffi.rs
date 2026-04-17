@@ -120,11 +120,7 @@ extern "C" {
     pub fn evdi_register_buffer(handle: evdi_handle, buffer: evdi_buffer);
     pub fn evdi_unregister_buffer(handle: evdi_handle, buffer_id: c_int);
     pub fn evdi_request_update(handle: evdi_handle, buffer_id: c_int) -> bool;
-    pub fn evdi_grab_pixels(
-        handle: evdi_handle,
-        rects: *mut evdi_rect,
-        num_rects: *mut c_int,
-    );
+    pub fn evdi_grab_pixels(handle: evdi_handle, rects: *mut evdi_rect, num_rects: *mut c_int);
     pub fn evdi_handle_events(handle: evdi_handle, evtctx: *mut evdi_event_context);
     pub fn evdi_get_event_ready(handle: evdi_handle) -> evdi_selectable;
     pub fn evdi_get_lib_version(version: *mut evdi_lib_version);
