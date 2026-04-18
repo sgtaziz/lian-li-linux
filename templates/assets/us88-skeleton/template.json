@@ -1,0 +1,683 @@
+{
+  "id": "us88-skeleton",
+  "name": "Universal Screen 8.8\" Skeleton",
+  "base_width": 1920,
+  "base_height": 480,
+  "rotated": true,
+  "target_device": "Universal Screen 8.8\" (480×1920)",
+  "background": {
+    "type": "image",
+    "path": "background.jpg"
+  },
+  "widgets": [
+    {
+      "id": "w-1",
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 135.0,
+        "sweep_angle": 270.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [60, 60, 60, 255],
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 200.0,
+      "y": 150.0,
+      "width": 220.0,
+      "height": 220.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-2",
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": { "path": null },
+        "font_size": 60.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 200.0,
+      "y": 170.0,
+      "width": 120.0,
+      "height": 60.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-3",
+      "kind": {
+        "type": "label",
+        "text": "CPU Usage",
+        "font": { "path": null },
+        "font_size": 24.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 200.0,
+      "y": 120.0,
+      "width": 120.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-4",
+      "sensor_category": "cpu_temp",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 135.0,
+        "sweep_angle": 270.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [60, 60, 60, 255],
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 470.0,
+      "y": 150.0,
+      "width": 220.0,
+      "height": 220.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-5",
+      "sensor_category": "cpu_temp",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": { "path": null },
+        "font_size": 60.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 470.0,
+      "y": 170.0,
+      "width": 120.0,
+      "height": 60.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-6",
+      "kind": {
+        "type": "label",
+        "text": "CPU Temp",
+        "font": { "path": null },
+        "font_size": 24.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 470.0,
+      "y": 120.0,
+      "width": 120.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-7",
+      "sensor_category": "gpu_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 135.0,
+        "sweep_angle": 270.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [60, 60, 60, 255],
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 1100.0,
+      "y": 215.0,
+      "width": 350.0,
+      "height": 350.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-8",
+      "sensor_category": "gpu_usage",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": { "path": null },
+        "font_size": 80.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 1100.0,
+      "y": 240.0,
+      "width": 230.0,
+      "height": 80.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-9",
+      "kind": {
+        "type": "label",
+        "text": "GPU Usage",
+        "font": { "path": null },
+        "font_size": 40.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 1100.0,
+      "y": 155.43736,
+      "width": 200.0,
+      "height": 80.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-10",
+      "sensor_category": "mem_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 135.0,
+        "sweep_angle": 270.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [60, 60, 60, 255],
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 200.0,
+      "y": 370.0,
+      "width": 220.0,
+      "height": 220.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-11",
+      "sensor_category": "mem_usage",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": { "path": null },
+        "font_size": 48.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 200.0,
+      "y": 390.0,
+      "width": 120.0,
+      "height": 60.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-12",
+      "kind": {
+        "type": "label",
+        "text": "RAM Usage",
+        "font": { "path": null },
+        "font_size": 24.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 200.0,
+      "y": 340.0,
+      "width": 120.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-13",
+      "kind": {
+        "type": "label",
+        "text": "RAM Temp",
+        "font": { "path": null },
+        "font_size": 24.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 470.0,
+      "y": 320.0,
+      "width": 220.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-14",
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "6-0051"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "background_color": [60, 60, 60, 255],
+        "corner_radius": 4.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      },
+      "x": 470.0,
+      "y": 370.0,
+      "width": 220.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-15",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "6-0051"
+        },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": { "path": null },
+        "font_size": 36.0,
+        "color": [255, 255, 255, 255],
+        "align": "right",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": 75.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": null, "color": [255, 255, 255], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 520.0,
+      "y": 370.0,
+      "width": 100.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-16",
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "6-0053"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "background_color": [60, 60, 60, 255],
+        "corner_radius": 4.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      },
+      "x": 470.0,
+      "y": 420.0,
+      "width": 220.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-17",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "6-0053"
+        },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": { "path": null },
+        "font_size": 36.0,
+        "color": [255, 255, 255, 255],
+        "align": "right",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": 75.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": null, "color": [255, 255, 255], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 520.0,
+      "y": 420.0,
+      "width": 100.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-18",
+      "sensor_category": "gpu_temp",
+      "kind": {
+        "type": "horizontal_bar",
+        "source": { "type": "cpu_usage" },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "background_color": [60, 60, 60, 255],
+        "corner_radius": 4.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      },
+      "x": 1100.0,
+      "y": 420.0,
+      "width": 350.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-19",
+      "sensor_category": "gpu_temp",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "cpu_usage" },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": { "path": null },
+        "font_size": 36.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 1220.0,
+      "y": 420.0,
+      "width": 100.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-20",
+      "kind": {
+        "type": "label",
+        "text": "GPU Temp",
+        "font": { "path": null },
+        "font_size": 24.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 1100.0,
+      "y": 370.0,
+      "width": 200.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-21",
+      "kind": {
+        "type": "core_bars",
+        "orientation": "horizontal",
+        "background_color": [30, 30, 30, 0],
+        "show_labels": false,
+        "ranges": [
+          { "max": 50.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 75.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      },
+      "x": 1450.0,
+      "y": 391.08005,
+      "width": 200.0,
+      "height": 100.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-22",
+      "kind": {
+        "type": "label",
+        "text": "CPU Cores Usage",
+        "font": { "path": null },
+        "font_size": 24.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 1450.0,
+      "y": 320.0,
+      "width": 250.0,
+      "height": 40.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-23",
+      "kind": {
+        "type": "vertical_bar",
+        "source": { "type": "mem_used" },
+        "value_min": 0.0,
+        "value_max": 62.0,
+        "background_color": [60, 60, 60, 255],
+        "corner_radius": 4.0,
+        "ranges": [
+          { "max": 32.0, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 48.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": null, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      },
+      "x": 720.0,
+      "y": 300.0,
+      "width": 40.0,
+      "height": 280.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-24",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "mem_used" },
+        "format": "{:.0}",
+        "unit": " GB",
+        "font": { "path": null },
+        "font_size": 36.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          { "max": 50.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": 75.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": null, "color": [255, 255, 255], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 720.0,
+      "y": 370.0,
+      "width": 100.0,
+      "height": 150.0,
+      "rotation": 270.0,
+      "visible": true
+    },
+    {
+      "id": "w-25",
+      "kind": {
+        "type": "label",
+        "text": "RAM free (GB)",
+        "font": { "path": null },
+        "font_size": 20.0,
+        "color": [255, 255, 255, 255],
+        "align": "right",
+        "letter_spacing": 0.0
+      },
+      "x": 820.0,
+      "y": 110.0,
+      "width": 150.0,
+      "height": 200.0,
+      "rotation": 310.0,
+      "visible": true
+    },
+    {
+      "id": "w-26",
+      "kind": {
+        "type": "vertical_bar",
+        "source": { "type": "mem_free" },
+        "value_min": 0.0,
+        "value_max": 62.0,
+        "background_color": [60, 60, 60, 255],
+        "corner_radius": 4.0,
+        "ranges": [
+          { "max": null, "color": [0, 200, 0], "alpha": 255 },
+          { "max": 32.0, "color": [220, 140, 0], "alpha": 255 },
+          { "max": 48.0, "color": [220, 0, 0], "alpha": 255 }
+        ]
+      },
+      "x": 790.0,
+      "y": 300.0,
+      "width": 40.0,
+      "height": 280.0,
+      "rotation": 0.0,
+      "visible": true
+    },
+    {
+      "id": "w-27",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "mem_free" },
+        "format": "{:.0}",
+        "unit": " GB",
+        "font": { "path": null },
+        "font_size": 36.0,
+        "color": [255, 255, 255, 255],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 64.0,
+        "ranges": [
+          { "max": 32.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": 48.0, "color": [255, 255, 255], "alpha": 255 },
+          { "max": null, "color": [255, 255, 255], "alpha": 255 }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 790.0,
+      "y": 370.0,
+      "width": 100.0,
+      "height": 150.0,
+      "rotation": 270.0,
+      "visible": true
+    },
+    {
+      "id": "w-28",
+      "kind": {
+        "type": "label",
+        "text": "RAM used (GB)",
+        "font": { "path": null },
+        "font_size": 20.0,
+        "color": [255, 255, 255, 255],
+        "align": "right",
+        "letter_spacing": 0.0
+      },
+      "x": 745.0,
+      "y": 110.0,
+      "width": 170.0,
+      "height": 200.0,
+      "rotation": 310.0,
+      "visible": true
+    }
+  ]
+}

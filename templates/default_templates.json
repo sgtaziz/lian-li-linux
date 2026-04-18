@@ -62,6 +62,27 @@
       "base_height": 400,
       "rotated": false,
       "files": []
+    },
+    {
+      "id": "us88-skeleton",
+      "name": "Universal Screen 8.8\" Skeleton",
+      "description": "CPU, GPU, and RAM dashboard laid out across the 1920×480 Universal Screen 8.8\", over a dark skeleton backdrop.",
+      "author": "hanzzz2909",
+      "min_daemon_version": "0.3.4",
+      "folder": "us88-skeleton",
+      "template_file": "template.json",
+      "template_sha256": "7e007642cba46781caeb7afea42cd90400c68289a870daf5d86625fe499bf2f4",
+      "preview": "preview.png",
+      "preview_sha256": "5fff9ebb97d19a7fd047618a9aa58e900bd01d1f8e553cb2c037ec5988e27190",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "background.jpg",
+          "sha256": "5d8f76cf96bb80d35bc4354c0d171e54f889a7e948dd6d0339c3011082237ed6"
+        }
+      ]
     }
   ]
 }
