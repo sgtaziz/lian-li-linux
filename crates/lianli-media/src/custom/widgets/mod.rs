@@ -19,16 +19,15 @@ pub(super) mod video_widget;
 use super::helpers::{resolve_font, widget_size_px, ElapsedMs};
 use image::{imageops, Rgba, RgbaImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
-use lianli_shared::sensors::{read_sensor_value, ResolvedSensor};
+use lianli_shared::sensors::ResolvedSensor;
 use lianli_shared::template::{Widget, WidgetKind};
 use rusttype::Font;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-/// Per-widget render state: resolved sensor + any preloaded media + last-frame memo.
 pub(super) struct WidgetState {
     pub resolved_sensor: Option<ResolvedSensor>,
     pub loaded_image: Option<RgbaImage>,
@@ -38,6 +37,12 @@ pub(super) struct WidgetState {
     pub last_quantized: i32,
     pub failed: AtomicBool,
     pub history: VecDeque<f32>,
+    pub sample_interval: Duration,
+    pub last_sample_at: Option<Instant>,
+    pub cached_value: f32,
+    pub cached_core_usage: Vec<u32>,
+    pub last_clock_key: Option<u64>,
+    pub last_video_frame_idx: Option<usize>,
 }
 
 impl WidgetState {
@@ -51,6 +56,12 @@ impl WidgetState {
             last_quantized: i32::MIN,
             failed: AtomicBool::new(false),
             history: VecDeque::new(),
+            sample_interval: Duration::from_millis(1000),
+            last_sample_at: None,
+            cached_value: 0.0,
+            cached_core_usage: Vec::new(),
+            last_clock_key: None,
+            last_video_frame_idx: None,
         }
     }
 }
@@ -135,14 +146,9 @@ pub(super) fn draw_widget(
             value_corner_radius,
             ..
         } => {
-            let raw = state
-                .resolved_sensor
-                .as_ref()
-                .and_then(|s| read_sensor_value(s).ok())
-                .unwrap_or(0.0);
             radial_gauge::draw(
                 &mut sub,
-                raw,
+                state.cached_value,
                 *value_min,
                 *value_max,
                 *start_angle,
@@ -171,14 +177,9 @@ pub(super) fn draw_widget(
             ..
         } => {
             let is_vertical = matches!(widget.kind, WidgetKind::VerticalBar { .. });
-            let raw = state
-                .resolved_sensor
-                .as_ref()
-                .and_then(|s| read_sensor_value(s).ok())
-                .unwrap_or(0.0);
             bar::draw(
                 &mut sub,
-                raw,
+                state.cached_value,
                 *value_min,
                 *value_max,
                 *background_color,
@@ -205,14 +206,9 @@ pub(super) fn draw_widget(
             needle_border_width,
             ..
         } => {
-            let raw = state
-                .resolved_sensor
-                .as_ref()
-                .and_then(|s| read_sensor_value(s).ok())
-                .unwrap_or(0.0);
             speedometer::draw(
                 &mut sub,
-                raw,
+                state.cached_value,
                 *value_min,
                 *value_max,
                 *start_angle,
@@ -320,6 +316,7 @@ pub(super) fn draw_widget(
         } => {
             core_bars::draw(
                 &mut sub,
+                &state.cached_core_usage,
                 *orientation,
                 *background_color,
                 *show_labels,

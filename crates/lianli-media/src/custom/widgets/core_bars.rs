@@ -5,13 +5,13 @@ use image::{Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use lianli_shared::media::SensorRange;
-use lianli_shared::systeminfo::SysSensor;
 use lianli_shared::template::BarOrientation;
 use rusttype::{Font, Scale};
 
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn draw(
     sub: &mut RgbaImage,
+    usage: &[u32],
     orientation: BarOrientation,
     background_color: [u8; 4],
     show_labels: bool,
@@ -25,7 +25,6 @@ pub(in super::super) fn draw(
         draw_filled_rect_mut(sub, Rect::at(0, 0).of_size(w, h), bg);
     }
 
-    let usage = SysSensor::get_core_usage();
     let num_cores = usage.len().max(1);
     let label_color = Rgba([230, 238, 246, 255]);
 

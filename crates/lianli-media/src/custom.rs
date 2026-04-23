@@ -22,6 +22,7 @@ use imageproc::rect::Rect;
 use lianli_shared::fonts::default_font_path;
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::{read_sensor_value, SensorInfo};
+use lianli_shared::systeminfo::SysSensor;
 use lianli_shared::template::{LcdTemplate, TemplateBackground, WidgetKind};
 use parking_lot::Mutex;
 use rusttype::Font;
@@ -32,6 +33,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::warn;
 use widgets::{draw_widget, WidgetState};
+
+fn default_sample_interval(kind: &WidgetKind, explicit_ms: Option<u64>) -> Duration {
+    let default_ms = match kind {
+        WidgetKind::ClockAnalog { show_seconds, .. } if *show_seconds => 100,
+        WidgetKind::ClockAnalog { .. } | WidgetKind::ClockDigital { .. } => 1000,
+        _ => 1000,
+    };
+    let min_ms = match kind {
+        WidgetKind::ClockAnalog { show_seconds, .. } if *show_seconds => 50,
+        _ => 100,
+    };
+    Duration::from_millis(explicit_ms.unwrap_or(default_ms).max(min_ms))
+}
 
 pub struct CustomAsset {
     template: LcdTemplate,
@@ -135,10 +149,10 @@ impl CustomAsset {
         }
 
         let mut widget_states: Vec<WidgetState> = Vec::with_capacity(template.widgets.len());
-        let mut min_interval = Duration::from_millis(1000);
 
         for widget in &template.widgets {
             let mut state = WidgetState::blank();
+            state.sample_interval = default_sample_interval(&widget.kind, widget.update_interval_ms);
 
             if let Some(source) = widget_sensor_source(&widget.kind) {
                 state.resolved_sensor = resolve_sensor_source(source, all_sensors);
@@ -176,9 +190,6 @@ impl CustomAsset {
                             .unwrap_or(Duration::from_millis(33));
                         state.video_frame_duration = duration;
                         state.video_frames = Some(Arc::new(frames));
-                        if duration < min_interval {
-                            min_interval = duration;
-                        }
                     }
                     Err(e) => warn!(
                         "template '{}' widget '{}' video '{}' decode failed: {e}",
@@ -189,31 +200,12 @@ impl CustomAsset {
                 }
             }
 
-            if state.resolved_sensor.is_some() {
-                let widget_interval =
-                    Duration::from_millis(widget.update_interval_ms.unwrap_or(1000).max(100));
-                if widget_interval < min_interval {
-                    min_interval = widget_interval;
-                }
-            }
-
-            let clock_interval = match widget.kind {
-                WidgetKind::ClockAnalog { show_seconds, .. } if show_seconds => {
-                    Some(Duration::from_millis(100))
-                }
-                WidgetKind::ClockAnalog { .. } | WidgetKind::ClockDigital { .. } => {
-                    Some(Duration::from_millis(500))
-                }
-                _ => None,
-            };
-            if let Some(ci) = clock_interval {
-                if ci < min_interval {
-                    min_interval = ci;
-                }
-            }
-
             widget_states.push(state);
         }
+
+        let fps = screen.max_fps.max(1);
+        let frame_interval = Duration::from_nanos(1_000_000_000 / fps as u64)
+            .max(Duration::from_millis(16));
 
         Ok(Arc::new(Self {
             template: template.clone(),
@@ -221,7 +213,7 @@ impl CustomAsset {
             template_image: composite,
             screen: *screen,
             orientation,
-            update_interval: min_interval.max(Duration::from_millis(16)),
+            update_interval: frame_interval,
             uniform_scale,
             offset_x,
             offset_y,
@@ -233,6 +225,7 @@ impl CustomAsset {
             start_instant: Instant::now(),
         }))
     }
+
 
     pub fn update_interval(&self) -> Duration {
         self.update_interval
@@ -278,6 +271,9 @@ impl CustomAsset {
 
     pub fn render_frame(&self, force: bool) -> Result<Option<FrameInfo>, MediaError> {
         let now = Instant::now();
+        let elapsed_ms = now
+            .saturating_duration_since(self.start_instant)
+            .as_millis() as u64;
 
         let mut states = self.widget_states.lock();
         let mut any_dynamic_changed = force;
@@ -285,47 +281,85 @@ impl CustomAsset {
             if !widget.visible {
                 continue;
             }
+
+            let due = state
+                .last_sample_at
+                .map(|t| now.saturating_duration_since(t) >= state.sample_interval)
+                .unwrap_or(true);
+
             if let Some(sensor) = &state.resolved_sensor {
-                let raw = match read_sensor_value(sensor) {
-                    Ok(v) => {
-                        state.failed.store(false, Ordering::Relaxed);
-                        v
-                    }
-                    Err(e) => {
-                        if !state.failed.swap(true, Ordering::Relaxed) {
-                            warn!(
-                                "custom template '{}' widget '{}' sensor read failed: {e}",
-                                self.template.id, widget.id
-                            );
+                if due {
+                    let raw = match read_sensor_value(sensor) {
+                        Ok(v) => {
+                            state.failed.store(false, Ordering::Relaxed);
+                            v
                         }
-                        0.0
+                        Err(e) => {
+                            if !state.failed.swap(true, Ordering::Relaxed) {
+                                warn!(
+                                    "custom template '{}' widget '{}' sensor read failed: {e}",
+                                    self.template.id, widget.id
+                                );
+                            }
+                            0.0
+                        }
+                    };
+                    state.cached_value = raw;
+                    state.last_sample_at = Some(now);
+
+                    let (text, quantized) = format_sensor_readout(&widget.kind, raw);
+                    let changed = state.last_render_text.as_deref() != Some(text.as_str())
+                        || state.last_quantized != quantized;
+                    if changed {
+                        any_dynamic_changed = true;
+                        state.last_render_text = Some(text);
+                        state.last_quantized = quantized;
                     }
-                };
-                let (text, quantized) = format_sensor_readout(&widget.kind, raw);
-                let changed = state.last_render_text.as_deref() != Some(text.as_str())
-                    || state.last_quantized != quantized;
-                if changed {
-                    any_dynamic_changed = true;
-                    state.last_render_text = Some(text);
-                    state.last_quantized = quantized;
-                }
-                if let WidgetKind::Sparkline { history_length, .. } = &widget.kind {
-                    let cap = (*history_length).max(2) as usize;
-                    state.history.push_back(raw);
-                    while state.history.len() > cap {
-                        state.history.pop_front();
+                    if let WidgetKind::Sparkline { history_length, .. } = &widget.kind {
+                        let cap = (*history_length).max(2) as usize;
+                        state.history.push_back(raw);
+                        while state.history.len() > cap {
+                            state.history.pop_front();
+                        }
+                        any_dynamic_changed = true;
                     }
-                    any_dynamic_changed = true;
                 }
+                continue;
             }
-            if matches!(
-                widget.kind,
-                WidgetKind::Video { .. }
-                    | WidgetKind::CoreBars { .. }
-                    | WidgetKind::ClockDigital { .. }
-                    | WidgetKind::ClockAnalog { .. }
-            ) {
-                any_dynamic_changed = true;
+
+            match &widget.kind {
+                WidgetKind::CoreBars { .. } => {
+                    if due {
+                        let usage = SysSensor::get_core_usage();
+                        if usage != state.cached_core_usage {
+                            state.cached_core_usage = usage;
+                            any_dynamic_changed = true;
+                        }
+                        state.last_sample_at = Some(now);
+                    }
+                }
+                WidgetKind::ClockDigital { .. } | WidgetKind::ClockAnalog { .. } => {
+                    let key = elapsed_ms / state.sample_interval.as_millis().max(1) as u64;
+                    if state.last_clock_key != Some(key) {
+                        state.last_clock_key = Some(key);
+                        state.last_sample_at = Some(now);
+                        any_dynamic_changed = true;
+                    }
+                }
+                WidgetKind::Video { .. } => {
+                    if let Some(frames) = &state.video_frames {
+                        if !frames.is_empty() {
+                            let dur_ms = state.video_frame_duration.as_millis().max(1) as u64;
+                            let idx = ((elapsed_ms / dur_ms) as usize) % frames.len();
+                            if state.last_video_frame_idx != Some(idx) {
+                                state.last_video_frame_idx = Some(idx);
+                                state.last_sample_at = Some(now);
+                                any_dynamic_changed = true;
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -334,9 +368,6 @@ impl CustomAsset {
         }
 
         let mut frame = self.template_image.clone();
-        let elapsed_ms = now
-            .saturating_duration_since(self.start_instant)
-            .as_millis() as u64;
         for (widget, state) in self.template.widgets.iter().zip(states.iter()) {
             if !widget.visible {
                 continue;
