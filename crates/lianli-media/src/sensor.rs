@@ -130,7 +130,11 @@ impl SensorAsset {
             | SensorSourceConfig::CpuUsage
             | SensorSourceConfig::MemUsage
             | SensorSourceConfig::MemUsed
-            | SensorSourceConfig::MemFree => {
+            | SensorSourceConfig::MemFree
+            | SensorSourceConfig::NetworkRx { .. }
+            | SensorSourceConfig::NetworkTx { .. }
+            | SensorSourceConfig::DiskRead { .. }
+            | SensorSourceConfig::DiskWrite { .. } => {
                 let sensor_source = descriptor.source.to_sensor_source();
                 let sensor_info = sensors.iter().find(|s| s.source == sensor_source);
                 let divider = sensor_info.map_or(1, |s| s.divider);

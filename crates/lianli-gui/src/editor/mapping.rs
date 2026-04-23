@@ -812,6 +812,22 @@ pub(super) fn parse_sensor_source(
         SensorSource::MemUsage => SensorSourceConfig::MemUsage,
         SensorSource::MemUsed => SensorSourceConfig::MemUsed,
         SensorSource::MemFree => SensorSourceConfig::MemFree,
+        SensorSource::NetworkRate { iface, direction } => match direction {
+            lianli_shared::sensors::NetDirection::Rx => SensorSourceConfig::NetworkRx {
+                iface: iface.clone(),
+            },
+            lianli_shared::sensors::NetDirection::Tx => SensorSourceConfig::NetworkTx {
+                iface: iface.clone(),
+            },
+        },
+        SensorSource::DiskRate { device, direction } => match direction {
+            lianli_shared::sensors::DiskDirection::Read => SensorSourceConfig::DiskRead {
+                device: device.clone(),
+            },
+            lianli_shared::sensors::DiskDirection::Write => SensorSourceConfig::DiskWrite {
+                device: device.clone(),
+            },
+        },
     })
 }
 

@@ -1341,6 +1341,14 @@ fn source_to_config(
         SensorSource::MemUsage => SensorSourceConfig::MemUsage,
         SensorSource::MemUsed => SensorSourceConfig::MemUsed,
         SensorSource::MemFree => SensorSourceConfig::MemFree,
+        SensorSource::NetworkRate { iface, direction } => match direction {
+            lianli_shared::sensors::NetDirection::Rx => SensorSourceConfig::NetworkRx { iface },
+            lianli_shared::sensors::NetDirection::Tx => SensorSourceConfig::NetworkTx { iface },
+        },
+        SensorSource::DiskRate { device, direction } => match direction {
+            lianli_shared::sensors::DiskDirection::Read => SensorSourceConfig::DiskRead { device },
+            lianli_shared::sensors::DiskDirection::Write => SensorSourceConfig::DiskWrite { device },
+        },
     }
 }
 
@@ -1470,6 +1478,36 @@ fn wire_lcd_callbacks(
                                 lianli_shared::sensors::SensorSource::MemFree => {
                                     lianli_shared::media::SensorSourceConfig::MemFree
                                 }
+                                lianli_shared::sensors::SensorSource::NetworkRate {
+                                    iface,
+                                    direction,
+                                } => match direction {
+                                    lianli_shared::sensors::NetDirection::Rx => {
+                                        lianli_shared::media::SensorSourceConfig::NetworkRx {
+                                            iface: iface.clone(),
+                                        }
+                                    }
+                                    lianli_shared::sensors::NetDirection::Tx => {
+                                        lianli_shared::media::SensorSourceConfig::NetworkTx {
+                                            iface: iface.clone(),
+                                        }
+                                    }
+                                },
+                                lianli_shared::sensors::SensorSource::DiskRate {
+                                    device,
+                                    direction,
+                                } => match direction {
+                                    lianli_shared::sensors::DiskDirection::Read => {
+                                        lianli_shared::media::SensorSourceConfig::DiskRead {
+                                            device: device.clone(),
+                                        }
+                                    }
+                                    lianli_shared::sensors::DiskDirection::Write => {
+                                        lianli_shared::media::SensorSourceConfig::DiskWrite {
+                                            device: device.clone(),
+                                        }
+                                    }
+                                },
                             }
                         })
                     } else {

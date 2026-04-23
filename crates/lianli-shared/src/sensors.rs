@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::systeminfo::SysSensor;
 
@@ -14,6 +16,20 @@ pub enum NvidiaMetric {
     #[default]
     Temp,
     Usage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetDirection {
+    Rx,
+    Tx,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskDirection {
+    Read,
+    Write,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -45,6 +61,14 @@ pub enum SensorSource {
     MemUsage,
     MemUsed,
     MemFree,
+    NetworkRate {
+        iface: String,
+        direction: NetDirection,
+    },
+    DiskRate {
+        device: String,
+        direction: DiskDirection,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +85,7 @@ pub enum Unit {
     FREQ,
     PERCENT,
     SIZE,
+    MBps,
     WO,
 }
 
@@ -72,6 +97,7 @@ impl std::fmt::Display for Unit {
             Unit::V => "mV",
             Unit::FREQ => "Mhz",
             Unit::SIZE => "MB",
+            Unit::MBps => "MB/s",
             Unit::PERCENT => "%",
             Unit::WO => "",
         };
@@ -104,6 +130,12 @@ impl SensorInfo {
 /// But in order to actually read the sensor we need to look into SensorSource thoroughly to find the real path, etc. This is how ResolvedSensor comes into play:
 /// It's created from a SensorSource and enables us to read a sensor as fast as possible.
 
+#[derive(Debug, Default)]
+pub struct RateState {
+    prev_counter: Option<u64>,
+    prev_at: Option<Instant>,
+}
+
 #[derive(Debug, Clone)]
 pub enum ResolvedSensor {
     SysfsFile {
@@ -121,6 +153,18 @@ pub enum ResolvedSensor {
         divider: usize,
     },
     Constant(f32),
+    NetworkRate {
+        iface: String,
+        direction: NetDirection,
+        divider: usize,
+        state: Arc<Mutex<RateState>>,
+    },
+    DiskRate {
+        device: String,
+        direction: DiskDirection,
+        divider: usize,
+        state: Arc<Mutex<RateState>>,
+    },
 }
 
 /// Abstract sensor categories used by downloadable templates to bind widgets
@@ -134,6 +178,10 @@ pub enum SensorCategory {
     CpuUsage,
     GpuUsage,
     MemUsage,
+    NetworkRx,
+    NetworkTx,
+    DiskRead,
+    DiskWrite,
 }
 
 /// Picks the most likely "CPU control temp" sensor — k10temp's `Tctl` /
@@ -227,6 +275,18 @@ pub fn pick_source_for_category(
                 )
             })
             .map(|s| source_to_config(s.source.clone())),
+        SensorCategory::NetworkRx => {
+            default_route_iface().map(|iface| SensorSourceConfig::NetworkRx { iface })
+        }
+        SensorCategory::NetworkTx => {
+            default_route_iface().map(|iface| SensorSourceConfig::NetworkTx { iface })
+        }
+        SensorCategory::DiskRead => {
+            root_disk_device().map(|device| SensorSourceConfig::DiskRead { device })
+        }
+        SensorCategory::DiskWrite => {
+            root_disk_device().map(|device| SensorSourceConfig::DiskWrite { device })
+        }
     }
 }
 
@@ -260,6 +320,10 @@ pub fn infer_sensor_category(source: &crate::media::SensorSourceConfig) -> Optio
             }
             None
         }
+        SensorSourceConfig::NetworkRx { .. } => Some(SensorCategory::NetworkRx),
+        SensorSourceConfig::NetworkTx { .. } => Some(SensorCategory::NetworkTx),
+        SensorSourceConfig::DiskRead { .. } => Some(SensorCategory::DiskRead),
+        SensorSourceConfig::DiskWrite { .. } => Some(SensorCategory::DiskWrite),
         SensorSourceConfig::Command { .. }
         | SensorSourceConfig::Constant { .. }
         | SensorSourceConfig::WirelessCoolant { .. } => None,
@@ -290,6 +354,14 @@ fn source_to_config(source: SensorSource) -> crate::media::SensorSourceConfig {
         SensorSource::MemUsage => SensorSourceConfig::MemUsage,
         SensorSource::MemUsed => SensorSourceConfig::MemUsed,
         SensorSource::MemFree => SensorSourceConfig::MemFree,
+        SensorSource::NetworkRate { iface, direction } => match direction {
+            NetDirection::Rx => SensorSourceConfig::NetworkRx { iface },
+            NetDirection::Tx => SensorSourceConfig::NetworkTx { iface },
+        },
+        SensorSource::DiskRate { device, direction } => match direction {
+            DiskDirection::Read => SensorSourceConfig::DiskRead { device },
+            DiskDirection::Write => SensorSourceConfig::DiskWrite { device },
+        },
     }
 }
 
@@ -466,6 +538,8 @@ pub fn enumerate_sensors() -> Vec<SensorInfo> {
     }
 
     enumerate_amd_gpu_usage(&gpu_names, &mut sensors);
+    enumerate_network_sensors(&mut sensors);
+    enumerate_disk_sensors(&mut sensors);
 
     sensors
 }
@@ -855,6 +929,18 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
                 None
             }
         }
+        SensorSource::NetworkRate { iface, direction } => Some(ResolvedSensor::NetworkRate {
+            iface: iface.clone(),
+            direction: *direction,
+            divider,
+            state: Arc::new(Mutex::new(RateState::default())),
+        }),
+        SensorSource::DiskRate { device, direction } => Some(ResolvedSensor::DiskRate {
+            device: device.clone(),
+            direction: *direction,
+            divider,
+            state: Arc::new(Mutex::new(RateState::default())),
+        }),
     }
 }
 
@@ -946,6 +1032,218 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
             Ok(temp)
         }
         ResolvedSensor::Constant(value) => Ok(*value),
+        ResolvedSensor::NetworkRate {
+            iface,
+            direction,
+            divider,
+            state,
+        } => {
+            let counter = read_network_counter(iface, *direction)?;
+            Ok(compute_rate(state, counter, *divider))
+        }
+        ResolvedSensor::DiskRate {
+            device,
+            direction,
+            divider,
+            state,
+        } => {
+            let counter = read_disk_counter(device, *direction)?;
+            Ok(compute_rate(state, counter, *divider))
+        }
+    }
+}
+
+fn compute_rate(state: &Arc<Mutex<RateState>>, counter: u64, divider: usize) -> f32 {
+    let now = Instant::now();
+    let mut s = state.lock().unwrap();
+    let rate = match (s.prev_counter, s.prev_at) {
+        (Some(prev), Some(prev_at)) => {
+            let dt = now.saturating_duration_since(prev_at).as_secs_f32();
+            if counter < prev || dt <= 0.0 {
+                0.0
+            } else {
+                (counter - prev) as f32 / dt / divider.max(1) as f32
+            }
+        }
+        _ => 0.0,
+    };
+    s.prev_counter = Some(counter);
+    s.prev_at = Some(now);
+    rate
+}
+
+fn read_network_counter(iface: &str, direction: NetDirection) -> anyhow::Result<u64> {
+    let content = std::fs::read_to_string("/proc/net/dev")
+        .map_err(|e| anyhow::anyhow!("reading /proc/net/dev: {e}"))?;
+    for line in content.lines() {
+        let Some((name, rest)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim() != iface {
+            continue;
+        }
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        // 0=rx_bytes, 8=tx_bytes
+        let idx = match direction {
+            NetDirection::Rx => 0,
+            NetDirection::Tx => 8,
+        };
+        return fields
+            .get(idx)
+            .and_then(|f| f.parse::<u64>().ok())
+            .ok_or_else(|| anyhow::anyhow!("malformed /proc/net/dev for {iface}"));
+    }
+    anyhow::bail!("interface '{iface}' not found in /proc/net/dev")
+}
+
+fn read_disk_counter(device: &str, direction: DiskDirection) -> anyhow::Result<u64> {
+    let content = std::fs::read_to_string("/proc/diskstats")
+        .map_err(|e| anyhow::anyhow!("reading /proc/diskstats: {e}"))?;
+    for line in content.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.get(2).copied() != Some(device) {
+            continue;
+        }
+        // 5=sectors read, 9=sectors written; sector = 512 bytes
+        let idx = match direction {
+            DiskDirection::Read => 5,
+            DiskDirection::Write => 9,
+        };
+        let sectors: u64 = fields
+            .get(idx)
+            .and_then(|f| f.parse().ok())
+            .ok_or_else(|| anyhow::anyhow!("malformed /proc/diskstats for {device}"))?;
+        return Ok(sectors.saturating_mul(512));
+    }
+    anyhow::bail!("device '{device}' not found in /proc/diskstats")
+}
+
+fn default_route_iface() -> Option<String> {
+    let content = std::fs::read_to_string("/proc/net/route").ok()?;
+    for line in content.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 2 {
+            continue;
+        }
+        if fields[1] == "00000000" {
+            return Some(fields[0].to_string());
+        }
+    }
+    None
+}
+
+fn root_disk_device() -> Option<String> {
+    let mounts = std::fs::read_to_string("/proc/mounts").ok()?;
+    let mut root_dev: Option<String> = None;
+    for line in mounts.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 2 {
+            continue;
+        }
+        if fields[1] == "/" {
+            root_dev = Some(fields[0].to_string());
+            break;
+        }
+    }
+    let dev = root_dev?;
+    let partition = dev.strip_prefix("/dev/")?.to_string();
+    let block = Path::new("/sys/class/block").join(&partition);
+    let canon = std::fs::canonicalize(&block).ok()?;
+    let parent = canon.parent()?;
+    let parent_name = parent.file_name()?.to_string_lossy().to_string();
+    if parent_name == "block" {
+        Some(partition)
+    } else {
+        Some(parent_name)
+    }
+}
+
+fn enumerate_network_sensors(sensors: &mut Vec<SensorInfo>) {
+    let Ok(content) = std::fs::read_to_string("/proc/net/dev") else {
+        return;
+    };
+    let mut ifaces: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let Some((name, _)) = line.split_once(':') else {
+            continue;
+        };
+        let trimmed = name.trim();
+        if trimmed == "lo" || trimmed.is_empty() {
+            continue;
+        }
+        ifaces.push(trimmed.to_string());
+    }
+    ifaces.sort();
+    for iface in ifaces {
+        sensors.push(SensorInfo {
+            source: SensorSource::NetworkRate {
+                iface: iface.clone(),
+                direction: NetDirection::Rx,
+            },
+            sensor_name: None,
+            display_name: Some(format!("Network {iface}: Rx")),
+            divider: 1_000_000,
+            unit: Unit::MBps,
+            current_value: Some(0.0),
+        });
+        sensors.push(SensorInfo {
+            source: SensorSource::NetworkRate {
+                iface: iface.clone(),
+                direction: NetDirection::Tx,
+            },
+            sensor_name: None,
+            display_name: Some(format!("Network {iface}: Tx")),
+            divider: 1_000_000,
+            unit: Unit::MBps,
+            current_value: Some(0.0),
+        });
+    }
+}
+
+fn enumerate_disk_sensors(sensors: &mut Vec<SensorInfo>) {
+    let Ok(entries) = std::fs::read_dir("/sys/block") else {
+        return;
+    };
+    let mut devices: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let skip = name.starts_with("loop")
+                || name.starts_with("ram")
+                || name.starts_with("dm-")
+                || name.starts_with("zram")
+                || name.starts_with("sr");
+            if skip {
+                None
+            } else {
+                Some(name)
+            }
+        })
+        .collect();
+    devices.sort();
+    for device in devices {
+        sensors.push(SensorInfo {
+            source: SensorSource::DiskRate {
+                device: device.clone(),
+                direction: DiskDirection::Read,
+            },
+            sensor_name: None,
+            display_name: Some(format!("Disk {device}: Read")),
+            divider: 1_000_000,
+            unit: Unit::MBps,
+            current_value: Some(0.0),
+        });
+        sensors.push(SensorInfo {
+            source: SensorSource::DiskRate {
+                device: device.clone(),
+                direction: DiskDirection::Write,
+            },
+            sensor_name: None,
+            display_name: Some(format!("Disk {device}: Write")),
+            divider: 1_000_000,
+            unit: Unit::MBps,
+            current_value: Some(0.0),
+        });
     }
 }
 

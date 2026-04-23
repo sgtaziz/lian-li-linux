@@ -114,6 +114,10 @@ fn mock_value_for_widget(widget: &Widget) -> f32 {
             SensorCategory::CpuUsage | SensorCategory::GpuUsage | SensorCategory::MemUsage => {
                 MOCK_USAGE_PCT
             }
+            SensorCategory::NetworkRx
+            | SensorCategory::NetworkTx
+            | SensorCategory::DiskRead
+            | SensorCategory::DiskWrite => 25.0,
         };
     }
     if let WidgetKind::ValueText { unit, .. } = &widget.kind {

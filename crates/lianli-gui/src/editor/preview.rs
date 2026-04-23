@@ -3,16 +3,44 @@ use crate::ipc_client;
 use crate::{Shared, TemplateEditorWindow};
 use lianli_shared::ipc::IpcRequest;
 use slint::Image;
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
-/// Spawns a preview render in the background. The version counter discards
-/// late responses if the user edits faster than the daemon can render.
+const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
+
+thread_local! {
+    static DEBOUNCE_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+}
+
+/// Schedules a debounced preview render. Rapid successive calls (slider drags,
+/// typing) coalesce into one IPC to the daemon once edits settle.
 pub(super) fn request_preview(
     weak: &slint::Weak<TemplateEditorWindow>,
     state: &SharedEditor,
     version: &Arc<AtomicU64>,
     _shared: &Shared,
+) {
+    let weak = weak.clone();
+    let state = state.clone();
+    let version = version.clone();
+
+    DEBOUNCE_TIMER.with(|slot| {
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::SingleShot,
+            PREVIEW_DEBOUNCE,
+            move || do_request_preview(&weak, &state, &version),
+        );
+        *slot.borrow_mut() = Some(timer);
+    });
+}
+
+fn do_request_preview(
+    weak: &slint::Weak<TemplateEditorWindow>,
+    state: &SharedEditor,
+    version: &Arc<AtomicU64>,
 ) {
     let tpl = {
         let st = state.lock();
