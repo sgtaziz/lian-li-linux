@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 lianli-shared = { path = "../lianli-shared" }
-slint = { git = "https://github.com/slint-ui/slint", default-features = false, features = ["compat-1-2", "backend-winit", "renderer-femtovg"] }
+slint = { git = "https://github.com/slint-ui/slint", rev = "e27d0d19e983baf71532de8b7a4a0ebce2026237", default-features = false, features = ["compat-1-2", "backend-winit", "renderer-femtovg"] }
 
 base64 = { workspace = true }
 parking_lot = { workspace = true }
@@ -19,4 +19,4 @@ arboard = { workspace = true }
 rfd = "0.15"
 
 [build-dependencies]
-slint-build = { git = "https://github.com/slint-ui/slint" }
+slint-build = { git = "https://github.com/slint-ui/slint", rev = "e27d0d19e983baf71532de8b7a4a0ebce2026237" }
