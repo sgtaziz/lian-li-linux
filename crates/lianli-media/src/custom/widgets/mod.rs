@@ -83,7 +83,22 @@ pub(super) fn draw_widget(
         return;
     }
 
-    let mut sub = RgbaImage::from_pixel(ww, wh, Rgba([0, 0, 0, 0]));
+    let ss_factor: u32 = match &widget.kind {
+        WidgetKind::RadialGauge { .. }
+        | WidgetKind::Speedometer { .. }
+        | WidgetKind::Sparkline { .. }
+        | WidgetKind::ClockAnalog { .. } => 2,
+        WidgetKind::VerticalBar { corner_radius, .. }
+        | WidgetKind::HorizontalBar { corner_radius, .. } if *corner_radius > 0.1 => 2,
+        _ => 1,
+    };
+    let ss = ss_factor as f32;
+    let draw_w = ww * ss_factor;
+    let draw_h = wh * ss_factor;
+    let base_scale = uniform_scale;
+    let uniform_scale = uniform_scale * ss;
+
+    let mut sub = RgbaImage::from_pixel(draw_w, draw_h, Rgba([0, 0, 0, 0]));
 
     match &widget.kind {
         WidgetKind::Label {
@@ -156,8 +171,8 @@ pub(super) fn draw_widget(
                 *inner_radius_pct,
                 *background_color,
                 ranges,
-                *bg_corner_radius,
-                *value_corner_radius,
+                *bg_corner_radius * ss,
+                *value_corner_radius * ss,
             );
         }
         WidgetKind::VerticalBar {
@@ -412,9 +427,15 @@ pub(super) fn draw_widget(
         }
     }
 
+    let sub = if ss_factor > 1 {
+        imageops::resize(&sub, ww, wh, imageops::FilterType::Triangle)
+    } else {
+        sub
+    };
+
     let (ww_i, wh_i) = (ww as i32, wh as i32);
-    let tl_x = offset_x + (widget.x * uniform_scale).round() as i32 - ww_i / 2;
-    let tl_y = offset_y + (widget.y * uniform_scale).round() as i32 - wh_i / 2;
+    let tl_x = offset_x + (widget.x * base_scale).round() as i32 - ww_i / 2;
+    let tl_y = offset_y + (widget.y * base_scale).round() as i32 - wh_i / 2;
 
     if widget.rotation.abs() > 0.5 {
         let rotated = rotate_about_center(
