@@ -117,7 +117,7 @@ component LedStrip inherits VerticalLayout {
             red: root.led-colors[root.selected-led].r;
             green: root.led-colors[root.selected-led].g;
             blue: root.led-colors[root.selected-led].b;
-            changed(r, g, b) => {
+            changed(r, g, b, a) => {
                 root.color-changed(root.selected-led, r, g, b);
             }
         }
@@ -212,7 +212,7 @@ component RgbZoneEditor inherits VerticalLayout {
                     red: color-data.r;
                     green: color-data.g;
                     blue: color-data.b;
-                    changed(r, g, b) => { root.set-color(cidx, r, g, b); }
+                    changed(r, g, b, a) => { root.set-color(cidx, r, g, b); }
                 }
                 if root.zone.colors.length > 1: HorizontalLayout {
                     alignment: center;

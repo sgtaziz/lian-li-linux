@@ -230,6 +230,9 @@ fn main() {
     // ── Fan callbacks ──
     wire_fan_callbacks(&window, &backend, &shared);
 
+    // ── AIO callbacks ──
+    wire_aio_callbacks(&window, &backend, &shared);
+
     let editor_handle = editor::install(&window, shared.clone());
     let browser_handle = template_browser::install(&window, shared.clone());
 
@@ -1037,6 +1040,310 @@ fn wire_fan_callbacks(window: &MainWindow, _backend: &backend::BackendHandle, sh
     }
 }
 
+fn wire_aio_callbacks(window: &MainWindow, backend: &backend::BackendHandle, shared: &Shared) {
+    use lianli_shared::aio::AioConfig;
+
+    fn with_aio<F>(shared: &Shared, device_id: &str, f: F) -> bool
+    where
+        F: FnOnce(&mut AioConfig),
+    {
+        let mut state = shared.lock().unwrap();
+        let Some(cfg) = state.config.as_mut() else {
+            return false;
+        };
+        let entry = cfg.aio.entry(device_id.to_string()).or_default();
+        f(entry);
+        true
+    }
+
+    fn mark_dirty(weak: &slint::Weak<MainWindow>) {
+        let weak = weak.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_config_dirty(true);
+            }
+        })
+        .ok();
+    }
+
+    // Pump speed mode (Off / curve name / Constant PWM)
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_pump_speed_mode(move |dev_id, val| {
+            let dev_id = dev_id.to_string();
+            let val = val.to_string();
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.pump_target_rpm = match val.as_str() {
+                    "Off" => FanSpeed::Constant(0),
+                    "Constant PWM" => FanSpeed::Constant(128),
+                    "MB Sync" => FanSpeed::Constant(128),
+                    curve => FanSpeed::Curve(curve.to_string()),
+                };
+            });
+            if changed {
+                refresh_aio_ui(&weak, &shared);
+            }
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_pump_pwm(move |dev_id, percent| {
+            let dev_id = dev_id.to_string();
+            let percent = percent.clamp(0, 100) as u32;
+            let byte = ((percent * 255) / 100).min(255) as u8;
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.pump_target_rpm = FanSpeed::Constant(byte);
+            });
+            if changed {
+                mark_dirty(&weak);
+            }
+        });
+    }
+
+    // Fan speed mode
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_fan_speed_mode(move |dev_id, slot, val| {
+            let dev_id = dev_id.to_string();
+            let slot = (slot as usize).min(3);
+            let val = val.to_string();
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.fan_speeds[slot] = match val.as_str() {
+                    "Off" => FanSpeed::Constant(0),
+                    "Constant PWM" => FanSpeed::Constant(128),
+                    "MB Sync" => FanSpeed::Constant(128),
+                    curve => FanSpeed::Curve(curve.to_string()),
+                };
+            });
+            if changed {
+                refresh_aio_ui(&weak, &shared);
+            }
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_fan_pwm(move |dev_id, slot, percent| {
+            let dev_id = dev_id.to_string();
+            let slot = (slot as usize).min(3);
+            let percent = percent.clamp(0, 100) as u32;
+            let byte = ((percent * 255) / 100).min(255) as u8;
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.fan_speeds[slot] = FanSpeed::Constant(byte);
+            });
+            if changed {
+                mark_dirty(&weak);
+            }
+        });
+    }
+
+    // Sensor picker
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_sensor(move |dev_id, which, new_index| {
+            let dev_id = dev_id.to_string();
+            let which = which.to_string();
+            let new_index = new_index as i32;
+            let picked: Option<lianli_shared::media::SensorSourceConfig> = {
+                let state = shared.lock().unwrap();
+                if new_index <= 0 {
+                    None
+                } else {
+                    state
+                        .available_sensors
+                        .get((new_index - 1) as usize)
+                        .map(|s| source_to_config(s.source.clone()))
+                }
+            };
+            let changed = with_aio(&shared, &dev_id, |aio| match which.as_str() {
+                "cpu_temp" => aio.cpu_temp_source = picked.clone(),
+                "cpu_load" => aio.cpu_load_source = picked.clone(),
+                "gpu_temp" => aio.gpu_temp_source = picked.clone(),
+                "gpu_load" => aio.gpu_load_source = picked.clone(),
+                _ => {}
+            });
+            if changed {
+                refresh_aio_ui(&weak, &shared);
+            }
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_color(move |dev_id, which, r, g, b, a| {
+            let dev_id = dev_id.to_string();
+            let which = which.to_string();
+            let rgba = [
+                r.clamp(0, 255) as u8,
+                g.clamp(0, 255) as u8,
+                b.clamp(0, 255) as u8,
+                a.clamp(0, 255) as u8,
+            ];
+            let changed = with_aio(&shared, &dev_id, |aio| match which.as_str() {
+                "str" => aio.str_color = rgba,
+                "val" => aio.val_color = rgba,
+                "unit" => aio.unit_color = rgba,
+                _ => {}
+            });
+            if changed {
+                mark_dirty(&weak);
+            }
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_brightness(move |dev_id, v| {
+            let dev_id = dev_id.to_string();
+            let v = v.clamp(0, 100) as u8;
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.brightness = v;
+            });
+            if changed {
+                mark_dirty(&weak);
+            }
+        });
+    }
+
+    // Rotation
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_rotation(move |dev_id, v| {
+            let dev_id = dev_id.to_string();
+            let v = v.clamp(0, 3) as u8;
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.rotation = v;
+            });
+            if changed {
+                refresh_aio_ui(&weak, &shared);
+            }
+        });
+    }
+
+    // Theme index
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_theme_index(move |dev_id, v| {
+            let dev_id = dev_id.to_string();
+            let v = v.clamp(0, 12) as u8;
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.theme_index = v;
+            });
+            if changed {
+                refresh_aio_ui(&weak, &shared);
+            }
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        window.on_aio_set_loop_interval(move |dev_id, v| {
+            let dev_id = dev_id.to_string();
+            let v = v.clamp(1, 30) as u8;
+            let changed = with_aio(&shared, &dev_id, |aio| {
+                aio.loop_interval = v;
+            });
+            if changed {
+                mark_dirty(&weak);
+            }
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        let tx = backend.tx.clone();
+        window.on_aio_pick_image(move |dev_id| {
+            let dev_id = dev_id.to_string();
+            let weak2 = weak.clone();
+            let shared2 = shared.clone();
+            let tx2 = tx.clone();
+            std::thread::spawn(move || {
+                let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Image", &["jpg", "jpeg", "png", "bmp", "webp"])
+                    .pick_file()
+                else {
+                    return;
+                };
+                let cfg_snapshot = {
+                    let mut state = shared2.lock().unwrap();
+                    if let Some(cfg) = state.config.as_mut() {
+                        let entry = cfg.aio.entry(dev_id.clone()).or_default();
+                        entry.custom_image_path = Some(path);
+                    }
+                    state.config.clone()
+                };
+                if let Some(cfg) = cfg_snapshot {
+                    let _ = tx2.send(backend::BackendCommand::SaveConfig(cfg));
+                }
+                refresh_aio_ui(&weak2, &shared2);
+            });
+        });
+    }
+
+    {
+        let shared = shared.clone();
+        let weak = window.as_weak();
+        let tx = backend.tx.clone();
+        window.on_aio_clear_image(move |dev_id| {
+            let dev_id = dev_id.to_string();
+            let cfg_snapshot = {
+                let mut state = shared.lock().unwrap();
+                if let Some(cfg) = state.config.as_mut() {
+                    let entry = cfg.aio.entry(dev_id.clone()).or_default();
+                    entry.custom_image_path = None;
+                }
+                state.config.clone()
+            };
+            if let Some(cfg) = cfg_snapshot {
+                let _ = tx.send(backend::BackendCommand::SaveConfig(cfg));
+            }
+            refresh_aio_ui(&weak, &shared);
+        });
+    }
+}
+
+fn source_to_config(
+    s: lianli_shared::sensors::SensorSource,
+) -> lianli_shared::media::SensorSourceConfig {
+    use lianli_shared::media::SensorSourceConfig;
+    use lianli_shared::sensors::SensorSource;
+    match s {
+        SensorSource::Hwmon {
+            name,
+            label,
+            device_path,
+        } => SensorSourceConfig::Hwmon {
+            name,
+            label,
+            device_path,
+        },
+        SensorSource::NvidiaGpu { gpu_index, metric } => {
+            SensorSourceConfig::NvidiaGpu { gpu_index, metric }
+        }
+        SensorSource::AmdGpuUsage { card_index } => SensorSourceConfig::AmdGpuUsage { card_index },
+        SensorSource::Command { cmd } => SensorSourceConfig::Command { cmd },
+        SensorSource::WirelessCoolant { device_id } => {
+            SensorSourceConfig::WirelessCoolant { device_id }
+        }
+        SensorSource::CpuUsage => SensorSourceConfig::CpuUsage,
+        SensorSource::MemUsage => SensorSourceConfig::MemUsage,
+        SensorSource::MemUsed => SensorSourceConfig::MemUsed,
+        SensorSource::MemFree => SensorSourceConfig::MemFree,
+    }
+}
+
 fn wire_lcd_callbacks(
     window: &MainWindow,
     shared: &Shared,
@@ -1745,6 +2052,43 @@ fn refresh_fan_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
                 &devices,
                 &pwm_headers,
             ));
+        }
+    })
+    .ok();
+}
+
+pub(crate) fn refresh_aio_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
+    let (config, devices, sensors) = {
+        let state = shared.lock().unwrap();
+        let Some(cfg) = state.config.clone() else {
+            return;
+        };
+        (
+            cfg,
+            state.devices.clone(),
+            state.available_sensors.clone(),
+        )
+    };
+    let weak = weak.clone();
+    slint::invoke_from_event_loop(move || {
+        if let Some(w) = weak.upgrade() {
+            let pwm_headers = lianli_shared::sensors::enumerate_pwm_headers();
+            let telemetry = lianli_shared::ipc::TelemetrySnapshot::default();
+            w.set_aios(conversions::aios_to_model(
+                &config,
+                &devices,
+                &telemetry,
+                &sensors,
+                &pwm_headers,
+            ));
+            w.set_aio_sensor_options(conversions::aio_sensor_options_model(&sensors));
+            w.set_aio_speed_options(conversions::speed_options_model(
+                &config.fan_curves,
+                false,
+            ));
+            w.set_aio_theme_options(conversions::aio_theme_options_model());
+            w.set_aio_rotation_options(conversions::aio_rotation_options_model());
+            w.set_config_dirty(true);
         }
     })
     .ok();

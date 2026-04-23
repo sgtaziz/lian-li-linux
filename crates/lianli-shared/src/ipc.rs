@@ -184,6 +184,9 @@ pub struct DeviceInfo {
     pub screen_height: Option<u32>,
     #[serde(default)]
     pub is_unbound_wireless: bool,
+    /// Target pump RPM range (min, max) for wireless AIOs. None for non-AIO devices.
+    #[serde(default)]
+    pub pump_rpm_range: Option<(u32, u32)>,
 }
 
 /// Status of the OpenRGB SDK server.

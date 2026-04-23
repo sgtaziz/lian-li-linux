@@ -34,8 +34,8 @@
 | UNI FAN SL V3 (LCD / LED) | Yes | Yes | 400x400 | - | Yes |
 | UNI FAN SL-INF | Yes | Yes | - | - | Yes |
 | UNI FAN CL / RL120 | Yes | Yes | - | - | - |
-| HydroShift Wireless AIO | Yes | Yes | - | Yes | Yes|
-| HydroShift II Wireless AIO | Yes | Yes | - | Yes | Yes |
+| HydroShift II LCD-C (Wireless) | Yes | Yes | - | Yes | - |
+| HydroShift II LCD-S (Wireless) | Yes | Yes | - | Yes | - |
 | Strimer Plus Wireless | - | Yes | - | - | Yes |
 | Lancool 217 Wireless | - | Yes | - | - | - |
 | Lancool V150 Wireless | Yes | Yes | - | - | - |

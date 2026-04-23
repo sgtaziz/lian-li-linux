@@ -164,6 +164,19 @@ fn fan_control_thread(
                 .map(|id| id.starts_with("wireless:"))
                 .unwrap_or(false);
 
+            // Wireless AIOs are driven by AioController; skip them here.
+            if is_wireless {
+                if let (Some(device_id), Some(w)) = (&group.device_id, wireless.as_ref()) {
+                    let mac_str = device_id.strip_prefix("wireless:").unwrap_or(device_id);
+                    if w.devices()
+                        .iter()
+                        .any(|d| d.mac_str() == mac_str && d.is_aio())
+                    {
+                        continue;
+                    }
+                }
+            }
+
             // Wired MB sync: hardware handles it natively, skip
             if !is_wireless && group.speeds.iter().any(|s| s.is_mb_sync()) {
                 continue;

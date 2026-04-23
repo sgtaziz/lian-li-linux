@@ -1,10 +1,11 @@
+use crate::aio::AioConfig;
 use crate::fan::{FanConfig, FanCurve};
 use crate::media::{DoublegaugeDescriptor, MediaType, SensorDescriptor, SensorSourceConfig};
 use crate::rgb::RgbAppConfig;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -132,6 +133,9 @@ pub struct AppConfig {
     pub fans: Option<FanConfig>,
     #[serde(default)]
     pub rgb: Option<RgbAppConfig>,
+    /// Per-AIO configuration keyed by device_id (e.g. "wireless:AA:BB:CC:DD:EE:FF").
+    #[serde(default)]
+    pub aio: HashMap<String, AioConfig>,
 }
 
 impl Default for AppConfig {
@@ -143,6 +147,7 @@ impl Default for AppConfig {
             fan_curves: Vec::new(),
             fans: None,
             rgb: None,
+            aio: HashMap::new(),
         }
     }
 }
@@ -237,6 +242,34 @@ impl AppConfig {
         }
 
         Ok((cfg, warnings))
+    }
+}
+
+impl AppConfig {
+    /// One-way migration: if a legacy `FanGroup` targets an AIO device and no
+    /// `AioConfig` exists for that device_id yet, convert the FanGroup into an
+    /// AioConfig (pump slot → pump_target_rpm, other slots → fan_speeds) and
+    /// remove the FanGroup. Returns true if anything was migrated.
+    pub fn migrate_aio_fangroup(&mut self, aio_device_id: &str) -> bool {
+        if self.aio.contains_key(aio_device_id) {
+            return false;
+        }
+        let Some(fans) = self.fans.as_mut() else {
+            return false;
+        };
+        let Some(pos) = fans
+            .speeds
+            .iter()
+            .position(|g| g.device_id.as_deref() == Some(aio_device_id))
+        else {
+            return false;
+        };
+        let group = fans.speeds.remove(pos);
+        let mut aio = AioConfig::default();
+        aio.pump_target_rpm = group.speeds[3].clone();
+        aio.fan_speeds = group.speeds;
+        self.aio.insert(aio_device_id.to_string(), aio);
+        true
     }
 }
 

@@ -356,8 +356,25 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 w.set_fan_pwm_header_options(slint::ModelRc::new(slint::VecModel::from(pwm_opts)));
 
                 // RGB devices
-                let rgb_model = conversions::rgb_devices_to_model(&rgb_caps, &config, &rgb_presets);
+                let rgb_model =
+                    conversions::rgb_devices_to_model(&rgb_caps, &config, &rgb_presets, &devices);
                 w.set_rgb_devices(rgb_model);
+
+                // AIO
+                let telem: lianli_shared::ipc::TelemetrySnapshot =
+                    ipc_client::send_request(&IpcRequest::GetTelemetry)
+                        .and_then(ipc_client::unwrap_response)
+                        .unwrap_or_default();
+                let aio_model =
+                    conversions::aios_to_model(&config, &devices, &telem, &sensors, &pwm_headers);
+                w.set_aios(aio_model);
+                w.set_aio_sensor_options(conversions::aio_sensor_options_model(&sensors));
+                w.set_aio_speed_options(conversions::speed_options_model(
+                    &config.fan_curves,
+                    false,
+                ));
+                w.set_aio_theme_options(conversions::aio_theme_options_model());
+                w.set_aio_rotation_options(conversions::aio_rotation_options_model());
 
                 // Inject live per-LED colors for wireless Direct zones
                 if !live_led_colors.is_empty() {

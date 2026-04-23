@@ -1,3 +1,4 @@
+use crate::aio_controller::AioController;
 use crate::fan_controller::FanController;
 use crate::ipc_server::{self, DaemonState};
 use crate::openrgb_server;
@@ -81,6 +82,7 @@ pub struct ServiceManager {
     wireless: WirelessController,
     packet_builder: PacketBuilder,
     fan_controller: Option<FanController>,
+    aio_controller: Option<AioController>,
     rgb_controller: Option<Arc<Mutex<RgbController>>>,
     /// Per-port DeviceInfo for wired fan devices (populated by open_wired_fan_devices).
     wired_fan_device_info: Vec<DeviceInfo>,
@@ -119,6 +121,7 @@ impl ServiceManager {
             wireless: WirelessController::new(),
             packet_builder: PacketBuilder::new(),
             fan_controller: None,
+            aio_controller: None,
             rgb_controller: None,
             wired_fan_device_info: Vec::new(),
             wired_fan_devices: Arc::new(HashMap::new()),
@@ -196,7 +199,9 @@ impl ServiceManager {
                     self.last_wireless_count, current_wireless
                 );
                 self.rebuild_rgb_controller();
+                self.ensure_aio_defaults();
                 self.restart_fan_control();
+                self.start_aio_control();
             }
             self.last_wireless_count = current_wireless;
         }
@@ -271,7 +276,9 @@ impl ServiceManager {
         }
         self.init_wired_devices();
         self.start_openrgb_server();
+        self.ensure_aio_defaults();
         self.start_fan_control();
+        self.start_aio_control();
 
         // Spawn a thread to regularily check for new USB devices.
         let usb_tx = tx.clone();
@@ -348,6 +355,13 @@ impl ServiceManager {
                             break;
                         }
                         self.start_fan_control();
+                        if let (Some(aio), Some(cfg)) =
+                            (self.aio_controller.as_ref(), self.config.as_ref())
+                        {
+                            aio.set_config(cfg.clone());
+                        } else {
+                            self.start_aio_control();
+                        }
                         self.apply_rgb_config();
                         self.start_openrgb_server();
                         self.sync_ipc_state();
@@ -418,6 +432,7 @@ impl ServiceManager {
                         screen_width: screen.map(|s| s.width),
                         screen_height: screen.map(|s| s.height),
                         is_unbound_wireless: false,
+                        pump_rpm_range: None,
                     });
                 }
 
@@ -513,6 +528,7 @@ impl ServiceManager {
                 screen_width: None,
                 screen_height: None,
                 is_unbound_wireless: false,
+                pump_rpm_range: dev.fan_type.pump_rpm_range(),
             });
 
             // Update RPM telemetry keyed by device_id
@@ -573,6 +589,7 @@ impl ServiceManager {
                 screen_width: None,
                 screen_height: None,
                 is_unbound_wireless: true,
+                pump_rpm_range: dev.fan_type.pump_rpm_range(),
             });
         }
 
@@ -616,6 +633,11 @@ impl ServiceManager {
         if let Some(fan_controller) = self.fan_controller.take() {
             info!("Stopping fan controller...");
             fan_controller.stop();
+        }
+
+        if let Some(aio) = self.aio_controller.take() {
+            info!("Stopping AIO controller...");
+            aio.stop();
         }
 
         // Drop RGB controller before HID backends so device handles are released cleanly
@@ -671,6 +693,62 @@ impl ServiceManager {
         let mut controller = FanController::new(fan_config, fan_curves, wireless, wired_devices);
         controller.start();
         self.fan_controller = Some(controller);
+    }
+
+    fn start_aio_control(&mut self) {
+        if let Some(existing) = self.aio_controller.take() {
+            existing.stop();
+        }
+        let Some(cfg) = self.config.clone() else {
+            return;
+        };
+        let wireless = Arc::new(self.wireless.clone());
+        let mut controller = AioController::new(wireless, cfg);
+        controller.start();
+        self.aio_controller = Some(controller);
+    }
+
+    /// For each discovered AIO, ensure an AioConfig exists in the user's config.
+    /// Migrates any legacy FanGroup targeting that device, then inserts defaults.
+    fn ensure_aio_defaults(&mut self) {
+        let Some(cfg) = self.config.as_mut() else {
+            return;
+        };
+        let aio_device_ids: Vec<String> = self
+            .wireless
+            .devices()
+            .iter()
+            .filter(|d| d.is_aio())
+            .map(|d| format!("wireless:{}", d.mac_str()))
+            .collect();
+        if aio_device_ids.is_empty() {
+            return;
+        }
+
+        let mut changed = false;
+        for device_id in aio_device_ids {
+            if cfg.migrate_aio_fangroup(&device_id) {
+                info!("Migrated legacy fan group for AIO {device_id} into aio config");
+                changed = true;
+            }
+            if !cfg.aio.contains_key(&device_id) {
+                cfg.aio.insert(
+                    device_id.clone(),
+                    lianli_shared::aio::AioConfig::defaults_for_host(),
+                );
+                info!("Created default AIO config for {device_id}");
+                changed = true;
+            }
+        }
+
+        if changed {
+            let snapshot = cfg.clone();
+            if let Err(e) = ipc_server::write_config(&self.config_path, &snapshot) {
+                warn!("Failed to persist AIO config additions: {e}");
+            } else {
+                self.ipc_state.lock().config = Some(snapshot);
+            }
+        }
     }
 
     /// Initialize all wired HID devices (fan + RGB) in a single pass.
@@ -852,6 +930,7 @@ impl ServiceManager {
                             screen_width: None,
                             screen_height: None,
                             is_unbound_wireless: false,
+                            pump_rpm_range: None,
                         });
                     }
                     fan_devices.insert(base_id.to_string(), fan_ctrl);

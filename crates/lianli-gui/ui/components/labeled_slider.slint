@@ -1,0 +1,43 @@
+import { Theme } from "../theme.slint";
+import { Slider } from "std-widgets.slint";
+
+export component LabeledSlider inherits HorizontalLayout {
+    in-out property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <string> unit: "";
+    in property <string> label: "";
+    in property <int> label-width: 80;
+    in property <int> value-width: 60;
+    callback committed(int);
+
+    spacing: 8px;
+
+    if root.label != "": Text {
+        text: root.label;
+        font-size: 12px;
+        color: Theme.text-secondary;
+        width: root.label-width * 1px;
+        vertical-alignment: center;
+    }
+
+    Slider {
+        horizontal-stretch: 1;
+        minimum: root.minimum;
+        maximum: root.maximum;
+        value: root.value;
+        changed(v) => {
+            root.value = round(v);
+            root.committed(root.value);
+        }
+    }
+
+    Text {
+        text: "\{root.value}\{root.unit}";
+        font-size: 12px;
+        color: Theme.text-primary;
+        width: root.value-width * 1px;
+        vertical-alignment: center;
+        horizontal-alignment: right;
+    }
+}

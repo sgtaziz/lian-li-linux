@@ -724,7 +724,7 @@ fn base64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn write_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
+pub(crate) fn write_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

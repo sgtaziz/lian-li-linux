@@ -104,9 +104,14 @@ export component Sidebar inherits Rectangle {
                 clicked => { root.current-page = 3; }
             }
             NavItem {
-                label: "Settings";
+                label: "AIO";
                 active: root.current-page == 4;
                 clicked => { root.current-page = 4; }
+            }
+            NavItem {
+                label: "Settings";
+                active: root.current-page == 5;
+                clicked => { root.current-page = 5; }
             }
         }
 

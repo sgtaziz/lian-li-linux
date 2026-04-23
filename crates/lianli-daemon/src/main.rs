@@ -1,3 +1,4 @@
+mod aio_controller;
 mod desktop_display;
 mod fan_controller;
 mod ipc_server;

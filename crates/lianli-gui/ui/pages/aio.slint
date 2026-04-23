@@ -1,0 +1,371 @@
+import { Theme } from "../theme.slint";
+import { Card } from "../widgets.slint";
+import { PageHeader } from "../page_header.slint";
+import { ColorPicker } from "../components/color_picker.slint";
+import { LabeledSlider } from "../components/labeled_slider.slint";
+import { FanSpeedSlot } from "fans.slint";
+import { Button, ComboBox, ScrollView, Slider, SpinBox } from "std-widgets.slint";
+
+export struct AioData {
+    device-id: string,
+    display-name: string,
+    mac: string,
+    min-rpm: int,
+    max-rpm: int,
+    current-pump-rpm: int,
+    coolant-temp: string,
+    fan-count: int,
+    pump-slot: FanSpeedSlot,
+    slots: [FanSpeedSlot],
+    cpu-temp-index: int,
+    cpu-load-index: int,
+    gpu-temp-index: int,
+    gpu-load-index: int,
+    str-r: int, str-g: int, str-b: int, str-a: int,
+    val-r: int, val-g: int, val-b: int, val-a: int,
+    unit-r: int, unit-g: int, unit-b: int, unit-a: int,
+    brightness: int,
+    rotation: int,
+    theme-index: int,
+    loop-interval: int,
+    custom-image-filename: string,
+    has-custom-image: bool,
+}
+
+component AioCard inherits Card {
+    in property <AioData> aio;
+    in property <[string]> sensor-options: [];
+    in property <[string]> speed-options: [];
+    in property <[string]> theme-options: [];
+    in property <[string]> rotation-options: [];
+
+    callback set-pump-speed-mode(string, string);
+    callback set-pump-pwm(string, int);
+    callback set-fan-speed-mode(string, int, string);
+    callback set-fan-pwm(string, int, int);
+    callback set-sensor(string, string, int);
+    callback set-color(string, string, int, int, int, int);
+    callback set-brightness(string, int);
+    callback set-rotation(string, int);
+    callback set-theme-index(string, int);
+    callback set-loop-interval(string, int);
+    callback pick-image(string);
+    callback clear-image(string);
+
+    property <int> live-brightness: root.aio.brightness;
+    property <int> live-loop-interval: root.aio.loop-interval;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.aio.display-name;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.aio.mac;
+                font-size: 11px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: "Pump: \{root.aio.current-pump-rpm} RPM";
+                font-size: 11px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.aio.coolant-temp;
+                font-size: 11px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.border; }
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Pump Speed (\{root.aio.min-rpm}-\{root.aio.max-rpm} RPM)"; font-size: 12px; font-weight: 600; color: Theme.text-primary; }
+            ComboBox {
+                model: root.speed-options;
+                current-value: root.aio.pump-slot.dropdown-value;
+                selected(val) => { root.set-pump-speed-mode(root.aio.device-id, val); }
+            }
+            if root.aio.pump-slot.display-mode == "constant": LabeledSlider {
+                value: root.aio.pump-slot.pwm-percent;
+                minimum: 0;
+                maximum: 100;
+                unit: "%";
+                label-width: 0;
+                committed(v) => { root.set-pump-pwm(root.aio.device-id, v); }
+            }
+        }
+
+        if root.aio.fan-count > 0: Rectangle { height: 1px; background: Theme.border; }
+        if root.aio.fan-count > 0: VerticalLayout {
+            spacing: 6px;
+            Text { text: "Attached Fans"; font-size: 12px; font-weight: 600; color: Theme.text-primary; }
+            for slot[sidx] in root.aio.slots: VerticalLayout {
+                spacing: 4px;
+                if sidx < root.aio.fan-count: Text {
+                    text: "Fan \{sidx + 1}";
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                }
+                if sidx < root.aio.fan-count: ComboBox {
+                    model: root.speed-options;
+                    current-value: slot.dropdown-value;
+                    selected(val) => { root.set-fan-speed-mode(root.aio.device-id, sidx, val); }
+                }
+                if sidx < root.aio.fan-count && slot.display-mode == "constant": LabeledSlider {
+                    value: slot.pwm-percent;
+                    minimum: 0;
+                    maximum: 100;
+                    unit: "%";
+                    label-width: 0;
+                    committed(v) => { root.set-fan-pwm(root.aio.device-id, sidx, v); }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.border; }
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Built-in Display Sensors"; font-size: 12px; font-weight: 600; color: Theme.text-primary; }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "CPU Temp"; width: 80px; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.sensor-options;
+                    current-index: root.aio.cpu-temp-index;
+                    selected(val) => { root.set-sensor(root.aio.device-id, "cpu_temp", self.current-index); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "CPU Load"; width: 80px; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.sensor-options;
+                    current-index: root.aio.cpu-load-index;
+                    selected(val) => { root.set-sensor(root.aio.device-id, "cpu_load", self.current-index); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "GPU Temp"; width: 80px; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.sensor-options;
+                    current-index: root.aio.gpu-temp-index;
+                    selected(val) => { root.set-sensor(root.aio.device-id, "gpu_temp", self.current-index); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "GPU Load"; width: 80px; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.sensor-options;
+                    current-index: root.aio.gpu-load-index;
+                    selected(val) => { root.set-sensor(root.aio.device-id, "gpu_load", self.current-index); }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.border; }
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Text Colors"; font-size: 12px; font-weight: 600; color: Theme.text-primary; }
+
+            Text { text: "Label"; font-size: 11px; color: Theme.text-secondary; }
+            ColorPicker {
+                show-alpha: true;
+                red: root.aio.str-r;
+                green: root.aio.str-g;
+                blue: root.aio.str-b;
+                alpha: root.aio.str-a;
+                changed(r, g, b, a) => { root.set-color(root.aio.device-id, "str", r, g, b, a); }
+            }
+
+            Text { text: "Value"; font-size: 11px; color: Theme.text-secondary; }
+            ColorPicker {
+                show-alpha: true;
+                red: root.aio.val-r;
+                green: root.aio.val-g;
+                blue: root.aio.val-b;
+                alpha: root.aio.val-a;
+                changed(r, g, b, a) => { root.set-color(root.aio.device-id, "val", r, g, b, a); }
+            }
+
+            Text { text: "Unit"; font-size: 11px; color: Theme.text-secondary; }
+            ColorPicker {
+                show-alpha: true;
+                red: root.aio.unit-r;
+                green: root.aio.unit-g;
+                blue: root.aio.unit-b;
+                alpha: root.aio.unit-a;
+                changed(r, g, b, a) => { root.set-color(root.aio.device-id, "unit", r, g, b, a); }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.border; }
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Display"; font-size: 12px; font-weight: 600; color: Theme.text-primary; }
+
+            LabeledSlider {
+                value <=> root.live-brightness;
+                minimum: 0;
+                maximum: 100;
+                label: "Brightness";
+                label-width: 90;
+                unit: "%";
+                committed(v) => { root.set-brightness(root.aio.device-id, v); }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "Rotation"; width: 90px; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.rotation-options;
+                    current-index: root.aio.rotation;
+                    selected(val) => { root.set-rotation(root.aio.device-id, self.current-index); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "Theme"; width: 90px; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: root.theme-options;
+                    current-index: root.aio.theme-index;
+                    selected(val) => { root.set-theme-index(root.aio.device-id, self.current-index); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "Loop interval"; width: 90px; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+                SpinBox {
+                    horizontal-stretch: 1;
+                    minimum: 1;
+                    maximum: 30;
+                    value: root.live-loop-interval;
+                    edited(v) => {
+                        root.live-loop-interval = v;
+                        root.set-loop-interval(root.aio.device-id, v);
+                    }
+                }
+                Text { text: "s"; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.border; }
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: "Custom Image"; font-size: 12px; font-weight: 600; color: Theme.text-primary; }
+            Text {
+                text: root.aio.has-custom-image
+                    ? "Current: \{root.aio.custom-image-filename}"
+                    : "No custom image uploaded. Upload a 480×480 JPEG (≤20 KB).";
+                font-size: 11px;
+                color: Theme.text-secondary;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    text: "Upload image…";
+                    clicked => { root.pick-image(root.aio.device-id); }
+                }
+                Button {
+                    text: "Clear";
+                    enabled: root.aio.has-custom-image;
+                    clicked => { root.clear-image(root.aio.device-id); }
+                }
+            }
+        }
+    }
+}
+
+export component AioPage inherits VerticalLayout {
+    in property <[AioData]> aios: [];
+    in property <[string]> sensor-options: [];
+    in property <[string]> speed-options: [];
+    in property <[string]> theme-options: [];
+    in property <[string]> rotation-options: [];
+
+    callback set-pump-speed-mode(string, string);
+    callback set-pump-pwm(string, int);
+    callback set-fan-speed-mode(string, int, string);
+    callback set-fan-pwm(string, int, int);
+    callback set-sensor(string, string, int);
+    callback set-color(string, string, int, int, int, int);
+    callback set-brightness(string, int);
+    callback set-rotation(string, int);
+    callback set-theme-index(string, int);
+    callback set-loop-interval(string, int);
+    callback pick-image(string);
+    callback clear-image(string);
+    callback save-config();
+
+    PageHeader {
+        title: "AIO";
+
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            vertical-stretch: 0;
+
+            Button {
+                text: "Save";
+                clicked => { root.save-config(); }
+            }
+        }
+    }
+
+    ScrollView {
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            alignment: start;
+
+            if root.aios.length == 0: Text {
+                text: "No wireless AIO device detected.";
+                color: Theme.text-secondary;
+                font-size: 12px;
+            }
+
+            for aio in root.aios: AioCard {
+                aio: aio;
+                sensor-options: root.sensor-options;
+                speed-options: root.speed-options;
+                theme-options: root.theme-options;
+                rotation-options: root.rotation-options;
+                set-pump-speed-mode(id, v) => { root.set-pump-speed-mode(id, v); }
+                set-pump-pwm(id, v) => { root.set-pump-pwm(id, v); }
+                set-fan-speed-mode(id, s, v) => { root.set-fan-speed-mode(id, s, v); }
+                set-fan-pwm(id, s, v) => { root.set-fan-pwm(id, s, v); }
+                set-sensor(id, w, i) => { root.set-sensor(id, w, i); }
+                set-color(id, w, r, g, b, a) => { root.set-color(id, w, r, g, b, a); }
+                set-brightness(id, v) => { root.set-brightness(id, v); }
+                set-rotation(id, v) => { root.set-rotation(id, v); }
+                set-theme-index(id, v) => { root.set-theme-index(id, v); }
+                set-loop-interval(id, v) => { root.set-loop-interval(id, v); }
+                pick-image(id) => { root.pick-image(id); }
+                clear-image(id) => { root.clear-image(id); }
+            }
+        }
+    }
+}

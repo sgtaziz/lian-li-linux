@@ -1,3 +1,4 @@
+pub mod aio;
 pub mod config;
 pub mod device_id;
 pub mod fan;

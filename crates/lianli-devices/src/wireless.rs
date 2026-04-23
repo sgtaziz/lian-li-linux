@@ -21,11 +21,21 @@ const USB_CMD_GET_MAC: u8 = 0x11;
 
 const RF_SELECT: u8 = 0x12;
 const RF_PWM_CMD: u8 = 0x10;
+const RF_AIO_SWITCH_WIRELESS: u8 = 0x19;
 const RF_SET_RGB: u8 = 0x20;
+const RF_AIO_PARAMS: u8 = 0x21;
+const RF_AIO_PIC: u8 = 0x22;
 
 const RF_DATA_SIZE: usize = 240;
 const RF_CHUNK_SIZE: usize = 60;
 const RF_CHUNKS: usize = RF_DATA_SIZE / RF_CHUNK_SIZE;
+
+/// Maximum size of a JPEG uploaded to an AIO's built-in display.
+pub const AIO_PIC_MAX_BYTES: usize = 20_480;
+/// Width/height of an AIO's built-in display in pixels.
+pub const AIO_PIC_DIMENSION: u32 = 480;
+/// Size of the aio_param state block sent over RF to wireless AIOs.
+pub const AIO_PARAM_LEN: usize = 32;
 
 static CMD_RESET: Lazy<Vec<u8>> = Lazy::new(|| decode_command("11080000"));
 static CMD_VIDEO_START: Lazy<Vec<u8>> = Lazy::new(|| decode_command("11010000"));
@@ -114,9 +124,11 @@ pub enum WirelessFanType {
     SlInf,
     /// CL / RL120 fans — 10% minimum duty (special PWM filter)
     Clv1,
-    /// First-gen wireless AIO (device_type 10) — pump + 0-4 fans, 24 LEDs each
+    /// HydroShift II LCD-C (Circle) wireless AIO (device_type 10).
+    /// Pump RPM range 1600-2500, 0-4 fans, 24 LEDs on pump head.
     WaterBlock,
-    /// HydroShift II wireless AIO (device_type 11) — pump + 0-4 fans, 24 LEDs each
+    /// HydroShift II LCD-S / H2S (Square) wireless AIO (device_type 11).
+    /// Pump RPM range 1600-3200, 0-4 fans, 24 LEDs on pump head.
     WaterBlock2,
     /// Wireless LED strip (device_type 1-9) — RGB only, no fans
     Strimer(u8),
@@ -152,8 +164,8 @@ impl WirelessFanType {
             Self::Tlv2Led => "UNI FAN TL Wireless",
             Self::SlInf => "UNI FAN SL-INF Wireless",
             Self::Clv1 => "UNI FAN CL Wireless",
-            Self::WaterBlock => "HydroShift Wireless AIO",
-            Self::WaterBlock2 => "HydroShift II Wireless AIO",
+            Self::WaterBlock => "HydroShift II LCD-C (Wireless)",
+            Self::WaterBlock2 => "HydroShift II LCD-S (Wireless)",
             Self::Strimer(_) => "Strimer Plus Wireless",
             Self::Lc217 => "Lancool 217 Wireless",
             Self::Led88 => "Universal Screen 8.8\" Wireless",
@@ -195,6 +207,16 @@ impl WirelessFanType {
             24
         } else {
             0
+        }
+    }
+
+    /// Supported target pump RPM range (min, max) for this AIO variant, or None
+    /// if the device has no pump.
+    pub fn pump_rpm_range(self) -> Option<(u32, u32)> {
+        match self {
+            Self::WaterBlock => Some((1600, 2500)),
+            Self::WaterBlock2 => Some((1600, 3200)),
+            _ => None,
         }
     }
 
@@ -1206,6 +1228,156 @@ impl WirelessController {
         Ok(())
     }
 
+    /// Signal an AIO device to start honouring RF-driven theme / pump state.
+    /// Must be sent once per AIO MAC after discovery, before the first `set_aio_params`.
+    /// Idempotent — safe to re-invoke on reconnects.
+    pub fn switch_to_wireless_theme(&self, mac: &[u8; 6]) -> Result<()> {
+        let tx = self.tx.as_ref().context("TX device not connected")?;
+        let device = self.device_by_mac_snapshot(mac)?;
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+
+        let mut rf_data = vec![0u8; RF_DATA_SIZE];
+        rf_data[0] = RF_SELECT;
+        rf_data[1] = RF_AIO_SWITCH_WIRELESS;
+        rf_data[2..8].copy_from_slice(&device.mac);
+        rf_data[8..14].copy_from_slice(&master_mac);
+        rf_data[14] = device.rx_type;
+        rf_data[15] = master_ch;
+
+        with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
+            for _ in 0..10 {
+                send_rf_frame_via(handle, &device, &rf_data)?;
+                thread::sleep(Duration::from_millis(2));
+            }
+            Ok(())
+        })?;
+
+        debug!("switch_to_wireless_theme sent to {}", device.mac_str());
+        Ok(())
+    }
+
+    /// Send the 32-byte aio_param block to a wireless AIO. Carries pump speed,
+    /// on-screen sensor values + enables, text colors, LCD brightness, rotation,
+    /// theme index, loop interval.
+    pub fn set_aio_params(&self, mac: &[u8; 6], aio_param: &[u8; AIO_PARAM_LEN]) -> Result<()> {
+        let tx = self.tx.as_ref().context("TX device not connected")?;
+        let device = self.device_by_mac_snapshot(mac)?;
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+        let seq_index = self.next_seq_index(&device);
+
+        let mut rf_data = vec![0u8; RF_DATA_SIZE];
+        rf_data[0] = RF_SELECT;
+        rf_data[1] = RF_AIO_PARAMS;
+        rf_data[2..8].copy_from_slice(&device.mac);
+        rf_data[8..14].copy_from_slice(&master_mac);
+        rf_data[14] = device.rx_type;
+        rf_data[15] = master_ch;
+        rf_data[16] = seq_index;
+        rf_data[18..18 + AIO_PARAM_LEN].copy_from_slice(aio_param);
+
+        with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
+            send_rf_frame_via(handle, &device, &rf_data)
+        })?;
+
+        debug!(
+            "set_aio_params sent to {} (pump_timer={}, theme={})",
+            device.mac_str(),
+            u16::from_be_bytes([aio_param[28], aio_param[29]]),
+            aio_param[27]
+        );
+        Ok(())
+    }
+
+    /// Upload a JPEG to the AIO's built-in display for custom theme mode.
+    /// Must be ≤ `AIO_PIC_MAX_BYTES` bytes; should be 480×480 JPEG.
+    pub fn send_aio_pic(&self, mac: &[u8; 6], jpeg: &[u8]) -> Result<()> {
+        if jpeg.len() > AIO_PIC_MAX_BYTES {
+            bail!(
+                "AIO image {} bytes exceeds maximum {}",
+                jpeg.len(),
+                AIO_PIC_MAX_BYTES
+            );
+        }
+        if jpeg.is_empty() {
+            bail!("AIO image payload is empty");
+        }
+
+        let tx = self.tx.as_ref().context("TX device not connected")?;
+        let device = self.device_by_mac_snapshot(mac)?;
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+
+        const PIC_CHUNK: usize = 220;
+        let total_len = jpeg.len() as u16;
+        let total_chunks = jpeg.len().div_ceil(PIC_CHUNK);
+
+        with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
+            for idx in 0..total_chunks {
+                let start = idx * PIC_CHUNK;
+                let end = (start + PIC_CHUNK).min(jpeg.len());
+                let mut rf_data = vec![0u8; RF_DATA_SIZE];
+                rf_data[0] = RF_SELECT;
+                rf_data[1] = RF_AIO_PIC;
+                rf_data[2..8].copy_from_slice(&device.mac);
+                rf_data[8..14].copy_from_slice(&master_mac);
+                rf_data[14] = device.rx_type;
+                rf_data[15] = master_ch;
+                rf_data[18] = idx as u8;
+                rf_data[19..19 + (end - start)].copy_from_slice(&jpeg[start..end]);
+                send_rf_frame_via(handle, &device, &rf_data)?;
+                thread::sleep(Duration::from_millis(2));
+            }
+
+            let mut terminator = vec![0u8; RF_DATA_SIZE];
+            terminator[0] = RF_SELECT;
+            terminator[1] = RF_AIO_PIC;
+            terminator[2..8].copy_from_slice(&device.mac);
+            terminator[8..14].copy_from_slice(&master_mac);
+            terminator[14] = device.rx_type;
+            terminator[15] = master_ch;
+            terminator[18] = 0xFF;
+            terminator[19] = (total_len >> 8) as u8;
+            terminator[20] = (total_len & 0xFF) as u8;
+            send_rf_frame_via(handle, &device, &terminator)?;
+            Ok(())
+        })?;
+
+        info!(
+            "send_aio_pic sent to {}: {} bytes in {} chunks",
+            device.mac_str(),
+            total_len,
+            total_chunks
+        );
+        Ok(())
+    }
+
+    fn next_seq_index(&self, device: &DiscoveredDevice) -> u8 {
+        let devices = self.discovered_devices.lock();
+        let master_mac = *self.master_mac.lock();
+        devices
+            .iter()
+            .filter(|d| d.master_mac == master_mac && d.device_type != 0xFF)
+            .position(|d| d.mac == device.mac)
+            .map(|i| (i + 1) as u8)
+            .unwrap_or(1)
+    }
+
+    fn device_by_mac_snapshot(&self, mac: &[u8; 6]) -> Result<DiscoveredDevice> {
+        let devices = self.discovered_devices.lock();
+        devices
+            .iter()
+            .find(|d| &d.mac == mac)
+            .cloned()
+            .with_context(|| {
+                format!(
+                    "Device MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} not found in discovery",
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                )
+            })
+    }
+
     pub fn stop(&mut self) {
         self.poll_stop.store(true, Ordering::SeqCst);
         if let Some(handle) = self.poll_thread.take() {
@@ -1214,6 +1386,81 @@ impl WirelessController {
         self.tx.take();
         self.rx.take();
     }
+}
+
+fn send_rf_frame_via(
+    handle: &UsbTransport,
+    device: &DiscoveredDevice,
+    rf_data: &[u8],
+) -> Result<()> {
+    assert_eq!(rf_data.len(), RF_DATA_SIZE);
+    for chunk_idx in 0..RF_CHUNKS as u8 {
+        let mut packet = vec![0u8; 64];
+        packet[0] = USB_CMD_SEND_RF;
+        packet[1] = chunk_idx;
+        packet[2] = device.channel;
+        packet[3] = device.rx_type;
+
+        let start = chunk_idx as usize * RF_CHUNK_SIZE;
+        let end = start + RF_CHUNK_SIZE;
+        packet[4..64].copy_from_slice(&rf_data[start..end]);
+
+        handle
+            .write(&packet, USB_TIMEOUT)
+            .context("sending RF packet chunk")?;
+        thread::sleep(Duration::from_millis(1));
+    }
+    Ok(())
+}
+
+/// Map pump target RPM → firmware PWM timer value for the given AIO variant.
+/// Returns `None` for non-AIO device types.
+pub fn pump_rpm_to_timer(rpm: u32, variant: WirelessFanType) -> Option<u16> {
+    match variant {
+        WirelessFanType::WaterBlock => Some(circle_pump_timer(rpm)),
+        WirelessFanType::WaterBlock2 => Some(square_pump_timer(rpm)),
+        _ => None,
+    }
+}
+
+fn circle_pump_timer(rpm: u32) -> u16 {
+    let rpm = rpm.clamp(1600, 2500) as f32;
+    let t = if rpm <= 1720.0 {
+        1500.0 - (rpm - 1600.0) * 1.667
+    } else if rpm <= 1870.0 {
+        1300.0 - (rpm - 1720.0) * 2.0
+    } else if rpm <= 2000.0 {
+        1000.0 - (rpm - 1870.0) * 1.23
+    } else if rpm <= 2300.0 {
+        840.0 - (rpm - 2000.0) * 2.0
+    } else if rpm <= 2400.0 {
+        240.0 - (rpm - 2300.0) * 1.8
+    } else {
+        60.0 - (rpm - 2400.0) * 0.5
+    };
+    t.clamp(0.0, u16::MAX as f32) as u16
+}
+
+fn square_pump_timer(rpm: u32) -> u16 {
+    let rpm = rpm.clamp(1600, 3200) as f32;
+    let t = if rpm <= 1800.0 {
+        1590.0 - (rpm - 1600.0) * 0.95
+    } else if rpm <= 2000.0 {
+        1400.0 - (rpm - 1800.0)
+    } else if rpm <= 2200.0 {
+        1200.0 - (rpm - 2000.0)
+    } else if rpm <= 2400.0 {
+        1000.0 - (rpm - 2200.0)
+    } else if rpm <= 2600.0 {
+        800.0 - (rpm - 2400.0)
+    } else if rpm <= 2800.0 {
+        580.0 - (rpm - 2600.0) * 1.11
+    } else if rpm <= 3000.0 {
+        330.0 - (rpm - 2800.0) * 1.2
+    } else {
+        90.0 - (rpm - 3000.0) * 0.45
+    };
+    t.clamp(0.0, u16::MAX as f32) as u16
 }
 
 impl Default for WirelessController {
@@ -1386,4 +1633,67 @@ fn poll_and_discover(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod aio_tests {
+    use super::*;
+
+    #[test]
+    fn circle_curve_clamps_to_range() {
+        assert_eq!(circle_pump_timer(1000), circle_pump_timer(1600));
+        assert_eq!(circle_pump_timer(5000), circle_pump_timer(2500));
+    }
+
+    #[test]
+    fn circle_curve_spans_each_segment() {
+        assert_eq!(circle_pump_timer(1600), 1500);
+        assert_eq!(circle_pump_timer(1700), 1333);
+        assert_eq!(circle_pump_timer(1800), 1140);
+        assert_eq!(circle_pump_timer(1900), 963);
+        assert_eq!(circle_pump_timer(2100), 640);
+        assert_eq!(circle_pump_timer(2350), 150);
+        assert_eq!(circle_pump_timer(2450), 35);
+        assert_eq!(circle_pump_timer(2500), 10);
+    }
+
+    #[test]
+    fn square_curve_clamps_to_range() {
+        assert_eq!(square_pump_timer(100), square_pump_timer(1600));
+        assert_eq!(square_pump_timer(9999), square_pump_timer(3200));
+    }
+
+    #[test]
+    fn square_curve_spans_each_segment() {
+        assert_eq!(square_pump_timer(1600), 1590);
+        assert_eq!(square_pump_timer(1700), 1495);
+        assert_eq!(square_pump_timer(1900), 1300);
+        assert_eq!(square_pump_timer(2100), 1100);
+        assert_eq!(square_pump_timer(2300), 900);
+        assert_eq!(square_pump_timer(2500), 700);
+        assert_eq!(square_pump_timer(2700), 469);
+        assert_eq!(square_pump_timer(2900), 210);
+        assert_eq!(square_pump_timer(3100), 45);
+        assert_eq!(square_pump_timer(3200), 0);
+    }
+
+    #[test]
+    fn pump_rpm_to_timer_dispatches_by_variant() {
+        assert_eq!(
+            pump_rpm_to_timer(2000, WirelessFanType::WaterBlock),
+            Some(circle_pump_timer(2000))
+        );
+        assert_eq!(
+            pump_rpm_to_timer(2000, WirelessFanType::WaterBlock2),
+            Some(square_pump_timer(2000))
+        );
+        assert_eq!(pump_rpm_to_timer(2000, WirelessFanType::Slv3Led), None);
+    }
+
+    #[test]
+    fn pump_rpm_range_per_variant() {
+        assert_eq!(WirelessFanType::WaterBlock.pump_rpm_range(), Some((1600, 2500)));
+        assert_eq!(WirelessFanType::WaterBlock2.pump_rpm_range(), Some((1600, 3200)));
+        assert_eq!(WirelessFanType::Slv3Led.pump_rpm_range(), None);
+    }
 }

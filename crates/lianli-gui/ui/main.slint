@@ -4,6 +4,7 @@ import { DevicesPage, DeviceData } from "pages/devices.slint";
 import { FansPage, FanCurveData, FanGroupData, FanSpeedSlot, CurvePoint, CurveSegment } from "pages/fans.slint";
 import { LcdPage, LcdEntryData, LcdDeviceOption, GaugeRangeData } from "pages/lcd.slint";
 import { RgbPage, RgbDeviceData, RgbZoneData, RgbColorData } from "pages/rgb.slint";
+import { AioPage, AioData } from "pages/aio.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { TemplateEditorWindow, EditorWidget } from "windows/template_editor.slint";
 import { TemplateBrowserWindow, CatalogEntry } from "windows/template_browser.slint";
@@ -13,6 +14,7 @@ export { TemplateBrowserWindow, CatalogEntry }
 export { DeviceData, FanCurveData, FanGroupData, FanSpeedSlot, CurvePoint, CurveSegment }
 export { LcdEntryData, LcdDeviceOption, GaugeRangeData }
 export { RgbDeviceData, RgbZoneData, RgbColorData }
+export { AioData }
 
 export component MainWindow inherits Window {
     title: "Lian Li Linux";
@@ -102,6 +104,27 @@ export component MainWindow inherits Window {
     callback rgb-save-preset(string, string);
     callback rgb-apply-preset(string, string);
     callback rgb-delete-preset(string, string);
+
+    // AIO properties
+    in property <[AioData]> aios: [];
+    in property <[string]> aio-sensor-options: [];
+    in property <[string]> aio-speed-options: [];
+    in property <[string]> aio-theme-options: [];
+    in property <[string]> aio-rotation-options: [];
+
+    // AIO callbacks
+    callback aio-set-pump-speed-mode(string, string);
+    callback aio-set-pump-pwm(string, int);
+    callback aio-set-fan-speed-mode(string, int, string);
+    callback aio-set-fan-pwm(string, int, int);
+    callback aio-set-sensor(string, string, int);
+    callback aio-set-color(string, string, int, int, int, int);
+    callback aio-set-brightness(string, int);
+    callback aio-set-rotation(string, int);
+    callback aio-set-theme-index(string, int);
+    callback aio-set-loop-interval(string, int);
+    callback aio-pick-image(string);
+    callback aio-clear-image(string);
 
     // Fan callbacks
     callback fan-add-curve();
@@ -213,7 +236,28 @@ export component MainWindow inherits Window {
                 save-config => { root.save-config(); }
             }
 
-            if root.current-page == 4: SettingsPage {
+            if root.current-page == 4: AioPage {
+                aios: root.aios;
+                sensor-options: root.aio-sensor-options;
+                speed-options: root.aio-speed-options;
+                theme-options: root.aio-theme-options;
+                rotation-options: root.aio-rotation-options;
+                set-pump-speed-mode(id, v) => { root.aio-set-pump-speed-mode(id, v); }
+                set-pump-pwm(id, v) => { root.aio-set-pump-pwm(id, v); }
+                set-fan-speed-mode(id, s, v) => { root.aio-set-fan-speed-mode(id, s, v); }
+                set-fan-pwm(id, s, v) => { root.aio-set-fan-pwm(id, s, v); }
+                set-sensor(id, w, i) => { root.aio-set-sensor(id, w, i); }
+                set-color(id, w, r, g, b, a) => { root.aio-set-color(id, w, r, g, b, a); }
+                set-brightness(id, v) => { root.aio-set-brightness(id, v); }
+                set-rotation(id, v) => { root.aio-set-rotation(id, v); }
+                set-theme-index(id, v) => { root.aio-set-theme-index(id, v); }
+                set-loop-interval(id, v) => { root.aio-set-loop-interval(id, v); }
+                pick-image(id) => { root.aio-pick-image(id); }
+                clear-image(id) => { root.aio-clear-image(id); }
+                save-config => { root.save-config(); }
+            }
+
+            if root.current-page == 5: SettingsPage {
                 daemon-connected: root.daemon-connected;
                 socket-path: root.socket-path;
                 streaming-active: root.streaming-active;
