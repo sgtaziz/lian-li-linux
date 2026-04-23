@@ -22,7 +22,7 @@
 | UNI FAN TL LCD | 4 ports | Yes | 400x400 | - | Yes |
 | Galahad II Trinity AIO | Yes | Yes | - | Yes | - |
 | HydroShift LCD AIO | Yes | Yes | 480x480 | Yes | Yes |
-| Galahad II LCD / Vision AIO | Yes | Yes | 480x480 | Yes | -* |
+| Galahad II LCD / Vision AIO | Yes | Yes | 480x480 | Yes | Yes |
 
 \* Galahad II LCD / Vision uses the same driver as HydroShift LCD AIO.
 
@@ -128,13 +128,13 @@ git clone --recurse-submodules https://github.com/sgtaziz/lian-li-linux.git && c
 
 ```bash
 # Arch
-sudo pacman -S hidapi libusb ffmpeg fontconfig mesa libxkbcommon wayland libx11 libinput libdrm clang cmake pkg-config
+sudo pacman -S hidapi libusb ffmpeg fontconfig mesa libxkbcommon wayland libx11 libinput libdrm clang cmake pkg-config nasm
 yay -S evdi-dkms         # AUR - bundles both libevdi (required) and the DKMS kernel module
 
 # Ubuntu / Debian
 sudo apt install libhidapi-dev libusb-1.0-0-dev libudev-dev libfontconfig-dev \
   libxkbcommon-dev libwayland-dev libx11-dev libinput-dev libdrm-dev \
-  libgl-dev libegl-dev clang cmake pkg-config ffmpeg \
+  libgl-dev libegl-dev clang cmake pkg-config ffmpeg nasm \
   libavcodec-dev libavformat-dev libswscale-dev libavutil-dev \
   libevdi0-dev              # required to build/link the daemon
 sudo apt install evdi-dkms  # optional, only needed at runtime for desktop-mode devices
@@ -143,7 +143,7 @@ sudo apt install evdi-dkms  # optional, only needed at runtime for desktop-mode 
 sudo dnf install hidapi-devel libusb1-devel fontconfig-devel \
   libxkbcommon-devel wayland-devel libX11-devel libinput-devel libdrm-devel \
   mesa-libGL-devel mesa-libEGL-devel clang cmake pkg-config ffmpeg \
-  ffmpeg-devel
+  ffmpeg-devel nasm
 # evdi is not packaged in Fedora repos — build libevdi from source to link the daemon:
 #   https://github.com/DisplayLink/evdi  (evdi-dkms is only needed at runtime)
 ```
