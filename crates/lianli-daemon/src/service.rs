@@ -404,13 +404,14 @@ impl ServiceManager {
                     let screen = screen_info_for(det.family);
                     let device_id = det.device_id();
 
-                    // For LCD families whose HID control interface is also registered
-                    // by register_wired_controllers (fan/pump/RGB), this entry represents
-                    // only the LCD facet — don't duplicate the control-side tags.
+                    // LCD-only USB facets: pump/fan/RGB are owned elsewhere
+                    // (register_wired_controllers for HS / Galahad2, wireless dongle
+                    // for HS II). Suppress the control-side tags here.
                     let lcd_only = matches!(
                         det.family,
                         lianli_shared::device_id::DeviceFamily::HydroShiftLcd
                             | lianli_shared::device_id::DeviceFamily::Galahad2Lcd
+                            | lianli_shared::device_id::DeviceFamily::HydroShift2Lcd
                     );
 
                     cached.push(DeviceInfo {
