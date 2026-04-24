@@ -420,26 +420,29 @@ pub fn ensure_hid_devices_bound() {
     }
 }
 
-/// Try opening a device, retrying with USB reset on failure.
-/// Works for both hidapi and rusb backends.
-///
-/// Max 3 retries (4 total attempts). After each failure, performs a USB reset
-/// and waits for the device to re-enumerate.
+/// Try opening a device, retrying on failure. First two retries are plain
+/// reopens, only the last retry does a USB port reset
 fn open_with_retry<T>(
     usb_device: &Device<GlobalContext>,
     mut open_fn: impl FnMut() -> Result<T>,
 ) -> Result<T> {
     const MAX_RETRIES: u32 = 3;
+    const RESET_AT: u32 = 2;
     for attempt in 0..=MAX_RETRIES {
         match open_fn() {
             Ok(t) => return Ok(t),
             Err(e) if attempt < MAX_RETRIES => {
-                warn!(
-                    "Open attempt {} failed: {e}, resetting USB device",
-                    attempt + 1
-                );
-                let _ = RusbHidTransport::reset_usb_device(usb_device);
-                std::thread::sleep(Duration::from_secs(3));
+                if attempt == RESET_AT {
+                    warn!(
+                        "Open attempt {} failed: {e}, resetting USB device",
+                        attempt + 1
+                    );
+                    let _ = RusbHidTransport::reset_usb_device(usb_device);
+                    std::thread::sleep(Duration::from_secs(3));
+                } else {
+                    warn!("Open attempt {} failed: {e}, retrying", attempt + 1);
+                    std::thread::sleep(Duration::from_millis(250));
+                }
             }
             Err(e) => {
                 return Err(e.context(format!("failed after {} attempts", MAX_RETRIES + 1)));
@@ -473,6 +476,7 @@ pub fn open_hid_lcd_device_rusb(
                     det.pid,
                     det.hid_usage_page,
                 ));
+                backend.read_flush();
                 let backend = Arc::new(Mutex::new(backend));
                 crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid)
                     .map(|d| Box::new(d) as Box<dyn crate::traits::LcdDevice>)
@@ -503,27 +507,40 @@ pub fn open_hidapi_with_retry<T>(
 ) -> Result<T> {
     let usb_device = find_usb_device(det.vid, det.pid);
 
+    const RESET_AT: u32 = 2;
     for attempt in 0..=3u32 {
         match api.open_path(&det.path) {
             Ok(hid_dev) => {
                 let backend = HidBackend::from_hidapi(hid_dev)
                     .with_reopener(make_hidapi_reopener(det.vid, det.pid, det.family));
+                backend.read_flush();
                 return create_fn(backend);
             }
             Err(e) if attempt < 3 => {
-                warn!(
-                    "HID open attempt {} failed for {} ({:04x}:{:04x}): {e}, resetting USB",
-                    attempt + 1,
-                    det.name,
-                    det.vid,
-                    det.pid
-                );
-                if let Some(ref usb_dev) = usb_device {
-                    let _ = RusbHidTransport::reset_usb_device(usb_dev);
-                    std::thread::sleep(Duration::from_secs(3));
+                if attempt == RESET_AT {
+                    warn!(
+                        "HID open attempt {} failed for {} ({:04x}:{:04x}): {e}, resetting USB",
+                        attempt + 1,
+                        det.name,
+                        det.vid,
+                        det.pid
+                    );
+                    if let Some(ref usb_dev) = usb_device {
+                        let _ = RusbHidTransport::reset_usb_device(usb_dev);
+                        std::thread::sleep(Duration::from_secs(3));
+                    } else {
+                        warn!("Cannot find USB device for reset");
+                        return Err(anyhow::anyhow!("HID open failed: {e}"));
+                    }
                 } else {
-                    warn!("Cannot find USB device for reset");
-                    return Err(anyhow::anyhow!("HID open failed: {e}"));
+                    warn!(
+                        "HID open attempt {} failed for {} ({:04x}:{:04x}): {e}, retrying",
+                        attempt + 1,
+                        det.name,
+                        det.vid,
+                        det.pid
+                    );
+                    std::thread::sleep(Duration::from_millis(250));
                 }
             }
             Err(e) => {
