@@ -173,7 +173,16 @@ pub fn install_template(template: &CatalogTemplate, sensors: &[SensorInfo]) -> R
 }
 
 fn rewrite_asset_paths(template: &mut LcdTemplate, base: &std::path::Path) {
-    use crate::template::{TemplateBackground, WidgetKind};
+    use crate::template::{FontRef, TemplateBackground, WidgetKind};
+
+    fn rewrite_font(font: &mut FontRef, base: &std::path::Path) {
+        if let Some(p) = font.path.as_mut() {
+            if p.is_relative() {
+                *p = base.join(&*p);
+            }
+        }
+    }
+
     if let TemplateBackground::Image { path } = &mut template.background {
         if path.is_relative() {
             *path = base.join(&*path);
@@ -186,6 +195,12 @@ fn rewrite_asset_paths(template: &mut LcdTemplate, base: &std::path::Path) {
                     *path = base.join(&*path);
                 }
             }
+            WidgetKind::Label { font, .. } | WidgetKind::ValueText { font, .. } => {
+                rewrite_font(font, base);
+            }
+            WidgetKind::ClockDigital { font, .. } => rewrite_font(font, base),
+            WidgetKind::ClockAnalog { numbers_font, .. } => rewrite_font(numbers_font, base),
+            WidgetKind::Sparkline { axis_label_font, .. } => rewrite_font(axis_label_font, base),
             _ => {}
         }
     }
