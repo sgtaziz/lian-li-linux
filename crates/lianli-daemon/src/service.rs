@@ -307,6 +307,11 @@ impl ServiceManager {
                 if let Some(sig) = signals.forever().next() {
                     info!("received signal {sig}, shutting down");
                     let _ = shutdown_tx.send(DaemonEvent::Shutdown);
+                    // Force exit if graceful shutdown stalls (e.g. blocking USB
+                    // call in a worker thread).
+                    thread::sleep(Duration::from_secs(5));
+                    warn!("shutdown exceeded 5s grace period, forcing exit");
+                    std::process::exit(0);
                 }
             }
         });

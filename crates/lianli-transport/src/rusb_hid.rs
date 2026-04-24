@@ -56,7 +56,7 @@ impl RusbHidTransport {
         // Find the target interface by usage page
         let target_iface = if let Some(required_page) = usage_page {
             let mut matched = None;
-            for &iface_num in &hid_ifaces {
+            for &iface_num in &claimed {
                 let mut buf = [0u8; 256];
                 let result = handle.read_control(
                     0x81,
@@ -78,14 +78,23 @@ impl RusbHidTransport {
                     }
                 }
             }
-            matched.unwrap_or_else(|| {
-                debug!(
-                    "RusbHid: no interface matched usage page {required_page:#06x}, using first"
-                );
-                hid_ifaces[0]
-            })
+            match matched {
+                Some(n) => n,
+                None => {
+                    debug!(
+                        "RusbHid: no interface matched usage page {required_page:#06x}, using first claimed"
+                    );
+                    *claimed.first().ok_or_else(|| {
+                        TransportError::Other(
+                            "RusbHid: could not claim any HID interface".into(),
+                        )
+                    })?
+                }
+            }
         } else {
-            hid_ifaces[0]
+            *claimed.first().ok_or_else(|| {
+                TransportError::Other("RusbHid: could not claim any HID interface".into())
+            })?
         };
 
         // Release probed interfaces we won't use, keep only the target.
@@ -93,9 +102,6 @@ impl RusbHidTransport {
             if iface_num != target_iface {
                 let _ = handle.release_interface(iface_num);
             }
-        }
-        if !claimed.contains(&target_iface) {
-            handle.claim_interface(target_iface)?;
         }
 
         // Find endpoints
