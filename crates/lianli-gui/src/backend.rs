@@ -362,7 +362,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
 
                 // RGB devices
                 let rgb_model =
-                    conversions::rgb_devices_to_model(&rgb_caps, &config, &rgb_presets, &devices);
+                    conversions::rgb_devices_to_model(&rgb_caps, &config, &rgb_presets);
                 w.set_rgb_devices(rgb_model);
 
                 // AIO

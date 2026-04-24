@@ -583,20 +583,12 @@ pub fn rgb_devices_to_model(
     capabilities: &[RgbDeviceCapabilities],
     config: &AppConfig,
     presets: &[lianli_shared::rgb::RgbPreset],
-    devices: &[DeviceInfo],
 ) -> ModelRc<super::RgbDeviceData> {
     let rgb_config = config.rgb.as_ref();
     let device_configs = rgb_config.map(|r| &r.devices);
 
-    let aio_ids: std::collections::HashSet<&str> = devices
-        .iter()
-        .filter(|d| d.pump_rpm_range.is_some())
-        .map(|d| d.device_id.as_str())
-        .collect();
-
     let items: Vec<super::RgbDeviceData> = capabilities
         .iter()
-        .filter(|cap| !aio_ids.contains(cap.device_id.as_str()))
         .map(|cap| {
             let dev_cfg =
                 device_configs.and_then(|devs| devs.iter().find(|d| d.device_id == cap.device_id));
