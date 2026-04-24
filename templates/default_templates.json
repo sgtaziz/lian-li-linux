@@ -83,6 +83,39 @@
           "sha256": "5d8f76cf96bb80d35bc4354c0d171e54f889a7e948dd6d0339c3011082237ed6"
         }
       ]
+    },
+    {
+      "id": "neon-us88",
+      "name": "Neon",
+      "description": "Neon dashboard for the Universal Screen 8.8\": radial CPU/GPU gauges, analog and digital clocks, RAM/disk readouts, CPU/GPU temperature graphs, and network throughput sparklines.",
+      "author": "sgtaziz",
+      "min_daemon_version": "0.4.1",
+      "folder": "neon-us88",
+      "template_file": "template.json",
+      "template_sha256": "b77af5e9fe6ee40a3c88948931b8d8a45666c4c42e47bb89c74fcf519bdbdf1b",
+      "preview": "preview.png",
+      "preview_sha256": "d37c21f0002b0ccb576c3ec375e81a264c815d0d263378796c10a5ac595959de",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "background.png",
+          "sha256": "3a8b4c55868753c954a436cb85aaa2e10de20aed8b9d98caccc511900ca340a7"
+        },
+        {
+          "path": "animation.apng",
+          "sha256": "5ce7e8539240491a9767d45a1d880d62e18e3978bf7fbe55e2ef781f5b78db74"
+        },
+        {
+          "path": "JetBrainsMonoNL-Medium.ttf",
+          "sha256": "44099e1efefba55637e0abbbf8dd3f526e59523345888a257bb01d39df4af74c"
+        },
+        {
+          "path": "OFL.txt",
+          "sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
+        }
+      ]
     }
   ]
 }
