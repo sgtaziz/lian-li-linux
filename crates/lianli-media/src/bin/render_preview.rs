@@ -114,6 +114,8 @@ fn mock_value_for_widget(widget: &Widget) -> f32 {
             SensorCategory::CpuUsage | SensorCategory::GpuUsage | SensorCategory::MemUsage => {
                 MOCK_USAGE_PCT
             }
+            SensorCategory::MemUsed => 16.0,
+            SensorCategory::MemFree => 16.0,
             SensorCategory::NetworkRx
             | SensorCategory::NetworkTx
             | SensorCategory::DiskRead

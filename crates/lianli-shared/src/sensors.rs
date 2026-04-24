@@ -96,7 +96,7 @@ impl std::fmt::Display for Unit {
             Unit::RPM => "RPM",
             Unit::V => "mV",
             Unit::FREQ => "Mhz",
-            Unit::SIZE => "MB",
+            Unit::SIZE => "GB",
             Unit::MBps => "MB/s",
             Unit::PERCENT => "%",
             Unit::WO => "",
@@ -178,6 +178,8 @@ pub enum SensorCategory {
     CpuUsage,
     GpuUsage,
     MemUsage,
+    MemUsed,
+    MemFree,
     NetworkRx,
     NetworkTx,
     DiskRead,
@@ -261,6 +263,8 @@ pub fn pick_source_for_category(
     match category {
         SensorCategory::CpuUsage => Some(SensorSourceConfig::CpuUsage),
         SensorCategory::MemUsage => Some(SensorSourceConfig::MemUsage),
+        SensorCategory::MemUsed => Some(SensorSourceConfig::MemUsed),
+        SensorCategory::MemFree => Some(SensorSourceConfig::MemFree),
         SensorCategory::CpuTemp => find_default_cpu_temp(sensors).map(source_to_config),
         SensorCategory::GpuTemp => find_default_gpu_temp(sensors).map(source_to_config),
         SensorCategory::GpuUsage => sensors
@@ -294,9 +298,9 @@ pub fn infer_sensor_category(source: &crate::media::SensorSourceConfig) -> Optio
     use crate::media::SensorSourceConfig;
     match source {
         SensorSourceConfig::CpuUsage => Some(SensorCategory::CpuUsage),
-        SensorSourceConfig::MemUsage
-        | SensorSourceConfig::MemUsed
-        | SensorSourceConfig::MemFree => Some(SensorCategory::MemUsage),
+        SensorSourceConfig::MemUsage => Some(SensorCategory::MemUsage),
+        SensorSourceConfig::MemUsed => Some(SensorCategory::MemUsed),
+        SensorSourceConfig::MemFree => Some(SensorCategory::MemFree),
         SensorSourceConfig::NvidiaGpu {
             metric: NvidiaMetric::Temp,
             ..
