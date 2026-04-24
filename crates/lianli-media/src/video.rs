@@ -1,7 +1,8 @@
 use super::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
 use image::codecs::gif::GifDecoder;
+use image::codecs::png::PngDecoder;
 use image::imageops::FilterType;
-use image::{load_from_memory, AnimationDecoder, DynamicImage, RgbaImage};
+use image::{load_from_memory, AnimationDecoder, DynamicImage, Frames, RgbaImage};
 use lianli_shared::screen::ScreenInfo;
 use std::fs::File;
 use std::path::Path;
@@ -95,45 +96,37 @@ pub fn decode_frames_to_rgba(
     width: u32,
     height: u32,
 ) -> Result<(Vec<RgbaImage>, Vec<Duration>), MediaError> {
-    let is_gif = path
+    let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("gif"))
-        .unwrap_or(false);
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
 
-    if is_gif {
-        let file = File::open(path)?;
-        let decoder = GifDecoder::new(file)?;
-        let mut frames = Vec::new();
-        let mut durations = Vec::new();
-        for frame in decoder.into_frames() {
-            let frame = frame?;
-            let (numer, denom) = frame.delay().numer_denom_ms();
-            let millis = if denom == 0 {
-                numer as f32
-            } else {
-                numer as f32 / denom as f32
-            };
-            let duration = Duration::from_millis(millis.max(10.0) as u64);
-            let rgba = frame.into_buffer();
-            let resized = image::imageops::resize(&rgba, width, height, FilterType::Lanczos3);
-            frames.push(resized);
-            durations.push(duration);
+    if ext == "gif" {
+        let decoder = GifDecoder::new(File::open(path)?)?;
+        return decode_animation_frames(decoder.into_frames(), width, height);
+    }
+
+    if ext == "png" || ext == "apng" {
+        let decoder = PngDecoder::new(File::open(path)?)?;
+        if decoder.is_apng() {
+            let apng = decoder.apng();
+            return decode_animation_frames(apng.into_frames(), width, height);
         }
-        if frames.is_empty() {
-            return Err(MediaError::EmptyVideo);
-        }
-        return Ok((frames, durations));
+        let img = DynamicImage::from_decoder(decoder)?;
+        let resized =
+            image::imageops::resize(&img.to_rgba8(), width, height, FilterType::Lanczos3);
+        return Ok((vec![resized], vec![Duration::from_millis(100)]));
     }
 
     let temp = TempDir::new()?;
-    let output_pattern = temp.path().join("frame_%05d.jpg");
-    run_ffmpeg(path, fps, &output_pattern, width, height)?;
+    let output_pattern = temp.path().join("frame_%05d.png");
+    run_ffmpeg_rgba(path, fps, &output_pattern, width, height)?;
 
     let mut entries: Vec<_> = std::fs::read_dir(temp.path())?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map(|x| x == "jpg").unwrap_or(false))
+        .filter(|p| p.extension().map(|x| x == "png").unwrap_or(false))
         .collect();
     entries.sort();
 
@@ -151,6 +144,33 @@ pub fn decode_frames_to_rgba(
     let interval = Duration::from_secs_f32(1.0 / fps.max(1.0));
     let durations = vec![interval; frames.len()];
     Ok((frames, durations))
+}
+
+fn decode_animation_frames(
+    frames: Frames<'_>,
+    width: u32,
+    height: u32,
+) -> Result<(Vec<RgbaImage>, Vec<Duration>), MediaError> {
+    let mut out_frames = Vec::new();
+    let mut durations = Vec::new();
+    for frame in frames {
+        let frame = frame?;
+        let (numer, denom) = frame.delay().numer_denom_ms();
+        let millis = if denom == 0 {
+            numer as f32
+        } else {
+            numer as f32 / denom as f32
+        };
+        let duration = Duration::from_millis(millis.max(10.0) as u64);
+        let rgba = frame.into_buffer();
+        let resized = image::imageops::resize(&rgba, width, height, FilterType::Lanczos3);
+        out_frames.push(resized);
+        durations.push(duration);
+    }
+    if out_frames.is_empty() {
+        return Err(MediaError::EmptyVideo);
+    }
+    Ok((out_frames, durations))
 }
 
 pub fn encode_h264(
@@ -373,6 +393,41 @@ fn run_ffmpeg(
             &fps.to_string(),
             "-q:v",
             "4",
+            output_pattern.to_str().unwrap(),
+        ])
+        .status()
+        .map_err(MediaError::Io)?;
+
+    if !status.success() {
+        return Err(MediaError::Ffmpeg(format!(
+            "ffmpeg exited with status {status}"
+        )));
+    }
+
+    Ok(())
+}
+
+fn run_ffmpeg_rgba(
+    input: &Path,
+    fps: f32,
+    output_pattern: &Path,
+    width: u32,
+    height: u32,
+) -> Result<(), MediaError> {
+    let scale_filter = format!("scale={width}:{height}:flags=lanczos");
+    let status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            input.to_str().unwrap(),
+            "-vf",
+            &scale_filter,
+            "-r",
+            &fps.to_string(),
+            "-pix_fmt",
+            "rgba",
             output_pattern.to_str().unwrap(),
         ])
         .status()

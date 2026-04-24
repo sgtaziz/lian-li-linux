@@ -1831,7 +1831,8 @@ fn wire_lcd_callbacks(
                     dialog.add_filter(
                         "Media",
                         &[
-                            "jpg", "jpeg", "png", "bmp", "gif", "mp4", "avi", "mkv", "webm",
+                            "jpg", "jpeg", "png", "apng", "bmp", "gif", "mp4", "avi", "mkv",
+                            "webm", "mov",
                         ],
                     )
                 };

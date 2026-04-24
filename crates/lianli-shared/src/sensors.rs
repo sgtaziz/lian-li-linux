@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::systeminfo::SysSensor;
 
@@ -977,28 +977,7 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
             _ => anyhow::bail!("unexpected virtual sensor source"),
         },
         ResolvedSensor::NvidiaGpu { index, metric } => {
-            let query = match metric {
-                NvidiaMetric::Temp => "--query-gpu=temperature.gpu",
-                NvidiaMetric::Usage => "--query-gpu=utilization.gpu",
-            };
-            let output = Command::new("nvidia-smi")
-                .args([
-                    query,
-                    "--format=csv,noheader,nounits",
-                    "-i",
-                    &index.to_string(),
-                ])
-                .output()
-                .map_err(|e| anyhow::anyhow!("nvidia-smi: {e}"))?;
-            if !output.status.success() {
-                anyhow::bail!("nvidia-smi failed");
-            }
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let value: f32 = stdout
-                .trim()
-                .parse()
-                .map_err(|e| anyhow::anyhow!("parsing nvidia-smi output: {e}"))?;
-            Ok(value)
+            Ok(nvidia_cache_get(*index, *metric))
         }
         ResolvedSensor::RuntimeFile(path) => {
             let content = std::fs::read_to_string(path)
@@ -1051,6 +1030,61 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
             Ok(compute_rate(state, counter, *divider))
         }
     }
+}
+
+type NvidiaCache = Arc<Mutex<HashMap<(u32, NvidiaMetric), f32>>>;
+
+static NVIDIA_CACHE: OnceLock<NvidiaCache> = OnceLock::new();
+
+fn nvidia_cache_get(index: u32, metric: NvidiaMetric) -> f32 {
+    let cache = NVIDIA_CACHE.get_or_init(|| {
+        let cache: NvidiaCache = Arc::new(Mutex::new(HashMap::new()));
+        let cache_clone = Arc::clone(&cache);
+        std::thread::spawn(move || loop {
+            if let Ok(values) = query_nvidia_smi_all() {
+                *cache_clone.lock().unwrap() = values;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        cache
+    });
+    cache
+        .lock()
+        .unwrap()
+        .get(&(index, metric))
+        .copied()
+        .unwrap_or(0.0)
+}
+
+fn query_nvidia_smi_all() -> anyhow::Result<HashMap<(u32, NvidiaMetric), f32>> {
+    let output = Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=index,temperature.gpu,utilization.gpu",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .map_err(|e| anyhow::anyhow!("nvidia-smi: {e}"))?;
+    if !output.status.success() {
+        anyhow::bail!("nvidia-smi failed");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut map = HashMap::new();
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let Ok(idx) = parts[0].parse::<u32>() else {
+            continue;
+        };
+        if let Ok(temp) = parts[1].parse::<f32>() {
+            map.insert((idx, NvidiaMetric::Temp), temp);
+        }
+        if let Ok(usage) = parts[2].parse::<f32>() {
+            map.insert((idx, NvidiaMetric::Usage), usage);
+        }
+    }
+    Ok(map)
 }
 
 fn compute_rate(state: &Arc<Mutex<RateState>>, counter: u64, divider: usize) -> f32 {

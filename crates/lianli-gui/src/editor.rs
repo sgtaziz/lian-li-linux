@@ -393,7 +393,8 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                     .add_filter(
                         "Media",
                         &[
-                            "jpg", "jpeg", "png", "bmp", "gif", "mp4", "webm", "mkv", "avi",
+                            "jpg", "jpeg", "png", "apng", "bmp", "gif", "mp4", "webm", "mkv",
+                            "avi", "mov",
                         ],
                     )
                     .pick_file();
