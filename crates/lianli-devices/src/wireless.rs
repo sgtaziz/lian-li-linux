@@ -8,7 +8,7 @@ use std::sync::{
     Arc,
 };
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 /// TX dongle VID:PID pairs (V1 and V2 hardware).
@@ -805,11 +805,72 @@ impl WirelessController {
             .collect()
     }
 
-    /// Bind a wireless device to this dongle by sending an RF bind packet.
-    ///
-    /// The device firmware updates its stored master MAC and RX endpoint.
-    /// A SaveConfig broadcast is sent afterwards to persist the binding.
     pub fn bind_device(&self, mac: &[u8; 6]) -> Result<()> {
+        let master_mac = *self.master_mac.lock();
+        let new_rx = self.get_rx_unused();
+        self.converge_bind_state(mac, &master_mac, new_rx)?;
+        self.save_rf_config()
+    }
+
+    pub fn unbind_device(&self, mac: &[u8; 6]) -> Result<()> {
+        self.converge_bind_state(mac, &[0u8; 6], 0)?;
+        self.save_rf_config()
+    }
+
+    fn converge_bind_state(
+        &self,
+        mac: &[u8; 6],
+        target_master_mac: &[u8; 6],
+        target_rx: u8,
+    ) -> Result<()> {
+        const CONVERGE_TIMEOUT: Duration = Duration::from_secs(5);
+        const POLL_GAP: Duration = Duration::from_millis(150);
+
+        let rx = self.rx.as_ref().context("RX not connected")?;
+        let deadline = Instant::now() + CONVERGE_TIMEOUT;
+        let mut attempts = 0u32;
+        loop {
+            self.send_bind_packet(mac, target_master_mac, target_rx)?;
+            attempts += 1;
+            thread::sleep(POLL_GAP);
+
+            let _ = poll_and_discover(
+                rx,
+                &self.discovered_devices,
+                &self.mobo_pwm,
+                &self.master_mac,
+            );
+
+            let observed = self
+                .discovered_devices
+                .lock()
+                .iter()
+                .find(|d| &d.mac == mac)
+                .map(|d| (d.master_mac, d.rx_type));
+
+            let converged = match observed {
+                Some((m, r)) => &m == target_master_mac && r == target_rx,
+                None => target_master_mac == &[0u8; 6],
+            };
+            if converged {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                warn!(
+                    "bind convergence for {:02x?} timed out after {attempts} attempt(s); observed={:?}",
+                    mac, observed
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    fn send_bind_packet(
+        &self,
+        mac: &[u8; 6],
+        target_master_mac: &[u8; 6],
+        target_rx: u8,
+    ) -> Result<()> {
         let tx = self.tx.as_ref().context("TX not connected")?;
         let device = self
             .discovered_devices
@@ -819,35 +880,34 @@ impl WirelessController {
             .cloned()
             .context("device not found in discovery")?;
 
-        let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
-        let new_rx = self.get_rx_unused();
 
         let mut rf_data = vec![0u8; RF_DATA_SIZE];
         rf_data[0] = RF_SELECT;
         rf_data[1] = RF_PWM_CMD;
         rf_data[2..8].copy_from_slice(&device.mac);
-        rf_data[8..14].copy_from_slice(&master_mac);
-        rf_data[14] = new_rx;
+        rf_data[8..14].copy_from_slice(target_master_mac);
+        rf_data[14] = target_rx;
         rf_data[15] = master_ch;
-        rf_data[16] = new_rx;
+        rf_data[16] = target_rx;
+        rf_data[17..21].copy_from_slice(&device.current_pwm);
 
         with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
-            for _ in 0..3 {
+            for _ in 0..6 {
                 self.send_rf_packet(handle, &device, &rf_data)?;
-                thread::sleep(Duration::from_millis(50));
+                thread::sleep(Duration::from_millis(30));
             }
             Ok(())
         })?;
 
-        self.save_rf_config()?;
-
+        let verb = if target_rx == 0 { "Unbind" } else { "Bind" };
         info!(
-            "Bind sent to {} ({}) rx={} ch={}",
+            "{} sent to {} ({}) rx={} ch={}",
+            verb,
             device.mac_str(),
             device.fan_type.display_name(),
-            new_rx,
-            master_ch
+            target_rx,
+            master_ch,
         );
         Ok(())
     }

@@ -419,6 +419,13 @@ fn handle_request(
             }))
         }
 
+        IpcRequest::UnbindWirelessDevice { mac } => {
+            tx.send(DaemonEvent::Unbind { mac_address: mac }).ok();
+            IpcResponse::ok(serde_json::json!({
+                "message": "Unbind command queued."
+            }))
+        }
+
         IpcRequest::GetLcdTemplates => {
             let state = state.lock();
             let sensors = lianli_shared::sensors::enumerate_sensors();

@@ -1,5 +1,5 @@
 import { Theme } from "../theme.slint";
-import { Badge, Card } from "../widgets.slint";
+import { Badge } from "../widgets.slint";
 import { PageHeader } from "../page_header.slint";
 import { Button, ScrollView } from "std-widgets.slint";
 
@@ -18,17 +18,28 @@ export struct DeviceData {
     in-desktop-mode: bool,
     in-lcd-mode: bool,
     is-unbound-wireless: bool,
+    is-bound-wireless: bool,
+    pending-action: string,
 }
 
-component DeviceCard inherits Card {
+component DeviceCard inherits Rectangle {
     in property <DeviceData> device;
     callback switch-display-mode(string);
     callback bind-wireless-device(string);
+    callback unbind-wireless-device(string);
 
-    width: 280px;
+    min-width: 280px;
+    min-height: 190px;
+    flex-grow: 1;
+    flex-align-self: stretch;
     opacity: device.is-unbound-wireless ? 0.5 : 1.0;
+    background: Theme.card-background;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Theme.border;
 
     VerticalLayout {
+        padding: 16px;
         spacing: 6px;
 
         // Header
@@ -83,22 +94,30 @@ component DeviceCard inherits Card {
             color: Theme.text-primary;
         }
 
+        Rectangle { vertical-stretch: 1; }
+
         if device.in-desktop-mode: Button {
-            text: "Switch to LCD Mode";
+            text: device.pending-action == "switch" ? "Switching…" : "Switch to LCD Mode";
+            enabled: device.pending-action == "";
             clicked => { root.switch-display-mode(device.device-id); }
         }
 
         if device.in-lcd-mode: Button {
-            text: "Switch to Desktop Mode";
+            text: device.pending-action == "switch" ? "Switching…" : "Switch to Desktop Mode";
+            enabled: device.pending-action == "";
             clicked => { root.switch-display-mode(device.device-id); }
         }
 
-        if device.is-unbound-wireless: HorizontalLayout {
-            opacity: device.is-unbound-wireless ? 2.0 : 1.0;
-            Button {
-                text: "Bind to this dongle";
-                clicked => { root.bind-wireless-device(device.device-id); }
-            }
+        if device.is-unbound-wireless: Button {
+            text: device.pending-action == "bind" ? "Binding…" : "Bind to this dongle";
+            enabled: device.pending-action == "";
+            clicked => { root.bind-wireless-device(device.device-id); }
+        }
+
+        if device.is-bound-wireless: Button {
+            text: device.pending-action == "unbind" ? "Unbinding…" : "Unbind";
+            enabled: device.pending-action == "";
+            clicked => { root.unbind-wireless-device(device.device-id); }
         }
     }
 }
@@ -108,6 +127,7 @@ export component DevicesPage inherits VerticalLayout {
     callback refresh();
     callback switch-display-mode(string);
     callback bind-wireless-device(string);
+    callback unbind-wireless-device(string);
 
     PageHeader {
         title: "Devices";
@@ -123,24 +143,35 @@ export component DevicesPage inherits VerticalLayout {
         }
     }
 
-    ScrollView {
+    scroll := ScrollView {
+        property <length> card-stride-x: 292px; // card min-width 280 + 12 gap
+        property <length> card-stride-y: 198px; // card min-height 190 + 8 gap
+        property <int> cards-per-row: Math.max(1, Math.floor((self.visible-width - 48px) / card-stride-x));
+        property <int> grid-rows: root.devices.length == 0
+            ? 0
+            : Math.ceil(root.devices.length / cards-per-row);
+
+        viewport-width: self.visible-width;
+        viewport-height: grid-rows == 0
+            ? self.visible-height
+            : grid-rows * card-stride-y + 48px;
+
         VerticalLayout {
             padding: 24px;
             spacing: 16px;
             alignment: start;
 
-            // Device grid with wrapping
             FlexboxLayout {
-                vertical-stretch: 0;
                 spacing-horizontal: 12px;
                 spacing-vertical: 8px;
-                align-items: start;
-                align-content: start;
+                align-items: stretch;
+                align-content: stretch;
 
                 for device[idx] in root.devices: DeviceCard {
                     device: device;
                     switch-display-mode(id) => { root.switch-display-mode(id); }
                     bind-wireless-device(id) => { root.bind-wireless-device(id); }
+                    unbind-wireless-device(id) => { root.unbind-wireless-device(id); }
                 }
             }
 

@@ -50,19 +50,30 @@ fn main() {
     // ── Switch display mode ──
     {
         let tx = backend.tx.clone();
+        let shared_inner = shared.clone();
         window.on_switch_display_mode(move |device_id| {
+            shared_inner
+                .lock()
+                .unwrap()
+                .set_pending(device_id.to_string(), state::PendingAction::SwitchDisplay);
             let _ = tx.send(backend::BackendCommand::IpcRequest(
                 lianli_shared::ipc::IpcRequest::SwitchDisplayMode {
                     device_id: device_id.to_string(),
                 },
             ));
+            let _ = tx.send(backend::BackendCommand::RefreshDevices);
         });
     }
 
     // ── Bind wireless device ──
     {
         let tx = backend.tx.clone();
+        let shared_inner = shared.clone();
         window.on_bind_wireless_device(move |device_id| {
+            shared_inner
+                .lock()
+                .unwrap()
+                .set_pending(device_id.to_string(), state::PendingAction::Bind);
             let mac = device_id
                 .to_string()
                 .strip_prefix("wireless-unbound:")
@@ -71,6 +82,28 @@ fn main() {
             let _ = tx.send(backend::BackendCommand::IpcRequest(
                 lianli_shared::ipc::IpcRequest::BindWirelessDevice { mac },
             ));
+            let _ = tx.send(backend::BackendCommand::RefreshDevices);
+        });
+    }
+
+    // ── Unbind wireless device ──
+    {
+        let tx = backend.tx.clone();
+        let shared_inner = shared.clone();
+        window.on_unbind_wireless_device(move |device_id| {
+            shared_inner
+                .lock()
+                .unwrap()
+                .set_pending(device_id.to_string(), state::PendingAction::Unbind);
+            let mac = device_id
+                .to_string()
+                .strip_prefix("wireless:")
+                .unwrap_or(&device_id)
+                .to_string();
+            let _ = tx.send(backend::BackendCommand::IpcRequest(
+                lianli_shared::ipc::IpcRequest::UnbindWirelessDevice { mac },
+            ));
+            let _ = tx.send(backend::BackendCommand::RefreshDevices);
         });
     }
 

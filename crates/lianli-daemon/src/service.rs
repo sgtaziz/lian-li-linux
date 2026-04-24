@@ -70,6 +70,7 @@ pub enum DaemonEvent {
     DisplaySwitch { device_id: String }, // LCD→Desktop. Handled by main event loop.
     DisplaySwitchToLcd { device_id: String, pid: u16 }, // Desktop→LCD. Handled by main event loop.
     Bind { mac_address: String }, // MAC address pending wireless device bind. Handled by main event loop.
+    Unbind { mac_address: String }, // MAC address pending wireless device unbind. Handled by main event loop.
     FrameFinished { asset: Arc<MediaAsset> }, // A device has calculated a new frame, let's update the display
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
 }
@@ -336,8 +337,21 @@ impl ServiceManager {
                         if let Err(e) = self.wireless.bind_device(&mac) {
                             warn!("Failed to bind wireless device {mac_str}: {e}");
                         }
+                        self.device_poll();
                     } else {
                         warn!("Invalid MAC address for bind: {mac_str}");
+                    }
+                }
+                DaemonEvent::Unbind {
+                    mac_address: mac_str,
+                } => {
+                    if let Some(mac) = parse_mac_str(&mac_str) {
+                        if let Err(e) = self.wireless.unbind_device(&mac) {
+                            warn!("Failed to unbind wireless device {mac_str}: {e}");
+                        }
+                        self.device_poll();
+                    } else {
+                        warn!("Invalid MAC address for unbind: {mac_str}");
                     }
                 }
                 DaemonEvent::IpcUpdate => {

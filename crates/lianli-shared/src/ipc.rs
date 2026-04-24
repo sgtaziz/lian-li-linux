@@ -100,6 +100,10 @@ pub enum IpcRequest {
     BindWirelessDevice {
         mac: String,
     },
+    /// Unbind a wireless device from this dongle.
+    UnbindWirelessDevice {
+        mac: String,
+    },
     ListSensors,
     GetLcdTemplates,
     SetLcdTemplates {

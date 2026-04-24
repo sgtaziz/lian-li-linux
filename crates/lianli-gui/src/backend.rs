@@ -192,7 +192,12 @@ fn poll_daemon(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
     };
 
     // Update shared state devices
-    shared.lock().unwrap().devices = devices.clone();
+    let pending_actions = {
+        let mut s = shared.lock().unwrap();
+        s.devices = devices.clone();
+        s.expire_pending(&devices);
+        s.pending_actions.clone()
+    };
 
     let device_count = devices
         .iter()
@@ -220,7 +225,7 @@ fn poll_daemon(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
             w.set_openrgb_running(openrgb_running);
             w.set_openrgb_error(slint::SharedString::from(&openrgb_error));
             // Build model on UI thread (ModelRc is !Send)
-            let model = conversions::devices_to_model(&devices, &telemetry);
+            let model = conversions::devices_to_model(&devices, &telemetry, &pending_actions);
             w.set_devices(model);
         }
     })

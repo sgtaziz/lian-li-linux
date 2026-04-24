@@ -42,7 +42,11 @@ fn family_display_name(f: DeviceFamily) -> &'static str {
     }
 }
 
-pub fn device_to_slint(device: &DeviceInfo, telemetry: &TelemetrySnapshot) -> super::DeviceData {
+pub fn device_to_slint(
+    device: &DeviceInfo,
+    telemetry: &TelemetrySnapshot,
+    pending_actions: &std::collections::HashMap<String, (crate::state::PendingAction, std::time::Instant)>,
+) -> super::DeviceData {
     let fan_rpms = telemetry
         .fan_rpms
         .get(&device.device_id)
@@ -66,6 +70,11 @@ pub fn device_to_slint(device: &DeviceInfo, telemetry: &TelemetrySnapshot) -> su
     };
 
     let family_name = family_display_name(device.family);
+    let is_bound_wireless = device.device_id.starts_with("wireless:");
+    let pending = pending_actions
+        .get(&device.device_id)
+        .map(|(action, _)| action.as_str())
+        .unwrap_or("");
 
     super::DeviceData {
         device_id: SharedString::from(&device.device_id),
@@ -83,12 +92,15 @@ pub fn device_to_slint(device: &DeviceInfo, telemetry: &TelemetrySnapshot) -> su
         in_lcd_mode: device.family.supports_display_mode_switch()
             && !device.family.is_desktop_mode(),
         is_unbound_wireless: device.is_unbound_wireless,
+        is_bound_wireless,
+        pending_action: SharedString::from(pending),
     }
 }
 
 pub fn devices_to_model(
     devices: &[DeviceInfo],
     telemetry: &TelemetrySnapshot,
+    pending_actions: &std::collections::HashMap<String, (crate::state::PendingAction, std::time::Instant)>,
 ) -> ModelRc<super::DeviceData> {
     let items: Vec<super::DeviceData> = devices
         .iter()
@@ -99,7 +111,7 @@ pub fn devices_to_model(
                     | lianli_shared::device_id::DeviceFamily::WirelessRx
             )
         })
-        .map(|d| device_to_slint(d, telemetry))
+        .map(|d| device_to_slint(d, telemetry, pending_actions))
         .collect();
     ModelRc::new(VecModel::from(items))
 }
