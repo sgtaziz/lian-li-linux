@@ -38,11 +38,18 @@ impl RusbHidTransport {
             return Err(TransportError::Other("No HID interfaces found".into()));
         }
 
-        // Detach kernel drivers from all HID interfaces on this device
+        // Detach kernel drivers from all HID interfaces on this device.
+        // Claim each one before the usage-page probe; usbfs rejects control
+        // transfers against unclaimed interfaces.
+        let mut claimed: Vec<u8> = Vec::new();
         for &iface_num in &hid_ifaces {
             if handle.kernel_driver_active(iface_num).unwrap_or(false) {
                 let _ = handle.detach_kernel_driver(iface_num);
                 debug!("RusbHid: detached kernel driver from interface {iface_num}");
+            }
+            match handle.claim_interface(iface_num) {
+                Ok(()) => claimed.push(iface_num),
+                Err(e) => debug!("RusbHid: claim interface {iface_num} failed: {e}"),
             }
         }
 
@@ -81,8 +88,15 @@ impl RusbHidTransport {
             hid_ifaces[0]
         };
 
-        // Claim the target interface (same handle, no drop in between)
-        handle.claim_interface(target_iface)?;
+        // Release probed interfaces we won't use, keep only the target.
+        for &iface_num in &claimed {
+            if iface_num != target_iface {
+                let _ = handle.release_interface(iface_num);
+            }
+        }
+        if !claimed.contains(&target_iface) {
+            handle.claim_interface(target_iface)?;
+        }
 
         // Find endpoints
         let mut ep_in: Option<u8> = None;
