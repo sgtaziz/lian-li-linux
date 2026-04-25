@@ -12,6 +12,7 @@ use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_transport::HidBackend;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -74,6 +75,7 @@ pub struct Galahad2TrinityController {
     device: Arc<Mutex<HidBackend>>,
     model: Galahad2TrinityModel,
     last_handshake: Option<Galahad2Handshake>,
+    mb_sync: AtomicBool,
 }
 
 impl Galahad2TrinityController {
@@ -85,6 +87,7 @@ impl Galahad2TrinityController {
             device,
             model,
             last_handshake: None,
+            mb_sync: AtomicBool::new(false),
         };
 
         ctrl.initialize()?;
@@ -299,8 +302,9 @@ fn duty_to_percent(duty: u8) -> u8 {
 impl FanDevice for Galahad2TrinityController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
         let pwm = duty_to_percent(duty);
-        self.send_a_command(CMD_SET_FAN_PWM, &[0x00, pwm])?;
-        debug!("Set fan PWM to {pwm}%");
+        let mb = self.mb_sync.load(Ordering::Relaxed) as u8;
+        self.send_a_command(CMD_SET_FAN_PWM, &[mb, pwm])?;
+        debug!("Set fan PWM to {pwm}% (mb_sync={mb})");
         Ok(())
     }
 
@@ -323,14 +327,24 @@ impl FanDevice for Galahad2TrinityController {
         1
     }
 
+    fn supports_mb_sync(&self) -> bool {
+        true
+    }
+
+    fn set_mb_rpm_sync(&self, _port: u8, sync: bool) -> Result<()> {
+        self.mb_sync.store(sync, Ordering::Relaxed);
+        Ok(())
+    }
+
     fn has_pump_control(&self) -> bool {
         true
     }
 
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         let pwm = duty_to_percent(duty);
-        self.send_a_command(CMD_SET_PUMP_PWM, &[0x00, pwm])?;
-        debug!("Set pump PWM to {pwm}%");
+        let mb = self.mb_sync.load(Ordering::Relaxed) as u8;
+        self.send_a_command(CMD_SET_PUMP_PWM, &[mb, pwm])?;
+        debug!("Set pump PWM to {pwm}% (mb_sync={mb})");
         Ok(())
     }
 }
