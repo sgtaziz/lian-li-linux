@@ -48,6 +48,11 @@ pub enum RgbMode {
     ColorfulStarryNight,
     StaticStarryNight,
     Bounce,
+    // HydroShift LCD / Galahad2 LCD / Galahad2 Vision
+    TickerTape,
+    Fluctuation,
+    Transmit,
+    Burst,
 }
 
 impl RgbMode {
@@ -83,6 +88,61 @@ impl RgbMode {
             Self::ElectricCurrent => Some(27),
             Self::Kaleidoscope => Some(28),
             _ => None,
+        }
+    }
+
+    pub fn to_galahad2_mode_byte(self) -> Option<u8> {
+        match self {
+            Self::Rainbow => Some(1),
+            Self::RainbowMorph => Some(2),
+            Self::Static => Some(3),
+            Self::Breathing => Some(4),
+            Self::Runway => Some(5),
+            Self::Meteor => Some(6),
+            Self::Vortex => Some(7),
+            Self::CrossingOver => Some(8),
+            Self::TaiChi => Some(9),
+            Self::ColorfulStarryNight => Some(10),
+            Self::StaticStarryNight => Some(11),
+            Self::Voice => Some(12),
+            Self::BigBang => Some(13),
+            Self::Pump => Some(14),
+            Self::ColorsMorph => Some(15),
+            Self::Bounce => Some(16),
+            _ => None,
+        }
+    }
+
+    pub fn to_hydroshift_lcd_mode_byte(self) -> Option<u8> {
+        match self {
+            Self::Rainbow => Some(1),
+            Self::RainbowMorph => Some(2),
+            Self::Static => Some(3),
+            Self::Breathing => Some(4),
+            Self::Runway => Some(5),
+            Self::Meteor => Some(6),
+            Self::TickerTape => Some(7),
+            Self::Fluctuation => Some(8),
+            Self::Transmit => Some(9),
+            Self::ColorfulStarryNight => Some(10),
+            Self::StaticStarryNight => Some(11),
+            Self::Voice => Some(12),
+            Self::BigBang => Some(13),
+            Self::Burst => Some(14),
+            Self::ColorsMorph => Some(15),
+            Self::Bounce => Some(16),
+            _ => None,
+        }
+    }
+
+    pub fn is_valid_galahad2_pump_scope(self, scope: RgbScope) -> bool {
+        let Some(byte) = self.to_galahad2_mode_byte() else {
+            return false;
+        };
+        match scope {
+            RgbScope::Inner => matches!(byte, 1..=6 | 9..=12 | 14),
+            RgbScope::Outer => matches!(byte, 1..=6 | 9..=12 | 14 | 16),
+            _ => matches!(byte, 1..=15),
         }
     }
 
@@ -163,6 +223,10 @@ impl RgbMode {
             Self::ColorfulStarryNight => "Colorful Starry Night",
             Self::StaticStarryNight => "Static Starry Night",
             Self::Bounce => "Bounce",
+            Self::TickerTape => "Ticker Tape",
+            Self::Fluctuation => "Fluctuation",
+            Self::Transmit => "Transmit",
+            Self::Burst => "Burst",
         }
     }
 }

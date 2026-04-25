@@ -713,7 +713,7 @@ impl AioLcdRgbController {
             RgbScope::Outer => 1,
             _ => 2,
         };
-        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let mode_byte = effect.mode.to_hydroshift_lcd_mode_byte().unwrap_or(3);
         let mut payload = [0u8; 19];
         payload[0] = scope;
         payload[1] = mode_byte;
@@ -739,7 +739,7 @@ impl AioLcdRgbController {
         source_mcu: bool,
         sync_to_pump: bool,
     ) -> Result<()> {
-        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let mode_byte = effect.mode.to_hydroshift_lcd_mode_byte().unwrap_or(3);
         let mut payload = [0u8; 20];
         payload[0] = mode_byte;
         payload[1] = effect.brightness.min(4);
@@ -794,19 +794,16 @@ impl RgbDevice for AioLcdRgbController {
             RgbMode::Breathing,
             RgbMode::Runway,
             RgbMode::Meteor,
-            RgbMode::ColorCycle,
-            RgbMode::Staggered,
-            RgbMode::Tide,
-            RgbMode::Mixing,
-            RgbMode::Ripple,
-            RgbMode::Reflect,
-            RgbMode::TailChasing,
-            RgbMode::Paint,
-            RgbMode::PingPong,
+            RgbMode::TickerTape,
+            RgbMode::Fluctuation,
+            RgbMode::Transmit,
+            RgbMode::ColorfulStarryNight,
+            RgbMode::StaticStarryNight,
+            RgbMode::Voice,
             RgbMode::BigBang,
-            RgbMode::Vortex,
-            RgbMode::Pump,
+            RgbMode::Burst,
             RgbMode::ColorsMorph,
+            RgbMode::Bounce,
         ]
     }
 

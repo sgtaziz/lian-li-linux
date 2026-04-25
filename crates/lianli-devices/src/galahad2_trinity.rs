@@ -199,16 +199,36 @@ impl Galahad2TrinityController {
     /// [18] = ARGB source (0=MCU, 1=Motherboard)
     /// ```
     pub fn set_pump_light(&self, effect: &RgbEffect, source_mcu: bool) -> Result<()> {
-        let scope = match effect.scope {
-            RgbScope::Inner => 0u8,
-            RgbScope::Outer => 1,
-            _ => 2, // All
+        let req_scope = match effect.scope {
+            RgbScope::Inner => RgbScope::Inner,
+            RgbScope::Outer => RgbScope::Outer,
+            _ => RgbScope::All,
         };
 
-        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let (resolved_scope, mode_byte) = if effect.mode.is_valid_galahad2_pump_scope(req_scope) {
+            (req_scope, effect.mode.to_galahad2_mode_byte().unwrap())
+        } else if effect.mode.is_valid_galahad2_pump_scope(RgbScope::All) {
+            warn!(
+                "Galahad2 pump: mode {:?} unsupported in scope {req_scope:?}, falling back to All",
+                effect.mode
+            );
+            (RgbScope::All, effect.mode.to_galahad2_mode_byte().unwrap())
+        } else {
+            warn!(
+                "Galahad2 pump: mode {:?} not mappable, falling back to Static",
+                effect.mode
+            );
+            (req_scope, 3)
+        };
+
+        let scope_byte: u8 = match resolved_scope {
+            RgbScope::Inner => 0,
+            RgbScope::Outer => 1,
+            _ => 2,
+        };
 
         let mut payload = [0u8; 19];
-        payload[0] = scope;
+        payload[0] = scope_byte;
         payload[1] = mode_byte;
         payload[2] = effect.brightness.min(4);
         payload[3] = effect.speed.min(4);
@@ -225,7 +245,7 @@ impl Galahad2TrinityController {
         payload[18] = if source_mcu { 0 } else { 1 };
 
         self.send_a_command(CMD_SET_PUMP_LIGHT, &payload)?;
-        debug!("Set pump light: mode={mode_byte} scope={scope}");
+        debug!("Set pump light: mode={mode_byte} scope={scope_byte}");
         Ok(())
     }
 
@@ -249,7 +269,16 @@ impl Galahad2TrinityController {
         source_mcu: bool,
         sync_to_pump: bool,
     ) -> Result<()> {
-        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let mode_byte = match effect.mode.to_galahad2_mode_byte() {
+            Some(b) => b,
+            None => {
+                warn!(
+                    "Galahad2 fan: mode {:?} not mappable, falling back to Static",
+                    effect.mode
+                );
+                3
+            }
+        };
 
         let mut payload = [0u8; 20];
         payload[0] = mode_byte;
@@ -391,19 +420,16 @@ impl RgbDevice for Galahad2TrinityController {
             RgbMode::Breathing,
             RgbMode::Runway,
             RgbMode::Meteor,
-            RgbMode::ColorCycle,
-            RgbMode::Staggered,
-            RgbMode::Tide,
-            RgbMode::Mixing,
-            RgbMode::Ripple,
-            RgbMode::Reflect,
-            RgbMode::TailChasing,
-            RgbMode::Paint,
-            RgbMode::PingPong,
-            RgbMode::BigBang,
             RgbMode::Vortex,
+            RgbMode::CrossingOver,
+            RgbMode::TaiChi,
+            RgbMode::ColorfulStarryNight,
+            RgbMode::StaticStarryNight,
+            RgbMode::Voice,
+            RgbMode::BigBang,
             RgbMode::Pump,
             RgbMode::ColorsMorph,
+            RgbMode::Bounce,
         ]
     }
 

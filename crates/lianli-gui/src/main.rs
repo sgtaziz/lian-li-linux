@@ -2457,6 +2457,15 @@ fn parse_rgb_mode(s: &str) -> RgbMode {
         "Vortex" => RgbMode::Vortex,
         "Pump" => RgbMode::Pump,
         "ColorsMorph" => RgbMode::ColorsMorph,
+        "TaiChi" => RgbMode::TaiChi,
+        "CrossingOver" => RgbMode::CrossingOver,
+        "ColorfulStarryNight" => RgbMode::ColorfulStarryNight,
+        "StaticStarryNight" => RgbMode::StaticStarryNight,
+        "Bounce" => RgbMode::Bounce,
+        "TickerTape" => RgbMode::TickerTape,
+        "Fluctuation" => RgbMode::Fluctuation,
+        "Transmit" => RgbMode::Transmit,
+        "Burst" => RgbMode::Burst,
         _ => RgbMode::Off,
     }
 }
