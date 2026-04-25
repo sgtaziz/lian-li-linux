@@ -726,7 +726,7 @@ impl AioLcdRgbController {
             payload[offset + 2] = color[2];
         }
         payload[16] = effect.direction.to_tl_byte();
-        payload[17] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[17] = (effect.disabled || effect.mode == RgbMode::Off) as u8;
         payload[18] = if source_mcu { 0 } else { 1 };
         self.send_rgb_command(CMD_SET_PUMP_LIGHT, &payload)?;
         debug!("Set pump light: mode={mode_byte} scope={scope}");
@@ -751,7 +751,7 @@ impl AioLcdRgbController {
             payload[offset + 2] = color[2];
         }
         payload[15] = effect.direction.to_tl_byte();
-        payload[16] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[16] = (effect.disabled || effect.mode == RgbMode::Off) as u8;
         payload[17] = if source_mcu { 0 } else { 1 };
         payload[18] = sync_to_pump as u8;
         payload[19] = FAN_LED_COUNT as u8;

@@ -2232,6 +2232,7 @@ fn with_zone_effect(
                 brightness: 4,
                 direction: RgbDirection::Clockwise,
                 scope: RgbScope::All,
+                disabled: false,
             };
             mutate(&mut e);
             return e;
@@ -2340,6 +2341,7 @@ fn get_or_create_zone_config(dev: &mut RgbDeviceConfig, zone: u8) -> &mut RgbZon
                 brightness: 4,
                 direction: RgbDirection::Clockwise,
                 scope: RgbScope::All,
+                disabled: false,
             },
             swap_lr: false,
             swap_tb: false,

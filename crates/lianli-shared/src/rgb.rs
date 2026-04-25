@@ -295,6 +295,9 @@ pub struct RgbEffect {
     /// Which LED scope to target (All, Top, Bottom, Inner, Outer).
     #[serde(default)]
     pub scope: RgbScope,
+    /// Hardware "disabled" flag, turns LEDs off without changing mode/colors.
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 fn default_colors() -> Vec<[u8; 3]> {
@@ -318,6 +321,7 @@ impl Default for RgbEffect {
             brightness: default_brightness(),
             direction: RgbDirection::default(),
             scope: RgbScope::default(),
+            disabled: false,
         }
     }
 }
