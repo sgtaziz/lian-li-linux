@@ -397,10 +397,12 @@ pub fn ensure_hid_devices_bound() {
         });
         if let Some(usb_dev) = dev {
             if device_responds_to_descriptor(&usb_dev) {
-                info!(
-                    "{name}: descriptor read OK, kernel hasn't bound hidraw yet — skipping reset"
-                );
-                continue;
+                nudge_kernel_to_bind_hid(&usb_dev);
+                if poll_for_hidraw(*vid, *pid, Duration::from_millis(2000)) {
+                    info!("{name}: hidraw appeared after kernel bind, no reset needed");
+                    continue;
+                }
+                info!("{name}: hidraw still missing after wait, falling through to reset");
             }
             match RusbHidTransport::reset_usb_device(&usb_dev) {
                 Ok(()) => {
@@ -424,6 +426,36 @@ pub fn ensure_hid_devices_bound() {
         info!("Waiting 3s for {reset_count} device(s) to re-enumerate after USB reset");
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
+}
+
+fn nudge_kernel_to_bind_hid(device: &Device<GlobalContext>) {
+    let Ok(handle) = device.open() else { return };
+    let Ok(config) = device.active_config_descriptor() else {
+        return;
+    };
+    for iface in config.interfaces() {
+        for desc in iface.descriptors() {
+            if desc.class_code() == 0x03 {
+                let _ = handle.attach_kernel_driver(desc.interface_number());
+            }
+        }
+    }
+}
+
+fn poll_for_hidraw(vid: u16, pid: u16, max_wait: Duration) -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < max_wait {
+        if let Ok(api) = HidApi::new() {
+            if api
+                .device_list()
+                .any(|d| d.vendor_id() == vid && d.product_id() == pid)
+            {
+                return true;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
 }
 
 fn device_responds_to_descriptor(device: &Device<GlobalContext>) -> bool {
