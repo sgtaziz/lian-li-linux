@@ -3,6 +3,7 @@ mod desktop_display;
 mod fan_controller;
 mod ipc_server;
 mod openrgb_server;
+mod pidlock;
 mod rgb_controller;
 mod service;
 mod template_store;
@@ -46,6 +47,8 @@ fn main() -> anyhow::Result<()> {
         )
         .with_timer(tracing_subscriber::fmt::time::uptime())
         .init();
+
+    let _pidlock = pidlock::PidLock::acquire()?;
 
     let mut manager = service::ServiceManager::new(cli.config)?;
     let restart = manager.run()?;

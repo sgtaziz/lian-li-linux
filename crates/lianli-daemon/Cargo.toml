@@ -27,3 +27,4 @@ notify = { workspace = true }
 image = { workspace = true }
 ffmpeg-next = { workspace = true }
 signal-hook = "0.3"
+libc = { workspace = true }

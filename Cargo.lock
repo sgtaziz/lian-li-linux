@@ -2968,6 +2968,7 @@ dependencies = [
  "lianli-media",
  "lianli-shared",
  "lianli-transport",
+ "libc",
  "notify",
  "parking_lot",
  "rusb",
