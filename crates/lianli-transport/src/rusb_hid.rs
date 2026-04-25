@@ -97,9 +97,8 @@ impl RusbHidTransport {
             claimed[0]
         };
 
-        // Find endpoints
-        let mut ep_in: Option<u8> = None;
-        let mut ep_out: Option<u8> = None;
+        let mut ins: Vec<u8> = Vec::new();
+        let mut outs: Vec<u8> = Vec::new();
         for iface_group in config.interfaces() {
             for desc in iface_group.descriptors() {
                 if desc.interface_number() != target_iface {
@@ -110,12 +109,24 @@ impl RusbHidTransport {
                         continue;
                     }
                     match ep.direction() {
-                        rusb::Direction::In => ep_in = ep_in.or(Some(ep.address())),
-                        rusb::Direction::Out => ep_out = ep_out.or(Some(ep.address())),
+                        rusb::Direction::In => ins.push(ep.address()),
+                        rusb::Direction::Out => outs.push(ep.address()),
                     }
                 }
             }
         }
+        if ins.len() > 1 {
+            warn!(
+                "RusbHid: interface {target_iface} has multiple interrupt IN endpoints {ins:02x?}, using first"
+            );
+        }
+        if outs.len() > 1 {
+            warn!(
+                "RusbHid: interface {target_iface} has multiple interrupt OUT endpoints {outs:02x?}, using first"
+            );
+        }
+        let ep_in = ins.first().copied();
+        let ep_out = outs.first().copied();
 
         let ep_in = ep_in.ok_or_else(|| {
             TransportError::Other("RusbHid: no interrupt IN endpoint found".into())
