@@ -28,11 +28,9 @@ pub(super) fn request_preview(
 
     DEBOUNCE_TIMER.with(|slot| {
         let timer = slint::Timer::default();
-        timer.start(
-            slint::TimerMode::SingleShot,
-            PREVIEW_DEBOUNCE,
-            move || do_request_preview(&weak, &state, &version),
-        );
+        timer.start(slint::TimerMode::SingleShot, PREVIEW_DEBOUNCE, move || {
+            do_request_preview(&weak, &state, &version)
+        });
         *slot.borrow_mut() = Some(timer);
     });
 }

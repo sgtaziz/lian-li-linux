@@ -71,11 +71,7 @@ impl Drop for AioController {
     }
 }
 
-fn run(
-    wireless: Arc<WirelessController>,
-    state: Arc<Mutex<State>>,
-    stop_flag: Arc<AtomicBool>,
-) {
+fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: Arc<AtomicBool>) {
     let all_sensors = enumerate_sensors();
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
     let mut last_sent: HashMap<[u8; 6], [u8; AIO_PARAM_LEN]> = HashMap::new();
@@ -108,7 +104,10 @@ fn run(
                         info!("AIO {}: wireless theme mode engaged", device.mac_str());
                     }
                     Err(e) => {
-                        warn!("AIO {}: switch_to_wireless_theme failed: {e:#}", device.mac_str());
+                        warn!(
+                            "AIO {}: switch_to_wireless_theme failed: {e:#}",
+                            device.mac_str()
+                        );
                         continue;
                     }
                 }
@@ -149,10 +148,13 @@ fn run(
                     FanSpeed::Curve(name) => match curves.get(name) {
                         Some(curve) => {
                             let source = curve.effective_source();
-                            let pct = match resolve_and_read(&source, &mut sensor_cache, &all_sensors) {
-                                Some(temp) => interpolate_curve(&curve.curve, temp).clamp(0.0, 100.0),
-                                None => 0.0,
-                            };
+                            let pct =
+                                match resolve_and_read(&source, &mut sensor_cache, &all_sensors) {
+                                    Some(temp) => {
+                                        interpolate_curve(&curve.curve, temp).clamp(0.0, 100.0)
+                                    }
+                                    None => 0.0,
+                                };
                             (pct * 2.55) as u8
                         }
                         None => 0,
@@ -175,10 +177,7 @@ fn run(
                                 );
                                 applied_image.insert(device.mac, path.clone());
                             }
-                            Err(e) => warn!(
-                                "AIO {}: send_aio_pic failed: {e:#}",
-                                device.mac_str()
-                            ),
+                            Err(e) => warn!("AIO {}: send_aio_pic failed: {e:#}", device.mac_str()),
                         },
                         Err(e) => warn!(
                             "AIO {}: encode_aio_image({}) failed: {e:#}",
@@ -242,7 +241,13 @@ fn build_aio_param(
     p[26] = 1;
     p[27] = cfg.theme_index.min(12);
 
-    let rpm = resolve_pump_rpm(&cfg.pump_target_rpm, device.fan_type, curves, sensor_cache, all_sensors);
+    let rpm = resolve_pump_rpm(
+        &cfg.pump_target_rpm,
+        device.fan_type,
+        curves,
+        sensor_cache,
+        all_sensors,
+    );
     let timer = pump_rpm_to_timer(rpm, device.fan_type).unwrap_or(0);
     p[28] = (timer >> 8) as u8;
     p[29] = (timer & 0xFF) as u8;

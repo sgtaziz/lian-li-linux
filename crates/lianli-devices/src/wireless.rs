@@ -1752,8 +1752,14 @@ mod aio_tests {
 
     #[test]
     fn pump_rpm_range_per_variant() {
-        assert_eq!(WirelessFanType::WaterBlock.pump_rpm_range(), Some((1600, 2500)));
-        assert_eq!(WirelessFanType::WaterBlock2.pump_rpm_range(), Some((1600, 3200)));
+        assert_eq!(
+            WirelessFanType::WaterBlock.pump_rpm_range(),
+            Some((1600, 2500))
+        );
+        assert_eq!(
+            WirelessFanType::WaterBlock2.pump_rpm_range(),
+            Some((1600, 3200))
+        );
         assert_eq!(WirelessFanType::Slv3Led.pump_rpm_range(), None);
     }
 }

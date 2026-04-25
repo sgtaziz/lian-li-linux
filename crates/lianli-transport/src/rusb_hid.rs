@@ -85,9 +85,7 @@ impl RusbHidTransport {
                         "RusbHid: no interface matched usage page {required_page:#06x}, using first claimed"
                     );
                     *claimed.first().ok_or_else(|| {
-                        TransportError::Other(
-                            "RusbHid: could not claim any HID interface".into(),
-                        )
+                        TransportError::Other("RusbHid: could not claim any HID interface".into())
                     })?
                 }
             }

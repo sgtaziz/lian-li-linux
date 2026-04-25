@@ -45,7 +45,10 @@ fn family_display_name(f: DeviceFamily) -> &'static str {
 pub fn device_to_slint(
     device: &DeviceInfo,
     telemetry: &TelemetrySnapshot,
-    pending_actions: &std::collections::HashMap<String, (crate::state::PendingAction, std::time::Instant)>,
+    pending_actions: &std::collections::HashMap<
+        String,
+        (crate::state::PendingAction, std::time::Instant),
+    >,
 ) -> super::DeviceData {
     let fan_rpms = telemetry
         .fan_rpms
@@ -100,7 +103,10 @@ pub fn device_to_slint(
 pub fn devices_to_model(
     devices: &[DeviceInfo],
     telemetry: &TelemetrySnapshot,
-    pending_actions: &std::collections::HashMap<String, (crate::state::PendingAction, std::time::Instant)>,
+    pending_actions: &std::collections::HashMap<
+        String,
+        (crate::state::PendingAction, std::time::Instant),
+    >,
 ) -> ModelRc<super::DeviceData> {
     let items: Vec<super::DeviceData> = devices
         .iter()
@@ -793,7 +799,9 @@ pub fn aios_to_model(
     let items: Vec<super::AioData> = config
         .aio
         .iter()
-        .map(|(device_id, cfg)| aio_to_slint(device_id, cfg, devices, telemetry, sensors, pwm_headers))
+        .map(|(device_id, cfg)| {
+            aio_to_slint(device_id, cfg, devices, telemetry, sensors, pwm_headers)
+        })
         .collect();
     ModelRc::new(VecModel::from(items))
 }
@@ -817,7 +825,10 @@ fn aio_to_slint(
         })
         .unwrap_or_else(|| family_display_name(DeviceFamily::WirelessAio).to_string());
 
-    let mac = device_id.strip_prefix("wireless:").unwrap_or("").to_string();
+    let mac = device_id
+        .strip_prefix("wireless:")
+        .unwrap_or("")
+        .to_string();
 
     let (min_rpm, max_rpm) = device
         .and_then(|d| d.pump_rpm_range)

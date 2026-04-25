@@ -20,7 +20,10 @@ fn main() -> Result<()> {
     ctrl.connect().context("connecting to dongle")?;
     ctrl.start_polling().context("starting RF discovery")?;
 
-    eprintln!("Waiting {}s for device discovery…", DISCOVERY_WINDOW.as_secs());
+    eprintln!(
+        "Waiting {}s for device discovery…",
+        DISCOVERY_WINDOW.as_secs()
+    );
     let deadline = Instant::now() + DISCOVERY_WINDOW;
     while Instant::now() < deadline {
         thread::sleep(Duration::from_millis(250));
@@ -100,15 +103,23 @@ fn print_device_list(devices: &[DiscoveredDevice]) {
     for (i, d) in devices.iter().enumerate() {
         let master = format!(
             "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            d.master_mac[0], d.master_mac[1], d.master_mac[2],
-            d.master_mac[3], d.master_mac[4], d.master_mac[5],
+            d.master_mac[0],
+            d.master_mac[1],
+            d.master_mac[2],
+            d.master_mac[3],
+            d.master_mac[4],
+            d.master_mac[5],
         );
         let bound = d.master_mac != [0u8; 6];
         println!(
             "{:>3}  {:17}  {:17}  {:>3}  {:>3}  {:>3}  {}{}",
             i + 1,
             d.mac_str(),
-            if bound { master } else { "(unbound)".to_string() },
+            if bound {
+                master
+            } else {
+                "(unbound)".to_string()
+            },
             d.channel,
             d.rx_type,
             d.fan_count,

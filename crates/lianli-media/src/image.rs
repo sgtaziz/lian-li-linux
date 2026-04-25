@@ -29,7 +29,8 @@ pub fn encode_aio_image(path: &Path) -> Result<Vec<u8>, MediaError> {
     let resized = if w == target && h == target {
         img.to_rgb8()
     } else {
-        img.resize_exact(target, target, FilterType::Lanczos3).to_rgb8()
+        img.resize_exact(target, target, FilterType::Lanczos3)
+            .to_rgb8()
     };
     for quality in [85u8, 75, 65, 55, 45, 35] {
         let mut buf: Vec<u8> = Vec::new();

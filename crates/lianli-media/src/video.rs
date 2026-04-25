@@ -114,8 +114,7 @@ pub fn decode_frames_to_rgba(
             return decode_animation_frames(apng.into_frames(), width, height);
         }
         let img = DynamicImage::from_decoder(decoder)?;
-        let resized =
-            image::imageops::resize(&img.to_rgba8(), width, height, FilterType::Lanczos3);
+        let resized = image::imageops::resize(&img.to_rgba8(), width, height, FilterType::Lanczos3);
         return Ok((vec![resized], vec![Duration::from_millis(100)]));
     }
 

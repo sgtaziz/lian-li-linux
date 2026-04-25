@@ -126,6 +126,9 @@ mod tests {
         assert_eq!(cfg.brightness, 80);
         assert_eq!(cfg.loop_interval, 3);
         assert_eq!(cfg.str_color, [255, 255, 255, 255]);
-        assert!(matches!(cfg.cpu_load_source, Some(SensorSourceConfig::CpuUsage)));
+        assert!(matches!(
+            cfg.cpu_load_source,
+            Some(SensorSourceConfig::CpuUsage)
+        ));
     }
 }

@@ -980,9 +980,7 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
             }
             _ => anyhow::bail!("unexpected virtual sensor source"),
         },
-        ResolvedSensor::NvidiaGpu { index, metric } => {
-            Ok(nvidia_cache_get(*index, *metric))
-        }
+        ResolvedSensor::NvidiaGpu { index, metric } => Ok(nvidia_cache_get(*index, *metric)),
         ResolvedSensor::RuntimeFile(path) => {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;

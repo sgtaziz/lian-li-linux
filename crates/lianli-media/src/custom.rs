@@ -152,7 +152,8 @@ impl CustomAsset {
 
         for widget in &template.widgets {
             let mut state = WidgetState::blank();
-            state.sample_interval = default_sample_interval(&widget.kind, widget.update_interval_ms);
+            state.sample_interval =
+                default_sample_interval(&widget.kind, widget.update_interval_ms);
 
             if let Some(source) = widget_sensor_source(&widget.kind) {
                 state.resolved_sensor = resolve_sensor_source(source, all_sensors);
@@ -204,8 +205,8 @@ impl CustomAsset {
         }
 
         let fps = screen.max_fps.max(1);
-        let frame_interval = Duration::from_nanos(1_000_000_000 / fps as u64)
-            .max(Duration::from_millis(16));
+        let frame_interval =
+            Duration::from_nanos(1_000_000_000 / fps as u64).max(Duration::from_millis(16));
 
         Ok(Arc::new(Self {
             template: template.clone(),
@@ -225,7 +226,6 @@ impl CustomAsset {
             start_instant: Instant::now(),
         }))
     }
-
 
     pub fn update_interval(&self) -> Duration {
         self.update_interval

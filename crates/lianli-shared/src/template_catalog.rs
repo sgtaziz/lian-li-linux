@@ -200,7 +200,9 @@ fn rewrite_asset_paths(template: &mut LcdTemplate, base: &std::path::Path) {
             }
             WidgetKind::ClockDigital { font, .. } => rewrite_font(font, base),
             WidgetKind::ClockAnalog { numbers_font, .. } => rewrite_font(numbers_font, base),
-            WidgetKind::Sparkline { axis_label_font, .. } => rewrite_font(axis_label_font, base),
+            WidgetKind::Sparkline {
+                axis_label_font, ..
+            } => rewrite_font(axis_label_font, base),
             _ => {}
         }
     }

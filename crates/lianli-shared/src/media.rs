@@ -54,13 +54,21 @@ pub enum SensorSourceConfig {
     #[serde(rename = "mem_free")]
     MemFree,
     #[serde(rename = "network_rx")]
-    NetworkRx { iface: String },
+    NetworkRx {
+        iface: String,
+    },
     #[serde(rename = "network_tx")]
-    NetworkTx { iface: String },
+    NetworkTx {
+        iface: String,
+    },
     #[serde(rename = "disk_read")]
-    DiskRead { device: String },
+    DiskRead {
+        device: String,
+    },
     #[serde(rename = "disk_write")]
-    DiskWrite { device: String },
+    DiskWrite {
+        device: String,
+    },
 }
 
 impl Default for SensorSourceConfig {
@@ -208,14 +216,12 @@ impl SensorDescriptor {
             | SensorSourceConfig::MemUsage
             | SensorSourceConfig::MemUsed
             | SensorSourceConfig::MemFree => {}
-            SensorSourceConfig::NetworkRx { iface }
-            | SensorSourceConfig::NetworkTx { iface } => {
+            SensorSourceConfig::NetworkRx { iface } | SensorSourceConfig::NetworkTx { iface } => {
                 if iface.trim().is_empty() {
                     anyhow::bail!("network sensor iface must not be empty");
                 }
             }
-            SensorSourceConfig::DiskRead { device }
-            | SensorSourceConfig::DiskWrite { device } => {
+            SensorSourceConfig::DiskRead { device } | SensorSourceConfig::DiskWrite { device } => {
                 if device.trim().is_empty() {
                     anyhow::bail!("disk sensor device must not be empty");
                 }

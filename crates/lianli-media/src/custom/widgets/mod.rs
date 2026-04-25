@@ -89,7 +89,11 @@ pub(super) fn draw_widget(
         | WidgetKind::Sparkline { .. }
         | WidgetKind::ClockAnalog { .. } => 2,
         WidgetKind::VerticalBar { corner_radius, .. }
-        | WidgetKind::HorizontalBar { corner_radius, .. } if *corner_radius > 0.1 => 2,
+        | WidgetKind::HorizontalBar { corner_radius, .. }
+            if *corner_radius > 0.1 =>
+        {
+            2
+        }
         _ => 1,
     };
     let ss = ss_factor as f32;

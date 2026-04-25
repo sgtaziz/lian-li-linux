@@ -1380,7 +1380,9 @@ fn source_to_config(
         },
         SensorSource::DiskRate { device, direction } => match direction {
             lianli_shared::sensors::DiskDirection::Read => SensorSourceConfig::DiskRead { device },
-            lianli_shared::sensors::DiskDirection::Write => SensorSourceConfig::DiskWrite { device },
+            lianli_shared::sensors::DiskDirection::Write => {
+                SensorSourceConfig::DiskWrite { device }
+            }
         },
     }
 }
@@ -2135,11 +2137,7 @@ pub(crate) fn refresh_aio_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
         let Some(cfg) = state.config.clone() else {
             return;
         };
-        (
-            cfg,
-            state.devices.clone(),
-            state.available_sensors.clone(),
-        )
+        (cfg, state.devices.clone(), state.available_sensors.clone())
     };
     let weak = weak.clone();
     slint::invoke_from_event_loop(move || {
@@ -2154,10 +2152,7 @@ pub(crate) fn refresh_aio_ui(weak: &slint::Weak<MainWindow>, shared: &Shared) {
                 &pwm_headers,
             ));
             w.set_aio_sensor_options(conversions::aio_sensor_options_model(&sensors));
-            w.set_aio_speed_options(conversions::speed_options_model(
-                &config.fan_curves,
-                false,
-            ));
+            w.set_aio_speed_options(conversions::speed_options_model(&config.fan_curves, false));
             w.set_aio_theme_options(conversions::aio_theme_options_model());
             w.set_aio_rotation_options(conversions::aio_rotation_options_model());
             w.set_config_dirty(true);

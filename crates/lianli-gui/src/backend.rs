@@ -361,8 +361,7 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
                 w.set_fan_pwm_header_options(slint::ModelRc::new(slint::VecModel::from(pwm_opts)));
 
                 // RGB devices
-                let rgb_model =
-                    conversions::rgb_devices_to_model(&rgb_caps, &config, &rgb_presets);
+                let rgb_model = conversions::rgb_devices_to_model(&rgb_caps, &config, &rgb_presets);
                 w.set_rgb_devices(rgb_model);
 
                 // AIO
