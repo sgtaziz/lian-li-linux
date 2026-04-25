@@ -45,14 +45,7 @@ impl RusbHidTransport {
         for &iface_num in &hid_ifaces {
             detach_kernel_driver_with_retry(&handle, iface_num);
             match handle.claim_interface(iface_num) {
-                Ok(()) => {
-                    if let Err(e) = handle.set_alternate_setting(iface_num, 0) {
-                        debug!(
-                            "RusbHid: set_alternate_setting(0) on interface {iface_num} failed: {e}"
-                        );
-                    }
-                    claimed.push(iface_num);
-                }
+                Ok(()) => claimed.push(iface_num),
                 Err(e) => warn!("RusbHid: claim interface {iface_num} failed: {e}"),
             }
         }
@@ -96,6 +89,16 @@ impl RusbHidTransport {
         } else {
             claimed[0]
         };
+
+        claimed.retain(|&iface_num| {
+            if iface_num == target_iface {
+                true
+            } else {
+                let _ = handle.release_interface(iface_num);
+                let _ = handle.attach_kernel_driver(iface_num);
+                false
+            }
+        });
 
         let mut ins: Vec<u8> = Vec::new();
         let mut outs: Vec<u8> = Vec::new();

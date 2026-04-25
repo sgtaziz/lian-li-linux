@@ -134,7 +134,6 @@ impl UsbTransport {
                 }
                 match self.handle.claim_interface(num) {
                     Ok(()) => {
-                        let _ = self.handle.set_alternate_setting(num, 0);
                         self.claimed.push(num);
                         debug!("{name}: claimed extra interface {num}");
                     }
