@@ -301,7 +301,7 @@ fn duty_to_percent(duty: u8) -> u8 {
 
 impl FanDevice for Galahad2TrinityController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
-        let pwm = duty_to_percent(duty);
+        let pwm = duty_to_percent(duty).max(10);
         let mb = self.mb_sync.load(Ordering::Relaxed) as u8;
         self.send_a_command(CMD_SET_FAN_PWM, &[mb, pwm])?;
         debug!("Set fan PWM to {pwm}% (mb_sync={mb})");
