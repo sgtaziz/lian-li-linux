@@ -332,7 +332,6 @@ impl DeviceFamily {
             self,
             Self::Ene6k77
                 | Self::TlFan
-                | Self::TlLcd
                 | Self::Galahad2Trinity
                 | Self::HydroShiftLcd
                 | Self::Galahad2Lcd
