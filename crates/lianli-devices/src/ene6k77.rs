@@ -478,7 +478,7 @@ impl Ene6k77Controller {
     }
 
     fn read_input(&self, expected_len: usize) -> Result<Vec<u8>> {
-        let dev = self.device.lock();
+        let mut dev = self.device.lock();
         let mut buf = vec![0u8; 65];
         buf[0] = REPORT_ID;
         let n = dev

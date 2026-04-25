@@ -74,7 +74,7 @@ impl HidBackend {
         }
     }
 
-    pub fn read_timeout(&self, buf: &mut [u8], timeout_ms: i32) -> anyhow::Result<usize> {
+    fn do_read_timeout(&self, buf: &mut [u8], timeout_ms: i32) -> anyhow::Result<usize> {
         match &self.kind {
             HidBackendKind::Hidapi(dev) => dev
                 .read_timeout(buf, timeout_ms)
@@ -82,6 +82,19 @@ impl HidBackend {
             HidBackendKind::Rusb(dev) => dev
                 .read_timeout(buf, timeout_ms)
                 .map_err(|e| anyhow::anyhow!("{e}")),
+        }
+    }
+
+    pub fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> anyhow::Result<usize> {
+        match self.do_read_timeout(buf, timeout_ms) {
+            Ok(n) => Ok(n),
+            Err(e) if self.reopener.is_some() => {
+                warn!("HID read_timeout failed ({e}); attempting reopen");
+                self.try_reopen()?;
+                info!("HID handle reopened, retrying read_timeout");
+                self.do_read_timeout(buf, timeout_ms)
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -111,7 +124,7 @@ impl HidBackend {
         }
     }
 
-    pub fn get_feature_report(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
+    fn do_get_feature_report(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
         match &self.kind {
             HidBackendKind::Hidapi(dev) => dev
                 .get_feature_report(buf)
@@ -122,7 +135,20 @@ impl HidBackend {
         }
     }
 
-    pub fn get_input_report(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
+    pub fn get_feature_report(&mut self, buf: &mut [u8]) -> anyhow::Result<usize> {
+        match self.do_get_feature_report(buf) {
+            Ok(n) => Ok(n),
+            Err(e) if self.reopener.is_some() => {
+                warn!("HID get_feature_report failed ({e}); attempting reopen");
+                self.try_reopen()?;
+                info!("HID handle reopened, retrying get_feature_report");
+                self.do_get_feature_report(buf)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn do_get_input_report(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
         match &self.kind {
             HidBackendKind::Hidapi(dev) => dev
                 .get_input_report(buf)
@@ -130,14 +156,27 @@ impl HidBackend {
             HidBackendKind::Rusb(dev) => dev
                 .get_input_report(buf)
                 .map_err(|e| anyhow::anyhow!("{e}")),
+        }
+    }
+
+    pub fn get_input_report(&mut self, buf: &mut [u8]) -> anyhow::Result<usize> {
+        match self.do_get_input_report(buf) {
+            Ok(n) => Ok(n),
+            Err(e) if self.reopener.is_some() => {
+                warn!("HID get_input_report failed ({e}); attempting reopen");
+                self.try_reopen()?;
+                info!("HID handle reopened, retrying get_input_report");
+                self.do_get_input_report(buf)
+            }
+            Err(e) => Err(e),
         }
     }
 
     /// Drain any stale data from the device read buffer.
-    pub fn read_flush(&self) {
+    pub fn read_flush(&mut self) {
         let mut buf = [0u8; 64];
         loop {
-            match self.read_timeout(&mut buf, 5) {
+            match self.do_read_timeout(&mut buf, 5) {
                 Ok(n) if n > 0 => continue,
                 _ => break,
             }

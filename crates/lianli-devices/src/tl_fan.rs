@@ -219,7 +219,7 @@ impl TlFanController {
             .to_string();
 
         // Consume second response (date/time) to keep buffer in sync
-        let dev = self.device.lock();
+        let mut dev = self.device.lock();
         let mut buf = [0u8; PACKET_SIZE];
         let n2 = dev
             .read_timeout(&mut buf, INIT_READ_TIMEOUT_MS)

@@ -471,11 +471,8 @@ pub fn open_hid_lcd_device_rusb(
             Some(open_with_retry(&det.device, || {
                 let transport =
                     RusbHidTransport::open_by_usage(det.device.clone(), det.hid_usage_page)?;
-                let backend = HidBackend::from_rusb(transport).with_reopener(make_rusb_reopener(
-                    det.vid,
-                    det.pid,
-                    det.hid_usage_page,
-                ));
+                let mut backend = HidBackend::from_rusb(transport)
+                    .with_reopener(make_rusb_reopener(det.vid, det.pid, det.hid_usage_page));
                 backend.read_flush();
                 let backend = Arc::new(Mutex::new(backend));
                 crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid)
@@ -511,7 +508,7 @@ pub fn open_hidapi_with_retry<T>(
     for attempt in 0..=3u32 {
         match api.open_path(&det.path) {
             Ok(hid_dev) => {
-                let backend = HidBackend::from_hidapi(hid_dev)
+                let mut backend = HidBackend::from_hidapi(hid_dev)
                     .with_reopener(make_hidapi_reopener(det.vid, det.pid, det.family));
                 backend.read_flush();
                 return create_fn(backend);
