@@ -13,6 +13,7 @@ pub type HidReopener = Arc<dyn Fn() -> anyhow::Result<HidBackendKind> + Send + S
 pub enum HidBackendKind {
     Hidapi(HidDevice),
     Rusb(RusbHidTransport),
+    Closed,
 }
 
 pub struct HidBackend {
@@ -47,8 +48,9 @@ impl HidBackend {
     fn try_reopen(&mut self) -> anyhow::Result<()> {
         let reopener = self
             .reopener
-            .as_ref()
+            .clone()
             .ok_or_else(|| anyhow::anyhow!("no reopener configured"))?;
+        drop(std::mem::replace(&mut self.kind, HidBackendKind::Closed));
         let new_kind = reopener().map_err(|e| anyhow::anyhow!("reopen: {e}"))?;
         self.kind = new_kind;
         Ok(())
@@ -58,6 +60,7 @@ impl HidBackend {
         match &self.kind {
             HidBackendKind::Hidapi(dev) => dev.write(data).map_err(|e| anyhow::anyhow!("{e}")),
             HidBackendKind::Rusb(dev) => dev.write(data).map_err(|e| anyhow::anyhow!("{e}")),
+            HidBackendKind::Closed => Err(anyhow::anyhow!("HID backend closed")),
         }
     }
 
@@ -82,6 +85,7 @@ impl HidBackend {
             HidBackendKind::Rusb(dev) => dev
                 .read_timeout(buf, timeout_ms)
                 .map_err(|e| anyhow::anyhow!("{e}")),
+            HidBackendKind::Closed => Err(anyhow::anyhow!("HID backend closed")),
         }
     }
 
@@ -108,6 +112,7 @@ impl HidBackend {
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(())
             }
+            HidBackendKind::Closed => Err(anyhow::anyhow!("HID backend closed")),
         }
     }
 
@@ -132,6 +137,7 @@ impl HidBackend {
             HidBackendKind::Rusb(dev) => dev
                 .get_feature_report(buf)
                 .map_err(|e| anyhow::anyhow!("{e}")),
+            HidBackendKind::Closed => Err(anyhow::anyhow!("HID backend closed")),
         }
     }
 
@@ -156,6 +162,7 @@ impl HidBackend {
             HidBackendKind::Rusb(dev) => dev
                 .get_input_report(buf)
                 .map_err(|e| anyhow::anyhow!("{e}")),
+            HidBackendKind::Closed => Err(anyhow::anyhow!("HID backend closed")),
         }
     }
 
