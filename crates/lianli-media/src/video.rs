@@ -57,22 +57,41 @@ pub fn build_gif_frames(
     path: &Path,
     orientation: f32,
     screen: &ScreenInfo,
+    desired_fps: Option<f32>,
 ) -> Result<(Vec<Vec<u8>>, Vec<Duration>), MediaError> {
     let file = File::open(path)?;
     let decoder = GifDecoder::new(file)?;
-    let frames = decoder.into_frames();
     let mut encoded = Vec::new();
     let mut durations = Vec::new();
 
-    for frame in frames {
-        let frame = frame?;
+    let target_ms = desired_fps.map(|fps| 1000.0 / fps.max(1.0));
+    let mut accum_ms = 0.0f32;
+
+    let frames: Vec<_> = decoder
+        .into_frames()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(image::ImageError::from)?;
+    let n = frames.len();
+
+    for (i, frame) in frames.into_iter().enumerate() {
         let (numer, denom) = frame.delay().numer_denom_ms();
-        let millis = if denom == 0 {
+        let native_ms = if denom == 0 {
             numer as f32
         } else {
             numer as f32 / denom as f32
         };
-        let duration = Duration::from_millis(millis.max(10.0) as u64);
+        let native_ms = native_ms.max(10.0);
+        accum_ms += native_ms;
+
+        let is_last = i + 1 == n;
+        let should_emit = match target_ms {
+            Some(t) => accum_ms >= t || is_last,
+            None => true,
+        };
+        if !should_emit {
+            continue;
+        }
+
         let rgba = frame.into_buffer();
         let rgb = DynamicImage::ImageRgba8(rgba).to_rgb8();
         let (rw, rh) = render_dimensions(screen, orientation);
@@ -80,7 +99,8 @@ pub fn build_gif_frames(
         let oriented = apply_orientation(resized, orientation);
         let jpeg = encode_jpeg(oriented, screen)?;
         encoded.push(jpeg);
-        durations.push(duration);
+        durations.push(Duration::from_millis(accum_ms as u64));
+        accum_ms = 0.0;
     }
 
     if encoded.is_empty() {

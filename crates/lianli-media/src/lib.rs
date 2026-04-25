@@ -112,7 +112,8 @@ pub fn prepare_media_asset(
             let path = cfg.path.as_ref().ok_or(MediaError::InvalidConfig(
                 "gif entry requires a 'path' field".into(),
             ))?;
-            let (frames, durations) = video::build_gif_frames(path, cfg.orientation, screen)?;
+            let (frames, durations) =
+                video::build_gif_frames(path, cfg.orientation, screen, cfg.fps)?;
             Ok(MediaAssetKind::Video {
                 frames: Arc::new(frames),
                 frame_durations: Arc::new(durations),
