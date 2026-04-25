@@ -14,6 +14,7 @@ use lianli_transport::HidBackend;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 const REPORT_ID: u8 = 0x01;
@@ -74,9 +75,11 @@ pub struct Galahad2Handshake {
 pub struct Galahad2TrinityController {
     device: Arc<Mutex<HidBackend>>,
     model: Galahad2TrinityModel,
-    last_handshake: Option<Galahad2Handshake>,
+    handshake_cache: Mutex<Option<(Galahad2Handshake, Instant)>>,
     mb_sync: AtomicBool,
 }
+
+const HANDSHAKE_REFRESH: Duration = Duration::from_millis(500);
 
 impl Galahad2TrinityController {
     pub fn new(device: Arc<Mutex<HidBackend>>, pid: u16) -> Result<Self> {
@@ -86,7 +89,7 @@ impl Galahad2TrinityController {
         let mut ctrl = Self {
             device,
             model,
-            last_handshake: None,
+            handshake_cache: Mutex::new(None),
             mb_sync: AtomicBool::new(false),
         };
 
@@ -120,7 +123,7 @@ impl Galahad2TrinityController {
     }
 
     /// Perform handshake to read fan and pump RPM.
-    pub fn handshake(&mut self) -> Result<Galahad2Handshake> {
+    pub fn handshake(&self) -> Result<Galahad2Handshake> {
         self.device.lock().read_flush();
         let resp = self.send_a_command(CMD_HANDSHAKE, &[])?;
         let data = &resp[HEADER_LEN..];
@@ -136,7 +139,7 @@ impl Galahad2TrinityController {
         };
 
         debug!("Handshake: fan={}rpm pump={}rpm", hs.fan_rpm, hs.pump_rpm);
-        self.last_handshake = Some(hs.clone());
+        *self.handshake_cache.lock() = Some((hs.clone(), Instant::now()));
         Ok(hs)
     }
 
@@ -271,6 +274,21 @@ impl Galahad2TrinityController {
         Ok(())
     }
 
+    fn refresh_handshake(&self) -> Option<Galahad2Handshake> {
+        let cached = self.handshake_cache.lock().clone();
+        let stale = match &cached {
+            Some((_, ts)) => ts.elapsed() >= HANDSHAKE_REFRESH,
+            None => true,
+        };
+        if stale {
+            match self.handshake() {
+                Ok(hs) => return Some(hs),
+                Err(e) => warn!("Galahad2 Trinity handshake refresh failed: {e}"),
+            }
+        }
+        cached.map(|(hs, _)| hs)
+    }
+
     fn send_a_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
         let mut pkt = [0u8; PACKET_SIZE];
         pkt[0] = REPORT_ID;
@@ -316,11 +334,8 @@ impl FanDevice for Galahad2TrinityController {
     }
 
     fn read_fan_rpm(&self) -> Result<Vec<u16>> {
-        Ok(vec![self
-            .last_handshake
-            .as_ref()
-            .map(|hs| hs.fan_rpm)
-            .unwrap_or(0)])
+        let hs = self.refresh_handshake();
+        Ok(vec![hs.map(|h| h.fan_rpm).unwrap_or(0)])
     }
 
     fn fan_slot_count(&self) -> u8 {
@@ -351,11 +366,7 @@ impl FanDevice for Galahad2TrinityController {
 
 impl AioDevice for Galahad2TrinityController {
     fn read_pump_rpm(&self) -> Result<u16> {
-        Ok(self
-            .last_handshake
-            .as_ref()
-            .map(|hs| hs.pump_rpm)
-            .unwrap_or(0))
+        Ok(self.refresh_handshake().map(|hs| hs.pump_rpm).unwrap_or(0))
     }
 
     fn read_coolant_temp(&self) -> Result<f32> {
