@@ -1,11 +1,14 @@
 use crate::error::TransportError;
 use rusb::{Device, DeviceHandle, GlobalContext};
 use std::time::Duration;
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub struct RusbHidTransport {
     handle: DeviceHandle<GlobalContext>,
     iface: u8,
+    /// All HID interfaces we hold for the lifetime of this transport.
+    /// Held continuously so the kernel can't re-bind hidraw and reject our writes.
+    claimed: Vec<u8>,
     ep_in: u8,
     ep_out: Option<u8>,
 }
@@ -38,22 +41,28 @@ impl RusbHidTransport {
             return Err(TransportError::Other("No HID interfaces found".into()));
         }
 
-        // Detach kernel drivers from all HID interfaces on this device.
-        // Claim each one before the usage-page probe; usbfs rejects control
-        // transfers against unclaimed interfaces.
         let mut claimed: Vec<u8> = Vec::new();
         for &iface_num in &hid_ifaces {
-            if handle.kernel_driver_active(iface_num).unwrap_or(false) {
-                let _ = handle.detach_kernel_driver(iface_num);
-                debug!("RusbHid: detached kernel driver from interface {iface_num}");
-            }
+            detach_kernel_driver_with_retry(&handle, iface_num);
             match handle.claim_interface(iface_num) {
-                Ok(()) => claimed.push(iface_num),
-                Err(e) => debug!("RusbHid: claim interface {iface_num} failed: {e}"),
+                Ok(()) => {
+                    if let Err(e) = handle.set_alternate_setting(iface_num, 0) {
+                        debug!(
+                            "RusbHid: set_alternate_setting(0) on interface {iface_num} failed: {e}"
+                        );
+                    }
+                    claimed.push(iface_num);
+                }
+                Err(e) => warn!("RusbHid: claim interface {iface_num} failed: {e}"),
             }
         }
 
-        // Find the target interface by usage page
+        if claimed.is_empty() {
+            return Err(TransportError::Other(
+                "RusbHid: could not claim any HID interface".into(),
+            ));
+        }
+
         let target_iface = if let Some(required_page) = usage_page {
             let mut matched = None;
             for &iface_num in &claimed {
@@ -64,7 +73,7 @@ impl RusbHidTransport {
                     (0x22u16) << 8,
                     iface_num as u16,
                     &mut buf,
-                    Duration::from_millis(1000),
+                    Duration::from_millis(250),
                 );
                 if let Ok(n) = result {
                     if let Some(page) = parse_usage_page(&buf[..n]) {
@@ -78,29 +87,15 @@ impl RusbHidTransport {
                     }
                 }
             }
-            match matched {
-                Some(n) => n,
-                None => {
-                    debug!(
-                        "RusbHid: no interface matched usage page {required_page:#06x}, using first claimed"
-                    );
-                    *claimed.first().ok_or_else(|| {
-                        TransportError::Other("RusbHid: could not claim any HID interface".into())
-                    })?
-                }
-            }
+            matched.unwrap_or_else(|| {
+                debug!(
+                    "RusbHid: no interface matched usage page {required_page:#06x}, using first claimed"
+                );
+                claimed[0]
+            })
         } else {
-            *claimed.first().ok_or_else(|| {
-                TransportError::Other("RusbHid: could not claim any HID interface".into())
-            })?
+            claimed[0]
         };
-
-        // Release probed interfaces we won't use, keep only the target.
-        for &iface_num in &claimed {
-            if iface_num != target_iface {
-                let _ = handle.release_interface(iface_num);
-            }
-        }
 
         // Find endpoints
         let mut ep_in: Option<u8> = None;
@@ -138,6 +133,7 @@ impl RusbHidTransport {
         Ok(Self {
             handle,
             iface: target_iface,
+            claimed,
             ep_in,
             ep_out,
         })
@@ -277,8 +273,35 @@ impl RusbHidTransport {
 
 impl Drop for RusbHidTransport {
     fn drop(&mut self) {
-        let _ = self.handle.release_interface(self.iface);
-        let _ = self.handle.attach_kernel_driver(self.iface);
+        for &iface in self.claimed.iter().rev() {
+            let _ = self.handle.release_interface(iface);
+            let _ = self.handle.attach_kernel_driver(iface);
+        }
+    }
+}
+
+fn detach_kernel_driver_with_retry(handle: &DeviceHandle<GlobalContext>, iface: u8) {
+    for attempt in 0..2 {
+        let active = handle.kernel_driver_active(iface);
+        let needs_detach = matches!(active, Ok(true) | Err(_));
+        if !needs_detach {
+            return;
+        }
+        match handle.detach_kernel_driver(iface) {
+            Ok(()) => {
+                debug!("RusbHid: detached kernel driver from interface {iface}");
+                return;
+            }
+            Err(rusb::Error::NotFound) => return,
+            Err(e) if attempt == 0 => {
+                std::thread::sleep(Duration::from_millis(50));
+                debug!("RusbHid: detach interface {iface} retry after error: {e}");
+            }
+            Err(e) => {
+                warn!("RusbHid: detach interface {iface} failed: {e}");
+                return;
+            }
+        }
     }
 }
 

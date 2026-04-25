@@ -19,6 +19,9 @@ pub struct UsbTransport {
     ep_in: u8,
     ep_in_interrupt: bool,
     ep_out_interrupt: bool,
+    /// All interfaces we hold for the lifetime of this transport.
+    /// Held continuously so the kernel can't re-bind and reject our writes.
+    claimed: Vec<u8>,
 }
 
 impl UsbTransport {
@@ -39,6 +42,7 @@ impl UsbTransport {
             ep_in: EP_IN,
             ep_in_interrupt,
             ep_out_interrupt,
+            claimed: Vec::new(),
         })
     }
 
@@ -51,6 +55,7 @@ impl UsbTransport {
             ep_in: EP_IN,
             ep_in_interrupt,
             ep_out_interrupt,
+            claimed: Vec::new(),
         })
     }
 
@@ -91,6 +96,7 @@ impl UsbTransport {
         match self.handle.claim_interface(0) {
             Ok(()) => {
                 let _ = self.handle.set_alternate_setting(0, 0);
+                self.claimed.push(0);
             }
             Err(rusb::Error::Busy) => {
                 warn!("{name} interface busy, attempting USB reset");
@@ -109,8 +115,32 @@ impl UsbTransport {
                 }
                 self.handle.claim_interface(0)?;
                 let _ = self.handle.set_alternate_setting(0, 0);
+                self.claimed.push(0);
             }
             Err(e) => return Err(e.into()),
+        }
+
+        if let Ok(config) = self.handle.device().active_config_descriptor() {
+            for iface in config.interfaces() {
+                let num = iface.number();
+                if num == 0 || self.claimed.contains(&num) {
+                    continue;
+                }
+                match self.handle.kernel_driver_active(num) {
+                    Ok(true) => {
+                        let _ = self.handle.detach_kernel_driver(num);
+                    }
+                    _ => {}
+                }
+                match self.handle.claim_interface(num) {
+                    Ok(()) => {
+                        let _ = self.handle.set_alternate_setting(num, 0);
+                        self.claimed.push(num);
+                        debug!("{name}: claimed extra interface {num}");
+                    }
+                    Err(e) => warn!("{name}: claim extra interface {num} failed: {e}"),
+                }
+            }
         }
 
         Ok(())
@@ -185,7 +215,9 @@ impl UsbTransport {
     }
 
     pub fn release(&self) {
-        let _ = self.handle.release_interface(0);
+        for &iface in self.claimed.iter().rev() {
+            let _ = self.handle.release_interface(iface);
+        }
     }
 
     pub fn reset(&self) -> Result<(), TransportError> {
@@ -208,7 +240,9 @@ impl UsbTransport {
 
 impl Drop for UsbTransport {
     fn drop(&mut self) {
-        let _ = self.handle.release_interface(0);
+        for &iface in self.claimed.iter().rev() {
+            let _ = self.handle.release_interface(iface);
+        }
     }
 }
 
