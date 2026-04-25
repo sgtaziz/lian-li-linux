@@ -21,6 +21,7 @@ const REPORT_ID: u8 = 0x01;
 const PACKET_SIZE: usize = 64;
 const HEADER_LEN: usize = 6;
 const READ_TIMEOUT_MS: i32 = 200;
+const INIT_READ_TIMEOUT_MS: i32 = 3000;
 
 // A-Commands — Control
 const CMD_HANDSHAKE: u8 = 0x81;
@@ -107,12 +108,12 @@ impl Galahad2TrinityController {
             }
         );
 
-        match self.read_firmware() {
+        match self.read_firmware(INIT_READ_TIMEOUT_MS) {
             Ok(fw) => info!("  Firmware: {fw}"),
             Err(e) => warn!("  Failed to read firmware: {e}"),
         }
 
-        match self.handshake() {
+        match self.handshake_with_timeout(INIT_READ_TIMEOUT_MS) {
             Ok(hs) => {
                 info!("  Fan RPM: {}, Pump RPM: {}", hs.fan_rpm, hs.pump_rpm);
             }
@@ -124,8 +125,12 @@ impl Galahad2TrinityController {
 
     /// Perform handshake to read fan and pump RPM.
     pub fn handshake(&self) -> Result<Galahad2Handshake> {
+        self.handshake_with_timeout(READ_TIMEOUT_MS)
+    }
+
+    fn handshake_with_timeout(&self, timeout_ms: i32) -> Result<Galahad2Handshake> {
         self.device.lock().read_flush();
-        let resp = self.send_a_command(CMD_HANDSHAKE, &[])?;
+        let resp = self.send_a_command_timeout(CMD_HANDSHAKE, &[], timeout_ms)?;
         let data = &resp[HEADER_LEN..];
         let data_len = resp[5] as usize;
 
@@ -143,7 +148,7 @@ impl Galahad2TrinityController {
         Ok(hs)
     }
 
-    fn read_firmware(&self) -> Result<String> {
+    fn read_firmware(&self, timeout_ms: i32) -> Result<String> {
         let mut dev = self.device.lock();
         dev.read_flush();
 
@@ -156,7 +161,7 @@ impl Galahad2TrinityController {
         // Response 1: version string
         let mut buf = [0u8; PACKET_SIZE];
         let n = dev
-            .read_timeout(&mut buf, READ_TIMEOUT_MS)
+            .read_timeout(&mut buf, timeout_ms)
             .context("Galahad2 Trinity: read firmware")?;
         if n == 0 {
             bail!("Galahad2 Trinity: no firmware response");
@@ -168,7 +173,7 @@ impl Galahad2TrinityController {
             .to_string();
 
         // Response 2: date/time string (must be consumed to keep buffer in sync)
-        let n2 = dev.read_timeout(&mut buf, READ_TIMEOUT_MS).unwrap_or(0);
+        let n2 = dev.read_timeout(&mut buf, timeout_ms).unwrap_or(0);
         if n2 > 0 {
             let len2 = buf[5] as usize;
             let data2 = &buf[HEADER_LEN..HEADER_LEN + len2.min(58)];
@@ -319,6 +324,10 @@ impl Galahad2TrinityController {
     }
 
     fn send_a_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
+        self.send_a_command_timeout(cmd, data, READ_TIMEOUT_MS)
+    }
+
+    fn send_a_command_timeout(&self, cmd: u8, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
         let mut pkt = [0u8; PACKET_SIZE];
         pkt[0] = REPORT_ID;
         pkt[1] = cmd;
@@ -331,7 +340,7 @@ impl Galahad2TrinityController {
 
         let mut buf = [0u8; PACKET_SIZE];
         let n = dev
-            .read_timeout(&mut buf, READ_TIMEOUT_MS)
+            .read_timeout(&mut buf, timeout_ms)
             .context("Galahad2 Trinity: read")?;
 
         if n == 0 {

@@ -23,6 +23,7 @@ const PACKET_SIZE: usize = 64;
 const HEADER_LEN: usize = 6;
 const MAX_PAYLOAD: usize = PACKET_SIZE - HEADER_LEN;
 const READ_TIMEOUT_MS: i32 = 100;
+const INIT_READ_TIMEOUT_MS: i32 = 3000;
 
 // Commands — Fan control
 const CMD_HANDSHAKE: u8 = 0xA1;
@@ -91,7 +92,7 @@ impl TlFanController {
             Err(e) => warn!("  Failed to read firmware: {e}"),
         }
 
-        match self.handshake() {
+        match self.handshake_with_timeout(INIT_READ_TIMEOUT_MS) {
             Ok(hs) => {
                 info!(
                     "  Detected fans: port0={}, port1={}, port2={}, port3={}",
@@ -121,7 +122,11 @@ impl TlFanController {
 
     /// Perform a handshake to discover connected fans and read RPMs.
     pub fn handshake(&self) -> Result<TlFanHandshake> {
-        let response = self.send_command(CMD_HANDSHAKE, &[])?;
+        self.handshake_with_timeout(READ_TIMEOUT_MS)
+    }
+
+    fn handshake_with_timeout(&self, timeout_ms: i32) -> Result<TlFanHandshake> {
+        let response = self.send_command_timeout(CMD_HANDSHAKE, &[], timeout_ms)?;
 
         let mut port_fan_counts = [0u8; 4];
         let mut fans = Vec::new();
@@ -204,7 +209,8 @@ impl TlFanController {
     /// Read product/firmware info.
     fn read_product_info(&self) -> Result<String> {
         // Request controller firmware (not fan firmware)
-        let response = self.send_command(CMD_GET_PRODUCT_INFO, &[0x00, 0x00])?;
+        let response =
+            self.send_command_timeout(CMD_GET_PRODUCT_INFO, &[0x00, 0x00], INIT_READ_TIMEOUT_MS)?;
         let data_len = response[5] as usize;
         let data = &response[HEADER_LEN..HEADER_LEN + data_len.min(MAX_PAYLOAD)];
 
@@ -215,7 +221,9 @@ impl TlFanController {
         // Consume second response (date/time) to keep buffer in sync
         let dev = self.device.lock();
         let mut buf = [0u8; PACKET_SIZE];
-        let n2 = dev.read_timeout(&mut buf, READ_TIMEOUT_MS).unwrap_or(0);
+        let n2 = dev
+            .read_timeout(&mut buf, INIT_READ_TIMEOUT_MS)
+            .unwrap_or(0);
         if n2 > 0 {
             let len2 = buf[5] as usize;
             let data2 = &buf[HEADER_LEN..HEADER_LEN + len2.min(MAX_PAYLOAD)];
@@ -486,7 +494,7 @@ impl TlFanController {
     }
 
     /// Send a command and read the synchronous response.
-    fn send_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
+    fn send_command_timeout(&self, cmd: u8, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
         let pkt = Self::build_packet(cmd, data);
         let mut dev = self.device.lock();
 
@@ -498,7 +506,7 @@ impl TlFanController {
         // Read up to a few times to skip stale responses
         for _ in 0..5 {
             let n = dev
-                .read_timeout(&mut buf, READ_TIMEOUT_MS)
+                .read_timeout(&mut buf, timeout_ms)
                 .context("TL Fan: read response")?;
 
             if n == 0 {

@@ -20,6 +20,7 @@ const PACKET_SIZE: usize = 512;
 const HEADER_LEN: usize = 11;
 const MAX_PAYLOAD_PER_PACKET: usize = PACKET_SIZE - HEADER_LEN; // 501
 const READ_TIMEOUT_MS: i32 = 200;
+const INIT_READ_TIMEOUT_MS: i32 = 3000;
 
 // Commands
 const CMD_GET_HANDSHAKE: u8 = 60;
@@ -122,7 +123,8 @@ impl TlLcdDevice {
     }
 
     fn read_identity_raw(&self) -> Result<TlLcdIdentity> {
-        let resp = self.send_command_with_response(CMD_READ_SERIAL, &[])?;
+        let resp =
+            self.send_command_with_response_timeout(CMD_READ_SERIAL, &[], INIT_READ_TIMEOUT_MS)?;
         let data = &resp[HEADER_LEN..];
         let serial_bytes = &data[..32.min(data.len())];
         let serial = String::from_utf8_lossy(serial_bytes)
@@ -148,7 +150,8 @@ impl TlLcdDevice {
 
     /// Read handshake info (current mode and frame index).
     pub fn read_handshake(&self) -> Result<TlLcdHandshake> {
-        let resp = self.send_command_with_response(CMD_GET_HANDSHAKE, &[])?;
+        let resp =
+            self.send_command_with_response_timeout(CMD_GET_HANDSHAKE, &[], INIT_READ_TIMEOUT_MS)?;
         let data = &resp[HEADER_LEN..];
 
         Ok(TlLcdHandshake {
@@ -172,7 +175,7 @@ impl TlLcdDevice {
         // Response 1: version string
         let mut buf = [0u8; 64];
         let n = dev
-            .read_timeout(&mut buf, READ_TIMEOUT_MS)
+            .read_timeout(&mut buf, INIT_READ_TIMEOUT_MS)
             .context("TLLCD: read firmware")?;
         if n == 0 {
             bail!("TLLCD: no firmware response");
@@ -184,7 +187,9 @@ impl TlLcdDevice {
             .to_string();
 
         // Response 2: date/time string (must be consumed to keep buffer in sync)
-        let n2 = dev.read_timeout(&mut buf, READ_TIMEOUT_MS).unwrap_or(0);
+        let n2 = dev
+            .read_timeout(&mut buf, INIT_READ_TIMEOUT_MS)
+            .unwrap_or(0);
         if n2 > 0 {
             let len2 = payload_length(&buf);
             let data2 = &buf[HEADER_LEN..HEADER_LEN + len2.min(MAX_PAYLOAD_PER_PACKET)];
@@ -289,6 +294,15 @@ impl TlLcdDevice {
 
     /// Send a command with payload and read response.
     fn send_command_with_response(&self, cmd: u8, payload: &[u8]) -> Result<Vec<u8>> {
+        self.send_command_with_response_timeout(cmd, payload, READ_TIMEOUT_MS)
+    }
+
+    fn send_command_with_response_timeout(
+        &self,
+        cmd: u8,
+        payload: &[u8],
+        timeout_ms: i32,
+    ) -> Result<Vec<u8>> {
         let mut dev = self.device.lock();
         let pkt = build_packet(cmd, payload.len() as u32, 0, payload);
 
@@ -296,7 +310,7 @@ impl TlLcdDevice {
 
         let mut buf = [0u8; 64];
         let n = dev
-            .read_timeout(&mut buf, READ_TIMEOUT_MS)
+            .read_timeout(&mut buf, timeout_ms)
             .context("TLLCD: read response")?;
 
         if n == 0 {
