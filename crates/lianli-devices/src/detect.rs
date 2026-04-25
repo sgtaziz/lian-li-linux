@@ -396,6 +396,12 @@ pub fn ensure_hid_devices_bound() {
             })
         });
         if let Some(usb_dev) = dev {
+            if device_responds_to_descriptor(&usb_dev) {
+                info!(
+                    "{name}: descriptor read OK, kernel hasn't bound hidraw yet — skipping reset"
+                );
+                continue;
+            }
             match RusbHidTransport::reset_usb_device(&usb_dev) {
                 Ok(()) => {
                     info!("USB reset successful for {name}");
@@ -418,6 +424,25 @@ pub fn ensure_hid_devices_bound() {
         info!("Waiting 3s for {reset_count} device(s) to re-enumerate after USB reset");
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
+}
+
+fn device_responds_to_descriptor(device: &Device<GlobalContext>) -> bool {
+    let Ok(desc) = device.device_descriptor() else {
+        return false;
+    };
+    let Ok(handle) = device.open() else {
+        return false;
+    };
+    let langs = match handle.read_languages(Duration::from_millis(250)) {
+        Ok(l) if !l.is_empty() => l,
+        _ => return desc.product_string_index().is_some(),
+    };
+    if let Some(_idx) = desc.product_string_index() {
+        return handle
+            .read_product_string(langs[0], &desc, Duration::from_millis(250))
+            .is_ok();
+    }
+    true
 }
 
 /// Try opening a device, retrying on failure. First two retries are plain
