@@ -43,6 +43,11 @@ pub enum RgbMode {
     Vortex,
     Pump,
     ColorsMorph,
+    TaiChi,
+    CrossingOver,
+    ColorfulStarryNight,
+    StaticStarryNight,
+    Bounce,
 }
 
 impl RgbMode {
@@ -153,6 +158,11 @@ impl RgbMode {
             Self::Vortex => "Vortex",
             Self::Pump => "Pump",
             Self::ColorsMorph => "Colors Morph",
+            Self::TaiChi => "Tai Chi",
+            Self::CrossingOver => "Crossing Over",
+            Self::ColorfulStarryNight => "Colorful Starry Night",
+            Self::StaticStarryNight => "Static Starry Night",
+            Self::Bounce => "Bounce",
         }
     }
 }
