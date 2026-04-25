@@ -179,7 +179,7 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
     DeviceEntry {
         id: UsbId::new(0x04FC, 0x7393),
         family: DeviceFamily::TlLcd,
-        name: "TLLCD Fan LCD",
+        name: "UNI FAN TL LCD",
         hid_usage_page: None,
     },
     // Galahad2 Trinity — usage page 0xFF1B selects the control interface
