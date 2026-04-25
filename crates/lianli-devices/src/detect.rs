@@ -421,9 +421,10 @@ pub fn ensure_hid_devices_bound() {
 }
 
 /// Try opening a device, retrying on failure. First two retries are plain
-/// reopens, only the last retry does a USB port reset
-fn open_with_retry<T>(
-    usb_device: &Device<GlobalContext>,
+/// reopens, only the last retry does a USB port reset.
+fn try_open_with_retry<T>(
+    usb_device: Option<&Device<GlobalContext>>,
+    label: &str,
     mut open_fn: impl FnMut() -> Result<T>,
 ) -> Result<T> {
     const MAX_RETRIES: u32 = 3;
@@ -433,23 +434,42 @@ fn open_with_retry<T>(
             Ok(t) => return Ok(t),
             Err(e) if attempt < MAX_RETRIES => {
                 if attempt == RESET_AT {
+                    if let Some(usb_dev) = usb_device {
+                        warn!(
+                            "{label}: open attempt {} failed: {e}, resetting USB device",
+                            attempt + 1
+                        );
+                        let _ = RusbHidTransport::reset_usb_device(usb_dev);
+                        std::thread::sleep(Duration::from_secs(3));
+                    } else {
+                        return Err(e.context(format!(
+                            "{label}: failed and no USB device available for reset"
+                        )));
+                    }
+                } else {
                     warn!(
-                        "Open attempt {} failed: {e}, resetting USB device",
+                        "{label}: open attempt {} failed: {e}, retrying",
                         attempt + 1
                     );
-                    let _ = RusbHidTransport::reset_usb_device(usb_device);
-                    std::thread::sleep(Duration::from_secs(3));
-                } else {
-                    warn!("Open attempt {} failed: {e}, retrying", attempt + 1);
                     std::thread::sleep(Duration::from_millis(250));
                 }
             }
             Err(e) => {
-                return Err(e.context(format!("failed after {} attempts", MAX_RETRIES + 1)));
+                return Err(e.context(format!(
+                    "{label}: failed after {} attempts",
+                    MAX_RETRIES + 1
+                )));
             }
         }
     }
     unreachable!()
+}
+
+fn open_with_retry<T>(
+    usb_device: &Device<GlobalContext>,
+    open_fn: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    try_open_with_retry(Some(usb_device), "rusb open", open_fn)
 }
 
 /// Find the rusb `Device` matching a VID/PID pair.
@@ -503,49 +523,18 @@ pub fn open_hidapi_with_retry<T>(
     mut create_fn: impl FnMut(HidBackend) -> Result<T>,
 ) -> Result<T> {
     let usb_device = find_usb_device(det.vid, det.pid);
+    let label = format!("HID open {} ({:04x}:{:04x})", det.name, det.vid, det.pid);
 
-    const RESET_AT: u32 = 2;
-    for attempt in 0..=3u32 {
-        match api.open_path(&det.path) {
-            Ok(hid_dev) => {
-                let mut backend = HidBackend::from_hidapi(hid_dev)
-                    .with_reopener(make_hidapi_reopener(det.vid, det.pid, det.family));
-                backend.read_flush();
-                return create_fn(backend);
-            }
-            Err(e) if attempt < 3 => {
-                if attempt == RESET_AT {
-                    warn!(
-                        "HID open attempt {} failed for {} ({:04x}:{:04x}): {e}, resetting USB",
-                        attempt + 1,
-                        det.name,
-                        det.vid,
-                        det.pid
-                    );
-                    if let Some(ref usb_dev) = usb_device {
-                        let _ = RusbHidTransport::reset_usb_device(usb_dev);
-                        std::thread::sleep(Duration::from_secs(3));
-                    } else {
-                        warn!("Cannot find USB device for reset");
-                        return Err(anyhow::anyhow!("HID open failed: {e}"));
-                    }
-                } else {
-                    warn!(
-                        "HID open attempt {} failed for {} ({:04x}:{:04x}): {e}, retrying",
-                        attempt + 1,
-                        det.name,
-                        det.vid,
-                        det.pid
-                    );
-                    std::thread::sleep(Duration::from_millis(250));
-                }
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!("HID open failed after 4 attempts: {e}"));
-            }
-        }
-    }
-    unreachable!()
+    let backend = try_open_with_retry(usb_device.as_ref(), &label, || {
+        let hid_dev = api
+            .open_path(&det.path)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut backend = HidBackend::from_hidapi(hid_dev)
+            .with_reopener(make_hidapi_reopener(det.vid, det.pid, det.family));
+        backend.read_flush();
+        Ok(backend)
+    })?;
+    create_fn(backend)
 }
 
 /// Open a shared HID backend via hidapi with retry logic.
