@@ -1,0 +1,1149 @@
+{
+  "id": "downloaded-18a7b2f9ba083754",
+  "name": "Universal Screen 8.8\" Skeleton (Downloaded 2)",
+  "base_width": 1920,
+  "base_height": 480,
+  "background": {
+    "type": "image",
+    "path": "background.png"
+  },
+  "widgets": [
+    {
+      "id": "CPU USAGE CHART",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 135.0,
+        "sweep_angle": 350.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [
+          60,
+          60,
+          60,
+          255
+        ],
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 127.164215,
+      "y": 118.17073,
+      "width": 220.0,
+      "height": 220.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "CPU USAGE DATA",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "",
+        "unit": "%",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 80.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 500.0,
+        "value_max": 1800.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 128.55998,
+      "y": 115.84781,
+      "width": 180.0,
+      "height": 80.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null,
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "CPU TEMP CHART",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 135.0,
+        "sweep_angle": 350.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [
+          60,
+          60,
+          60,
+          255
+        ],
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 122.79903,
+      "y": 358.93753,
+      "width": 220.0,
+      "height": 220.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "CPU TEMP DATA",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "°",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 80.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 122.05981,
+      "y": 360.7718,
+      "width": 120.0,
+      "height": 60.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "CPU NAME",
+      "kind": {
+        "type": "label",
+        "text": "CPU",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 50.0,
+        "color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 243.86902,
+      "y": 39.22653,
+      "width": 120.0,
+      "height": 80.0,
+      "rotation": 45.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "GPU USAGE CHART",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 45.0,
+        "sweep_angle": 350.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [
+          60,
+          60,
+          60,
+          255
+        ],
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 1801.9144,
+      "y": 117.19846,
+      "width": 220.0,
+      "height": 220.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "GPU USAGE DATA",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 80.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 1799.1029,
+      "y": 118.8022,
+      "width": 175.0,
+      "height": 175.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "GP NAME",
+      "kind": {
+        "type": "label",
+        "text": "GPU",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 50.0,
+        "color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 1682.3956,
+      "y": 46.420815,
+      "width": 100.0,
+      "height": 100.0,
+      "rotation": 307.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "GPU TEMP DATA",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "°",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 80.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 1799.8998,
+      "y": 358.0,
+      "width": 150.0,
+      "height": 80.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "CPU/CORE",
+      "kind": {
+        "type": "core_bars",
+        "orientation": "horizontal",
+        "background_color": [
+          30,
+          30,
+          30,
+          0
+        ],
+        "show_labels": false,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 960.0,
+      "y": 260.7359,
+      "width": 1200.0,
+      "height": 439.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "CPU/CORE",
+      "kind": {
+        "type": "label",
+        "text": "CPU/CORE",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 100.0,
+        "color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 960.0,
+      "y": 43.0,
+      "width": 500.0,
+      "height": 100.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "RAM FREE BAR",
+      "kind": {
+        "type": "vertical_bar",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 62.0,
+        "background_color": [
+          60,
+          60,
+          60,
+          255
+        ],
+        "corner_radius": 4.0,
+        "ranges": [
+          {
+            "max": 32.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 48.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 1607.7565,
+      "y": 222.44905,
+      "width": 40.0,
+      "height": 240.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "mem_used"
+    },
+    {
+      "id": "Used RAM",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": " GB",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 36.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 1610.167,
+      "y": 142.26195,
+      "width": 75.0,
+      "height": 150.0,
+      "rotation": 270.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "mem_used"
+    },
+    {
+      "id": "FREE RAM BAR",
+      "kind": {
+        "type": "vertical_bar",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 62.0,
+        "background_color": [
+          60,
+          60,
+          60,
+          255
+        ],
+        "corner_radius": 4.0,
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 32.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 48.0,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 1659.7352,
+      "y": 222.88255,
+      "width": 40.0,
+      "height": 240.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "mem_free"
+    },
+    {
+      "id": "FREE RAM DATA",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": " GB",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 36.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 64.0,
+        "ranges": [
+          {
+            "max": 32.0,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 48.0,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 1660.0,
+      "y": 147.0,
+      "width": 100.0,
+      "height": 150.0,
+      "rotation": 270.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "mem_free"
+    },
+    {
+      "id": "GPU TEMP DATA",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "start_angle": 45.0,
+        "sweep_angle": 350.0,
+        "inner_radius_pct": 0.78,
+        "background_color": [
+          40,
+          40,
+          40,
+          255
+        ],
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0.0,
+        "value_corner_radius": 0.0
+      },
+      "x": 1801.0,
+      "y": 360.0,
+      "width": 220.0,
+      "height": 220.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "Ram Temp 2",
+      "kind": {
+        "type": "vertical_bar",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "16-0053"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "background_color": [
+          40,
+          40,
+          40,
+          255
+        ],
+        "corner_radius": 4.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 264.54977,
+      "y": 220.0,
+      "width": 40.0,
+      "height": 260.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Ram Temp 2",
+      "kind": {
+        "type": "vertical_bar",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "16-0053"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "background_color": [
+          40,
+          40,
+          40,
+          255
+        ],
+        "corner_radius": 4.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              0,
+              200,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              140,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              0,
+              0
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 319.2424,
+      "y": 220.0,
+      "width": 40.0,
+      "height": 260.0,
+      "rotation": 0.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Ram Temp 2 Data",
+      "kind": {
+        "type": "label",
+        "text": "",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 50.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 0.0
+      },
+      "x": 311.11093,
+      "y": 293.80804,
+      "width": 50.0,
+      "height": 150.0,
+      "rotation": 90.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "RAM TEMP (1)",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "16-0051"
+        },
+        "format": "",
+        "unit": "°",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 50.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 264.0,
+      "y": 300.75677,
+      "width": 100.0,
+      "height": 130.0,
+      "rotation": 90.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "RAM  TEMP (2)",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "spd5118",
+          "label": "temp1",
+          "device_path": "16-0051"
+        },
+        "format": "{:.0}",
+        "unit": "°",
+        "font": {
+          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
+        },
+        "font_size": 48.0,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "ranges": [
+          {
+            "max": 50.0,
+            "color": [
+              255,
+              200,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 75.0,
+            "color": [
+              220,
+              255,
+              255
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              220,
+              225,
+              255
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0.0
+      },
+      "x": 316.26044,
+      "y": 303.80887,
+      "width": 100.0,
+      "height": 90.0,
+      "rotation": 90.0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    }
+  ],
+  "rotated": true,
+  "target_device": "Universal Screen 8.8\" (480×1920)"
+}
