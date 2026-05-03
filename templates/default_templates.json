@@ -116,6 +116,27 @@
           "sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
         }
       ]
+    },
+    {
+      "id": "geforce-rtx-cpu-gpu-ram",
+      "name": "GeForce RTX CPU GPU RAM",
+      "description": "Full system monitor for Universal Screen 8.8\" - shows CPU/GPU usage, temps, and RAM stats",
+      "author": "Drewlius",
+      "min_daemon_version": "0.5.3",
+      "folder": "geforce-rtx-cpu-gpu-ram",
+      "template_file": "template.json",
+      "template_sha256": "0d8ce99b1efd37dcae818a60effccdffec81e4380cc81a7e13b2e542c1681e2b",
+      "preview": "preview.png",
+      "preview_sha256": "0d8ce99b1efd37dcae818a60effccdffec81e4380cc81a7e13b2e542c1681e2b",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "background.png",
+          "sha256": "7ce419da94952093f0ade36f7ad7e780aa3b0d4023267397dfc8de03e24f3d0f"
+        }
+      ]
     }
   ]
 }
