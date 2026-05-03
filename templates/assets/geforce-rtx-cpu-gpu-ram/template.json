@@ -1,6 +1,6 @@
 {
-  "id": "downloaded-18a7b2f9ba083754",
-  "name": "Universal Screen 8.8\" Skeleton (Downloaded 2)",
+  "id": "geforce-rtx-cpu-gpu-ram",
+  "name": "Geforce-RTX: CPU, GPU, RAM",
   "base_width": 1920,
   "base_height": 480,
   "background": {
@@ -69,7 +69,7 @@
       "sensor_category": "cpu_usage"
     },
     {
-      "id": "CPU USAGE DATA",
+      "id": "CPU USAGE STRING",
       "kind": {
         "type": "value_text",
         "source": {
@@ -88,8 +88,8 @@
           255
         ],
         "align": "center",
-        "value_min": 500.0,
-        "value_max": 1800.0,
+        "value_min": 0,
+        "value_max": 100,
         "ranges": [
           {
             "max": 50.0,
@@ -132,11 +132,11 @@
       "sensor_category": "cpu_usage"
     },
     {
-      "id": "CPU TEMP CHART",
+      "id": "CPU TEMP RADIAL",
       "kind": {
         "type": "radial_gauge",
         "source": {
-          "type": "cpu_usage"
+          "type": "cpu_temp"
         },
         "value_min": 0.0,
         "value_max": 100.0,
@@ -192,13 +192,13 @@
       "sensor_category": "cpu_temp"
     },
     {
-      "id": "CPU TEMP DATA",
+      "id": "CPU TEMP STRING",
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "cpu_temp"
         },
-        "format": "{:.0}",
+        "format": "",
         "unit": "°",
         "font": {
           "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
@@ -255,7 +255,7 @@
       "sensor_category": "cpu_temp"
     },
     {
-      "id": "CPU NAME",
+      "id": "CPU STRING",
       "kind": {
         "type": "label",
         "text": "CPU",
@@ -282,11 +282,11 @@
       "fps": null
     },
     {
-      "id": "GPU USAGE CHART",
+      "id": "GPU USAGE RADIAL",
       "kind": {
         "type": "radial_gauge",
         "source": {
-          "type": "cpu_usage"
+          "type": "gpu_usage"
         },
         "value_min": 0.0,
         "value_max": 100.0,
@@ -342,13 +342,13 @@
       "sensor_category": "gpu_usage"
     },
     {
-      "id": "GPU USAGE DATA",
+      "id": "GPU USAGE STRING",
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "gpu_usage"
         },
-        "format": "{:.0}",
+        "format": "",
         "unit": "%",
         "font": {
           "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
@@ -405,7 +405,7 @@
       "sensor_category": "gpu_usage"
     },
     {
-      "id": "GP NAME",
+      "id": "GPU NAME STRING",
       "kind": {
         "type": "label",
         "text": "GPU",
@@ -432,13 +432,13 @@
       "fps": null
     },
     {
-      "id": "GPU TEMP DATA",
+      "id": "GPU TEMP STRING",
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "gpu_temp"
         },
-        "format": "{:.0}",
+        "format": "",
         "unit": "°",
         "font": {
           "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
@@ -495,7 +495,7 @@
       "sensor_category": "gpu_temp"
     },
     {
-      "id": "CPU/CORE",
+      "id": "CPU/CORE STRING",
       "kind": {
         "type": "core_bars",
         "orientation": "horizontal",
@@ -546,7 +546,7 @@
       "fps": null
     },
     {
-      "id": "CPU/CORE",
+      "id": "CPU/CORE LABEL",
       "kind": {
         "type": "label",
         "text": "CPU/CORE",
@@ -573,11 +573,11 @@
       "fps": null
     },
     {
-      "id": "RAM FREE BAR",
+      "id": "MEM FREE BAR CHART",
       "kind": {
         "type": "vertical_bar",
         "source": {
-          "type": "cpu_usage"
+          "type": "mem_free"
         },
         "value_min": 0.0,
         "value_max": 62.0,
@@ -629,13 +629,13 @@
       "sensor_category": "mem_used"
     },
     {
-      "id": "Used RAM",
+      "id": "USED MEM BAR CHART",
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "mem_used"
         },
-        "format": "{:.0}",
+        "format": "",
         "unit": " GB",
         "font": {
           "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
@@ -692,7 +692,7 @@
       "sensor_category": "mem_used"
     },
     {
-      "id": "FREE RAM BAR",
+      "id": "FREE MEM BAR CHART1",
       "kind": {
         "type": "vertical_bar",
         "source": {
@@ -713,6 +713,7 @@
             "color": [
               0,
               200,
+        },
               0
             ],
             "alpha": 255
@@ -748,11 +749,11 @@
       "sensor_category": "mem_free"
     },
     {
-      "id": "FREE RAM DATA",
+      "id": "FREE RAM STRING",
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "mem_free"
         },
         "format": "{:.0}",
         "unit": " GB",
@@ -815,7 +816,7 @@
       "kind": {
         "type": "radial_gauge",
         "source": {
-          "type": "cpu_usage"
+          "type": "gpu_temp"
         },
         "value_min": 0.0,
         "value_max": 100.0,
@@ -876,9 +877,9 @@
         "type": "vertical_bar",
         "source": {
           "type": "hwmon",
-          "name": "spd5118",
-          "label": "temp1",
-          "device_path": "16-0053"
+          "name": "",
+          "label": "mem_temp2",
+          "device_path": ""
         },
         "value_min": 0.0,
         "value_max": 100.0,
@@ -934,9 +935,9 @@
         "type": "vertical_bar",
         "source": {
           "type": "hwmon",
-          "name": "spd5118",
-          "label": "temp1",
-          "device_path": "16-0053"
+          "name": "",
+          "label": "mem_temp1",
+          "device_path": ""
         },
         "value_min": 0.0,
         "value_max": 100.0,
@@ -987,41 +988,14 @@
       "fps": null
     },
     {
-      "id": "Ram Temp 2 Data",
-      "kind": {
-        "type": "label",
-        "text": "",
-        "font": {
-          "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
-        },
-        "font_size": 50.0,
-        "color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "align": "center",
-        "letter_spacing": 0.0
-      },
-      "x": 311.11093,
-      "y": 293.80804,
-      "width": 50.0,
-      "height": 150.0,
-      "rotation": 90.0,
-      "visible": true,
-      "update_interval_ms": null,
-      "fps": null
-    },
-    {
-      "id": "RAM TEMP (1)",
+      "id": "MEM TEMP1",
       "kind": {
         "type": "value_text",
         "source": {
           "type": "hwmon",
-          "name": "spd5118",
-          "label": "temp1",
-          "device_path": "16-0051"
+          "name": "",
+          "label": "mem_temp1",
+          "device_path": ""
         },
         "format": "",
         "unit": "°",
@@ -1079,16 +1053,16 @@
       "fps": null
     },
     {
-      "id": "RAM  TEMP (2)",
+      "id": "MEM TEMP2",
       "kind": {
         "type": "value_text",
         "source": {
           "type": "hwmon",
-          "name": "spd5118",
-          "label": "temp1",
-          "device_path": "16-0051"
+          "name": "",
+          "label": "mem_temp2",
+          "device_path": ""
         },
-        "format": "{:.0}",
+        "format": "",
         "unit": "°",
         "font": {
           "path": "/usr/share/fonts/gsfonts/Z003-MediumItalic.otf"
