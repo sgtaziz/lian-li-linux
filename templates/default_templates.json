@@ -125,7 +125,7 @@
       "min_daemon_version": "0.5.3",
       "folder": "geforce-rtx-cpu-gpu-ram",
       "template_file": "template.json",
-      "template_sha256": "02562afb7000516b69db92dc96b241788aced78ce5ffc2ded7f415f2d99d3c79",
+      "template_sha256": "0d8ce99b1efd37dcae818a60effccdffec81e4380cc81a7e13b2e542c1681e2b",
       "preview": "preview.png",
       "preview_sha256": "0d8ce99b1efd37dcae818a60effccdffec81e4380cc81a7e13b2e542c1681e2b",
       "base_width": 1920,
