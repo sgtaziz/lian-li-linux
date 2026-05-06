@@ -10,6 +10,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
+#[derive(Clone, Debug)]
+struct FanState {
+    last_temp: Option<f32>,
+    last_pwm: [u8; 4],
+    last_direction: [i8; 4],
+}
+
 pub struct FanController {
     config: FanConfig,
     curves: HashMap<String, FanCurve>,
@@ -107,12 +114,34 @@ fn fan_control_thread(
     }
 
     info!(
-        "Starting fan speed control loop ({} group(s))",
-        config.speeds.len()
+        "Starting fan speed control loop ({} group(s), update_interval={}ms, hysteresis_temp={:.1}°C, hysteresis_pwm={})",
+        config.speeds.len(),
+        config.update_interval_ms,
+        config.hysteresis_temp,
+        config.hysteresis_pwm
     );
+
+    for (idx, group) in config.speeds.iter().enumerate() {
+        let device_id = group.device_id.as_deref().unwrap_or("none");
+        let fan_modes: Vec<&str> = group
+            .speeds
+            .iter()
+            .map(|s| match s {
+                FanSpeed::Constant(v) => "const",
+                FanSpeed::Curve(c) => c.as_str(),
+            })
+            .collect();
+        info!(
+            "Group {}: device='{}', fans=[{}]",
+            idx,
+            device_id,
+            fan_modes.join(", ")
+        );
+    }
 
     let mut temp_ema: HashMap<SensorSource, f32> = HashMap::new();
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
+    let mut fan_states: HashMap<usize, FanState> = HashMap::new();
 
     // Initialize MB sync state for all wired groups at startup.
     for (group_idx, group) in config.speeds.iter().enumerate() {
@@ -157,12 +186,22 @@ fn fan_control_thread(
         let tick_start = Instant::now();
         last_update = tick_start;
 
+        debug!("=== Fan control tick start ===");
+
         for (group_idx, group) in config.speeds.iter().enumerate() {
             let is_wireless = group
                 .device_id
                 .as_ref()
                 .map(|id| id.starts_with("wireless:"))
                 .unwrap_or(false);
+
+            debug!(
+                "Group {} ({}): wireless={}, speeds={:?}",
+                group_idx,
+                group.device_id.as_deref().unwrap_or("none"),
+                is_wireless,
+                group.speeds
+            );
 
             // Wireless AIOs are driven by AioController; skip them here.
             if is_wireless {
@@ -172,6 +211,10 @@ fn fan_control_thread(
                         .iter()
                         .any(|d| d.mac_str() == mac_str && d.is_aio())
                     {
+                        debug!(
+                            "Group {}: skipping wireless AIO (controlled separately)",
+                            group_idx
+                        );
                         continue;
                     }
                 }
@@ -179,6 +222,10 @@ fn fan_control_thread(
 
             // Wired MB sync: hardware handles it natively, skip
             if !is_wireless && group.speeds.iter().any(|s| s.is_mb_sync()) {
+                debug!(
+                    "Group {}: skipping wired MB sync (hardware handles)",
+                    group_idx
+                );
                 continue;
             }
 
@@ -194,6 +241,10 @@ fn fan_control_thread(
                             .map(|d| d.fan_type.supports_hw_mobo_sync())
                             .unwrap_or(false);
                         if is_hw_sync {
+                            debug!(
+                                "Group {}: SLV3 hardware MB sync enabled, sending [6,6,6,6]",
+                                group_idx
+                            );
                             apply_wireless_by_id(&wireless, device_id, &[6, 6, 6, 6], group_idx);
                             continue;
                         }
@@ -207,6 +258,9 @@ fn fan_control_thread(
                 &mut sensor_cache,
                 &mut temp_ema,
                 all_sensors,
+                fan_states.get(&group_idx),
+                config.hysteresis_temp,
+                config.hysteresis_pwm,
             ) {
                 Ok(speeds) => speeds,
                 Err(err) => {
@@ -215,13 +269,70 @@ fn fan_control_thread(
                 }
             };
 
+            let current_temps: Vec<Option<f32>> = group
+                .speeds
+                .iter()
+                .map(|s| {
+                    if let FanSpeed::Curve(curve_name) = s {
+                        curves.get(curve_name).and_then(|c| {
+                            let source = c.effective_source();
+                            temp_ema.get(&source).copied()
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let current_directions: [i8; 4] = {
+                let mut dirs = [0i8; 4];
+                if let Some(state) = fan_states.get(&group_idx) {
+                    for i in 0..4 {
+                        let last = state.last_pwm[i];
+                        if speeds[i] > last {
+                            dirs[i] = 1;
+                        } else if speeds[i] < last {
+                            dirs[i] = -1;
+                        } else {
+                            dirs[i] = state.last_direction[i];
+                        }
+                    }
+                }
+                dirs
+            };
+
+            if let Some(state) = fan_states.get_mut(&group_idx) {
+                state.last_pwm = speeds;
+                state.last_direction = current_directions;
+                if let Some(temp) = current_temps.iter().flatten().next() {
+                    state.last_temp = Some(*temp);
+                }
+            } else {
+                fan_states.insert(
+                    group_idx,
+                    FanState {
+                        last_temp: current_temps.iter().flatten().next().copied(),
+                        last_pwm: speeds,
+                        last_direction: current_directions,
+                    },
+                );
+            }
+
             // Try to apply to the right device
             if let Some(ref device_id) = group.device_id {
                 if device_id.starts_with("wireless:") {
+                    info!(
+                        "Group {}: applying wireless PWM {:?} to {}",
+                        group_idx, speeds, device_id
+                    );
                     apply_wireless_by_id(&wireless, device_id, &speeds, group_idx);
                 } else if let Some((base_id, port_str)) = device_id.rsplit_once(":port") {
                     // Per-port wired device (e.g. "Nuvoton:port0")
                     if let (Some(dev), Ok(port)) = (wired.get(base_id), port_str.parse::<u8>()) {
+                        info!(
+                            "Group {}: applying wired PWM {} to {} port {}",
+                            group_idx, speeds[0], base_id, port
+                        );
                         if let Err(err) = dev.set_fan_speed(port, speeds[0]) {
                             warn!("Failed to set fan speed for {device_id}: {err}");
                         }
@@ -229,10 +340,15 @@ fn fan_control_thread(
                         warn!("Fan group {group_idx}: device '{device_id}' not found");
                     }
                 } else if let Some(dev) = wired.get(device_id) {
+                    info!(
+                        "Group {}: applying wired PWM {:?} to {}",
+                        group_idx, speeds, device_id
+                    );
                     if let Err(err) = dev.set_fan_speeds(&speeds) {
                         warn!("Failed to set fan speeds for {device_id}: {err}");
                     }
                     if dev.has_pump_control() {
+                        debug!("Group {}: setting pump PWM to {}", group_idx, speeds[3]);
                         if let Err(err) = dev.set_pump_speed(speeds[3]) {
                             warn!("Failed to set pump speed for {device_id}: {err}");
                         }
@@ -243,6 +359,10 @@ fn fan_control_thread(
             } else {
                 // Legacy: match by group index to wireless devices
                 if let Some(ref w) = wireless {
+                    info!(
+                        "Group {} (legacy): applying wireless PWM {:?} to device index {}",
+                        group_idx, speeds, group_idx
+                    );
                     if let Err(err) = w.set_fan_speeds(group_idx as u8, &speeds) {
                         warn!("Failed to set fan speeds for wireless device {group_idx}: {err}");
                     }
@@ -253,9 +373,14 @@ fn fan_control_thread(
         }
 
         let tick_elapsed = tick_start.elapsed();
+        debug!(
+            "=== Fan control tick complete in {:?} ({} groups processed) ===",
+            tick_elapsed,
+            config.speeds.len()
+        );
         if tick_elapsed >= update_interval {
-            debug!(
-                "fan tick took {tick_elapsed:?}, exceeding {update_interval:?} — skipping cooldown"
+            warn!(
+                "Fan tick took {tick_elapsed:?}, exceeding {update_interval:?} — skipping cooldown"
             );
         }
     }
@@ -278,11 +403,24 @@ fn apply_wireless_by_id(
     // Find the device by MAC and get its list_index
     let devices = w.devices();
     if let Some(dev) = devices.iter().find(|d| d.mac_str() == mac_str) {
+        debug!(
+            "Group {}: found wireless device {} (type={:?}, fans={}, list_index={})",
+            group_idx, mac_str, dev.fan_type, dev.fan_count, dev.list_index
+        );
         if let Err(err) = w.set_fan_speeds(dev.list_index, speeds) {
             warn!("Failed to set fan speeds for {device_id}: {err}");
+        } else {
+            debug!(
+                "Group {}: successfully sent PWM {:?} to {}",
+                group_idx, speeds, mac_str
+            );
         }
     } else {
         warn!("Fan group {group_idx}: wireless device {device_id} not discovered");
+        debug!(
+            "Available devices: {:?}",
+            devices.iter().map(|d| d.mac_str()).collect::<Vec<_>>()
+        );
     }
 }
 
@@ -296,18 +434,28 @@ fn calculate_fan_speeds(
     sensor_cache: &mut HashMap<SensorSource, ResolvedSensor>,
     temp_ema: &mut HashMap<SensorSource, f32>,
     all_sensors: &[SensorInfo],
+    fan_state: Option<&FanState>,
+    hysteresis_temp: f32,
+    hysteresis_pwm: u8,
 ) -> Result<[u8; 4]> {
     let mut pwm_values = [0u8; 4];
 
     for (i, fan_speed) in fan_speeds.iter().enumerate() {
         pwm_values[i] = match fan_speed {
-            FanSpeed::Constant(value) => *value,
+            FanSpeed::Constant(value) => {
+                debug!("Fan {}: constant PWM {}", i, value);
+                *value
+            }
             _ if fan_speed.is_mb_sync() => {
-                if let Some(source) = fan_speed.mb_sync_source() {
-                    lianli_shared::sensors::read_pwm_header(source).unwrap_or(0)
+                let pwm = if let Some(source) = fan_speed.mb_sync_source() {
+                    let val = lianli_shared::sensors::read_pwm_header(source).unwrap_or(0);
+                    debug!("Fan {}: MB sync from {} -> PWM {}", i, source, val);
+                    val
                 } else {
+                    debug!("Fan {}: MB sync (no source) -> PWM 0", i);
                     0
-                }
+                };
+                pwm
             }
             FanSpeed::Curve(curve_name) => {
                 let curve = curves
@@ -317,10 +465,19 @@ fn calculate_fan_speeds(
                 let source = curve.effective_source();
                 let temp = smoothed_temperature(&source, sensor_cache, temp_ema, all_sensors)?;
                 let speed_percent = interpolate_curve(&curve.curve, temp);
-                let pwm = (speed_percent * 2.55) as u8;
+                let target_pwm = (speed_percent * 2.55) as u8;
 
-                debug!("Fan {i}: Temp {temp:.1}C, Speed {speed_percent:.0}%, PWM {pwm}");
-                pwm
+                let final_pwm = if let Some(state) = fan_state {
+                    apply_hysteresis(target_pwm, temp, i, state, hysteresis_temp, hysteresis_pwm)
+                } else {
+                    debug!(
+                        "Fan {}: first run, no hysteresis state -> PWM {}",
+                        i, target_pwm
+                    );
+                    target_pwm
+                };
+
+                final_pwm
             }
         };
     }
@@ -337,10 +494,12 @@ fn smoothed_temperature(
     let resolved = match cache.get(source) {
         Some(r) => r.clone(),
         None => {
+            debug!("Resolving new sensor source: {:?}", source);
             let sensor_info = all_sensors.iter().find(|s| s.source == *source);
             let divider = sensor_info.map_or(1, |s| s.divider);
             let r = sensors::resolve_sensor(source, divider).context("sensor not found")?;
             cache.insert(source.clone(), r.clone());
+            debug!("Sensor resolved: {:?}", r);
             r
         }
     };
@@ -348,16 +507,29 @@ fn smoothed_temperature(
     match sensors::read_sensor_value(&resolved) {
         Ok(temp) if temp > 0.0 && temp <= 100.0 => {
             let smoothed = match ema.get(source) {
-                Some(&prev) => TEMP_EMA_ALPHA * temp + (1.0 - TEMP_EMA_ALPHA) * prev,
-                None => temp,
+                Some(&prev) => {
+                    let s = TEMP_EMA_ALPHA * temp + (1.0 - TEMP_EMA_ALPHA) * prev;
+                    debug!(
+                        "Sensor {:?}: raw={:.1}°C, prev_ema={:.1}°C, new_ema={:.1}°C (alpha={})",
+                        source, temp, prev, s, TEMP_EMA_ALPHA
+                    );
+                    s
+                }
+                None => {
+                    debug!("Sensor {:?}: first reading {:.1}°C", source, temp);
+                    temp
+                }
             };
             ema.insert(source.clone(), smoothed);
         }
         Ok(temp) => {
-            debug!("Ignoring out-of-range temperature {temp:.1}°C");
+            debug!(
+                "Ignoring out-of-range temperature {temp:.1}°C from {:?}",
+                source
+            );
         }
         Err(err) => {
-            debug!("Sensor read failed: {err}");
+            debug!("Sensor read failed for {:?}: {err}", source);
             cache.remove(source);
         }
     }
@@ -367,12 +539,72 @@ fn smoothed_temperature(
         .context("no valid temperature readings yet")
 }
 
+fn apply_hysteresis(
+    target_pwm: u8,
+    current_temp: f32,
+    fan_idx: usize,
+    state: &FanState,
+    hysteresis_temp: f32,
+    hysteresis_pwm: u8,
+) -> u8 {
+    let last_pwm = state.last_pwm[fan_idx];
+    let pwm_diff = (target_pwm as i16 - last_pwm as i16).abs() as u8;
+
+    let temp_diff = state
+        .last_temp
+        .map(|last| (current_temp - last).abs())
+        .unwrap_or(f32::MAX);
+
+    let direction = if target_pwm > last_pwm {
+        1
+    } else if target_pwm < last_pwm {
+        -1
+    } else {
+        0
+    };
+
+    let last_direction = state.last_direction[fan_idx];
+    let direction_changed = last_direction != 0 && direction != 0 && direction != last_direction;
+
+    debug!(
+        "Fan {}: hysteresis check — target_pwm={}, last_pwm={}, pwm_diff={}, current_temp={:.1}°C, temp_diff={:.1}°C, direction={}, last_dir={}, dir_changed={}",
+        fan_idx, target_pwm, last_pwm, pwm_diff, current_temp, temp_diff, direction, last_direction, direction_changed
+    );
+
+    if pwm_diff < hysteresis_pwm && temp_diff < hysteresis_temp && !direction_changed {
+        info!(
+            "Fan {}: HYSTERESIS — keeping PWM {} (target {}, thresholds: pwm_diff {} < {}, temp_diff {:.1} < {:.1}, no direction change)",
+            fan_idx, last_pwm, target_pwm, pwm_diff, hysteresis_pwm, temp_diff, hysteresis_temp
+        );
+        last_pwm
+    } else {
+        if last_pwm != target_pwm {
+            info!(
+                "Fan {}: PWM {} → {} (reasons: pwm_diff={} {} hysteresis_pwm={}, temp_diff={:.1} {} hysteresis_temp={:.1}, dir_changed={})",
+                fan_idx,
+                last_pwm,
+                target_pwm,
+                pwm_diff,
+                if pwm_diff >= hysteresis_pwm { ">=" } else { "<" },
+                hysteresis_pwm,
+                temp_diff,
+                if temp_diff >= hysteresis_temp { ">=" } else { "<" },
+                hysteresis_temp,
+                direction_changed
+            );
+        }
+        target_pwm
+    }
+}
+
 fn interpolate_curve(curve: &[(f32, f32)], temp: f32) -> f32 {
     if curve.is_empty() {
+        debug!("Curve is empty, returning default 50%");
         return 50.0;
     }
 
     if curve.len() == 1 {
+        debug!("Single-point curve, returning {}%", curve[0].1);
         return curve[0].1;
     }
 
@@ -380,10 +612,20 @@ fn interpolate_curve(curve: &[(f32, f32)], temp: f32) -> f32 {
     sorted_curve.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     if temp <= sorted_curve[0].0 {
+        debug!(
+            "Temp {:.1}°C below curve range, clamping to first point: {:.1}°C -> {}%",
+            temp, sorted_curve[0].0, sorted_curve[0].1
+        );
         return sorted_curve[0].1;
     }
 
     if temp >= sorted_curve[sorted_curve.len() - 1].0 {
+        debug!(
+            "Temp {:.1}°C above curve range, clamping to last point: {:.1}°C -> {}%",
+            temp,
+            sorted_curve[sorted_curve.len() - 1].0,
+            sorted_curve[sorted_curve.len() - 1].1
+        );
         return sorted_curve[sorted_curve.len() - 1].1;
     }
 
@@ -393,9 +635,15 @@ fn interpolate_curve(curve: &[(f32, f32)], temp: f32) -> f32 {
 
         if temp >= temp1 && temp <= temp2 {
             let ratio = (temp - temp1) / (temp2 - temp1);
-            return speed1 + ratio * (speed2 - speed1);
+            let result = speed1 + ratio * (speed2 - speed1);
+            debug!(
+                "Curve interpolation: {:.1}°C between [{:.1}°C->{}%, {:.1}°C->{}%], ratio={:.3}, result={:.1}%",
+                temp, temp1, speed1, temp2, speed2, ratio, result
+            );
+            return result;
         }
     }
 
+    debug!("Curve interpolation failed, returning default 50%");
     50.0
 }

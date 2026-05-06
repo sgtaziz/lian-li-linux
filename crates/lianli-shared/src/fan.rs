@@ -81,6 +81,10 @@ pub struct FanConfig {
     pub speeds: Vec<FanGroup>,
     #[serde(default = "default_update_interval")]
     pub update_interval_ms: u64,
+    #[serde(default = "default_hysteresis_temp")]
+    pub hysteresis_temp: f32,
+    #[serde(default = "default_hysteresis_pwm")]
+    pub hysteresis_pwm: u8,
 }
 
 impl Default for FanConfig {
@@ -88,12 +92,22 @@ impl Default for FanConfig {
         Self {
             speeds: vec![],
             update_interval_ms: default_update_interval(),
+            hysteresis_temp: default_hysteresis_temp(),
+            hysteresis_pwm: default_hysteresis_pwm(),
         }
     }
 }
 
 fn default_update_interval() -> u64 {
     1000
+}
+
+fn default_hysteresis_temp() -> f32 {
+    2.0
+}
+
+fn default_hysteresis_pwm() -> u8 {
+    5
 }
 
 /// Custom deserializer: accepts either the new `Vec<FanGroup>` format
