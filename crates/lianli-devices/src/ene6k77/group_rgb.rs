@@ -52,7 +52,7 @@ impl RgbDevice for Ene6k77GroupDevice {
     }
 
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
-        let fans = self.controller.model.max_fans_per_group();
+        let fans = self.controller.fan_quantity(self.group).max(1);
         let leds_per_fan = self.controller.leds_per_fan();
         (0..fans)
             .map(|fan| RgbZoneInfo {
@@ -63,7 +63,7 @@ impl RgbDevice for Ene6k77GroupDevice {
     }
 
     fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
-        let fans = self.controller.model.max_fans_per_group() as usize;
+        let fans = self.controller.fan_quantity(self.group).max(1) as usize;
         if self.controller.model.uses_double_port() {
             vec![vec![RgbScope::All, RgbScope::Inner, RgbScope::Outer]; fans]
         } else {

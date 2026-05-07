@@ -27,11 +27,10 @@ pub enum MediaError {
 }
 
 pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
-    let final_image = apply_device_rotation_rgb(image, screen.device_rotation);
-    let width = final_image.width() as usize;
-    let height = final_image.height() as usize;
+    let width = image.width() as usize;
+    let height = image.height() as usize;
     let tj_image = turbojpeg::Image {
-        pixels: final_image.as_raw().as_slice(),
+        pixels: image.as_raw().as_slice(),
         width,
         pitch: width * 3,
         height,
@@ -49,7 +48,7 @@ pub fn encode_jpeg_rgba(
 ) -> Result<Vec<u8>, MediaError> {
     let orientation_q =
         (((((orientation % 360.0) + 360.0) % 360.0 + 45.0) / 90.0).floor() as i32 & 3) * 90;
-    let total_rot = ((orientation_q + screen.device_rotation as i32).rem_euclid(360)) as u16;
+    let total_rot = (orientation_q.rem_euclid(360)) as u16;
 
     if total_rot == 0 {
         let tj_image = turbojpeg::Image {
@@ -95,15 +94,6 @@ fn encode_compressed(
         return Err(MediaError::PayloadTooLarge { size: buf.len() });
     }
     Ok(buf)
-}
-
-fn apply_device_rotation_rgb(image: RgbImage, rotation: u16) -> RgbImage {
-    match rotation {
-        90 => rotate90(&image),
-        180 => rotate180(&image),
-        270 => rotate270(&image),
-        _ => image,
-    }
 }
 
 pub fn render_dimensions(screen: &ScreenInfo, orientation: f32) -> (u32, u32) {

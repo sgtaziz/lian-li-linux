@@ -8,7 +8,6 @@ pub struct ScreenInfo {
     pub max_fps: u32,
     pub jpeg_quality: u8,
     pub max_payload: usize,
-    pub device_rotation: u16,
     pub h264: bool,
 }
 
@@ -20,7 +19,6 @@ impl ScreenInfo {
         max_fps: 30,
         jpeg_quality: 90,
         max_payload: 102_400 - 512,
-        device_rotation: 0,
         h264: false,
     };
 
@@ -30,7 +28,6 @@ impl ScreenInfo {
         max_fps: 30,
         jpeg_quality: 90,
         max_payload: 65_535,
-        device_rotation: 0,
         h264: false,
     };
 
@@ -40,7 +37,6 @@ impl ScreenInfo {
         max_fps: 24,
         jpeg_quality: 85,
         max_payload: 153_600,
-        device_rotation: 0,
         h264: true,
     };
 
@@ -50,17 +46,15 @@ impl ScreenInfo {
         max_fps: 24,
         jpeg_quality: 85,
         max_payload: 153_600,
-        device_rotation: 0,
         h264: true,
     };
 
     pub const LANCOOL_207: Self = Self {
-        width: 1472,
-        height: 720,
+        width: 720,
+        height: 1472,
         max_fps: 30,
         jpeg_quality: 95,
         max_payload: 512_000,
-        device_rotation: 90,
         h264: true,
     };
 
@@ -70,7 +64,6 @@ impl ScreenInfo {
         max_fps: 30,
         jpeg_quality: 95,
         max_payload: 512_000,
-        device_rotation: 0,
         h264: true,
     };
 }

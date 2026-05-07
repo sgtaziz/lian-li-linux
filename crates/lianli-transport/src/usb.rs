@@ -241,6 +241,7 @@ impl Drop for UsbTransport {
     fn drop(&mut self) {
         for &iface in self.claimed.iter().rev() {
             let _ = self.handle.release_interface(iface);
+            let _ = self.handle.attach_kernel_driver(iface);
         }
     }
 }

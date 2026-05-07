@@ -189,6 +189,10 @@ impl Ene6k77Controller {
         Ok(())
     }
 
+    pub fn fan_quantity(&self, group: u8) -> u8 {
+        self.fan_quantities.lock()[group as usize]
+    }
+
     pub fn model(&self) -> Ene6k77Model {
         self.model
     }
@@ -253,6 +257,11 @@ impl Ene6k77Controller {
                 dir_byte,
                 brightness_byte,
             )?;
+        }
+
+        let qty = self.fan_quantity(group);
+        if let Err(e) = self.set_fan_quantity(group, qty) {
+            debug!("re-affirm fan quantity for group {group}: {e:#}");
         }
 
         let frame = self.model.frame_commit_value();
@@ -328,18 +337,36 @@ impl Ene6k77Controller {
     }
 
     fn map_mode_to_ene(&self, mode: RgbMode) -> u8 {
-        match mode {
-            RgbMode::Off => 0,
-            RgbMode::Static => 1,
-            RgbMode::Breathing => 2,
-            RgbMode::ColorCycle => 3,
-            RgbMode::Rainbow => 4,
-            RgbMode::Runway => 5,
-            RgbMode::Meteor => 6,
-            RgbMode::Staggered => 7,
-            RgbMode::Tide => 8,
-            RgbMode::Mixing => 9,
-            _ => 1,
+        if self.model.uses_double_port() {
+            // Inner/outer ring models (SL Infinity, AL Fan, AL V2).
+            // Inner and outer ports share the same mode byte values.
+            match mode {
+                RgbMode::Off => 0,
+                RgbMode::Static => 1,
+                RgbMode::Breathing => 2,
+                RgbMode::ColorCycle => 24,
+                RgbMode::Rainbow => 5,
+                RgbMode::Runway => 26,
+                RgbMode::Meteor => 25,
+                RgbMode::Tide => 45,
+                RgbMode::Mixing => 43,
+                _ => 1,
+            }
+        } else {
+            // Single-ring models (SL Fan, SL V2, SL V2a, SL Redragon).
+            match mode {
+                RgbMode::Off => 0,
+                RgbMode::Static => 1,
+                RgbMode::Breathing => 2,
+                RgbMode::ColorCycle => 35,
+                RgbMode::Rainbow => 5,
+                RgbMode::Runway => 28,
+                RgbMode::Meteor => 36,
+                RgbMode::Staggered => 24,
+                RgbMode::Tide => 26,
+                RgbMode::Mixing => 30,
+                _ => 1,
+            }
         }
     }
 

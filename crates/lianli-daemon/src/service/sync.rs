@@ -239,21 +239,30 @@ impl ServiceManager {
         // Add wired USB/HID fan devices (per-port entries from open_wired_fan_devices)
         devices.extend(self.wired_fan_device_info.clone());
 
-        // Read wired fan RPMs and split per port
+        // Read wired fan RPMs and split per port.
         for (base_id, dev) in self.wired_fan_devices.iter() {
             if let Ok(all_rpms) = dev.read_fan_rpm() {
                 let ports = dev.fan_port_info();
+                let per_fan = dev.per_fan_control();
                 let mut offset = 0;
                 for &(port, count) in &ports {
-                    let end = (offset + count as usize).min(all_rpms.len());
-                    let port_rpms = all_rpms[offset..end].to_vec();
+                    let port_rpms = if per_fan {
+                        let end = (offset + count as usize).min(all_rpms.len());
+                        let v = all_rpms[offset..end].to_vec();
+                        offset = end;
+                        v
+                    } else {
+                        all_rpms
+                            .get(port as usize)
+                            .map(|&r| vec![r])
+                            .unwrap_or_default()
+                    };
                     let device_id = if ports.len() > 1 {
                         format!("{base_id}:port{port}")
                     } else {
                         base_id.clone()
                     };
                     ipc_state.telemetry.fan_rpms.insert(device_id, port_rpms);
-                    offset = end;
                 }
             }
         }

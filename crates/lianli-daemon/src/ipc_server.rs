@@ -288,7 +288,35 @@ fn handle_request(
             fan_pwm,
         } => {
             debug!("SetFanSpeed for device {device_index}: {fan_pwm:?}");
-            IpcResponse::ok(serde_json::json!(null))
+            let mut state = state.lock();
+            let app_config = state.config.get_or_insert_with(AppConfig::default);
+            let fans = app_config.fans.get_or_insert_with(Default::default);
+            let idx = device_index as usize;
+            while fans.speeds.len() <= idx {
+                fans.speeds.push(lianli_shared::fan::FanGroup {
+                    device_id: None,
+                    speeds: [
+                        lianli_shared::fan::FanSpeed::Constant(128),
+                        lianli_shared::fan::FanSpeed::Constant(128),
+                        lianli_shared::fan::FanSpeed::Constant(128),
+                        lianli_shared::fan::FanSpeed::Constant(128),
+                    ],
+                });
+            }
+            fans.speeds[idx].speeds = [
+                lianli_shared::fan::FanSpeed::Constant(fan_pwm[0]),
+                lianli_shared::fan::FanSpeed::Constant(fan_pwm[1]),
+                lianli_shared::fan::FanSpeed::Constant(fan_pwm[2]),
+                lianli_shared::fan::FanSpeed::Constant(fan_pwm[3]),
+            ];
+            let cfg_clone = app_config.clone();
+            match write_config(&state.config_path, &cfg_clone) {
+                Ok(()) => {
+                    tx.send(DaemonEvent::IpcUpdate).ok();
+                    IpcResponse::ok(serde_json::json!(null))
+                }
+                Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
+            }
         }
 
         IpcRequest::GetRgbCapabilities => {
@@ -474,7 +502,6 @@ fn handle_request(
                 max_fps: 30,
                 jpeg_quality: 90,
                 max_payload: 4 * 1024 * 1024,
-                device_rotation: 0,
                 h264: false,
             };
             let all_sensors = lianli_shared::sensors::enumerate_sensors();

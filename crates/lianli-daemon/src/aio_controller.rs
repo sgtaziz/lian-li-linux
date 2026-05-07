@@ -28,20 +28,23 @@ pub struct AioController {
 
 struct State {
     config: AppConfig,
+    needs_reinit: bool,
 }
 
 impl AioController {
     pub fn new(wireless: Arc<WirelessController>, config: AppConfig) -> Self {
         Self {
             wireless,
-            state: Arc::new(Mutex::new(State { config })),
+            state: Arc::new(Mutex::new(State { config, needs_reinit: false })),
             stop_flag: Arc::new(AtomicBool::new(false)),
             thread: None,
         }
     }
 
     pub fn set_config(&self, config: AppConfig) {
-        self.state.lock().config = config;
+        let mut state = self.state.lock();
+        state.config = config;
+        state.needs_reinit = true;
     }
 
     pub fn start(&mut self) {
@@ -80,7 +83,15 @@ fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: A
     let mut applied_image: HashMap<[u8; 6], std::path::PathBuf> = HashMap::new();
 
     while !stop_flag.load(Ordering::Relaxed) {
-        let cfg = state.lock().config.clone();
+        let cfg = {
+            let mut s = state.lock();
+            if s.needs_reinit {
+                switched.clear();
+                last_sent.clear();
+                s.needs_reinit = false;
+            }
+            s.config.clone()
+        };
         let curves: HashMap<String, FanCurve> = cfg
             .fan_curves
             .iter()

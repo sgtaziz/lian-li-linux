@@ -68,7 +68,6 @@ fn main() -> Result<()> {
         max_fps: 30,
         jpeg_quality: 100,
         max_payload: usize::MAX,
-        device_rotation: 0,
         h264: false,
     };
 

@@ -89,7 +89,6 @@ fn render_template_preview(template: &LcdTemplate, sensors: &[SensorInfo]) -> Re
         max_fps: 30,
         jpeg_quality: 85,
         max_payload: 4 * 1024 * 1024,
-        device_rotation: 0,
         h264: false,
     };
     let asset =

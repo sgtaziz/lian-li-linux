@@ -313,14 +313,8 @@ impl CustomAsset {
         }
     }
 
-    /// Total rotation (in degrees) the LCD expects on top of the rendered canvas:
-    /// the configured orientation plus the device's intrinsic rotation. Used by
-    /// the live h264 path so ffmpeg's filter chain can do the rotation instead
-    /// of paying for it on the CPU every frame.
     pub fn total_rotation_deg(&self) -> u16 {
-        let total = (self.orientation as i32).rem_euclid(360);
-        let combined = (total + self.screen.device_rotation as i32).rem_euclid(360);
-        combined as u16
+        (self.orientation as i32).rem_euclid(360) as u16
     }
 
     /// Render one frame and hand the raw RGBA bytes to `cb` while still holding the

@@ -2,7 +2,7 @@ use super::discovery::{poll_and_discover, DiscoveredDevice};
 use super::transport::{open_any, with_transport_recovery};
 use super::{
     CMD_RESET, CMD_RX_LCD_MODE, CMD_RX_QUERY_34, CMD_RX_QUERY_37, CMD_VIDEO_START, RF_CHUNKS,
-    RF_CHUNK_SIZE, RX_IDS, TX_IDS, USB_CMD_GET_MAC, USB_CMD_SEND_RF,
+    RF_CHUNK_SIZE, RF_DATA_SIZE, RF_SELECT, RX_IDS, TX_IDS, USB_CMD_GET_MAC, USB_CMD_SEND_RF,
 };
 use anyhow::{bail, Context, Result};
 use lianli_transport::usb::{UsbTransport, USB_TIMEOUT};
@@ -293,6 +293,44 @@ impl WirelessController {
         Ok(())
     }
 
+    /// Broadcast a "master clock" sync packet (RF sub-command 0x14) carrying
+    /// 220 bytes of CPU/GPU info. L-Connect sends this once per second; missing
+    /// it appears to put the fan firmware into an autonomous fallback that
+    /// occasionally spikes RPM. We send all-zero info bytes — the firmware
+    /// only seems to need the heartbeat itself.
+    pub fn send_master_clock(&self) -> Result<()> {
+        let tx = self.tx.as_ref().context("TX device not connected")?;
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+
+        let mut rf_data = vec![0u8; RF_DATA_SIZE];
+        rf_data[0] = RF_SELECT;
+        rf_data[1] = 0x14;
+        rf_data[8..14].copy_from_slice(&master_mac);
+        // rf_data[14..234] = cpuInfoParam (220 bytes, leave zero)
+
+        with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
+            for chunk_idx in 0..RF_CHUNKS as u8 {
+                let mut packet = vec![0u8; 64];
+                packet[0] = USB_CMD_SEND_RF;
+                packet[1] = chunk_idx;
+                packet[2] = master_ch;
+                packet[3] = 0xFF;
+
+                let start = chunk_idx as usize * RF_CHUNK_SIZE;
+                let end = start + RF_CHUNK_SIZE;
+                packet[4..64].copy_from_slice(&rf_data[start..end]);
+
+                handle
+                    .write(&packet, USB_TIMEOUT)
+                    .context("sending master clock packet")?;
+                thread::sleep(Duration::from_millis(1));
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     pub fn send_rx_sequence(&self) -> Result<()> {
         if let Some(rx) = &self.rx {
             for (cmd, capture) in [
@@ -442,9 +480,11 @@ impl WirelessController {
     }
 
     pub fn stop(&mut self) {
-        self.poll_stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = self.poll_thread.take() {
-            let _ = handle.join();
+        if self.poll_thread.is_some() {
+            self.poll_stop.store(true, Ordering::SeqCst);
+            if let Some(handle) = self.poll_thread.take() {
+                let _ = handle.join();
+            }
         }
         self.tx.take();
         self.rx.take();

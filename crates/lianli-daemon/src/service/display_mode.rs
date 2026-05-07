@@ -69,6 +69,7 @@ impl ServiceManager {
     pub(super) fn handle_display_switch_to_lcd(&mut self, device_id: &str, pid: u16) {
         self.desktop_displays.stop_for_pid(pid);
         self.mark_mode_switch(device_id);
+        thread::sleep(Duration::from_millis(300));
 
         match hidapi::HidApi::new() {
             Ok(api) => match lianli_devices::display_switcher::switch_to_lcd_mode(&api, pid) {

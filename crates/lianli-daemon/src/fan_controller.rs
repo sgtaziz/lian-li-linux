@@ -78,7 +78,9 @@ fn fan_control_thread(
     all_sensors: &[SensorInfo],
 ) {
     let update_interval = Duration::from_millis(config.update_interval_ms);
+    let heartbeat_interval = Duration::from_secs(1);
     let mut last_update = Instant::now() - update_interval;
+    let mut last_heartbeat = Instant::now() - heartbeat_interval;
 
     // Wait briefly for wireless discovery if we have wireless
     if let Some(ref w) = wireless {
@@ -177,6 +179,20 @@ fn fan_control_thread(
 
     while !stop_flag.load(Ordering::Relaxed) {
         let now = Instant::now();
+
+        // Broadcast master clock heartbeat (RF 0x14) once per second regardless
+        // of the user-configured fan update interval. Without this packet the
+        // fan firmware appears to enter an autonomous fallback that briefly
+        // spikes RPM. L-Connect sends this every second.
+        if now.duration_since(last_heartbeat) >= heartbeat_interval {
+            if let Some(ref w) = wireless {
+                if let Err(err) = w.send_master_clock() {
+                    debug!("master clock send failed: {err}");
+                }
+            }
+            last_heartbeat = now;
+        }
+
         let since_last = now.duration_since(last_update);
         if since_last < update_interval {
             thread::sleep(Duration::from_millis(100));

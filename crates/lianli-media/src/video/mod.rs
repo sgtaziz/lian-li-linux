@@ -43,7 +43,7 @@ pub fn build_video_frames(
     let mut frames = Vec::with_capacity(entries.len());
     for frame_path in entries {
         let data = std::fs::read(&frame_path)?;
-        if orientation.abs() < f32::EPSILON && screen.device_rotation == 0 {
+        if orientation.abs() < f32::EPSILON {
             if data.len() > screen.max_payload {
                 return Err(MediaError::PayloadTooLarge { size: data.len() });
             }
