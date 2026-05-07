@@ -115,7 +115,7 @@ fn fan_control_thread(
         return;
     }
 
-    info!(
+    debug!(
         "Starting fan speed control loop ({} group(s), update_interval={}ms, hysteresis_temp={:.1}°C, hysteresis_pwm={})",
         config.speeds.len(),
         config.update_interval_ms,
@@ -133,7 +133,7 @@ fn fan_control_thread(
                 FanSpeed::Curve(c) => c.as_str(),
             })
             .collect();
-        info!(
+        debug!(
             "Group {}: device='{}', fans=[{}]",
             idx,
             device_id,
@@ -337,7 +337,7 @@ fn fan_control_thread(
             // Try to apply to the right device
             if let Some(ref device_id) = group.device_id {
                 if device_id.starts_with("wireless:") {
-                    info!(
+                    debug!(
                         "Group {}: applying wireless PWM {:?} to {}",
                         group_idx, speeds, device_id
                     );
@@ -345,7 +345,7 @@ fn fan_control_thread(
                 } else if let Some((base_id, port_str)) = device_id.rsplit_once(":port") {
                     // Per-port wired device (e.g. "Nuvoton:port0")
                     if let (Some(dev), Ok(port)) = (wired.get(base_id), port_str.parse::<u8>()) {
-                        info!(
+                        debug!(
                             "Group {}: applying wired PWM {} to {} port {}",
                             group_idx, speeds[0], base_id, port
                         );
@@ -356,7 +356,7 @@ fn fan_control_thread(
                         warn!("Fan group {group_idx}: device '{device_id}' not found");
                     }
                 } else if let Some(dev) = wired.get(device_id) {
-                    info!(
+                    debug!(
                         "Group {}: applying wired PWM {:?} to {}",
                         group_idx, speeds, device_id
                     );
@@ -375,7 +375,7 @@ fn fan_control_thread(
             } else {
                 // Legacy: match by group index to wireless devices
                 if let Some(ref w) = wireless {
-                    info!(
+                    debug!(
                         "Group {} (legacy): applying wireless PWM {:?} to device index {}",
                         group_idx, speeds, group_idx
                     );
@@ -588,14 +588,14 @@ fn apply_hysteresis(
     );
 
     if pwm_diff < hysteresis_pwm && temp_diff < hysteresis_temp && !direction_changed {
-        info!(
+        debug!(
             "Fan {}: HYSTERESIS — keeping PWM {} (target {}, thresholds: pwm_diff {} < {}, temp_diff {:.1} < {:.1}, no direction change)",
             fan_idx, last_pwm, target_pwm, pwm_diff, hysteresis_pwm, temp_diff, hysteresis_temp
         );
         last_pwm
     } else {
         if last_pwm != target_pwm {
-            info!(
+            debug!(
                 "Fan {}: PWM {} → {} (reasons: pwm_diff={} {} hysteresis_pwm={}, temp_diff={:.1} {} hysteresis_temp={:.1}, dir_changed={})",
                 fan_idx,
                 last_pwm,
