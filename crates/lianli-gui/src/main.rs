@@ -228,6 +228,7 @@ fn main() {
                 let fc = c.fans.get_or_insert_with(|| FanConfig {
                     speeds: vec![],
                     update_interval_ms: 500,
+                    ..Default::default()
                 });
                 fc.update_interval_ms = ms as u64;
             }

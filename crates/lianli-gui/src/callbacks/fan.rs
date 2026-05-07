@@ -221,6 +221,7 @@ pub(crate) fn wire_fan_callbacks(
                     let fc = c.fans.get_or_insert_with(|| FanConfig {
                         speeds: vec![],
                         update_interval_ms: 500,
+                        ..Default::default()
                     });
                     let group = fc
                         .speeds
@@ -268,6 +269,7 @@ pub(crate) fn wire_fan_callbacks(
                     let fc = c.fans.get_or_insert_with(|| FanConfig {
                         speeds: vec![],
                         update_interval_ms: 500,
+                        ..Default::default()
                     });
                     if let Some(group) = fc
                         .speeds
@@ -325,6 +327,7 @@ pub(crate) fn wire_fan_callbacks(
                     let fc = c.fans.get_or_insert_with(|| FanConfig {
                         speeds: vec![],
                         update_interval_ms: 500,
+                        ..Default::default()
                     });
                     if let Some(group) = fc
                         .speeds
