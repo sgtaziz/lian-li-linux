@@ -129,15 +129,26 @@ impl Galahad2TrinityController {
     }
 
     fn handshake_with_timeout(&self, timeout_ms: i32) -> Result<Galahad2Handshake> {
-        self.device.lock().read_flush();
-        let resp = self.send_a_command_timeout(CMD_HANDSHAKE, &[], timeout_ms)?;
-        let data = &resp[HEADER_LEN..];
-        let data_len = resp[5] as usize;
+        let mut dev = self.device.lock();
+        dev.read_flush();
 
-        if data_len < 4 {
-            bail!("Galahad2 Trinity: handshake response too short ({data_len} bytes)");
+        let mut pkt = [0u8; PACKET_SIZE];
+        pkt[0] = REPORT_ID;
+        pkt[1] = CMD_HANDSHAKE;
+        dev.write(&pkt).context("Galahad2 Trinity: write handshake")?;
+
+        let mut buf = [0u8; PACKET_SIZE];
+        let n = dev
+            .read_timeout(&mut buf, timeout_ms)
+            .context("Galahad2 Trinity: read handshake")?;
+
+        // Fan RPM and pump RPM are always at fixed positions in the response
+        // (bytes 6-7 and 8-9 respectively), regardless of the data_len header field.
+        if n < HEADER_LEN + 4 {
+            bail!("Galahad2 Trinity: handshake response too short ({n} bytes)");
         }
 
+        let data = &buf[HEADER_LEN..];
         let hs = Galahad2Handshake {
             fan_rpm: u16::from_be_bytes([data[0], data[1]]),
             pump_rpm: u16::from_be_bytes([data[2], data[3]]),
@@ -249,7 +260,7 @@ impl Galahad2TrinityController {
         payload[17] = (effect.disabled || effect.mode == RgbMode::Off) as u8;
         payload[18] = if source_mcu { 0 } else { 1 };
 
-        self.send_a_command(CMD_SET_PUMP_LIGHT, &payload)?;
+        self.send_write_command(CMD_SET_PUMP_LIGHT, &payload)?;
         debug!("Set pump light: mode={mode_byte} scope={scope_byte}");
         Ok(())
     }
@@ -303,7 +314,7 @@ impl Galahad2TrinityController {
         payload[18] = sync_to_pump as u8;
         payload[19] = FAN_LED_COUNT as u8;
 
-        self.send_a_command(CMD_SET_FAN_LIGHT, &payload)?;
+        self.send_write_command(CMD_SET_FAN_LIGHT, &payload)?;
         debug!("Set fan light: mode={mode_byte} sync_to_pump={sync_to_pump}");
         Ok(())
     }
@@ -323,10 +334,7 @@ impl Galahad2TrinityController {
         cached.map(|(hs, _)| hs)
     }
 
-    fn send_a_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
-        self.send_a_command_timeout(cmd, data, READ_TIMEOUT_MS)
-    }
-
+    /// Write a command and read back a response. Only for commands that actually respond (0x81, 0x86).
     fn send_a_command_timeout(&self, cmd: u8, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
         let mut pkt = [0u8; PACKET_SIZE];
         pkt[0] = REPORT_ID;
@@ -349,6 +357,18 @@ impl Galahad2TrinityController {
 
         Ok(buf[..n].to_vec())
     }
+
+    /// Write a fire-and-forget command (no response expected: 0x8a, 0x8b, 0x83, 0x85).
+    fn send_write_command(&self, cmd: u8, data: &[u8]) -> Result<()> {
+        let mut pkt = [0u8; PACKET_SIZE];
+        pkt[0] = REPORT_ID;
+        pkt[1] = cmd;
+        pkt[5] = data.len() as u8;
+        let copy_len = data.len().min(58);
+        pkt[HEADER_LEN..HEADER_LEN + copy_len].copy_from_slice(&data[..copy_len]);
+        self.device.lock().write(&pkt).context("Galahad2 Trinity: write command")?;
+        Ok(())
+    }
 }
 
 fn duty_to_percent(duty: u8) -> u8 {
@@ -359,7 +379,7 @@ impl FanDevice for Galahad2TrinityController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
         let pwm = duty_to_percent(duty).max(10);
         let mb = self.mb_sync.load(Ordering::Relaxed) as u8;
-        self.send_a_command(CMD_SET_FAN_PWM, &[mb, pwm])?;
+        self.send_write_command(CMD_SET_FAN_PWM, &[mb, pwm])?;
         debug!("Set fan PWM to {pwm}% (mb_sync={mb})");
         Ok(())
     }
@@ -396,7 +416,7 @@ impl FanDevice for Galahad2TrinityController {
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         let pwm = duty_to_percent(duty);
         let mb = self.mb_sync.load(Ordering::Relaxed) as u8;
-        self.send_a_command(CMD_SET_PUMP_PWM, &[mb, pwm])?;
+        self.send_write_command(CMD_SET_PUMP_PWM, &[mb, pwm])?;
         debug!("Set pump PWM to {pwm}% (mb_sync={mb})");
         Ok(())
     }
@@ -409,6 +429,59 @@ impl AioDevice for Galahad2TrinityController {
 
     fn read_coolant_temp(&self) -> Result<f32> {
         bail!("Galahad2 Trinity does not have a coolant temperature sensor")
+    }
+}
+
+/// Allows sharing a single `Galahad2TrinityController` instance across
+/// the fan control loop and the RGB controller via `Arc`.
+impl FanDevice for Arc<Galahad2TrinityController> {
+    fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()> {
+        (**self).set_fan_speed(slot, duty)
+    }
+    fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
+        (**self).set_fan_speeds(duties)
+    }
+    fn read_fan_rpm(&self) -> Result<Vec<u16>> {
+        (**self).read_fan_rpm()
+    }
+    fn fan_slot_count(&self) -> u8 {
+        (**self).fan_slot_count()
+    }
+    fn supports_mb_sync(&self) -> bool {
+        (**self).supports_mb_sync()
+    }
+    fn set_mb_rpm_sync(&self, port: u8, sync: bool) -> Result<()> {
+        (**self).set_mb_rpm_sync(port, sync)
+    }
+    fn has_pump_control(&self) -> bool {
+        (**self).has_pump_control()
+    }
+    fn set_pump_speed(&self, duty: u8) -> Result<()> {
+        (**self).set_pump_speed(duty)
+    }
+}
+
+impl RgbDevice for Arc<Galahad2TrinityController> {
+    fn device_name(&self) -> String {
+        (**self).device_name()
+    }
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        (**self).supported_modes()
+    }
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        (**self).zone_info()
+    }
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        (**self).set_zone_effect(zone, effect)
+    }
+    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
+        (**self).supported_scopes()
+    }
+    fn supports_mb_rgb_sync(&self) -> bool {
+        (**self).supports_mb_rgb_sync()
+    }
+    fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
+        (**self).set_mb_rgb_sync(enabled)
     }
 }
 

@@ -59,11 +59,12 @@ pub fn create_wired_controllers(
         )),
         DeviceFamily::Galahad2Trinity => Some(
             crate::galahad2_trinity::Galahad2TrinityController::new(backend, pid).map(|c| {
+                let ctrl = Arc::new(c);
                 WiredControllerSet {
-                    fan: None,
+                    fan: Some(Box::new(Arc::clone(&ctrl))),
                     rgb: vec![(
                         String::new(),
-                        Box::new(c) as Box<dyn crate::traits::RgbDevice>,
+                        Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
                     )],
                 }
             }),
