@@ -1,0 +1,566 @@
+{
+  "id": "lancool207-a5",
+  "name": "Lancool 207 A5",
+  "base_width": 1472,
+  "base_height": 720,
+  "rotated": false,
+  "target_device": "Lancool 207 Digital (1472\u00d7720)",
+  "background": {
+    "type": "image",
+    "path": "background.png"
+  },
+  "widgets": [
+    {
+      "id": "cpu-load-ring",
+      "x": 172,
+      "y": 214,
+      "width": 200,
+      "height": 200,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 36,
+        "sweep_angle": 360,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0,
+        "value_corner_radius": 0
+      }
+    },
+    {
+      "id": "gpu-load-ring",
+      "x": 896,
+      "y": 214,
+      "width": 200,
+      "height": 200,
+      "sensor_category": "gpu_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 36,
+        "sweep_angle": 360,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0,
+        "value_corner_radius": 0
+      }
+    },
+    {
+      "id": "ram-load-ring",
+      "x": 253,
+      "y": 557,
+      "width": 200,
+      "height": 200,
+      "sensor_category": "mem_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "mem_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 36,
+        "sweep_angle": 360,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0,
+        "value_corner_radius": 0
+      }
+    },
+    {
+      "id": "cpu-temp-bar",
+      "x": 510,
+      "y": 143,
+      "width": 352,
+      "height": 30,
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "background_color": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "corner_radius": 0.0,
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "gpu-temp-bar",
+      "x": 1233,
+      "y": 143,
+      "width": 352,
+      "height": 30,
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "background_color": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "corner_radius": 0.0,
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "drive-usage-bar",
+      "x": 733,
+      "y": 476,
+      "width": 419,
+      "height": 29,
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "command",
+          "cmd": "df -P / | awk 'NR==2 {gsub(/%/, \"\", $5); print $5}'"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "background_color": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "corner_radius": 0.0,
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 255
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpu-load",
+      "x": 174,
+      "y": 222,
+      "width": 120,
+      "height": 70,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 58,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "gpu-load",
+      "x": 898,
+      "y": 222,
+      "width": 120,
+      "height": 70,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 58,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "ram-load",
+      "x": 252,
+      "y": 557,
+      "width": 140,
+      "height": 76,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "mem_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 64,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "cpu-temp",
+      "x": 648,
+      "y": 178,
+      "width": 130,
+      "height": 40,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "\u00b0C",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 31,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "cpu-clock",
+      "x": 640,
+      "y": 273,
+      "width": 150,
+      "height": 40,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "command",
+          "cmd": "awk -F: '/cpu MHz/ {printf \"%.0f\\n\", $2; found=1; exit} END {if (!found) print 0}' /proc/cpuinfo"
+        },
+        "format": "{:.0}",
+        "unit": " MHz",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 31,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 6000
+      }
+    },
+    {
+      "id": "gpu-temp",
+      "x": 1370,
+      "y": 178,
+      "width": 130,
+      "height": 40,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "\u00b0C",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 31,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "gpu-clock",
+      "x": 1362,
+      "y": 273,
+      "width": 150,
+      "height": 40,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "command",
+          "cmd": "if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=clocks.current.graphics --format=csv,noheader,nounits 2>/dev/null | awk 'NR==1 {print $1+0; found=1; exit} END {if (!found) print 0}'; else echo 0; fi"
+        },
+        "format": "{:.0}",
+        "unit": " MHz",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 31,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 6000
+      }
+    },
+    {
+      "id": "drive-usage",
+      "x": 915,
+      "y": 440,
+      "width": 90,
+      "height": 40,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "command",
+          "cmd": "df -P / | awk 'NR==2 {gsub(/%/, \"\", $5); print $5}'"
+        },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 30,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "download",
+      "x": 650,
+      "y": 642,
+      "width": 190,
+      "height": 34,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "network_rx",
+          "iface": "lo"
+        },
+        "format": "{:.0}",
+        "unit": " kB/s",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 27,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "network_rx"
+    },
+    {
+      "id": "upload",
+      "x": 879,
+      "y": 642,
+      "width": 190,
+      "height": 34,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "network_tx",
+          "iface": "lo"
+        },
+        "format": "{:.0}",
+        "unit": " kB/s",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 27,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "network_tx"
+    },
+    {
+      "id": "date",
+      "x": 1160,
+      "y": 489,
+      "width": 310,
+      "height": 60,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%Y-%m-%d",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 45,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "time",
+      "x": 1158,
+      "y": 635,
+      "width": 250,
+      "height": 60,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%H:%M:%S",
+        "font": {
+          "path": "NotoSansTC-Regular.otf"
+        },
+        "font_size": 45,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "align": "left"
+      }
+    }
+  ]
+}

@@ -85,6 +85,31 @@
       ]
     },
     {
+      "id": "lancool207-a5",
+      "name": "Lancool 207 A5",
+      "description": "Recreated L-Connect 3 A5-style dashboard for the Lancool 207: CPU/GPU load rings, temperature bars, memory, clocks, drive usage, and network readouts.",
+      "author": "Lian Li",
+      "min_daemon_version": "0.4.1",
+      "folder": "lancool207-a5",
+      "template_file": "template.json",
+      "template_sha256": "04349386661c0559dc662fa2a88cdd487b811fd698e6cb5bd2d9b9238fe6d67c",
+      "preview": "preview.png",
+      "preview_sha256": "2b21221104ee93652ae49a179ca95708508556e27dc92ca084ca5f47a60802a5",
+      "base_width": 1472,
+      "base_height": 720,
+      "rotated": false,
+      "files": [
+        {
+          "path": "background.png",
+          "sha256": "ec1bef38c9097cd481e2f3496aed2dcddb930e48e68b1b3796cd91f4c7fb4a16"
+        },
+        {
+          "path": "NotoSansTC-Regular.otf",
+          "sha256": "8d9cd5f210c0204d2a1ddaeaf82db1071e242126f4e18b9c350d8b1680bae400"
+        }
+      ]
+    },
+    {
       "id": "neon-us88",
       "name": "Neon",
       "description": "Neon dashboard for the Universal Screen 8.8\": radial CPU/GPU gauges, analog and digital clocks, RAM/disk readouts, CPU/GPU temperature graphs, and network throughput sparklines.",
