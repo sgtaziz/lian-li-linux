@@ -4,9 +4,22 @@ use super::fan_type::WirelessFanType;
 use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, RF_PWM_CMD, RF_SELECT, USB_CMD_SEND_RF};
 use anyhow::{Context, Result};
 use lianli_transport::usb::USB_TIMEOUT;
+use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::debug;
+
+// Wireless fans can revert to hardware-default speed if PWM traffic goes quiet.
+// Keep sending steady-state targets periodically even when the reported PWM
+// already matches the requested value.
+const PWM_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(1);
+
+fn pwm_last_sent() -> &'static Mutex<HashMap<[u8; 6], Instant>> {
+    static LAST_SENT: OnceLock<Mutex<HashMap<[u8; 6], Instant>>> = OnceLock::new();
+    LAST_SENT.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 impl WirelessController {
     /// Set fan PWM values for a specific device identified by MAC address.
@@ -56,7 +69,12 @@ impl WirelessController {
             .any(|(target, reported)| {
                 target.abs_diff(*reported) > 5 || (*target <= 10 && *reported != *target)
             });
-        if !needs_send {
+        let now = Instant::now();
+        let force_keepalive = pwm_last_sent()
+            .lock()
+            .get(mac)
+            .map_or(true, |t| now.duration_since(*t) >= PWM_KEEPALIVE_INTERVAL);
+        if !needs_send && !force_keepalive {
             return Ok(());
         }
 
@@ -89,6 +107,8 @@ impl WirelessController {
             }
             Ok(())
         })?;
+
+        pwm_last_sent().lock().insert(*mac, Instant::now());
 
         debug!(
             "Set fan PWM for {} (rx={}, ch={}): {:?}",
