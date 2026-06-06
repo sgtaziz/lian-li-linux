@@ -37,7 +37,6 @@ pub(in super::super) fn draw(
     }
     let u = unit_interval(value, value_min, value_max);
     let fill_sweep = sweep * u;
-
     let bg = Rgba(background_color);
     let solid_value_color = range_color(ranges, u);
     let gradient_stops = if gradient {
@@ -117,7 +116,7 @@ fn prepare_gradient_stops(stops: &[GradientStop]) -> Vec<(f32, [u8; 4])> {
     let mut out: Vec<(f32, [u8; 4])> = if stops.is_empty() {
         vec![
             (0.0, [45, 110, 255, 255]),
-            (0.55, [170, 80, 255, 255]),
+            (0.50, [170, 80, 255, 255]),
             (1.0, [255, 80, 190, 255]),
         ]
     } else {

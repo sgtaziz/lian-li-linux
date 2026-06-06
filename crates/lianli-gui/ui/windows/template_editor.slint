@@ -2,13 +2,13 @@ import { Theme } from "../theme.slint";
 import {
     Button, ComboBox, LineEdit, ScrollView, Palette,
 } from "std-widgets.slint";
-import { EditorRange, EditorWidget } from "template_editor/types.slint";
+import { EditorRange, EditorGradientStop, EditorWidget } from "template_editor/types.slint";
 import { BareSpinBox, LabeledCheckBox } from "template_editor/inputs.slint";
 import { WidgetListRow } from "template_editor/list_row.slint";
 import { WidgetBox } from "template_editor/canvas_box.slint";
 import { PropertiesPanel } from "template_editor/props.slint";
 
-export { EditorRange, EditorWidget }
+export { EditorRange, EditorGradientStop, EditorWidget }
 
 export component TemplateEditorWindow inherits Window {
     title: "LCD Template Editor";
@@ -38,6 +38,7 @@ export component TemplateEditorWindow inherits Window {
     in-out property <int> selected-index: -1;
     in-out property <EditorWidget> selected-widget;
     in-out property <[EditorRange]> selected-ranges: [];
+    in-out property <[EditorGradientStop]> selected-gradient-stops: [];
 
     in property <image> preview-image;
     in property <[string]> device-presets: [];
@@ -71,6 +72,9 @@ export component TemplateEditorWindow inherits Window {
     callback range-field(int, string, string);
     callback range-added();
     callback range-removed(int);
+    callback gradient-stop-field(int, string, string);
+    callback gradient-stop-added();
+    callback gradient-stop-removed(int);
     callback pick-bg-image();
     callback pick-widget-image(int);
     callback preset-selected(string);
@@ -354,6 +358,7 @@ export component TemplateEditorWindow inherits Window {
                 selected-index: root.selected-index;
                 selected-widget: root.selected-widget;
                 selected-ranges: root.selected-ranges;
+                selected-gradient-stops: root.selected-gradient-stops;
                 sensor-options: root.sensor-options;
                 font-names: root.font-names;
                 align-options: root.align-options;
@@ -361,6 +366,9 @@ export component TemplateEditorWindow inherits Window {
                 range-field(i, f, v) => { root.range-field(i, f, v); }
                 range-added => { root.range-added(); }
                 range-removed(i) => { root.range-removed(i); }
+                gradient-stop-field(i, f, v) => { root.gradient-stop-field(i, f, v); }
+                gradient-stop-added => { root.gradient-stop-added(); }
+                gradient-stop-removed(i) => { root.gradient-stop-removed(i); }
                 widget-removed(i) => { root.widget-removed(i); }
                 pick-widget-image(i) => { root.pick-widget-image(i); }
             }

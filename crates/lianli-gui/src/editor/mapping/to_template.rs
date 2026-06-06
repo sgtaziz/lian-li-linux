@@ -1,7 +1,9 @@
 use lianli_shared::fonts::font_path_for_label;
 use lianli_shared::media::{SensorRange, SensorSourceConfig};
 use lianli_shared::sensors::{SensorInfo, SensorSource};
-use lianli_shared::template::{BarOrientation, FontRef, ImageFit, TextAlign, Widget, WidgetKind};
+use lianli_shared::template::{
+    default_gradient_stops, BarOrientation, FontRef, ImageFit, TextAlign, Widget, WidgetKind,
+};
 
 pub(in crate::editor) fn label_to_font_ref(label: &str) -> FontRef {
     FontRef {
@@ -43,6 +45,8 @@ pub(in crate::editor) fn make_default_widget(id: &str, kind_str: &str, cx: f32, 
             ranges: default_ranges(),
             bg_corner_radius: 0.0,
             value_corner_radius: 0.0,
+            gradient: false,
+            gradient_stops: default_gradient_stops(),
         },
         "vertical_bar" => WidgetKind::VerticalBar {
             source: SensorSourceConfig::CpuUsage,
@@ -178,6 +182,7 @@ pub(in crate::editor) fn make_default_widget(id: &str, kind_str: &str, cx: f32, 
             letter_spacing: 0.0,
         },
     };
+
     Widget {
         id: id.to_string(),
         kind,
@@ -232,11 +237,14 @@ pub(in crate::editor) fn parse_sensor_source(
     if label.ends_with(". Custom command") || label == "Custom command" {
         return Some(SensorSourceConfig::Command { cmd: String::new() });
     }
+
     let idx: usize = label.split('.').next()?.parse().ok()?;
     if idx == 0 {
         return None;
     }
+
     let sensor = sensors.get(idx - 1)?;
+
     Some(match &sensor.source {
         SensorSource::Hwmon {
             name,

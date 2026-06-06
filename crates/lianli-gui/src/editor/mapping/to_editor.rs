@@ -609,6 +609,7 @@ pub(in crate::editor) fn blank_editor_widget() -> EditorWidget {
         corner_radius: 0,
         bg_corner_radius: 0,
         value_corner_radius: 0,
+        gauge_gradient: false,
         sparkline_history: 60,
         sparkline_line_width: 2.0,
         sparkline_auto_range: false,

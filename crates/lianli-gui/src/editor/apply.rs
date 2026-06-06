@@ -1,7 +1,7 @@
-use crate::EditorRange;
+use crate::{EditorGradientStop, EditorRange};
 use lianli_shared::media::{SensorRange, SensorSourceConfig};
 use lianli_shared::sensors::SensorInfo;
-use lianli_shared::template::{Widget, WidgetKind};
+use lianli_shared::template::{GradientStop, Widget, WidgetKind};
 use slint::{ModelRc, VecModel};
 
 pub(super) fn apply_widget_field(
@@ -159,6 +159,7 @@ pub(super) fn apply_kind_field(
             ranges: _,
             bg_corner_radius,
             value_corner_radius,
+            gradient,
             ..
         } => match field {
             "source" => {
@@ -184,6 +185,9 @@ pub(super) fn apply_kind_field(
                 if let Ok(v) = val.parse() {
                     *value_max = v;
                 }
+            }
+            "gradient" => {
+                *gradient = val == "true" || val == "1";
             }
             "start_angle" => {
                 if let Ok(v) = val.parse() {
@@ -728,6 +732,20 @@ pub(super) fn widget_ranges(kind: &WidgetKind) -> Option<&[SensorRange]> {
     }
 }
 
+pub(super) fn widget_gradient_stops_mut(kind: &mut WidgetKind) -> Option<&mut Vec<GradientStop>> {
+    match kind {
+        WidgetKind::RadialGauge { gradient_stops, .. } => Some(gradient_stops),
+        _ => None,
+    }
+}
+
+pub(super) fn widget_gradient_stops(kind: &WidgetKind) -> Option<&[GradientStop]> {
+    match kind {
+        WidgetKind::RadialGauge { gradient_stops, .. } => Some(gradient_stops.as_slice()),
+        _ => None,
+    }
+}
+
 pub(super) fn apply_range_field(range: &mut SensorRange, field: &str, val: &str) {
     match field {
         "max" => {
@@ -747,6 +765,21 @@ pub(super) fn apply_range_field(range: &mut SensorRange, field: &str, val: &str)
     }
 }
 
+pub(super) fn apply_gradient_stop_field(stop: &mut GradientStop, field: &str, val: &str) {
+    match field {
+        "position" => {
+            if let Ok(v) = val.parse::<i32>() {
+                stop.position = v.clamp(0, 100) as f32;
+            }
+        }
+        "color_r" => stop.color[0] = super::mapping::parse_u8(val),
+        "color_g" => stop.color[1] = super::mapping::parse_u8(val),
+        "color_b" => stop.color[2] = super::mapping::parse_u8(val),
+        "color_a" => stop.alpha = super::mapping::parse_u8(val),
+        _ => {}
+    }
+}
+
 pub(super) fn ranges_to_editor(ranges: &[SensorRange]) -> ModelRc<EditorRange> {
     let items: Vec<EditorRange> = ranges
         .iter()
@@ -758,5 +791,20 @@ pub(super) fn ranges_to_editor(ranges: &[SensorRange]) -> ModelRc<EditorRange> {
             color_a: r.alpha as i32,
         })
         .collect();
+    ModelRc::new(VecModel::from(items))
+}
+
+pub(super) fn gradient_stops_to_editor(stops: &[GradientStop]) -> ModelRc<EditorGradientStop> {
+    let items: Vec<EditorGradientStop> = stops
+        .iter()
+        .map(|s| EditorGradientStop {
+            position_pct: s.position.round().clamp(0.0, 100.0) as i32,
+            color_r: s.color[0] as i32,
+            color_g: s.color[1] as i32,
+            color_b: s.color[2] as i32,
+            color_a: s.alpha as i32,
+        })
+        .collect();
+
     ModelRc::new(VecModel::from(items))
 }

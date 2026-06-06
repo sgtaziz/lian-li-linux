@@ -8,11 +8,13 @@ mod preview;
 mod reflect;
 
 use crate::conversions;
-use crate::{EditorRange, EditorWidget, MainWindow, Shared, TemplateEditorWindow};
+use crate::{
+    EditorGradientStop, EditorRange, EditorWidget, MainWindow, Shared, TemplateEditorWindow,
+};
 use lianli_shared::fonts::{cached_system_fonts, DEFAULT_FONT_LABEL};
 use lianli_shared::media::SensorRange;
 use lianli_shared::screen::screen_presets;
-use lianli_shared::template::{LcdTemplate, TemplateBackground, WidgetKind};
+use lianli_shared::template::{GradientStop, LcdTemplate, TemplateBackground, WidgetKind};
 use parking_lot::Mutex as PLMutex;
 use slint::{ComponentHandle, Image, ModelRc, SharedString, VecModel};
 use std::sync::atomic::AtomicU64;
@@ -331,7 +333,8 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                 }
             }
             if let Some(e) = editor_weak.upgrade() {
-                reflect::reflect_widget_row(&e, &editor_state, &shared, idx as usize);
+                reflect::select_widget(&e, &editor_state, &shared, idx);
+                reflect::reflect_gradient_stops(&e, &editor_state);
             }
             preview::request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
@@ -486,6 +489,7 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
             }
             if let Some(e) = editor_weak.upgrade() {
                 reflect::reflect_ranges(&e, &editor_state);
+                reflect::reflect_gradient_stops(&e, &editor_state);
                 reflect::reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
             }
             preview::request_preview(&editor_weak, &editor_state, &preview_version, &shared);
@@ -497,17 +501,21 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
         let editor_weak = editor.as_weak();
         let preview_version = preview_version.clone();
         let shared = shared.clone();
+
         editor.on_range_removed(move |range_idx| {
             let target_idx = editor_state.lock().selected_widget;
             if target_idx < 0 {
                 return;
             }
+
             {
                 let mut st = editor_state.lock();
+
                 if let Some(tpl) = st.template.as_mut() {
                     if let Some(widget) = tpl.widgets.get_mut(target_idx as usize) {
                         if let Some(ranges) = apply::widget_ranges_mut(&mut widget.kind) {
                             let i = range_idx as usize;
+
                             if i < ranges.len() {
                                 ranges.remove(i);
                             }
@@ -515,10 +523,128 @@ pub fn install(main: &MainWindow, shared: Shared) -> EditorHandle {
                     }
                 }
             }
+
             if let Some(e) = editor_weak.upgrade() {
                 reflect::reflect_ranges(&e, &editor_state);
+                reflect::reflect_gradient_stops(&e, &editor_state);
                 reflect::reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
             }
+
+            preview::request_preview(&editor_weak, &editor_state, &preview_version, &shared);
+        });
+    }
+
+    {
+        let editor_state = editor_state.clone();
+        let editor_weak = editor.as_weak();
+        let preview_version = preview_version.clone();
+        let shared = shared.clone();
+
+        editor.on_gradient_stop_field(move |stop_idx, field, val| {
+            let target_idx = editor_state.lock().selected_widget;
+            if target_idx < 0 {
+                return;
+            }
+
+            {
+                let mut st = editor_state.lock();
+
+                if let Some(tpl) = st.template.as_mut() {
+                    if let Some(widget) = tpl.widgets.get_mut(target_idx as usize) {
+                        if let Some(stops) = apply::widget_gradient_stops_mut(&mut widget.kind) {
+                            let i = stop_idx as usize;
+
+                            if let Some(stop) = stops.get_mut(i) {
+                                apply::apply_gradient_stop_field(
+                                    stop,
+                                    field.as_str(),
+                                    val.as_str(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            preview::request_preview(&editor_weak, &editor_state, &preview_version, &shared);
+        });
+    }
+
+    {
+        let editor_state = editor_state.clone();
+        let editor_weak = editor.as_weak();
+        let preview_version = preview_version.clone();
+        let shared = shared.clone();
+
+        editor.on_gradient_stop_added(move || {
+            let target_idx = editor_state.lock().selected_widget;
+            if target_idx < 0 {
+                return;
+            }
+
+            {
+                let mut st = editor_state.lock();
+
+                if let Some(tpl) = st.template.as_mut() {
+                    if let Some(widget) = tpl.widgets.get_mut(target_idx as usize) {
+                        if let Some(stops) = apply::widget_gradient_stops_mut(&mut widget.kind) {
+                            stops.push(GradientStop {
+                                position: 100.0,
+                                color: [255, 80, 190],
+                                alpha: 255,
+                            });
+
+                            stops.sort_by(|a, b| {
+                                a.position
+                                    .partial_cmp(&b.position)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                        }
+                    }
+                }
+            }
+
+            if let Some(e) = editor_weak.upgrade() {
+                reflect::reflect_gradient_stops(&e, &editor_state);
+                reflect::reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
+            }
+
+            preview::request_preview(&editor_weak, &editor_state, &preview_version, &shared);
+        });
+    }
+
+    {
+        let editor_state = editor_state.clone();
+        let editor_weak = editor.as_weak();
+        let preview_version = preview_version.clone();
+        let shared = shared.clone();
+
+        editor.on_gradient_stop_removed(move |stop_idx| {
+            let target_idx = editor_state.lock().selected_widget;
+            if target_idx < 0 {
+                return;
+            }
+
+            {
+                let mut st = editor_state.lock();
+
+                if let Some(tpl) = st.template.as_mut() {
+                    if let Some(widget) = tpl.widgets.get_mut(target_idx as usize) {
+                        if let Some(stops) = apply::widget_gradient_stops_mut(&mut widget.kind) {
+                            let i = stop_idx as usize;
+
+                            if i < stops.len() {
+                                stops.remove(i);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(e) = editor_weak.upgrade() {
+                reflect::reflect_gradient_stops(&e, &editor_state);
+                reflect::reflect_widget_row(&e, &editor_state, &shared, target_idx as usize);
+            }
+
             preview::request_preview(&editor_weak, &editor_state, &preview_version, &shared);
         });
     }
@@ -543,6 +669,11 @@ pub fn open(
     handle
         .window
         .set_selected_ranges(slint::ModelRc::new(VecModel::<EditorRange>::default()));
+    handle
+        .window
+        .set_selected_gradient_stops(slint::ModelRc::new(
+            VecModel::<EditorGradientStop>::default(),
+        ));
     handle.window.set_selected_index(-1);
     handle
         .window

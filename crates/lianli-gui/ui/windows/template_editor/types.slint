@@ -7,6 +7,14 @@ export struct EditorRange {
     color-a: int,
 }
 
+export struct EditorGradientStop {
+    position-pct: int,
+    color-r: int,
+    color-g: int,
+    color-b: int,
+    color-a: int,
+}
+
 export struct EditorWidget {
     id: string,
     kind: string,
@@ -49,6 +57,7 @@ export struct EditorWidget {
     corner-radius: int,
     bg-corner-radius: int,
     value-corner-radius: int,
+    gauge-gradient: bool,
     letter-spacing: int,
 
     show-gauge: bool,

@@ -1,6 +1,6 @@
 import { Theme } from "../../theme.slint";
 import { Button, ScrollView } from "std-widgets.slint";
-import { EditorRange, EditorWidget } from "types.slint";
+import { EditorRange, EditorGradientStop, EditorWidget } from "types.slint";
 import {
     LabeledSpinBox, LabeledLineEdit, LabeledComboValue, LabeledComboIndex,
     LabeledCheckBox, RgbaRow, BareSpinBox, BareLineEdit,
@@ -10,6 +10,7 @@ export component PropertiesPanel inherits Rectangle {
     in property <int> selected-index;
     in property <EditorWidget> selected-widget;
     in property <[EditorRange]> selected-ranges;
+    in property <[EditorGradientStop]> selected-gradient-stops;
     in property <[string]> sensor-options;
     in property <[string]> font-names;
     in property <[string]> align-options;
@@ -17,6 +18,9 @@ export component PropertiesPanel inherits Rectangle {
     callback widget-field(int, string, string);
     callback range-field(int, string, string);
     callback range-added();
+    callback gradient-stop-field(int, string, string);
+    callback gradient-stop-added();
+    callback gradient-stop-removed(int);
     callback range-removed(int);
     callback widget-removed(int);
     callback pick-widget-image(int);
@@ -170,12 +174,90 @@ export component PropertiesPanel inherits Rectangle {
                     }
                 }
 
-                if root.selected-widget.kind == "radial_gauge"
-                   || root.selected-widget.kind == "vertical_bar"
-                   || root.selected-widget.kind == "horizontal_bar"
-                   || root.selected-widget.kind == "speedometer"
-                   || root.selected-widget.kind == "value_text"
-                   || root.selected-widget.kind == "sparkline": VerticalLayout {
+                if root.selected-widget.kind == "radial_gauge": LabeledCheckBox {
+                    text: "Gradient fill";
+                    checked: root.selected-widget.gauge-gradient;
+                    toggled(c) => { root.widget-field(root.selected-index, "gradient", c ? "true" : "false"); }
+                }
+
+                if root.selected-widget.kind == "radial_gauge" && root.selected-widget.gauge-gradient: VerticalLayout {
+                    spacing: 6px;
+
+                    Text {
+                        text: "Gradient points (% / R / G / B / A)";
+                        font-size: 10px;
+                        color: Theme.text-secondary;
+                    }
+
+                    for s[si] in root.selected-gradient-stops: HorizontalLayout {
+                        spacing: 3px;
+                        height: 28px;
+
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: s.position-pct;
+                            minimum: 0;
+                            maximum: 100;
+                            edited(v) => { root.gradient-stop-field(si, "position", v); }
+                        }
+
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: s.color-r;
+                            edited(v) => { root.gradient-stop-field(si, "color_r", v); }
+                        }
+
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: s.color-g;
+                            edited(v) => { root.gradient-stop-field(si, "color_g", v); }
+                        }
+
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: s.color-b;
+                            edited(v) => { root.gradient-stop-field(si, "color_b", v); }
+                        }
+
+                        BareSpinBox {
+                            width: 96px;
+                            horizontal-stretch: 0;
+                            value: s.color-a;
+                            edited(v) => { root.gradient-stop-field(si, "color_a", v); }
+                        }
+
+                        Button {
+                            text: "✕";
+                            horizontal-stretch: 1;
+                            height: 28px;
+                            clicked => { root.gradient-stop-removed(si); }
+                        }
+                    }
+
+                    Button {
+                        text: "+ Add gradient point";
+                        clicked => { root.gradient-stop-added(); }
+                    }
+
+                    Text {
+                        text: "Color ranges are ignored while gradient fill is enabled.";
+                        font-size: 10px;
+                        color: Theme.text-secondary;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if (root.selected-widget.kind == "radial_gauge"
+                    || root.selected-widget.kind == "vertical_bar"
+                    || root.selected-widget.kind == "horizontal_bar"
+                    || root.selected-widget.kind == "speedometer"
+                    || root.selected-widget.kind == "core_bars"
+                    || root.selected-widget.kind == "value_text"
+                    || root.selected-widget.kind == "sparkline"): VerticalLayout {
                     spacing: 6px;
                     LabeledComboIndex {
                         label: "Sensor";
@@ -711,13 +793,14 @@ export component PropertiesPanel inherits Rectangle {
                     }
                 }
 
-                if root.selected-widget.kind == "radial_gauge"
-                   || root.selected-widget.kind == "vertical_bar"
-                   || root.selected-widget.kind == "horizontal_bar"
-                   || root.selected-widget.kind == "speedometer"
-                   || root.selected-widget.kind == "core_bars"
-                   || root.selected-widget.kind == "value_text"
-                   || root.selected-widget.kind == "sparkline": VerticalLayout {
+                if (root.selected-widget.kind != "radial_gauge" || !root.selected-widget.gauge-gradient)
+                && (root.selected-widget.kind == "radial_gauge"
+                    || root.selected-widget.kind == "vertical_bar"
+                    || root.selected-widget.kind == "horizontal_bar"
+                    || root.selected-widget.kind == "speedometer"
+                    || root.selected-widget.kind == "core_bars"
+                    || root.selected-widget.kind == "value_text"
+                    || root.selected-widget.kind == "sparkline"): VerticalLayout {
                     spacing: 6px;
                     Text { text: "Color ranges (max value / R / G / B / A)"; font-size: 10px; color: Theme.text-secondary; }
                     for r[ri] in root.selected-ranges: HorizontalLayout {

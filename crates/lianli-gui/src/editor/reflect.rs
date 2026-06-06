@@ -1,5 +1,5 @@
 use super::{EditorState, SharedEditor};
-use crate::{EditorRange, Shared, TemplateEditorWindow};
+use crate::{EditorGradientStop, EditorRange, Shared, TemplateEditorWindow};
 use lianli_shared::screen::screen_preset_label;
 use lianli_shared::template::TemplateBackground;
 use slint::{Model, ModelRc, SharedString, VecModel};
@@ -22,6 +22,29 @@ pub(super) fn reflect_ranges(editor: &TemplateEditorWindow, state: &SharedEditor
         None => ModelRc::new(VecModel::<EditorRange>::default()),
     };
     editor.set_selected_ranges(model);
+}
+
+pub(super) fn reflect_gradient_stops(editor: &TemplateEditorWindow, state: &SharedEditor) {
+    let stops = {
+        let st = state.lock();
+        let idx = st.selected_widget;
+
+        if idx < 0 {
+            None
+        } else {
+            st.template
+                .as_ref()
+                .and_then(|t| t.widgets.get(idx as usize))
+                .and_then(|w| super::apply::widget_gradient_stops(&w.kind).map(|s| s.to_vec()))
+        }
+    };
+
+    let model = match stops {
+        Some(s) => super::apply::gradient_stops_to_editor(&s),
+        None => ModelRc::new(VecModel::<EditorGradientStop>::default()),
+    };
+
+    editor.set_selected_gradient_stops(model);
 }
 
 pub(super) fn editor_color_from_state(st: &EditorState) -> [u8; 4] {
@@ -108,6 +131,7 @@ pub(super) fn select_widget(
         editor.set_selected_widget(super::mapping::blank_editor_widget());
     }
     reflect_ranges(editor, state);
+    reflect_gradient_stops(editor, state);
 }
 
 pub(super) fn reflect_widgets_model(
@@ -137,4 +161,5 @@ pub(super) fn reflect_widgets_model(
         editor.set_selected_widget(super::mapping::blank_editor_widget());
     }
     reflect_ranges(editor, state);
+    reflect_gradient_stops(editor, state);
 }

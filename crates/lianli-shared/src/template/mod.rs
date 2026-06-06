@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub mod widget_kind;
-pub use widget_kind::WidgetKind;
+pub use widget_kind::{default_gradient_stops, GradientStop, WidgetKind};
 
 /// Accepts both `[r,g,b]` (alpha defaults to 255) and `[r,g,b,a]` so older
 /// hand-written templates keep loading after the alpha channel was added.

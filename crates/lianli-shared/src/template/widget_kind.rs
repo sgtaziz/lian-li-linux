@@ -7,7 +7,7 @@ fn default_alpha() -> u8 {
     255
 }
 
-fn default_gradient_stops() -> Vec<GradientStop> {
+pub fn default_gradient_stops() -> Vec<GradientStop> {
     vec![
         GradientStop {
             position: 0.0,
