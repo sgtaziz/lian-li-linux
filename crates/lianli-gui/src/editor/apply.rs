@@ -159,6 +159,7 @@ pub(super) fn apply_kind_field(
             ranges: _,
             bg_corner_radius,
             value_corner_radius,
+            ..
         } => match field {
             "source" => {
                 if let Some(new) = super::mapping::parse_sensor_source(val, sensors) {

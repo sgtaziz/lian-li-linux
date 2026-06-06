@@ -3,6 +3,38 @@ use crate::media::{SensorRange, SensorSourceConfig};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn default_alpha() -> u8 {
+    255
+}
+
+fn default_gradient_stops() -> Vec<GradientStop> {
+    vec![
+        GradientStop {
+            position: 0.0,
+            color: [45, 110, 255],
+            alpha: 255,
+        },
+        GradientStop {
+            position: 50.0,
+            color: [170, 80, 255],
+            alpha: 255,
+        },
+        GradientStop {
+            position: 100.0,
+            color: [255, 80, 190],
+            alpha: 255,
+        },
+    ]
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GradientStop {
+    pub position: f32,
+    pub color: [u8; 3],
+    #[serde(default = "default_alpha")]
+    pub alpha: u8,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WidgetKind {
@@ -56,6 +88,10 @@ pub enum WidgetKind {
         bg_corner_radius: f32,
         #[serde(default)]
         value_corner_radius: f32,
+        #[serde(default)]
+        gradient: bool,
+        #[serde(default = "default_gradient_stops")]
+        gradient_stops: Vec<GradientStop>,
     },
     VerticalBar {
         source: SensorSourceConfig,

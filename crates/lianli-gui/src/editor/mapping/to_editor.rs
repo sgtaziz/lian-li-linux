@@ -65,6 +65,7 @@ pub(in crate::editor) fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) ->
         corner_radius: 0,
         bg_corner_radius: 0,
         value_corner_radius: 0,
+        gauge_gradient: false,
         letter_spacing: 0,
         clock_show_seconds: true,
         clock_show_hour_ticks: true,
@@ -201,6 +202,7 @@ pub(in crate::editor) fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) ->
             background_color,
             bg_corner_radius,
             value_corner_radius,
+            gradient,
             ..
         } => {
             out.source_index = sensor_index_for_source(source, sensors);
@@ -218,6 +220,7 @@ pub(in crate::editor) fn widget_to_editor(w: &Widget, sensors: &[SensorInfo]) ->
             out.bg_a = background_color[3] as i32;
             out.bg_corner_radius = bg_corner_radius.max(0.0).round() as i32;
             out.value_corner_radius = value_corner_radius.max(0.0).round() as i32;
+            out.gauge_gradient = *gradient;
         }
         WidgetKind::VerticalBar {
             source,

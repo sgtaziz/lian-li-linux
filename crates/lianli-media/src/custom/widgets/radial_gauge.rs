@@ -4,6 +4,7 @@
 use super::super::helpers::{range_color, unit_interval};
 use image::{Rgba, RgbaImage};
 use lianli_shared::media::SensorRange;
+use lianli_shared::template::GradientStop;
 use std::f32::consts::PI;
 
 #[allow(clippy::too_many_arguments)]
@@ -17,6 +18,8 @@ pub(in super::super) fn draw(
     inner_radius_pct: f32,
     background_color: [u8; 4],
     ranges: &[SensorRange],
+    gradient: bool,
+    gradient_stops: &[GradientStop],
     bg_corner_radius: f32,
     value_corner_radius: f32,
 ) {
@@ -36,7 +39,12 @@ pub(in super::super) fn draw(
     let fill_sweep = sweep * u;
 
     let bg = Rgba(background_color);
-    let value_color = range_color(ranges, u);
+    let solid_value_color = range_color(ranges, u);
+    let gradient_stops = if gradient {
+        prepare_gradient_stops(gradient_stops)
+    } else {
+        Vec::new()
+    };
 
     let bg_cr = clamp_corner(bg_corner_radius, half_thickness, sweep, r_mid);
     let value_cr = clamp_corner(value_corner_radius, half_thickness, fill_sweep, r_mid);
@@ -88,13 +96,88 @@ pub(in super::super) fn draw(
                 }
                 sub.put_pixel(x, y, bg);
             } else {
+                let value_color = if gradient {
+                    let pixel_u = (diff / sweep).clamp(0.0, 1.0);
+                    gradient_color(&gradient_stops, pixel_u)
+                } else {
+                    solid_value_color
+                };
+
                 if value_color[3] == 0 {
                     continue;
                 }
+
                 sub.put_pixel(x, y, value_color);
             }
         }
     }
+}
+
+fn prepare_gradient_stops(stops: &[GradientStop]) -> Vec<(f32, [u8; 4])> {
+    let mut out: Vec<(f32, [u8; 4])> = if stops.is_empty() {
+        vec![
+            (0.0, [45, 110, 255, 255]),
+            (0.55, [170, 80, 255, 255]),
+            (1.0, [255, 80, 190, 255]),
+        ]
+    } else {
+        stops
+            .iter()
+            .map(|s| {
+                (
+                    (s.position / 100.0).clamp(0.0, 1.0),
+                    [s.color[0], s.color[1], s.color[2], s.alpha],
+                )
+            })
+            .collect()
+    };
+
+    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    out
+}
+
+fn gradient_color(stops: &[(f32, [u8; 4])], t: f32) -> Rgba<u8> {
+    if stops.is_empty() {
+        return Rgba([255, 255, 255, 255]);
+    }
+
+    let t = t.clamp(0.0, 1.0);
+
+    if t <= stops[0].0 {
+        return Rgba(stops[0].1);
+    }
+
+    let last = stops.last().unwrap();
+    if t >= last.0 {
+        return Rgba(last.1);
+    }
+
+    for pair in stops.windows(2) {
+        let (p0, c0) = pair[0];
+        let (p1, c1) = pair[1];
+
+        if t >= p0 && t <= p1 {
+            let local_t = (t - p0) / (p1 - p0).max(f32::EPSILON);
+
+            return Rgba([
+                lerp_u8(c0[0], c1[0], local_t),
+                lerp_u8(c0[1], c1[1], local_t),
+                lerp_u8(c0[2], c1[2], local_t),
+                lerp_u8(c0[3], c1[3], local_t),
+            ]);
+        }
+    }
+
+    Rgba(last.1)
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    let t = t.clamp(0.0, 1.0);
+
+    (a as f32 + (b as f32 - a as f32) * t)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 fn clamp_corner(raw: f32, half_thickness: f32, arc_sweep_deg: f32, r_mid: f32) -> f32 {

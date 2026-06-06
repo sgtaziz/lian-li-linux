@@ -208,6 +208,8 @@ pub(super) fn draw_widget(
             ranges,
             bg_corner_radius,
             value_corner_radius,
+            gradient,
+            gradient_stops,
             ..
         } => {
             radial_gauge::draw(
@@ -220,6 +222,8 @@ pub(super) fn draw_widget(
                 *inner_radius_pct,
                 *background_color,
                 ranges,
+                *gradient,
+                gradient_stops,
                 *bg_corner_radius * ss,
                 *value_corner_radius * ss,
             );
