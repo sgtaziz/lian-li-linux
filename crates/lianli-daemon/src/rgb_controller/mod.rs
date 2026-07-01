@@ -249,6 +249,45 @@ impl RgbController {
         anyhow::bail!("RGB device not found: {device_id}");
     }
 
+    /// Upload a multi-frame animation to a wireless device via
+    /// `send_rgb_frames`. Each frame must be a full-device LED buffer; the
+    /// firmware then loops the animation onboard at `interval_ms` with no
+    /// further host packets. The effect_index is hashed across all frames so
+    /// the wireless drift check treats the running animation as the desired
+    /// state; `led_state` is parked on the final frame for a consistent later
+    /// single-frame re-send.
+    ///
+    /// Note: only the final frame is cached in `led_state`, so a later
+    /// `refresh_wireless_devices()` reconstructs a static image, not the
+    /// animation. The device also doesn't persist the effect (only bindings do),
+    /// so callers are expected to re-`SetRgbFrames` on reconnect to keep an
+    /// animation running.
+    pub fn set_rgb_frames(
+        &mut self,
+        device_id: &str,
+        frames: &[Vec<[u8; 3]>],
+        interval_ms: u16,
+    ) -> anyhow::Result<()> {
+        if frames.is_empty() {
+            anyhow::bail!("no frames supplied");
+        }
+        if let (Some(ref wireless), Some(state)) =
+            (&self.wireless, self.wireless_state.get_mut(device_id))
+        {
+            let want = state.led_state.len();
+            for (i, f) in frames.iter().enumerate() {
+                if f.len() != want {
+                    anyhow::bail!("frame {i} has {} LEDs, device has {want}", f.len());
+                }
+            }
+            let idx = effect_index_from_frames(frames);
+            wireless.send_rgb_frames(&state.mac, frames, interval_ms, &idx, 4)?;
+            state.led_state.copy_from_slice(&frames[frames.len() - 1]);
+            return Ok(());
+        }
+        anyhow::bail!("wireless RGB device not found: {device_id}");
+    }
+
     pub fn capabilities(&self) -> Vec<RgbDeviceCapabilities> {
         let mut caps = Vec::new();
 
@@ -455,6 +494,25 @@ fn effect_index_from_state(led_state: &[[u8; 3]]) -> [u8; 4] {
         for &b in px {
             h ^= b as u32;
             h = h.wrapping_mul(0x0100_0193);
+        }
+    }
+    if h == 0 {
+        h = 1;
+    }
+    h.to_be_bytes()
+}
+
+/// Same FNV-1a as `effect_index_from_state`, but over a frame sequence without
+/// flattening it into one buffer first (a multi-frame animation can be large).
+/// The byte order is identical to hashing the concatenated frames.
+fn effect_index_from_frames(frames: &[Vec<[u8; 3]>]) -> [u8; 4] {
+    let mut h: u32 = 0x811c_9dc5;
+    for frame in frames {
+        for px in frame {
+            for &b in px {
+                h ^= b as u32;
+                h = h.wrapping_mul(0x0100_0193);
+            }
         }
     }
     if h == 0 {

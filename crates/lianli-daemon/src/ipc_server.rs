@@ -361,6 +361,22 @@ fn handle_request(
             }
         }
 
+        IpcRequest::SetRgbFrames {
+            device_id,
+            frames,
+            interval_ms,
+        } => {
+            let state = state.lock();
+            if let Some(ref rgb) = state.rgb_controller {
+                match rgb.lock().set_rgb_frames(&device_id, &frames, interval_ms) {
+                    Ok(()) => IpcResponse::ok(serde_json::json!(null)),
+                    Err(e) => IpcResponse::error(format!("RGB frames error: {e}")),
+                }
+            } else {
+                IpcResponse::error("RGB controller not initialized")
+            }
+        }
+
         IpcRequest::SetMbRgbSync { device_id, enabled } => {
             let state = state.lock();
             if let Some(ref rgb) = state.rgb_controller {

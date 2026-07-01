@@ -43,6 +43,15 @@ pub enum IpcRequest {
         /// RGB triplets, one per LED.
         colors: Vec<[u8; 3]>,
     },
+    /// Upload a multi-frame animation to a wireless device. The firmware stores
+    /// the frames and loops them onboard at `interval_ms`, so no further host
+    /// packets are needed (unlike streamed Direct mode). Each frame is a
+    /// full-device LED buffer (one `[r, g, b]` per LED).
+    SetRgbFrames {
+        device_id: String,
+        frames: Vec<Vec<[u8; 3]>>,
+        interval_ms: u16,
+    },
     /// Set a single LED's color by index within a zone.
     /// Convenience wrapper around SetRgbDirect that modifies one LED
     /// without requiring the caller to track the full zone state.
