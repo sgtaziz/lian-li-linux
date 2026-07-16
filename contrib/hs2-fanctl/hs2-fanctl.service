@@ -1,0 +1,18 @@
+[Unit]
+Description=HydroShift II fan controller (smooth coolant-temp curve)
+Documentation=https://github.com/sgtaziz/lian-li-linux/blob/main/docs/hydroshift2-fan-protocol.md
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hs2-fanctl
+Restart=always
+RestartSec=3
+# Only needs USB (/dev/bus/usb) + sysfs hwmon reads.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
