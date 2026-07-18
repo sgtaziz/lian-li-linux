@@ -13,11 +13,61 @@ use lianli_shared::screen::{screen_info_for, ScreenInfo};
 use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
 use rusb::Device;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LcdIdentity {
+    family: DeviceFamily,
+    device_id: String,
+}
+
+fn is_wired_aio_lcd(family: DeviceFamily) -> bool {
+    matches!(
+        family,
+        DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd
+    )
+}
+
+/// Select an LCD without allowing two config entries to claim one device.
+///
+/// The alias fallback is intentionally narrow: some wired AIO firmwares switch
+/// between a hardware serial and a USB-topology ID after a cold boot. We only
+/// accept a sole compatible AIO when there is also a sole LCD configuration.
+fn select_lcd_index(
+    device: &LcdConfig,
+    identities: &[LcdIdentity],
+    claimed: &HashSet<usize>,
+    config_count: usize,
+) -> Option<usize> {
+    if let Some(serial) = device.serial.as_deref() {
+        if let Some((idx, _)) = identities
+            .iter()
+            .enumerate()
+            .find(|(idx, candidate)| !claimed.contains(idx) && candidate.device_id == serial)
+        {
+            return Some(idx);
+        }
+
+        if config_count == 1 && serial.starts_with("hid:") {
+            let mut compatible = identities.iter().enumerate().filter(|(idx, candidate)| {
+                !claimed.contains(idx) && is_wired_aio_lcd(candidate.family)
+            });
+            let first = compatible.next().map(|(idx, _)| idx);
+            if first.is_some() && compatible.next().is_none() {
+                return first;
+            }
+        }
+        return None;
+    }
+
+    device
+        .index
+        .filter(|idx| *idx < identities.len() && !claimed.contains(idx))
+}
 
 fn asset_cache_key(
     device: &LcdConfig,
@@ -174,6 +224,14 @@ impl ServiceManager {
         let mut new_targets = HashMap::new();
 
         if let Some(cfg) = &self.config {
+            let identities: Vec<LcdIdentity> = candidates
+                .iter()
+                .map(|candidate| LcdIdentity {
+                    family: candidate.family,
+                    device_id: candidate.device_id.clone(),
+                })
+                .collect();
+            let mut claimed = HashSet::new();
             for (cfg_idx, device_cfg) in cfg.lcds.iter().enumerate() {
                 let asset = match self.media_assets.get(&cfg_idx) {
                     Some(asset_arc) => Arc::clone(asset_arc),
@@ -185,16 +243,26 @@ impl ServiceManager {
                     }
                 };
 
-                let matched = if let Some(serial) = &device_cfg.serial {
-                    candidates.iter().find(|c| &c.device_id == serial)
-                } else if let Some(index) = device_cfg.index {
-                    candidates.get(index)
-                } else {
-                    None
-                };
+                let selected = select_lcd_index(device_cfg, &identities, &claimed, cfg.lcds.len());
+                let matched =
+                    selected.and_then(|idx| candidates.get(idx).map(|candidate| (idx, candidate)));
 
                 let candidate = match matched {
-                    Some(c) => c,
+                    Some((selected, c)) => {
+                        claimed.insert(selected);
+                        if device_cfg
+                            .serial
+                            .as_deref()
+                            .is_some_and(|configured| configured != c.device_id)
+                        {
+                            warn!(
+                                "[devices] configured AIO LCD id '{}' is unavailable; using compatible alias '{}'",
+                                device_cfg.serial.as_deref().unwrap_or("<index>"),
+                                c.device_id
+                            );
+                        }
+                        c
+                    }
                     None => {
                         if let Some(mut existing) = self.targets.remove(&cfg_idx) {
                             info!("[devices] LCD[{}] detached", device_cfg.device_id());
@@ -374,5 +442,137 @@ impl ServiceManager {
         }
 
         self.targets = new_targets;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn serial_config(serial: &str) -> LcdConfig {
+        serde_json::from_value(serde_json::json!({
+            "serial": serial,
+            "type": "color",
+            "rgb": [0, 0, 0]
+        }))
+        .unwrap()
+    }
+
+    fn index_config(index: usize) -> LcdConfig {
+        serde_json::from_value(serde_json::json!({
+            "index": index,
+            "serial": null,
+            "type": "color",
+            "rgb": [0, 0, 0]
+        }))
+        .unwrap()
+    }
+
+    fn identity(family: DeviceFamily, device_id: &str) -> LcdIdentity {
+        LcdIdentity {
+            family,
+            device_id: device_id.into(),
+        }
+    }
+
+    #[test]
+    fn exact_id_wins_with_multiple_candidates() {
+        let identities = vec![
+            identity(DeviceFamily::Galahad2Lcd, "hid:topology"),
+            identity(DeviceFamily::TlLcd, "hid:exact"),
+        ];
+        assert_eq!(
+            select_lcd_index(&serial_config("hid:exact"), &identities, &HashSet::new(), 1),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn sole_wired_aio_is_accepted_as_id_alias() {
+        let identities = vec![identity(
+            DeviceFamily::Galahad2Lcd,
+            "hid:0416:7395:topology",
+        )];
+        assert_eq!(
+            select_lcd_index(
+                &serial_config("hid:hardware-serial"),
+                &identities,
+                &HashSet::new(),
+                1
+            ),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn alias_fallback_rejects_incompatible_or_ambiguous_displays() {
+        let incompatible = vec![identity(DeviceFamily::TlLcd, "hid:tl")];
+        assert_eq!(
+            select_lcd_index(
+                &serial_config("hid:missing"),
+                &incompatible,
+                &HashSet::new(),
+                1
+            ),
+            None
+        );
+
+        let ambiguous = vec![
+            identity(DeviceFamily::Galahad2Lcd, "hid:a"),
+            identity(DeviceFamily::HydroShiftLcd, "hid:b"),
+        ];
+        assert_eq!(
+            select_lcd_index(
+                &serial_config("hid:missing"),
+                &ambiguous,
+                &HashSet::new(),
+                1
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn alias_fallback_is_disabled_for_multiple_configs() {
+        let identities = vec![identity(DeviceFamily::Galahad2Lcd, "hid:topology")];
+        assert_eq!(
+            select_lcd_index(
+                &serial_config("hid:serial"),
+                &identities,
+                &HashSet::new(),
+                2
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn claimed_candidate_cannot_be_selected_twice() {
+        let identities = vec![identity(DeviceFamily::Galahad2Lcd, "hid:exact")];
+        assert_eq!(
+            select_lcd_index(
+                &serial_config("hid:exact"),
+                &identities,
+                &HashSet::from([0]),
+                1
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn index_selection_preserves_order_and_honors_claims() {
+        let identities = vec![
+            identity(DeviceFamily::Slv3Lcd, "usb:first"),
+            identity(DeviceFamily::Tlv2Lcd, "usb:second"),
+        ];
+        assert_eq!(
+            select_lcd_index(&index_config(1), &identities, &HashSet::new(), 2),
+            Some(1)
+        );
+        assert_eq!(
+            select_lcd_index(&index_config(1), &identities, &HashSet::from([1]), 2),
+            None
+        );
     }
 }
