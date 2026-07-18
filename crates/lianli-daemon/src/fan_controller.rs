@@ -4,13 +4,43 @@ use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_shared::fan::{FanConfig, FanCurve, FanSpeed};
 use lianli_shared::sensors::{self, ResolvedSensor, SensorInfo, SensorSource};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
+
+const COOLANT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const COOLANT_POLL_MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+#[derive(Debug)]
+struct CoolantPollState {
+    failures: u32,
+    next_poll: Instant,
+}
+
+impl CoolantPollState {
+    fn ready(now: Instant) -> Self {
+        Self {
+            failures: 0,
+            next_poll: now,
+        }
+    }
+
+    fn success(&mut self, now: Instant) {
+        self.failures = 0;
+        self.next_poll = now + COOLANT_POLL_INTERVAL;
+    }
+
+    fn failure(&mut self, now: Instant) {
+        self.failures = self.failures.saturating_add(1);
+        let shift = self.failures.saturating_sub(1).min(5);
+        let delay = COOLANT_POLL_INTERVAL * (1_u32 << shift);
+        self.next_poll = now + delay.min(COOLANT_POLL_MAX_BACKOFF);
+    }
+}
 
 pub struct FanController {
     config: FanConfig,
@@ -131,6 +161,11 @@ fn fan_control_thread(
     let mut temp_ema: HashMap<SensorSource, f32> = HashMap::new();
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
     let mut fan_states: HashMap<usize, FanState> = HashMap::new();
+    let coolant_device_ids = coolant_devices_for_config(&config, &curves);
+    let mut coolant_poll_states: HashMap<String, CoolantPollState> = coolant_device_ids
+        .iter()
+        .map(|id| (id.clone(), CoolantPollState::ready(Instant::now())))
+        .collect();
 
     let mut mb_sync_init: HashMap<String, HashMap<u8, bool>> = HashMap::new();
     for group in config.speeds.iter() {
@@ -208,6 +243,49 @@ fn fan_control_thread(
 
         let tick_start = Instant::now();
         last_update = tick_start;
+
+        // Refresh wired AIO coolant telemetry before resolving curve sensors.
+        // This also creates the runtime sensor on the first tick after boot,
+        // without depending on the separate IPC telemetry polling schedule.
+        for device_id in &coolant_device_ids {
+            let Some(dev) = wired.get(device_id) else {
+                continue;
+            };
+            let state = coolant_poll_states
+                .entry(device_id.clone())
+                .or_insert_with(|| CoolantPollState::ready(tick_start));
+            if tick_start < state.next_poll {
+                continue;
+            }
+
+            match dev.poll_coolant_temp() {
+                Ok(Some(temp)) if temp.is_finite() && (0.0..=100.0).contains(&temp) => {
+                    match sensors::write_coolant_temp(device_id, temp) {
+                        Ok(()) => state.success(tick_start),
+                        Err(err) => {
+                            state.failure(tick_start);
+                            warn!("Failed to publish coolant temperature for {device_id}: {err:#}");
+                        }
+                    }
+                }
+                Ok(Some(temp)) => {
+                    state.failure(tick_start);
+                    warn!("Ignoring invalid coolant temperature {temp:?} for {device_id}");
+                }
+                Ok(None) => {
+                    state.failure(tick_start);
+                    debug!("Device {device_id} does not expose coolant telemetry");
+                }
+                Err(err) => {
+                    state.failure(tick_start);
+                    warn!(
+                        "Failed to poll coolant temperature for {device_id}; retry {} in {:?}: {err:#}",
+                        state.failures,
+                        state.next_poll.saturating_duration_since(tick_start)
+                    );
+                }
+            }
+        }
 
         for (group_idx, group) in config.speeds.iter().enumerate() {
             let is_wireless = group
@@ -340,6 +418,25 @@ fn map_stop(speeds: &[u8; 4], stop: u8) -> [u8; 4] {
     ]
 }
 
+fn coolant_devices_for_config(
+    config: &FanConfig,
+    curves: &HashMap<String, FanCurve>,
+) -> HashSet<String> {
+    config
+        .speeds
+        .iter()
+        .flat_map(|group| group.speeds.iter())
+        .filter_map(|speed| match speed {
+            FanSpeed::Curve(name) => curves.get(name),
+            _ => None,
+        })
+        .filter_map(|curve| match curve.effective_source() {
+            SensorSource::WirelessCoolant { device_id } => Some(device_id),
+            _ => None,
+        })
+        .collect()
+}
+
 fn apply_wireless_by_id(
     wireless: &Option<Arc<WirelessController>>,
     device_id: &str,
@@ -445,8 +542,19 @@ fn calculate_fan_speeds(
                     .ok_or_else(|| anyhow::anyhow!("Curve '{curve_name}' not found"))?;
 
                 let source = curve.effective_source();
-                let temp = smoothed_temperature(&source, sensor_cache, temp_ema, all_sensors)?;
-                let speed_percent = interpolate_curve(&curve.curve, temp);
+                let temp = match smoothed_temperature(&source, sensor_cache, temp_ema, all_sensors)
+                {
+                    Ok(temp) => temp,
+                    Err(err) if matches!(source, SensorSource::WirelessCoolant { .. }) => {
+                        warn!(
+                            "Coolant sensor unavailable for fan {i}; applying full-speed fail-safe: {err:#}"
+                        );
+                        pwm_values[i] = u8::MAX;
+                        continue;
+                    }
+                    Err(err) => return Err(err),
+                };
+                let speed_percent = interpolate_curve(&curve.curve, temp).clamp(0.0, 100.0);
                 let target_pwm = (speed_percent * 2.55) as u8;
 
                 let pwm = match prev_state {
@@ -497,10 +605,16 @@ fn smoothed_temperature(
         }
         Ok(temp) => {
             debug!("Ignoring out-of-range temperature {temp:.1}°C");
+            if matches!(source, SensorSource::WirelessCoolant { .. }) {
+                ema.remove(source);
+            }
         }
         Err(err) => {
             debug!("Sensor read failed: {err}");
             cache.remove(source);
+            if matches!(source, SensorSource::WirelessCoolant { .. }) {
+                ema.remove(source);
+            }
         }
     }
 
@@ -540,4 +654,136 @@ fn interpolate_curve(curve: &[(f32, f32)], temp: f32) -> f32 {
     }
 
     50.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lianli_shared::fan::FanGroup;
+
+    fn coolant_curve(device_id: &str) -> FanCurve {
+        FanCurve {
+            name: "coolant".into(),
+            temp_source: Some(SensorSource::WirelessCoolant {
+                device_id: device_id.into(),
+            }),
+            temp_command: String::new(),
+            curve: vec![(25.0, 20.0), (45.0, 100.0)],
+        }
+    }
+
+    #[test]
+    fn only_configured_coolant_devices_are_polled() {
+        let curve = coolant_curve("hid:aio");
+        let curves = HashMap::from([(curve.name.clone(), curve)]);
+        let config = FanConfig {
+            speeds: vec![FanGroup {
+                device_id: Some("hid:aio".into()),
+                speeds: [
+                    FanSpeed::Curve("coolant".into()),
+                    FanSpeed::Constant(64),
+                    FanSpeed::Constant(64),
+                    FanSpeed::Constant(128),
+                ],
+            }],
+            ..FanConfig::default()
+        };
+
+        assert_eq!(
+            coolant_devices_for_config(&config, &curves),
+            HashSet::from(["hid:aio".to_string()])
+        );
+        assert!(coolant_devices_for_config(&FanConfig::default(), &curves).is_empty());
+    }
+
+    #[test]
+    fn coolant_poll_failures_back_off_and_recovery_resets_delay() {
+        let now = Instant::now();
+        let mut state = CoolantPollState::ready(now);
+        state.failure(now);
+        assert_eq!(state.failures, 1);
+        assert_eq!(state.next_poll.duration_since(now), Duration::from_secs(1));
+
+        let second = state.next_poll;
+        state.failure(second);
+        assert_eq!(
+            state.next_poll.duration_since(second),
+            Duration::from_secs(2)
+        );
+
+        state.success(state.next_poll);
+        assert_eq!(state.failures, 0);
+        assert_eq!(
+            state
+                .next_poll
+                .duration_since(second + Duration::from_secs(2)),
+            COOLANT_POLL_INTERVAL
+        );
+    }
+
+    #[test]
+    fn missing_coolant_sensor_uses_full_speed_fail_safe() {
+        let source = SensorSource::WirelessCoolant {
+            device_id: format!("missing-test-device-{}", std::process::id()),
+        };
+        let curve = FanCurve {
+            name: "coolant".into(),
+            temp_source: Some(source),
+            temp_command: String::new(),
+            curve: vec![(25.0, 20.0), (45.0, 100.0)],
+        };
+        let curves = HashMap::from([(curve.name.clone(), curve)]);
+        let mut cache = HashMap::new();
+        let mut ema = HashMap::new();
+        let speeds = calculate_fan_speeds(
+            &[
+                FanSpeed::Curve("coolant".into()),
+                FanSpeed::Constant(64),
+                FanSpeed::Constant(64),
+                FanSpeed::Constant(128),
+            ],
+            &curves,
+            &mut cache,
+            &mut ema,
+            &[],
+            None,
+            1.0,
+            5,
+        )
+        .unwrap();
+        assert_eq!(speeds, [u8::MAX, 64, 64, 128]);
+    }
+
+    #[test]
+    fn curve_percent_is_clamped_before_pwm_conversion() {
+        let source = SensorSource::Command {
+            cmd: "unused".into(),
+        };
+        let curve = FanCurve {
+            name: "bad-range".into(),
+            temp_source: Some(source.clone()),
+            temp_command: "unused".into(),
+            curve: vec![(20.0, -50.0), (40.0, 150.0)],
+        };
+        let curves = HashMap::from([(curve.name.clone(), curve)]);
+        let mut cache = HashMap::from([(source, ResolvedSensor::Constant(40.0))]);
+        let mut ema = HashMap::new();
+        let speeds = calculate_fan_speeds(
+            &[
+                FanSpeed::Curve("bad-range".into()),
+                FanSpeed::Constant(0),
+                FanSpeed::Constant(0),
+                FanSpeed::Constant(0),
+            ],
+            &curves,
+            &mut cache,
+            &mut ema,
+            &[],
+            None,
+            1.0,
+            5,
+        )
+        .unwrap();
+        assert_eq!(speeds[0], u8::MAX);
+    }
 }

@@ -38,13 +38,30 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
             _ => anyhow::bail!("unexpected virtual sensor source"),
         },
         ResolvedSensor::NvidiaGpu { index, metric } => Ok(nvidia_cache_get(*index, *metric)),
-        ResolvedSensor::RuntimeFile(path) => {
+        ResolvedSensor::RuntimeFile { path, max_age } => {
+            if let Some(max_age) = max_age {
+                let modified = std::fs::metadata(path)
+                    .and_then(|metadata| metadata.modified())
+                    .map_err(|e| anyhow::anyhow!("metadata {}: {e}", path.display()))?;
+                let age = modified
+                    .elapsed()
+                    .map_err(|e| anyhow::anyhow!("timestamp {}: {e}", path.display()))?;
+                if age > *max_age {
+                    anyhow::bail!(
+                        "runtime sensor {} is stale ({age:?} > {max_age:?})",
+                        path.display()
+                    );
+                }
+            }
             let content = std::fs::read_to_string(path)
                 .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
             let temp: f32 = content
                 .trim()
                 .parse()
                 .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+            if !temp.is_finite() {
+                anyhow::bail!("runtime sensor {} is not finite", path.display());
+            }
             Ok(temp)
         }
         ResolvedSensor::ShellCommand(cmd) => {

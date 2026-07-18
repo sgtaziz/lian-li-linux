@@ -12,6 +12,15 @@ pub trait FanDevice: Send + Sync {
     fn read_fan_rpm(&self) -> Result<Vec<u16>>;
     fn fan_slot_count(&self) -> u8;
 
+    /// Poll a coolant temperature sensor, when the device exposes one.
+    ///
+    /// `Ok(None)` distinguishes devices without a coolant sensor from a
+    /// temporary read failure. Implementations may refresh other cached
+    /// telemetry as part of the same hardware transaction.
+    fn poll_coolant_temp(&self) -> Result<Option<f32>> {
+        Ok(None)
+    }
+
     /// Per-port fan counts: `(port_index, fan_count)`.
     /// Default: single port with `fan_slot_count()` fans.
     fn fan_port_info(&self) -> Vec<(u8, u8)> {

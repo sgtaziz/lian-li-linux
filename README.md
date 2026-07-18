@@ -224,8 +224,29 @@ Each LCD entry specifies a target device (by serial), media type, and orientatio
 
 ### Fan Curves
 
-Fan curves map a temperature source (any shell command) to a speed percentage.
+Fan curves map a temperature source to a speed percentage.
 Points are linearly interpolated; temperatures outside the curve range clamp to the nearest point's speed.
+
+Wired HydroShift LCD and Galahad II LCD/Vision controllers can use their
+coolant sensor directly. The serialized source name remains
+`wireless_coolant` for backward compatibility:
+
+```json
+{
+  "name": "AIO coolant",
+  "temp_source": {
+    "type": "wireless_coolant",
+    "device_id": "hid:<device-id>"
+  },
+  "curve": [[28, 25], [34, 40], [38, 70], [42, 100]]
+}
+```
+
+Active HID polling is enabled only when a configured fan group references such
+a curve. Failed polls back off to avoid repeatedly disturbing the USB device.
+If telemetry is missing or older than ten seconds, curve-controlled outputs use
+full PWM until a fresh valid sample arrives; constant pump/fan settings are left
+unchanged.
 
 ### Fan Speed Modes
 

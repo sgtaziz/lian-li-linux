@@ -42,6 +42,7 @@ pub enum SensorSourceConfig {
         card_index: u32,
     },
     #[serde(rename = "wireless_coolant")]
+    // Serialized name retained for compatibility; also used by wired AIOs.
     WirelessCoolant {
         device_id: String,
     },
@@ -209,7 +210,7 @@ impl SensorDescriptor {
             SensorSourceConfig::AmdGpuUsage { .. } => {}
             SensorSourceConfig::WirelessCoolant { device_id } => {
                 if device_id.trim().is_empty() {
-                    anyhow::bail!("wireless coolant device_id must not be empty");
+                    anyhow::bail!("coolant device_id must not be empty");
                 }
             }
             SensorSourceConfig::CpuUsage

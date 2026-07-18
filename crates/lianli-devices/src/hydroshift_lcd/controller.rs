@@ -36,13 +36,146 @@ fn find_au_split(data: &[u8]) -> Option<usize> {
     None
 }
 
+fn parse_handshake_response(resp: &[u8]) -> Result<AioHandshake> {
+    if resp.len() < A_HEADER_LEN {
+        bail!(
+            "AIO LCD: handshake response too short ({} < {A_HEADER_LEN} bytes)",
+            resp.len()
+        );
+    }
+    if resp[0] != REPORT_ID_A || resp[1] != CMD_HANDSHAKE {
+        bail!(
+            "AIO LCD: unexpected handshake response (report={:#04x}, command={:#04x})",
+            resp[0],
+            resp[1]
+        );
+    }
+
+    let data_len = resp[5] as usize;
+    let available = resp.len() - A_HEADER_LEN;
+    if data_len > available {
+        bail!("AIO LCD: truncated handshake payload ({data_len} declared, {available} available)");
+    }
+    if data_len < 4 {
+        bail!("AIO LCD: handshake payload too short ({data_len} bytes)");
+    }
+
+    let data = &resp[A_HEADER_LEN..A_HEADER_LEN + data_len];
+    let temp_valid = data_len >= 5 && data[4] != 0;
+    let coolant_temp = if data_len >= 7 {
+        let integer = data[5] as f32;
+        let fraction = (data[6] % 10) as f32 / 10.0;
+        integer + fraction
+    } else {
+        0.0
+    };
+
+    Ok(AioHandshake {
+        fan_rpm: u16::from_be_bytes([data[0], data[1]]),
+        pump_rpm: u16::from_be_bytes([data[2], data[3]]),
+        temp_valid,
+        coolant_temp,
+    })
+}
+
+fn validate_coolant_sample(hs: &AioHandshake) -> Result<f32> {
+    if !hs.temp_valid || !hs.coolant_temp.is_finite() || !(0.0..=100.0).contains(&hs.coolant_temp) {
+        bail!(
+            "Coolant telemetry invalid (temp={:.1}°C, pump={}rpm, valid={})",
+            hs.coolant_temp,
+            hs.pump_rpm,
+            hs.temp_valid
+        );
+    }
+
+    // Some controllers briefly return this placeholder while the LCD
+    // interface is starting. Reject the complete signature, but do not reject
+    // a real hot sample or a zero-RPM pump: both must reach the fail-safe path.
+    if hs.fan_rpm == 0 && hs.pump_rpm == 0 && (hs.coolant_temp - 1.0).abs() < f32::EPSILON {
+        bail!("Coolant telemetry returned the startup placeholder");
+    }
+
+    Ok(hs.coolant_temp)
+}
+
+#[cfg(test)]
+mod telemetry_tests {
+    use super::*;
+
+    fn response(fan_rpm: u16, pump_rpm: u16, valid: bool, temp: (u8, u8)) -> Vec<u8> {
+        let mut packet = vec![0; A_HEADER_LEN + 7];
+        packet[0] = REPORT_ID_A;
+        packet[1] = CMD_HANDSHAKE;
+        packet[5] = 7;
+        packet[6..8].copy_from_slice(&fan_rpm.to_be_bytes());
+        packet[8..10].copy_from_slice(&pump_rpm.to_be_bytes());
+        packet[10] = u8::from(valid);
+        packet[11] = temp.0;
+        packet[12] = temp.1;
+        packet
+    }
+
+    #[test]
+    fn parses_complete_handshake() {
+        let hs = parse_handshake_response(&response(1234, 2876, true, (35, 7))).unwrap();
+        assert_eq!(hs.fan_rpm, 1234);
+        assert_eq!(hs.pump_rpm, 2876);
+        assert!(hs.temp_valid);
+        assert!((hs.coolant_temp - 35.7).abs() < 0.01);
+    }
+
+    #[test]
+    fn rejects_every_truncated_handshake_without_panicking() {
+        let complete = response(1234, 2876, true, (35, 7));
+        for len in 0..complete.len() {
+            assert!(
+                parse_handshake_response(&complete[..len]).is_err(),
+                "length {len} unexpectedly parsed"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_mismatched_report_and_command() {
+        let mut packet = response(1234, 2876, true, (35, 7));
+        packet[0] = REPORT_ID_B;
+        assert!(parse_handshake_response(&packet).is_err());
+
+        packet[0] = REPORT_ID_A;
+        packet[1] = CMD_GET_FIRMWARE;
+        assert!(parse_handshake_response(&packet).is_err());
+    }
+
+    #[test]
+    fn rejects_declared_payload_larger_than_response() {
+        let mut packet = response(1234, 2876, true, (35, 7));
+        packet[5] = 8;
+        assert!(parse_handshake_response(&packet).is_err());
+    }
+
+    #[test]
+    fn validates_hot_and_zero_pump_samples() {
+        let hot = parse_handshake_response(&response(900, 0, true, (99, 9))).unwrap();
+        assert!((validate_coolant_sample(&hot).unwrap() - 99.9).abs() < 0.01);
+    }
+
+    #[test]
+    fn rejects_invalid_and_placeholder_samples() {
+        let invalid = parse_handshake_response(&response(900, 2800, false, (35, 0))).unwrap();
+        assert!(validate_coolant_sample(&invalid).is_err());
+
+        let placeholder = parse_handshake_response(&response(0, 0, true, (1, 0))).unwrap();
+        assert!(validate_coolant_sample(&placeholder).is_err());
+    }
+}
+
 /// HydroShift LCD / Galahad2 LCD AIO controller.
 ///
 /// Provides pump + fan speed control, coolant temperature reading, and LCD streaming.
 pub struct HydroShiftLcdController {
     device: Arc<Mutex<HidBackend>>,
     variant: AioLcdVariant,
-    last_handshake: Option<AioHandshake>,
+    last_handshake: Mutex<Option<AioHandshake>>,
     brightness: u8,
     rotation: ScreenRotation,
     initialized: bool,
@@ -60,7 +193,7 @@ impl HydroShiftLcdController {
         Ok(Self {
             device,
             variant,
-            last_handshake: None,
+            last_handshake: Mutex::new(None),
             brightness: 50,
             rotation: ScreenRotation::Rotate0,
             initialized: false,
@@ -128,41 +261,20 @@ impl HydroShiftLcdController {
         Ok(())
     }
 
-    pub fn handshake(&mut self) -> Result<AioHandshake> {
+    pub fn handshake(&self) -> Result<AioHandshake> {
         let timeout = if self.initialized {
             READ_TIMEOUT_MS
         } else {
             INIT_READ_TIMEOUT_MS
         };
         let resp = self.send_a_command(CMD_HANDSHAKE, &[], timeout)?;
-        let data = &resp[A_HEADER_LEN..];
-        let data_len = resp[5] as usize;
-
-        if data_len < 4 {
-            bail!("AIO LCD: handshake response too short ({data_len} bytes)");
-        }
-
-        let temp_valid = data_len >= 5 && data[4] != 0;
-        let coolant_temp = if data_len >= 7 {
-            let integer = data[5] as f32;
-            let fraction = (data[6] % 10) as f32 / 10.0;
-            integer + fraction
-        } else {
-            0.0
-        };
-
-        let hs = AioHandshake {
-            fan_rpm: u16::from_be_bytes([data[0], data[1]]),
-            pump_rpm: u16::from_be_bytes([data[2], data[3]]),
-            temp_valid,
-            coolant_temp,
-        };
+        let hs = parse_handshake_response(&resp)?;
 
         debug!(
             "Handshake: fan={}rpm pump={}rpm temp_valid={} temp={:.1}°C",
             hs.fan_rpm, hs.pump_rpm, hs.temp_valid, hs.coolant_temp
         );
-        self.last_handshake = Some(hs.clone());
+        *self.last_handshake.lock() = Some(hs.clone());
         Ok(hs)
     }
 
@@ -382,20 +494,35 @@ impl HydroShiftLcdController {
         self.write_a_command_internal(&mut *dev, cmd, data)?;
 
         let mut buf = [0u8; A_PACKET_SIZE];
-        let n = dev
-            .read_timeout(&mut buf, timeout_ms)
-            .context("AIO LCD: read A-response")?;
+        let timeout = std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                bail!(
+                    "AIO LCD: no matching response to A-command {cmd:#04x} (timeout after {timeout_ms}ms)"
+                );
+            }
+            let remaining_ms = remaining.as_millis().min(i32::MAX as u128).max(1) as i32;
+            let n = dev
+                .read_timeout(&mut buf, remaining_ms)
+                .context("AIO LCD: read A-response")?;
 
-        debug!(
-            "A-cmd {cmd:#04x}: response {n} bytes, raw={:02x?}",
-            &buf[..n.min(20)]
-        );
+            debug!(
+                "A-cmd {cmd:#04x}: response {n} bytes, raw={:02x?}",
+                &buf[..n.min(20)]
+            );
 
-        if n == 0 {
-            bail!("AIO LCD: no response to A-command {cmd:#04x} (timeout after {timeout_ms}ms)");
+            if n == 0 {
+                bail!(
+                    "AIO LCD: no response to A-command {cmd:#04x} (timeout after {timeout_ms}ms)"
+                );
+            }
+            if n >= 2 && buf[0] == REPORT_ID_A && buf[1] == cmd {
+                return Ok(buf[..n].to_vec());
+            }
+            debug!("A-cmd {cmd:#04x}: skipping stale or unrelated response");
         }
-
-        Ok(buf[..n].to_vec())
     }
 
     /// Public write_a_command. Locks `HidBackend` for the duration of the call —
@@ -533,6 +660,7 @@ impl FanDevice for HydroShiftLcdController {
     fn read_fan_rpm(&self) -> Result<Vec<u16>> {
         Ok(vec![self
             .last_handshake
+            .lock()
             .as_ref()
             .map(|hs| hs.fan_rpm)
             .unwrap_or(0)])
@@ -540,6 +668,12 @@ impl FanDevice for HydroShiftLcdController {
 
     fn fan_slot_count(&self) -> u8 {
         1
+    }
+
+    fn poll_coolant_temp(&self) -> Result<Option<f32>> {
+        self.handshake()
+            .and_then(|hs| validate_coolant_sample(&hs))
+            .map(Some)
     }
 
     fn has_pump_control(&self) -> bool {
@@ -567,6 +701,9 @@ impl FanDevice for Arc<HydroShiftLcdController> {
     fn fan_slot_count(&self) -> u8 {
         (**self).fan_slot_count()
     }
+    fn poll_coolant_temp(&self) -> Result<Option<f32>> {
+        <HydroShiftLcdController as FanDevice>::poll_coolant_temp(self)
+    }
     fn has_pump_control(&self) -> bool {
         (**self).has_pump_control()
     }
@@ -579,13 +716,14 @@ impl AioDevice for HydroShiftLcdController {
     fn read_pump_rpm(&self) -> Result<u16> {
         Ok(self
             .last_handshake
+            .lock()
             .as_ref()
             .map(|hs| hs.pump_rpm)
             .unwrap_or(0))
     }
 
     fn read_coolant_temp(&self) -> Result<f32> {
-        match &self.last_handshake {
+        match &*self.last_handshake.lock() {
             Some(hs) if hs.temp_valid => Ok(hs.coolant_temp),
             Some(_) => bail!("Coolant temperature sensor reports invalid"),
             None => bail!("No handshake data available"),

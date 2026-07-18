@@ -257,7 +257,11 @@ impl ServiceManager {
                     .telemetry
                     .coolant_temps
                     .insert(device_id.clone(), temp as f32);
-                lianli_shared::sensors::write_coolant_temp(&device_id, temp as f32);
+                if let Err(err) =
+                    lianli_shared::sensors::write_coolant_temp(&device_id, temp as f32)
+                {
+                    debug!("Failed to publish coolant temperature for {device_id}: {err:#}");
+                }
             }
         }
 
@@ -316,6 +320,21 @@ impl ServiceManager {
 
         // Read wired fan RPMs and split per port.
         for (base_id, dev) in self.wired_fan_devices.iter() {
+            // The fan controller publishes live wired-AIO coolant readings to
+            // the runtime sensor before calculating its curves.  Mirror that
+            // value into IPC telemetry without issuing a second USB handshake.
+            match lianli_shared::sensors::read_coolant_temp(base_id) {
+                Ok(temp) if temp > 0.0 && temp <= 100.0 => {
+                    ipc_state
+                        .telemetry
+                        .coolant_temps
+                        .insert(base_id.clone(), temp);
+                }
+                _ => {
+                    ipc_state.telemetry.coolant_temps.remove(base_id);
+                }
+            }
+
             if let Ok(all_rpms) = dev.read_fan_rpm() {
                 let ports = dev.fan_port_info();
                 let per_fan = dev.per_fan_control();
