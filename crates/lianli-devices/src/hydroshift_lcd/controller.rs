@@ -61,7 +61,7 @@ fn parse_handshake_response(resp: &[u8]) -> Result<AioHandshake> {
     }
 
     let data = &resp[A_HEADER_LEN..A_HEADER_LEN + data_len];
-    let temp_valid = data_len >= 5 && data[4] != 0;
+    let temp_valid = data_len >= 7 && data[4] != 0;
     let coolant_temp = if data_len >= 7 {
         let integer = data[5] as f32;
         let fraction = (data[6] % 10) as f32 / 10.0;
@@ -151,6 +151,18 @@ mod telemetry_tests {
         let mut packet = response(1234, 2876, true, (35, 7));
         packet[5] = 8;
         assert!(parse_handshake_response(&packet).is_err());
+    }
+
+    #[test]
+    fn incomplete_temperature_fields_remain_invalid() {
+        for data_len in [5_usize, 6] {
+            let mut packet = response(1234, 2876, true, (35, 7));
+            packet[5] = data_len as u8;
+            packet.truncate(A_HEADER_LEN + data_len);
+            let hs = parse_handshake_response(&packet).unwrap();
+            assert!(!hs.temp_valid);
+            assert!(validate_coolant_sample(&hs).is_err());
+        }
     }
 
     #[test]
@@ -491,6 +503,26 @@ impl HydroShiftLcdController {
 
     fn send_a_command(&self, cmd: u8, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
         let mut dev = self.device.lock();
+
+        // A response that arrived after a previous timeout has no transaction
+        // identifier and is otherwise indistinguishable from a fresh response
+        // to the same command. Drain the bounded HID queue before issuing the
+        // new request so delayed telemetry cannot receive a fresh timestamp.
+        let mut stale = [0u8; A_PACKET_SIZE];
+        for _ in 0..16 {
+            match dev.read_timeout(&mut stale, 0) {
+                Ok(0) => break,
+                Ok(n) => debug!(
+                    "A-cmd {cmd:#04x}: drained stale response ({n} bytes, raw={:02x?})",
+                    &stale[..n.min(20)]
+                ),
+                Err(err) => {
+                    debug!("A-cmd {cmd:#04x}: stale-response drain stopped: {err}");
+                    break;
+                }
+            }
+        }
+
         self.write_a_command_internal(&mut *dev, cmd, data)?;
 
         let mut buf = [0u8; A_PACKET_SIZE];
@@ -724,8 +756,7 @@ impl AioDevice for HydroShiftLcdController {
 
     fn read_coolant_temp(&self) -> Result<f32> {
         match &*self.last_handshake.lock() {
-            Some(hs) if hs.temp_valid => Ok(hs.coolant_temp),
-            Some(_) => bail!("Coolant temperature sensor reports invalid"),
+            Some(hs) => validate_coolant_sample(hs),
             None => bail!("No handshake data available"),
         }
     }

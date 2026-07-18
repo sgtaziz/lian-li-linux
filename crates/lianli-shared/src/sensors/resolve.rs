@@ -129,15 +129,16 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
     }
 }
 
+/// Return the per-user runtime directory without falling back to a shared,
+/// symlinkable temporary path.
 fn runtime_base_dir() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("lianli-linux-{}", std::process::id()))
-        })
+        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::geteuid() })))
         .join("lianli-linux")
 }
 
+/// Derive a non-reversible, single-component filename for a device ID.
 fn coolant_runtime_path_in(runtime_dir: &Path, device_id: &str) -> PathBuf {
     let digest = Sha256::digest(device_id.as_bytes());
     runtime_dir.join(format!("coolant-{}.txt", hex::encode(&digest[..12])))
@@ -150,6 +151,7 @@ pub fn coolant_runtime_path(device_id: &str) -> PathBuf {
     coolant_runtime_path_in(&runtime_base_dir(), device_id)
 }
 
+/// Publish one validated sample below an explicitly supplied runtime directory.
 fn write_coolant_temp_at(runtime_dir: &Path, device_id: &str, temp_c: f32) -> Result<()> {
     if !temp_c.is_finite() || !(0.0..=100.0).contains(&temp_c) {
         anyhow::bail!("refusing invalid coolant temperature {temp_c}");
@@ -202,6 +204,7 @@ pub fn write_coolant_temp(device_id: &str, temp_c: f32) -> Result<()> {
     write_coolant_temp_at(&runtime_base_dir(), device_id, temp_c)
 }
 
+/// Read a fresh coolant sample, rejecting files older than the safety window.
 pub fn read_coolant_temp(device_id: &str) -> Result<f32> {
     super::read::read_sensor_value(&ResolvedSensor::RuntimeFile {
         path: coolant_runtime_path(device_id),
