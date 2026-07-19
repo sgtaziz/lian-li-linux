@@ -1,5 +1,6 @@
 //! Wireless RF dongle driver — TX/RX dongles + bound wireless fans/AIOs/strips.
 
+pub mod adapters;
 mod aio;
 mod bind;
 mod controller;
