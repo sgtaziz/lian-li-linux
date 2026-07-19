@@ -2105,19 +2105,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
-name = "hidapi"
-version = "2.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1b71e1f4791fb9e93b9d7ee03d70b501ab48f6151432fbcadeabc30fe15396e"
-dependencies = [
- "cc",
- "cfg-if",
- "libc",
- "pkg-config",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "htmlparser"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3014,8 +3001,6 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
- "ffmpeg-next",
- "hidapi",
  "image",
  "lianli-devices",
  "lianli-evdi",
@@ -3093,6 +3078,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "fast_image_resize",
+ "ffmpeg-next",
  "image",
  "imageproc",
  "lianli-shared",

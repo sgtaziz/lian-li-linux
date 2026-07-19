@@ -7,34 +7,22 @@
 //! packets as TURZX stream A.
 
 mod enumerate;
-mod h264;
 mod worker;
 
 pub use enumerate::{enumerate_turzx, TurzxDeviceMatch};
 
-use ffmpeg_next as ffmpeg;
 use lianli_devices::turzx;
+use lianli_media::video::ensure_ffmpeg_initialized;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use worker::spawn_worker;
 
 /// Key identifying a single physical USB attachment (bus + address).
 pub type DeviceKey = (u8, u8);
-
-static FFMPEG_INIT: std::sync::Once = std::sync::Once::new();
-
-fn ensure_ffmpeg_initialized() {
-    FFMPEG_INIT.call_once(|| {
-        if let Err(e) = ffmpeg::init() {
-            error!("ffmpeg::init failed: {e}");
-        }
-        ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Error);
-    });
-}
 
 /// Handle to a running worker. Dropping it signals the worker to stop and
 /// waits for it to join.

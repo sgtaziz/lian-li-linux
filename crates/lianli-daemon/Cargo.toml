@@ -22,9 +22,7 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 parking_lot = { workspace = true }
 rusb = { workspace = true }
-hidapi = { workspace = true }
 notify = { workspace = true }
 image = { workspace = true }
-ffmpeg-next = { workspace = true }
 signal-hook = "0.3"
 libc = { workspace = true }

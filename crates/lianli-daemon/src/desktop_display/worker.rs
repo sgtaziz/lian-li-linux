@@ -1,9 +1,9 @@
 use super::ensure_ffmpeg_initialized;
-use super::h264::H264Encoder;
 use super::DesktopDisplayHandle;
 use anyhow::{bail, Context, Result};
 use lianli_devices::turzx::{self, Mode as TurzxMode, TurzxDisplay, FMT_H264};
 use lianli_evdi::{EvdiBuffer, EvdiHandle, Event as EvdiEvent};
+use lianli_media::video::H264Encoder;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self};

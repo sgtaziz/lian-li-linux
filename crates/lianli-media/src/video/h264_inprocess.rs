@@ -3,11 +3,24 @@ use ffmpeg_next as ffmpeg;
 use std::time::Instant;
 use tracing::{debug, info};
 
-use super::ensure_ffmpeg_initialized;
+static FFMPEG_INIT: std::sync::Once = std::sync::Once::new();
 
-/// libavcodec H.264 encoder specialised for BGRA(=XRGB8888) framebuffers
-/// arriving from evdi. Kept persistent across frames.
-pub(super) struct H264Encoder {
+/// Initialise the libavcodec library exactly once per process. Must be called
+/// before any `ffmpeg_next` API. Safe to call multiple times.
+pub fn ensure_ffmpeg_initialized() {
+    FFMPEG_INIT.call_once(|| {
+        if let Err(e) = ffmpeg::init() {
+            tracing::error!("ffmpeg::init failed: {e}");
+        }
+        ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Error);
+    });
+}
+
+/// libavcodec H.264 encoder specialised for BGRA framebuffers arriving from
+/// evdi. Kept persistent across frames. Returns complete NAL packets
+/// synchronously, unlike the CLI-based [`super::LiveH264Encoder`] which
+/// pipelines via subprocess stdio.
+pub struct H264Encoder {
     encoder: ffmpeg::encoder::Video,
     scaler: ffmpeg::software::scaling::Context,
     frame_in: ffmpeg::frame::Video,
@@ -19,7 +32,7 @@ pub(super) struct H264Encoder {
 }
 
 impl H264Encoder {
-    pub(super) fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
+    pub fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
         ensure_ffmpeg_initialized();
 
         let gop = (fps / 2).max(1);
@@ -37,7 +50,7 @@ impl H264Encoder {
                         height,
                         ffmpeg::software::scaling::Flags::BILINEAR,
                     )
-                    .context("building sws scaler BGRA→YUV420P")?;
+                    .context("building sws scaler BGRA->YUV420P")?;
                     let frame_in =
                         ffmpeg::frame::Video::new(ffmpeg::util::format::Pixel::BGRA, width, height);
                     let frame_out = ffmpeg::frame::Video::new(
@@ -65,11 +78,11 @@ impl H264Encoder {
         Err(last_err.unwrap_or_else(|| anyhow!("no H.264 encoder available")))
     }
 
-    pub(super) fn encode(&mut self, bgra: &[u8]) -> Result<Vec<u8>> {
+    pub fn encode(&mut self, bgra: &[u8]) -> Result<Vec<u8>> {
         self.copy_pixels_in(bgra)?;
         self.scaler
             .run(&self.frame_in, &mut self.frame_out)
-            .context("sws scale BGRA→YUV420P")?;
+            .context("sws scale BGRA->YUV420P")?;
         self.frame_out
             .set_pts(Some(self.start.elapsed().as_micros() as i64));
         self.encoder

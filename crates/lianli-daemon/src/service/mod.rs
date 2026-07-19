@@ -20,6 +20,7 @@ mod aio_lcd_firmware;
 mod display_mode;
 mod init;
 mod media;
+mod renderers;
 mod runtime;
 mod shutdown;
 mod streaming;
@@ -29,7 +30,21 @@ mod sync;
 use aio_lcd_firmware::AioLcdFirmwareTracker;
 use subsystems::{Controllers, DeviceRegistry, IpcSubsystem, OpenRgbSubsystem};
 
-use runtime::{parse_mac_str, ActiveTarget};
+use runtime::ActiveTarget;
+
+/// Parse a colon-separated MAC address string (e.g. `"01:23:45:67:89:AB"`)
+/// into a 6-byte array. Returns `None` on malformed input.
+fn parse_mac_str(s: &str) -> Option<[u8; 6]> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    let mut mac = [0u8; 6];
+    for (i, part) in parts.iter().enumerate() {
+        mac[i] = u8::from_str_radix(part, 16).ok()?;
+    }
+    Some(mac)
+}
 
 const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// Full USB bus enumeration interval — only needed for hot-plug detection of

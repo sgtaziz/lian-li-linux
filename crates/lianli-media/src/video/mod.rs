@@ -1,9 +1,11 @@
 pub mod ffmpeg;
 pub mod h264;
+pub mod h264_inprocess;
 pub mod h264_live;
 
 pub use ffmpeg::{cap_fps_to_source, probe_source_fps};
 pub use h264::encode_h264;
+pub use h264_inprocess::{ensure_ffmpeg_initialized, H264Encoder};
 pub use h264_live::LiveH264Encoder;
 
 use crate::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
