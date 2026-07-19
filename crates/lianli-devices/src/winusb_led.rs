@@ -192,6 +192,7 @@ impl crate::registry::DeviceDriver for WinUsbLedDriver {
                 Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
             )],
             aio: None,
+            shared_hid: None,
         })
     }
 }

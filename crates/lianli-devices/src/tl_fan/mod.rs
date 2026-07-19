@@ -40,7 +40,7 @@ impl DeviceDriver for TlFanDriver {
             ctx.bus,
             ctx.device.port_numbers().unwrap_or_default(),
         )?;
-        let ctrl = std::sync::Arc::new(TlFanController::new(backend)?);
+        let ctrl = std::sync::Arc::new(TlFanController::new(backend.clone())?);
         let rgb = ctrl
             .port_devices()
             .into_iter()
@@ -62,6 +62,7 @@ impl DeviceDriver for TlFanDriver {
             lcd: None,
             rgb,
             aio: None,
+            shared_hid: Some(backend),
         })
     }
 }

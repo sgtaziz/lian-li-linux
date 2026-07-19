@@ -597,6 +597,7 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
             lcd: Some(Box::new(lcd)),
             rgb: Vec::new(),
             aio: None,
+            shared_hid: None,
         })
     }
 }

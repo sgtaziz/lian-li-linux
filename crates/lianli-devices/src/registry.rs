@@ -63,6 +63,10 @@ pub struct OpenedDevice {
     /// (`""` for single-zone, `"port0"`, `"group1"`, etc.).
     pub rgb: Vec<(String, Box<dyn RgbDevice>)>,
     pub aio: Option<Box<dyn AioDevice>>,
+    /// For HID devices: the shared backend the controllers use, so the daemon
+    /// can cache it and hand the same backend to a sibling LCD controller
+    /// later. `None` for USB-bulk devices and LCD-only families.
+    pub shared_hid: Option<SharedHid>,
 }
 
 impl OpenedDevice {

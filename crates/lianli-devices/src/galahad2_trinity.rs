@@ -509,7 +509,7 @@ impl crate::registry::DeviceDriver for Galahad2TrinityDriver {
             ctx.bus,
             ctx.device.port_numbers().unwrap_or_default(),
         )?;
-        let ctrl = std::sync::Arc::new(Galahad2TrinityController::new(backend, ctx.pid)?);
+        let ctrl = std::sync::Arc::new(Galahad2TrinityController::new(backend.clone(), ctx.pid)?);
         let model = ctrl.model().name().to_string();
         Ok(crate::registry::OpenedDevice {
             id: ctx.device_id(),
@@ -525,6 +525,7 @@ impl crate::registry::DeviceDriver for Galahad2TrinityDriver {
                 Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
             )],
             aio: None,
+            shared_hid: Some(backend),
         })
     }
 }

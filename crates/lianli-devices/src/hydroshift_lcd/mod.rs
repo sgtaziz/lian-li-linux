@@ -142,7 +142,7 @@ impl crate::registry::DeviceDriver for HydroShiftLcdDriver {
         let mut lcd_ctrl = HydroShiftLcdController::new(std::sync::Arc::clone(&backend), pid)?;
         crate::traits::LcdDevice::initialize(&mut lcd_ctrl)?;
         let firmware = lcd_ctrl.firmware_version_str().map(|s| s.to_string());
-        let rgb_ctrl = AioLcdRgbController::new(backend, pid)?;
+        let rgb_ctrl = AioLcdRgbController::new(backend.clone(), pid)?;
         let lcd_arc = std::sync::Arc::new(lcd_ctrl);
 
         Ok(crate::registry::OpenedDevice {
@@ -159,6 +159,7 @@ impl crate::registry::DeviceDriver for HydroShiftLcdDriver {
                 Box::new(rgb_ctrl) as Box<dyn crate::traits::RgbDevice>,
             )],
             aio: None,
+            shared_hid: Some(backend),
         })
     }
 }

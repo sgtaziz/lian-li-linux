@@ -174,20 +174,6 @@ impl ServiceManager {
         det.device_id()
     }
 
-    /// Get a cached HID backend or open a new one via rusb.
-    fn get_or_open_backend_rusb(
-        &mut self,
-        det: &lianli_devices::detect::DetectedDevice,
-    ) -> anyhow::Result<Arc<Mutex<RusbHid>>> {
-        let key = Self::rusb_device_id(det);
-        if let Some(backend) = self.hid_backends.get(&key) {
-            return Ok(Arc::clone(backend));
-        }
-        let backend = lianli_devices::detect::open_hid_backend(det)?;
-        self.hid_backends.insert(key, Arc::clone(&backend));
-        Ok(backend)
-    }
-
     /// Process deferred firmware reads for AIO LCD devices.
     /// Called every DevicePoll tick.
     fn process_pending_lcd_firmware(&mut self) {

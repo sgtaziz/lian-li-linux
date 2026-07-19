@@ -39,7 +39,7 @@ impl DeviceDriver for Ene6k77Driver {
             ctx.bus,
             ctx.device.port_numbers().unwrap_or_default(),
         )?;
-        let ctrl = std::sync::Arc::new(Ene6k77Controller::new(backend, ctx.pid)?);
+        let ctrl = std::sync::Arc::new(Ene6k77Controller::new(backend.clone(), ctx.pid)?);
         let rgb = ctrl
             .group_devices()
             .into_iter()
@@ -64,6 +64,7 @@ impl DeviceDriver for Ene6k77Driver {
             lcd: None,
             rgb,
             aio: None,
+            shared_hid: Some(backend),
         })
     }
 }

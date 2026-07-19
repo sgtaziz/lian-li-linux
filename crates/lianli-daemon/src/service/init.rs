@@ -6,7 +6,8 @@ use crate::openrgb_server;
 use crate::rgb_controller::RgbController;
 use crate::template_store;
 use lianli_devices::crypto::PacketBuilder;
-use lianli_devices::detect::{create_wired_controllers, enumerate_devices};
+use lianli_devices::detect::enumerate_devices;
+use lianli_devices::registry;
 use lianli_devices::traits::FanDevice;
 use lianli_shared::config::AppConfig;
 use lianli_shared::device_id::DeviceFamily;
@@ -145,8 +146,9 @@ impl ServiceManager {
         self.last_wired_hid_ids = current;
     }
 
-    /// Initialize all wired HID devices (fan + RGB) in a single pass.
-    /// Shares one USB handle per physical device across fan and RGB controllers.
+    /// Initialize all wired USB devices (fan + RGB + LCD + AIO) via the
+    /// [`registry`] dispatch table. One call per detected device; no family-
+    /// specific branching in the daemon.
     pub(super) fn init_wired_devices(&mut self) {
         let mut fan_devices: HashMap<String, Box<dyn FanDevice>> = HashMap::new();
         let mut wired_rgb: HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>> =
@@ -162,37 +164,52 @@ impl ServiceManager {
                 return;
             }
         };
+
         for det in usb_devs {
-            if !lianli_shared::device_id::uses_hid(det.family) {
-                continue;
-            }
+            // TL LCD is opened by the LCD layer in media.rs; the LCD driver
+            // would conflict with the controller instance the LCD layer
+            // expects to own. Skip it here.
             if det.family == lianli_shared::device_id::DeviceFamily::TlLcd {
                 continue;
             }
-            let base_id = Self::rusb_device_id(&det);
-            let backend = match self.get_or_open_backend_rusb(&det) {
-                Ok(b) => b,
-                Err(e) => {
-                    warn!("Failed to open HID backend for {}: {e}", det.name);
-                    continue;
-                }
+            let Some(driver) = registry::driver_for_family(det.family) else {
+                continue;
             };
-            if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
-                self.register_wired_controllers(
-                    &base_id,
-                    det.name,
-                    det.family,
-                    det.vid,
-                    det.pid,
-                    det.serial.as_deref(),
-                    result,
-                    &mut fan_devices,
-                    &mut wired_rgb,
-                );
+            let ctx = registry::OpenContext {
+                device: det.device.clone(),
+                family: det.family,
+                vid: det.vid,
+                pid: det.pid,
+                bus: det.bus,
+                address: det.address,
+                serial: det.serial.clone(),
+                hid_usage_page: det.hid_usage_page,
+            };
+            let base_id = Self::rusb_device_id(&det);
+            match driver.open(&ctx) {
+                Ok(mut opened) => {
+                    // Cache the HID backend so the LCD layer can reuse it
+                    // when it later opens an LCD controller for the same
+                    // physical device.
+                    let shared_hid = opened.shared_hid.take();
+                    if let Some(backend) = shared_hid {
+                        self.hid_backends.insert(base_id.clone(), backend);
+                    }
+                    self.register_opened_device(
+                        base_id,
+                        det.name,
+                        det.family,
+                        det.vid,
+                        det.pid,
+                        det.serial.as_deref(),
+                        opened,
+                        &mut fan_devices,
+                        &mut wired_rgb,
+                    );
+                }
+                Err(e) => warn!("Failed to open {} ({:04x}:{:04x}): {e}", det.name, det.vid, det.pid),
             }
         }
-
-        self.init_usb_bulk_rgb_devices(&mut wired_rgb);
 
         let arc = Arc::new(fan_devices);
         self.wired_fan_devices = Arc::clone(&arc);
@@ -200,138 +217,95 @@ impl ServiceManager {
         self.last_wired_hid_ids = self.enumerate_wired_controller_ids();
     }
 
-    fn init_usb_bulk_rgb_devices(
+    /// Dispatch an [`registry::OpenedDevice`] into the fan / RGB / AIO
+    /// subsystems based on which slots are populated.
+    fn register_opened_device(
         &mut self,
-        wired_rgb: &mut HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>>,
-    ) {
-        let usb_devs = match enumerate_devices() {
-            Ok(devs) => devs,
-            Err(err) => {
-                warn!("Failed to enumerate USB devices for bulk RGB scan: {err}");
-                return;
-            }
-        };
-        for det in usb_devs {
-            let opener: Option<
-                fn(
-                    rusb::Device<rusb::GlobalContext>,
-                ) -> anyhow::Result<lianli_devices::winusb_led::WinUsbLedDevice>,
-            > = match det.family {
-                lianli_shared::device_id::DeviceFamily::UniversalScreenLighting => {
-                    Some(lianli_devices::universal_screen_lighting::open)
-                }
-                _ => None,
-            };
-            let Some(opener) = opener else { continue };
-
-            let device_id = Self::rusb_device_id(&det);
-            let device = rusb::Device::clone(&det.device);
-            match opener(device) {
-                Ok(ctrl) => {
-                    info!("Opened {} as RGB device: {device_id}", det.name);
-                    wired_rgb.insert(
-                        device_id,
-                        Box::new(ctrl) as Box<dyn lianli_devices::traits::RgbDevice>,
-                    );
-                }
-                Err(e) => warn!(
-                    "Failed to open {} ({:04x}:{:04x}): {e}",
-                    det.name, det.vid, det.pid
-                ),
-            }
-        }
-    }
-
-    /// Register fan + RGB from a unified controller set.
-    fn register_wired_controllers(
-        &mut self,
-        base_id: &str,
+        base_id: String,
         name: &str,
         family: DeviceFamily,
         vid: u16,
         pid: u16,
         serial: Option<&str>,
-        result: anyhow::Result<lianli_devices::detect::WiredControllerSet>,
+        opened: registry::OpenedDevice,
         fan_devices: &mut HashMap<String, Box<dyn FanDevice>>,
         wired_rgb: &mut HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>>,
     ) {
-        match result {
-            Ok(set) => {
-                if let Some(fan_ctrl) = set.fan {
-                    info!("Opened {name} as fan device: {base_id}");
-                    let supports_quantity = fan_ctrl.supports_fan_quantity();
-                    let max_quantity =
-                        supports_quantity.then(|| fan_ctrl.max_fan_quantity_per_port());
+        // Register fan controller.
+        if let Some(fan_ctrl) = opened.fan {
+            info!("Opened {name} as fan device: {base_id}");
+            let supports_quantity = fan_ctrl.supports_fan_quantity();
+            let max_quantity = supports_quantity.then(|| fan_ctrl.max_fan_quantity_per_port());
 
-                    if supports_quantity {
-                        if let (Some(serial_str), Some(cfg)) = (serial, self.config.as_ref()) {
-                            if let Some(dev_cfg) = cfg.ene6k77.get(serial_str) {
-                                for (&port, &qty) in &dev_cfg.fan_quantities {
-                                    if let Err(e) = fan_ctrl.set_port_fan_quantity(port, qty) {
-                                        warn!(
-                                            "Failed to apply persisted fan quantity for {base_id} port {port}: {e}"
-                                        );
-                                    }
+            if supports_quantity {
+                if let Some(serial_str) = serial {
+                    if let Some(cfg) = self.config.as_ref() {
+                        if let Some(dev_cfg) = cfg.ene6k77.get(serial_str) {
+                            for (&port, &qty) in &dev_cfg.fan_quantities {
+                                if let Err(e) = fan_ctrl.set_port_fan_quantity(port, qty) {
+                                    warn!(
+                                        "Failed to apply persisted fan quantity for {base_id} port {port}: {e}"
+                                    );
                                 }
                             }
                         }
                     }
-
-                    let ports = fan_ctrl.fan_port_info();
-                    let per_fan = fan_ctrl.per_fan_control();
-                    let mb_sync = fan_ctrl.supports_mb_sync();
-                    let pump_control = fan_ctrl.has_pump_control();
-                    for &(port, fan_count) in &ports {
-                        let device_id = if ports.len() > 1 {
-                            format!("{base_id}:port{port}")
-                        } else {
-                            base_id.to_string()
-                        };
-                        let dev_name = if ports.len() > 1 {
-                            format!("{name} Port {port}")
-                        } else {
-                            name.to_string()
-                        };
-                        self.wired_fan_device_info.push(DeviceInfo {
-                            device_id,
-                            family,
-                            name: dev_name,
-                            serial: serial.map(|s| s.to_string()),
-                            vid,
-                            pid,
-                            has_lcd: false,
-                            has_fan: true,
-                            has_pump: pump_control,
-                            has_rgb: family.has_rgb(),
-                            has_pump_control: pump_control,
-                            fan_count: Some(fan_count),
-                            per_fan_control: Some(per_fan),
-                            mb_sync_support: mb_sync,
-                            rgb_zone_count: None,
-                            screen_width: None,
-                            screen_height: None,
-                            is_unbound_wireless: false,
-                            pump_rpm_range: None,
-                            fan_quantity: supports_quantity.then_some(fan_count),
-                            max_fan_quantity: max_quantity,
-                            firmware_version: None,
-                            supports_c_command: false,
-                            port_index: None,
-                        });
-                    }
-                    fan_devices.insert(base_id.to_string(), fan_ctrl);
-                }
-                for (suffix, rgb_ctrl) in set.rgb {
-                    let device_id = if suffix.is_empty() {
-                        base_id.to_string()
-                    } else {
-                        format!("{base_id}:{suffix}")
-                    };
-                    info!("Opened {name} as RGB device: {device_id}");
-                    wired_rgb.insert(device_id, rgb_ctrl);
                 }
             }
-            Err(err) => warn!("Failed to init {name}: {err}"),
+
+            let ports = fan_ctrl.fan_port_info();
+            let per_fan = fan_ctrl.per_fan_control();
+            let mb_sync = fan_ctrl.supports_mb_sync();
+            let pump_control = fan_ctrl.has_pump_control();
+            for &(port, fan_count) in &ports {
+                let device_id = if ports.len() > 1 {
+                    format!("{base_id}:port{port}")
+                } else {
+                    base_id.clone()
+                };
+                let dev_name = if ports.len() > 1 {
+                    format!("{name} Port {port}")
+                } else {
+                    name.to_string()
+                };
+                self.wired_fan_device_info.push(DeviceInfo {
+                    device_id,
+                    family,
+                    name: dev_name,
+                    serial: serial.map(|s| s.to_string()),
+                    vid,
+                    pid,
+                    has_lcd: false,
+                    has_fan: true,
+                    has_pump: pump_control,
+                    has_rgb: family.has_rgb(),
+                    has_pump_control: pump_control,
+                    fan_count: Some(fan_count),
+                    per_fan_control: Some(per_fan),
+                    mb_sync_support: mb_sync,
+                    rgb_zone_count: None,
+                    screen_width: None,
+                    screen_height: None,
+                    is_unbound_wireless: false,
+                    pump_rpm_range: None,
+                    fan_quantity: supports_quantity.then_some(fan_count),
+                    max_fan_quantity: max_quantity,
+                    firmware_version: opened.firmware.clone(),
+                    supports_c_command: false,
+                    port_index: None,
+                });
+            }
+            fan_devices.insert(base_id.clone(), fan_ctrl);
+        }
+
+        // Register RGB devices (one per zone).
+        for (suffix, rgb) in opened.rgb {
+            let device_id = if suffix.is_empty() {
+                base_id.clone()
+            } else {
+                format!("{base_id}:{suffix}")
+            };
+            wired_rgb.insert(device_id, rgb);
         }
     }
 
