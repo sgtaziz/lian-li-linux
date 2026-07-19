@@ -135,6 +135,10 @@ extern "C" fn on_crtc(state: c_int, user_data: *mut c_void) {
     }
 }
 
+// Cursor callbacks are required by the libevdi ABI but currently no-op — the
+// daemon doesn't render hardware cursors on the virtual display. The structs
+// in `ffi.rs` (`evdi_cursor_set`, `evdi_cursor_move`) are kept for the same
+// reason. If we ever want cursor support, fill these in.
 extern "C" fn on_cursor_set(_c: ffi::evdi_cursor_set, _user_data: *mut c_void) {
     trace!("on_cursor_set cb fired");
 }
@@ -143,6 +147,9 @@ extern "C" fn on_cursor_move(_m: ffi::evdi_cursor_move, _user_data: *mut c_void)
     trace!("on_cursor_move cb fired");
 }
 
+// DDCCI callback: currently returns a zeroed response. Implement when we want
+// to expose Display Data Channel commands (brightness, control menus) through
+// the virtual display.
 extern "C" fn on_ddcci(data: ffi::evdi_ddcci_data, user_data: *mut c_void) {
     trace!(
         "on_ddcci cb fired: address={:#06x} flags={:#06x} buffer_length={}",

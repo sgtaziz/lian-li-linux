@@ -13,6 +13,7 @@ use parking_lot::Mutex;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tracing::warn;
 use std::time::Duration;
 use text::{draw_sensor_text_fallback, draw_sensor_text_ttf, TextRenderParams};
 
@@ -103,7 +104,7 @@ impl SensorAsset {
                     Some(Arc::new(resized))
                 }
                 Err(e) => {
-                    eprintln!(
+                    warn!(
                         "Failed to load sensor background image '{}': {e}",
                         path.display()
                     );
