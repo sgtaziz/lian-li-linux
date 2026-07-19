@@ -24,6 +24,7 @@ use tracing::{info, warn};
 
 use runtime::LcdBackend;
 
+mod aio_lcd_firmware;
 mod display_mode;
 mod init;
 mod media;
@@ -31,6 +32,8 @@ mod runtime;
 mod shutdown;
 mod streaming;
 mod sync;
+
+use aio_lcd_firmware::AioLcdFirmwareTracker;
 
 use runtime::{parse_mac_str, ActiveTarget};
 
@@ -91,15 +94,11 @@ pub struct ServiceManager {
     last_wired_hid_ids: std::collections::HashSet<String>,
     /// Cached USB device list from enumerate_devices() — refreshed every USB_ENUM_INTERVAL.
     cached_usb_devices: Vec<DeviceInfo>,
-    /// Firmware string + C-command capability per AIO LCD device_id, populated
-    /// when the controller attaches and surfaced through DeviceInfo.
-    aio_lcd_info: HashMap<String, (Option<String>, bool)>,
     /// TL LCD (port, fan_index) per device_id. Probed once at init, sync.rs reads this.
     tl_lcd_port_index: HashMap<String, (u8, u8)>,
-    /// AIO LCD device IDs with pending deferred firmware reads.
-    aio_lcd_pending_firmware: HashMap<String, (Instant, bool)>,
-    /// AIO LCD device IDs for which firmware read previously failed.
-    aio_lcd_skip_firmware: HashMap<String, Instant>,
+    /// AIO LCD device IDs with pending deferred firmware reads, plus the
+    /// devices whose reads previously failed and should be skipped.
+    aio_lcd_firmware: AioLcdFirmwareTracker,
     last_wireless_count: usize,
     last_poll_mono: Instant,
     last_poll_wall: std::time::SystemTime,
@@ -136,10 +135,8 @@ impl ServiceManager {
             hid_backends: HashMap::new(),
             last_wired_hid_ids: std::collections::HashSet::new(),
             cached_usb_devices: Vec::new(),
-            aio_lcd_info: HashMap::new(),
             tl_lcd_port_index: HashMap::new(),
-            aio_lcd_pending_firmware: HashMap::new(),
-            aio_lcd_skip_firmware: HashMap::new(),
+            aio_lcd_firmware: AioLcdFirmwareTracker::new(),
             last_wireless_count: 0,
             last_poll_mono: Instant::now(),
             last_poll_wall: std::time::SystemTime::now(),
@@ -177,17 +174,9 @@ impl ServiceManager {
     /// Process deferred firmware reads for AIO LCD devices.
     /// Called every DevicePoll tick.
     fn process_pending_lcd_firmware(&mut self) {
-        let now = Instant::now();
-        let ready: Vec<(String, bool)> = self
-            .aio_lcd_pending_firmware
-            .iter()
-            .filter(|(_, (deadline, _))| *deadline <= now)
-            .map(|(id, (_, enable_512))| (id.clone(), *enable_512))
-            .collect();
+        let ready = self.aio_lcd_firmware.drain_due();
 
         for (device_id, enable_512) in ready {
-            self.aio_lcd_pending_firmware.remove(&device_id);
-
             let found = self
                 .targets
                 .values_mut()
@@ -198,12 +187,10 @@ impl ServiceManager {
                     let mut guard = hid.lock();
                     match guard.try_read_firmware() {
                         Ok(()) => {
-                            self.aio_lcd_info.insert(
-                                device_id.clone(),
-                                (
-                                    guard.firmware_version_str().map(|s| s.to_string()),
-                                    guard.supports_c_command(),
-                                ),
+                            self.aio_lcd_firmware.record(
+                                &device_id,
+                                guard.firmware_version_str().map(|s| s.to_string()),
+                                guard.supports_c_command(),
                             );
                             guard.set_use_c_command(enable_512);
                             info!("AIO LCD firmware read succeeded for {device_id}");
@@ -213,8 +200,7 @@ impl ServiceManager {
                                 "AIO LCD firmware read failed for {device_id}: {e:#}. \
                                  Skipping firmware reads for 30 minutes."
                             );
-                            self.aio_lcd_skip_firmware
-                                .insert(device_id.clone(), Instant::now());
+                            self.aio_lcd_firmware.mark_failed(&device_id);
                         }
                     }
                 }

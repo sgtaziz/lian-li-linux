@@ -112,9 +112,8 @@ impl ServiceManager {
             );
 
             let (firmware_version, supports_c_command) = self
-                .aio_lcd_info
+                .aio_lcd_firmware
                 .get(&device_id)
-                .cloned()
                 .unwrap_or((None, false));
             let port_index = if det.family == DeviceFamily::TlLcd {
                 self.tl_lcd_port_index.get(&device_id).copied()

@@ -300,21 +300,13 @@ impl ServiceManager {
                                 );
                             }
                             guard.set_use_c_command(device_cfg.aio_512_frame());
-                            self.aio_lcd_info
-                                .insert(candidate.device_id.clone(), (None, false));
-                            let skip = self
-                                .aio_lcd_skip_firmware
-                                .get(&candidate.device_id)
-                                .map(|t| t.elapsed() < std::time::Duration::from_secs(1800))
-                                .unwrap_or(false);
-                            if !skip {
-                                self.aio_lcd_pending_firmware.insert(
-                                    candidate.device_id.clone(),
-                                    (
-                                        std::time::Instant::now()
-                                            + std::time::Duration::from_secs(10),
-                                        device_cfg.aio_512_frame(),
-                                    ),
+                            self.aio_lcd_firmware
+                                .record(&candidate.device_id, None, false);
+                            if !self.aio_lcd_firmware.should_skip(&candidate.device_id) {
+                                self.aio_lcd_firmware.schedule(
+                                    &candidate.device_id,
+                                    std::time::Duration::from_secs(10),
+                                    device_cfg.aio_512_frame(),
                                 );
                             }
                         }
