@@ -21,7 +21,7 @@ use tracing::{debug, info, warn};
 
 impl ServiceManager {
     pub(super) fn start_fan_control(&mut self) {
-        if let Some(controller) = self.fan_controller.take() {
+        if let Some(controller) = self.controllers.fan.take() {
             info!("Stopping existing fan controller for reload...");
             controller.stop();
         }
@@ -56,11 +56,11 @@ impl ServiceManager {
             self.tx.clone(),
         );
         controller.start();
-        self.fan_controller = Some(controller);
+        self.controllers.fan = Some(controller);
     }
 
     pub(super) fn start_aio_control(&mut self) {
-        if let Some(existing) = self.aio_controller.take() {
+        if let Some(existing) = self.controllers.aio.take() {
             existing.stop();
         }
         let Some(cfg) = self.config.clone() else {
@@ -69,7 +69,7 @@ impl ServiceManager {
         let wireless = Arc::new(self.wireless.clone());
         let mut controller = AioController::new(wireless, cfg);
         controller.start();
-        self.aio_controller = Some(controller);
+        self.controllers.aio = Some(controller);
     }
 
     /// For each discovered AIO, ensure an AioConfig exists in the user's config.
@@ -110,7 +110,7 @@ impl ServiceManager {
             if let Err(e) = ipc_server::write_config(&self.config_path, &snapshot) {
                 warn!("Failed to persist AIO config additions: {e}");
             } else {
-                self.ipc_state.lock().config = Some(snapshot);
+                self.ipc.state.lock().config = Some(snapshot);
             }
         }
     }
@@ -347,7 +347,7 @@ impl ServiceManager {
                 if let Err(e) = ipc_server::write_config(&self.config_path, &snapshot) {
                     warn!("Failed to persist ENE 6K77 fan quantity: {e}");
                 } else {
-                    self.ipc_state.lock().config = Some(snapshot);
+                    self.ipc.state.lock().config = Some(snapshot);
                 }
             }
         }
@@ -379,14 +379,14 @@ impl ServiceManager {
 
         if let Some(ref cfg) = self.config {
             if let Some(ref rgb_cfg) = cfg.rgb {
-                let presets = self.ipc_state.lock().rgb_presets.clone();
+                let presets = self.ipc.state.lock().rgb_presets.clone();
                 controller.apply_config(rgb_cfg, &presets);
             }
         }
 
         let rgb_arc = Arc::new(Mutex::new(controller));
-        self.rgb_controller = Some(Arc::clone(&rgb_arc));
-        self.ipc_state.lock().rgb_controller = Some(rgb_arc);
+        self.controllers.rgb = Some(Arc::clone(&rgb_arc));
+        self.ipc.state.lock().rgb_controller = Some(rgb_arc);
     }
 
     /// Rebuild RGB controller to pick up newly discovered wireless devices.
@@ -396,13 +396,13 @@ impl ServiceManager {
         } else {
             None
         };
-        if let Some(ref rgb) = self.rgb_controller {
+        if let Some(ref rgb) = self.controllers.rgb {
             let mut ctrl = rgb.lock();
             ctrl.set_wireless(wireless);
             ctrl.refresh_wireless_devices();
             if let Some(ref cfg) = self.config {
                 if let Some(ref rgb_cfg) = cfg.rgb {
-                    let presets = self.ipc_state.lock().rgb_presets.clone();
+                    let presets = self.ipc.state.lock().rgb_presets.clone();
                     ctrl.apply_config(rgb_cfg, &presets);
                 }
             }
@@ -416,9 +416,9 @@ impl ServiceManager {
 
     /// Apply RGB config from the current AppConfig to the RGB controller.
     pub(super) fn apply_rgb_config(&self) {
-        if let (Some(ref rgb), Some(ref cfg)) = (&self.rgb_controller, &self.config) {
+        if let (Some(ref rgb), Some(ref cfg)) = (&self.controllers.rgb, &self.config) {
             if let Some(ref rgb_cfg) = cfg.rgb {
-                let presets = self.ipc_state.lock().rgb_presets.clone();
+                let presets = self.ipc.state.lock().rgb_presets.clone();
                 rgb.lock().apply_config(rgb_cfg, &presets);
             }
         }
@@ -434,20 +434,20 @@ impl ServiceManager {
             .unwrap_or((false, 6743));
 
         // Check if we need to restart (port changed or toggled)
-        let current_state = self.openrgb_state.lock().clone();
+        let current_state = self.openrgb.state.lock().clone();
         let needs_restart =
-            self.openrgb_thread.is_some() && (current_state.port != Some(port) || !enabled);
+            self.openrgb.thread.is_some() && (current_state.port != Some(port) || !enabled);
 
         if needs_restart {
             info!("Stopping OpenRGB server for reconfiguration");
-            self.openrgb_stop.store(true, Ordering::Relaxed);
-            if let Some(thread) = self.openrgb_thread.take() {
+            self.openrgb.stop.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.openrgb.thread.take() {
                 let _ = thread.join();
             }
-            if let Some(thread) = self.direct_color_writer.take() {
+            if let Some(thread) = self.controllers.direct_color_writer.take() {
                 let _ = thread.join();
             }
-            let mut s = self.openrgb_state.lock();
+            let mut s = self.openrgb.state.lock();
             *s = openrgb_server::OpenRgbServerState::default();
         }
 
@@ -455,25 +455,25 @@ impl ServiceManager {
             return;
         }
 
-        if self.openrgb_thread.is_some() {
+        if self.openrgb.thread.is_some() {
             return; // Already running with correct port
         }
 
-        if let Some(ref rgb) = self.rgb_controller {
-            self.openrgb_stop.store(false, Ordering::Relaxed);
-            self.openrgb_thread = Some(openrgb_server::start_openrgb_server(
+        if let Some(ref rgb) = self.controllers.rgb {
+            self.openrgb.stop.store(false, Ordering::Relaxed);
+            self.openrgb.thread = Some(openrgb_server::start_openrgb_server(
                 Arc::clone(rgb),
-                Arc::clone(&self.direct_color_buffer),
+                Arc::clone(&self.controllers.direct_color_buffer),
                 port,
-                Arc::clone(&self.openrgb_stop),
-                Arc::clone(&self.openrgb_state),
+                Arc::clone(&self.openrgb.stop),
+                Arc::clone(&self.openrgb.state),
             ));
             // Start the async writer thread that flushes buffered colors at 30fps
-            if self.direct_color_writer.is_none() {
-                self.direct_color_writer = Some(crate::rgb_controller::start_direct_color_writer(
+            if self.controllers.direct_color_writer.is_none() {
+                self.controllers.direct_color_writer = Some(crate::rgb_controller::start_direct_color_writer(
                     Arc::clone(rgb),
-                    Arc::clone(&self.direct_color_buffer),
-                    Arc::clone(&self.openrgb_stop),
+                    Arc::clone(&self.controllers.direct_color_buffer),
+                    Arc::clone(&self.openrgb.stop),
                 ));
             }
         }
@@ -518,7 +518,7 @@ impl ServiceManager {
         }
         let sensors_for_preview = lianli_shared::sensors::enumerate_sensors();
         template_store::regenerate_template_previews(&user_templates, &sensors_for_preview);
-        self.ipc_state.lock().user_templates = user_templates;
+        self.ipc.state.lock().user_templates = user_templates;
 
         match AppConfig::load(&self.config_path) {
             Ok((cfg, warnings)) => {

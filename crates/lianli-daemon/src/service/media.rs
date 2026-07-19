@@ -50,7 +50,7 @@ impl ServiceManager {
             .collect();
 
         let all_sensors = lianli_shared::sensors::enumerate_sensors();
-        let user_templates = self.ipc_state.lock().user_templates.clone();
+        let user_templates = self.ipc.state.lock().user_templates.clone();
 
         self.media_assets.clear();
 

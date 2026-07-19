@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 impl ServiceManager {
     /// Sync current config to IPC shared state.
     pub(super) fn sync_ipc_state(&self) {
-        let mut ipc_state = self.ipc_state.lock();
+        let mut ipc_state = self.ipc.state.lock();
         ipc_state.config = self.config.clone();
     }
 
@@ -158,7 +158,7 @@ impl ServiceManager {
 
     /// Update IPC telemetry and device list.
     pub(super) fn sync_ipc_telemetry(&self) {
-        let mut ipc_state = self.ipc_state.lock();
+        let mut ipc_state = self.ipc.state.lock();
         ipc_state.telemetry.streaming_active = !self.targets.is_empty();
 
         // OpenRGB server status
@@ -168,7 +168,7 @@ impl ServiceManager {
             .and_then(|c| c.rgb.as_ref())
             .map(|rgb| (rgb.openrgb_server, rgb.openrgb_port))
             .unwrap_or((false, 6743));
-        let orgb_state = self.openrgb_state.lock();
+        let orgb_state = self.openrgb.state.lock();
         ipc_state.telemetry.openrgb_status = lianli_shared::ipc::OpenRgbServerStatus {
             enabled,
             running: orgb_state.running,

@@ -1,8 +1,4 @@
-use crate::aio_controller::AioController;
-use crate::fan_controller::FanController;
 use crate::ipc_server::{self, DaemonState};
-use crate::openrgb_server;
-use crate::rgb_controller::RgbController;
 use anyhow::Result;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::ensure_hid_devices_bound;
@@ -15,10 +11,9 @@ use lianli_transport::RusbHid;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
@@ -31,9 +26,11 @@ mod media;
 mod runtime;
 mod shutdown;
 mod streaming;
+mod subsystems;
 mod sync;
 
 use aio_lcd_firmware::AioLcdFirmwareTracker;
+use subsystems::{Controllers, IpcSubsystem, OpenRgbSubsystem};
 
 use runtime::{parse_mac_str, ActiveTarget};
 
@@ -81,9 +78,6 @@ pub struct ServiceManager {
     targets: HashMap<usize, ActiveTarget>,
     wireless: WirelessController,
     packet_builder: PacketBuilder,
-    fan_controller: Option<FanController>,
-    aio_controller: Option<AioController>,
-    rgb_controller: Option<Arc<Mutex<RgbController>>>,
     /// Per-port DeviceInfo for wired fan devices (populated by open_wired_fan_devices).
     wired_fan_device_info: Vec<DeviceInfo>,
     /// Shared reference to wired fan device handles (for RPM reading).
@@ -103,14 +97,12 @@ pub struct ServiceManager {
     last_poll_mono: Instant,
     last_poll_wall: std::time::SystemTime,
     restart_requested: bool,
-    ipc_state: Arc<Mutex<DaemonState>>, // the (shared) state of the deamon. Shared between daemon itself and IPC thread.
-    ipc_stop: Arc<AtomicBool>, // Flag which allows the deamon thread (on shutdown) to tell the IPC thread to stop.
-    ipc_thread: Option<JoinHandle<()>>, // Here the deamon thread stores the handle to the IPC thread.
-    openrgb_stop: Arc<AtomicBool>,
-    openrgb_thread: Option<JoinHandle<()>>,
-    openrgb_state: Arc<Mutex<openrgb_server::OpenRgbServerState>>,
-    direct_color_buffer: Arc<Mutex<crate::rgb_controller::DirectColorBuffer>>,
-    direct_color_writer: Option<JoinHandle<()>>,
+    /// Background controllers (fan/AIO/RGB) and direct-color flush thread.
+    controllers: Controllers,
+    /// IPC server thread + shared state.
+    ipc: IpcSubsystem,
+    /// OpenRGB SDK server thread + shared state.
+    openrgb: OpenRgbSubsystem,
     desktop_displays: crate::desktop_display::DesktopDisplayRegistry,
     tx: Option<Sender<DaemonEvent>>,
     mode_switch_suppression: HashMap<String, Instant>,
@@ -127,9 +119,6 @@ impl ServiceManager {
             targets: HashMap::new(),
             wireless: WirelessController::new(),
             packet_builder: PacketBuilder::new(),
-            fan_controller: None,
-            aio_controller: None,
-            rgb_controller: None,
             wired_fan_device_info: Vec::new(),
             wired_fan_devices: Arc::new(HashMap::new()),
             hid_backends: HashMap::new(),
@@ -141,16 +130,9 @@ impl ServiceManager {
             last_poll_mono: Instant::now(),
             last_poll_wall: std::time::SystemTime::now(),
             restart_requested: false,
-            ipc_state,
-            ipc_stop: Arc::new(AtomicBool::new(false)),
-            ipc_thread: None,
-            openrgb_stop: Arc::new(AtomicBool::new(false)),
-            openrgb_thread: None,
-            openrgb_state: Arc::new(Mutex::new(openrgb_server::OpenRgbServerState::default())),
-            direct_color_buffer: Arc::new(Mutex::new(
-                crate::rgb_controller::DirectColorBuffer::new(),
-            )),
-            direct_color_writer: None,
+            controllers: Controllers::new(),
+            ipc: IpcSubsystem::new(ipc_state),
+            openrgb: OpenRgbSubsystem::new(),
             desktop_displays: crate::desktop_display::DesktopDisplayRegistry::new(),
             tx: None,
             mode_switch_suppression: HashMap::new(),
@@ -291,9 +273,9 @@ impl ServiceManager {
 
         // Start IPC server
         let tx_cloned = tx.clone();
-        self.ipc_thread = Some(ipc_server::start_ipc_server(
-            Arc::clone(&self.ipc_state),
-            Arc::clone(&self.ipc_stop),
+        self.ipc.thread = Some(ipc_server::start_ipc_server(
+            Arc::clone(&self.ipc.state),
+            Arc::clone(&self.ipc.stop),
             tx_cloned,
         ));
         self.try_wireless();
@@ -402,14 +384,14 @@ impl ServiceManager {
                 }
                 DaemonEvent::IpcUpdate => {
                     // Check for IPC-triggered config reload
-                    let ipc_state = self.ipc_state.lock();
+                    let ipc_state = self.ipc.state.lock();
                     info!("Config reload triggered via IPC");
                     // Force the config watcher to pick up the new file
                     drop(ipc_state);
                     if self.load_config(tx.clone()) {
                         self.start_fan_control();
                         if let (Some(aio), Some(cfg)) =
-                            (self.aio_controller.as_ref(), self.config.as_ref())
+                            (self.controllers.aio.as_ref(), self.config.as_ref())
                         {
                             aio.set_config(cfg.clone());
                         } else {
