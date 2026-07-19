@@ -6,12 +6,12 @@ mod controllers;
 mod enumerate;
 
 pub use backends::{
-    hidraw_path_for_usb_topology, open_hid_backend_hidapi, open_hid_backend_rusb,
-    open_hid_lcd_by_topology, open_hid_lcd_by_vid_pid, open_hid_lcd_device_rusb,
+    hidraw_path_for_usb_topology, open_hid_backend, open_hid_lcd_by_topology,
+    open_hid_lcd_by_vid_pid, open_hid_lcd_device, open_usb_bulk_backend,
 };
 pub use binding::ensure_hid_devices_bound;
 pub use controllers::{create_hid_lcd_device, create_wired_controllers, WiredControllerSet};
-pub use enumerate::{enumerate_devices, enumerate_hid_devices, probe_tl_lcd_port_indices_rusb};
+pub use enumerate::{enumerate_devices, probe_tl_lcd_port_indices_rusb};
 
 use lianli_shared::device_id::DeviceFamily;
 use rusb::{Device, GlobalContext};
@@ -56,48 +56,10 @@ impl DetectedDevice {
     }
 }
 
-/// A detected HID device with its identified family.
-#[derive(Debug, Clone)]
-pub struct DetectedHidDevice {
-    pub family: DeviceFamily,
-    pub name: &'static str,
-    pub vid: u16,
-    pub pid: u16,
-    pub path: std::ffi::CString,
-    pub serial: Option<String>,
-    /// USB port path (e.g. "1-5.3") for stable device IDs.
-    pub usb_port_path: Option<String>,
-    /// (port, fan_index) for daisy-chained TL LCD fans, read during enumeration.
-    pub port_index: Option<(u8, u8)>,
-}
-
 /// Known non-unique HID serial strings (chip manufacturer names, firmware
 /// version markers, etc. — not actual per-device serials).
 const NON_UNIQUE_SERIALS: &[&str] = &["Nuvoton"];
 
 fn is_non_unique_serial(s: &str) -> bool {
     NON_UNIQUE_SERIALS.contains(&s) || s.starts_with("TL_LCDV")
-}
-
-impl DetectedHidDevice {
-    /// Stable device ID: serial if unique, otherwise USB port path.
-    pub fn device_id(&self) -> String {
-        match &self.serial {
-            Some(s) if !is_non_unique_serial(s.as_str()) => {
-                format!("hid:{}", s)
-            }
-            _ => match &self.usb_port_path {
-                Some(port_path) => {
-                    format!("hid:{:04x}:{:04x}:{}", self.vid, self.pid, port_path)
-                }
-                None => {
-                    let path_bytes = self.path.as_bytes();
-                    let hash: u32 = path_bytes
-                        .iter()
-                        .fold(0u32, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u32));
-                    format!("hid:{:04x}:{:04x}:{:04x}", self.vid, self.pid, hash as u16)
-                }
-            },
-        }
-    }
 }

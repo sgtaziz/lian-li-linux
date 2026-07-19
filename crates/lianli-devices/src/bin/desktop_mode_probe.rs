@@ -11,7 +11,7 @@ use lianli_devices::turzx::{
     self, build_config_packet, build_power_off, parse_vendor_desc, pick_format, pick_mode, Mode,
     TurzxDisplay, VendorCaps, FMT_H264, FMT_MJPEG,
 };
-use lianli_transport::usb::{UsbTransport, LCD_READ_TIMEOUT};
+use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT};
 use std::io::{BufRead, Write};
 use std::time::Duration;
 
@@ -179,7 +179,7 @@ fn make_jpeg(width: u32, height: u32, color: [u8; 3], quality: u8) -> Result<Vec
 }
 
 fn control_in(
-    transport: &UsbTransport,
+    transport: &RusbBulk,
     label: &str,
     req_type: u8,
     b_request: u8,
@@ -221,7 +221,7 @@ fn main() -> Result<()> {
     println!("Target: {:04x}:{:04x}", turzx::VID, pid);
 
     let mut transport =
-        UsbTransport::open(turzx::VID, pid).map_err(|e| anyhow::anyhow!("open: {e}"))?;
+        RusbBulk::open(turzx::VID, pid).map_err(|e| anyhow::anyhow!("open: {e}"))?;
 
     press_enter(args.no_pause, "Phase 0: USB reset + claim interface 0");
     match transport.reset() {

@@ -1,8 +1,7 @@
 use super::runtime::{ActiveTarget, LcdBackend, ThreadedWinUsbSender};
 use super::{DaemonEvent, ServiceManager};
 use lianli_devices::detect::{
-    create_hid_lcd_device, enumerate_devices, open_hid_lcd_by_topology, open_hid_lcd_by_vid_pid,
-    open_hid_lcd_device_rusb,
+    create_hid_lcd_device, enumerate_devices, open_hid_lcd_device,
 };
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
 use lianli_media::{prepare_media_asset, MediaAsset};
@@ -260,7 +259,7 @@ impl ServiceManager {
                                 }),
                                 None => Err(anyhow::anyhow!("Not an LCD device")),
                             }
-                        } else if self.use_rusb() || candidate.family == DeviceFamily::TlLcd {
+                        } else {
                             let device = Device::clone(candidate.usb_device.as_ref().unwrap());
                             let det = lianli_devices::detect::DetectedDevice {
                                 device,
@@ -273,34 +272,11 @@ impl ServiceManager {
                                 serial: Some(candidate.device_id.clone()),
                                 hid_usage_page: None,
                             };
-                            match open_hid_lcd_device_rusb(&det) {
+                            match open_hid_lcd_device(&det) {
                                 Some(result) => result.map(|d| {
                                     LcdBackend::HidLcd(Arc::new(parking_lot::Mutex::new(d)))
                                 }),
                                 None => Err(anyhow::anyhow!("Not an LCD device")),
-                            }
-                        } else {
-                            let port_numbers = candidate
-                                .usb_device
-                                .as_ref()
-                                .and_then(|d| d.port_numbers().ok())
-                                .unwrap_or_default();
-                            if !port_numbers.is_empty() {
-                                open_hid_lcd_by_topology(
-                                    candidate.vid,
-                                    candidate.pid,
-                                    candidate.family,
-                                    candidate.bus,
-                                    &port_numbers,
-                                )
-                                .map(|d| LcdBackend::HidLcd(Arc::new(parking_lot::Mutex::new(d))))
-                            } else {
-                                open_hid_lcd_by_vid_pid(
-                                    candidate.vid,
-                                    candidate.pid,
-                                    candidate.family,
-                                )
-                                .map(|d| LcdBackend::HidLcd(Arc::new(parking_lot::Mutex::new(d))))
                             }
                         }
                     }

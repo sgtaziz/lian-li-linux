@@ -1,7 +1,7 @@
 use super::transport::with_transport_recovery;
 use super::{WirelessFanType, RX_IDS, USB_CMD_SEND_RF};
 use anyhow::{bail, Context, Result};
-use lianli_transport::usb::{UsbTransport, USB_TIMEOUT};
+use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use parking_lot::Mutex;
 use std::fmt;
 use std::sync::atomic::{AtomicU16, Ordering};
@@ -187,7 +187,7 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
 /// Sends GetDev command (0x10, page=1) and parses the response into
 /// full 42-byte device records.
 pub(super) fn poll_and_discover(
-    rx: &Arc<Mutex<UsbTransport>>,
+    rx: &Arc<Mutex<RusbBulk>>,
     discovered_devices: &Arc<Mutex<Vec<DiscoveredDevice>>>,
     mobo_pwm: &Arc<AtomicU16>,
     master_mac: &Arc<Mutex<[u8; 6]>>,

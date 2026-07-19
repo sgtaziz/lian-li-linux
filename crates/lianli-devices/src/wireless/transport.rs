@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
-use lianli_transport::usb::UsbTransport;
+use lianli_transport::usb::RusbBulk;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Try to open a USB device matching any of the given VID:PID pairs.
-pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<UsbTransport> {
+pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<RusbBulk> {
     let mut last_err = None;
     for &(vid, pid) in ids {
-        match UsbTransport::open(vid, pid) {
+        match RusbBulk::open(vid, pid) {
             Ok(transport) => return Ok(transport),
             Err(e) => last_err = Some(e),
         }
@@ -21,7 +21,7 @@ pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<UsbTransport> {
 /// Reopen and swap a dongle transport in place after the underlying USB
 /// handle goes stale (suspend/resume, hub reset, unplug+replug).
 pub(super) fn reopen_transport(
-    arc: &Arc<Mutex<UsbTransport>>,
+    arc: &Arc<Mutex<RusbBulk>>,
     ids: &[(u16, u16)],
     name: &str,
 ) -> Result<()> {
@@ -35,13 +35,13 @@ pub(super) fn reopen_transport(
 /// Run a USB op on a dongle transport with one-shot reopen + retry on failure.
 /// `op` must be safe to call twice (idempotent at the protocol level).
 pub(super) fn with_transport_recovery<F, R>(
-    arc: &Arc<Mutex<UsbTransport>>,
+    arc: &Arc<Mutex<RusbBulk>>,
     ids: &[(u16, u16)],
     name: &str,
     mut op: F,
 ) -> Result<R>
 where
-    F: FnMut(&UsbTransport) -> Result<R>,
+    F: FnMut(&RusbBulk) -> Result<R>,
 {
     let first = {
         let handle = arc.lock();

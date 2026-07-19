@@ -6,7 +6,7 @@ use crate::openrgb_server;
 use crate::rgb_controller::RgbController;
 use crate::template_store;
 use lianli_devices::crypto::PacketBuilder;
-use lianli_devices::detect::{create_wired_controllers, enumerate_devices, enumerate_hid_devices};
+use lianli_devices::detect::{create_wired_controllers, enumerate_devices};
 use lianli_devices::traits::FanDevice;
 use lianli_shared::config::AppConfig;
 use lianli_shared::device_id::DeviceFamily;
@@ -116,37 +116,17 @@ impl ServiceManager {
 
     pub(super) fn enumerate_wired_controller_ids(&self) -> std::collections::HashSet<String> {
         use lianli_shared::device_id::DeviceFamily;
-        use std::collections::HashSet;
         fn is_wired_controller(family: DeviceFamily) -> bool {
             lianli_shared::device_id::uses_hid(family)
                 || matches!(family, DeviceFamily::UniversalScreenLighting)
         }
-        if self.use_rusb() {
-            enumerate_devices()
-                .ok()
-                .into_iter()
-                .flatten()
-                .filter(|det| is_wired_controller(det.family))
-                .map(|det| Self::rusb_device_id(&det))
-                .collect()
-        } else {
-            let mut set: HashSet<String> = match hidapi::HidApi::new() {
-                Ok(api) => lianli_devices::detect::enumerate_hid_devices(&api)
-                    .into_iter()
-                    .filter(|det| lianli_shared::device_id::uses_hid(det.family))
-                    .map(|det| det.device_id())
-                    .collect(),
-                Err(_) => return HashSet::new(),
-            };
-            if let Ok(devs) = enumerate_devices() {
-                set.extend(
-                    devs.into_iter()
-                        .filter(|det| matches!(det.family, DeviceFamily::UniversalScreenLighting))
-                        .map(|det| Self::rusb_device_id(&det)),
-                );
-            }
-            set
-        }
+        enumerate_devices()
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter(|det| is_wired_controller(det.family))
+            .map(|det| Self::rusb_device_id(&det))
+            .collect()
     }
 
     pub(super) fn check_wired_hotplug(&mut self) {
@@ -173,80 +153,42 @@ impl ServiceManager {
             HashMap::new();
         self.wired_fan_device_info.clear();
 
-        if self.use_rusb() {
-            let usb_devs = match enumerate_devices() {
-                Ok(devs) => devs,
-                Err(err) => {
-                    warn!("Failed to enumerate USB devices: {err}");
-                    self.wired_fan_devices = Arc::new(fan_devices);
-                    self.init_rgb_controller_from(wired_rgb);
-                    return;
-                }
-            };
-            for det in usb_devs {
-                if !lianli_shared::device_id::uses_hid(det.family) {
-                    continue;
-                }
-                if det.family == lianli_shared::device_id::DeviceFamily::TlLcd {
-                    continue;
-                }
-                let base_id = Self::rusb_device_id(&det);
-                let backend = match self.get_or_open_backend_rusb(&det) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        warn!("Failed to open HID backend for {}: {e}", det.name);
-                        continue;
-                    }
-                };
-                if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
-                    self.register_wired_controllers(
-                        &base_id,
-                        det.name,
-                        det.family,
-                        det.vid,
-                        det.pid,
-                        det.serial.as_deref(),
-                        result,
-                        &mut fan_devices,
-                        &mut wired_rgb,
-                    );
-                }
+        let usb_devs = match enumerate_devices() {
+            Ok(devs) => devs,
+            Err(err) => {
+                warn!("Failed to enumerate USB devices: {err}");
+                self.wired_fan_devices = Arc::new(fan_devices);
+                self.init_rgb_controller_from(wired_rgb);
+                return;
             }
-        } else {
-            let api = match hidapi::HidApi::new() {
-                Ok(api) => api,
-                Err(err) => {
-                    warn!("Failed to initialize HID API: {err}");
-                    self.wired_fan_devices = Arc::new(fan_devices);
-                    self.init_rgb_controller_from(wired_rgb);
-                    return;
-                }
-            };
-            for det in enumerate_hid_devices(&api) {
-                if det.family == lianli_shared::device_id::DeviceFamily::TlLcd {
+        };
+        for det in usb_devs {
+            if !lianli_shared::device_id::uses_hid(det.family) {
+                continue;
+            }
+            if det.family == lianli_shared::device_id::DeviceFamily::TlLcd {
+                continue;
+            }
+            let base_id = Self::rusb_device_id(&det);
+            let backend = match self.get_or_open_backend_rusb(&det) {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("Failed to open HID backend for {}: {e}", det.name);
                     continue;
                 }
-                let base_id = det.device_id();
-                let backend = match self.get_or_open_backend_hidapi(&api, &base_id, &det) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        warn!("Failed to open HID backend for {}: {e}", det.name);
-                        continue;
-                    }
-                };
-                if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
-                    self.register_wired_controllers(
-                        &base_id,
-                        det.name,
-                        det.family,
-                        det.vid,
-                        det.pid,
-                        det.serial.as_deref(),
-                        result,
-                        &mut fan_devices,
-                        &mut wired_rgb,
-                    );
-                }
+            };
+            if let Some(result) = create_wired_controllers(det.family, det.pid, backend) {
+                self.register_wired_controllers(
+                    &base_id,
+                    det.name,
+                    det.family,
+                    det.vid,
+                    det.pid,
+                    det.serial.as_deref(),
+                    result,
+                    &mut fan_devices,
+                    &mut wired_rgb,
+                );
             }
         }
 

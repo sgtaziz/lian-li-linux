@@ -312,10 +312,8 @@ fn load_config(window: &slint::Weak<crate::MainWindow>, shared: &crate::Shared) 
             .as_ref()
             .map(|f| f.hysteresis_pwm as i32)
             .unwrap_or(5);
-        let hid_driver = match config.hid_driver {
-            lianli_shared::config::HidDriver::Hidapi => "HIDAPI",
-            lianli_shared::config::HidDriver::Rusb => "Rusb",
-        };
+        // hidapi backend was dropped; only rusb remains.
+        let hid_driver = "Rusb";
 
         let window = window.clone();
         slint::invoke_from_event_loop(move || {

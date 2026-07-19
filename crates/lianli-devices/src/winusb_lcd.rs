@@ -13,7 +13,7 @@ use crate::crypto::PacketBuilder;
 use crate::traits::LcdDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
-use lianli_transport::usb::{UsbTransport, EP_OUT, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
+use lianli_transport::usb::{RusbBulk, EP_OUT, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use rusb::{Device, GlobalContext};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -25,7 +25,7 @@ const RESET_COOLDOWN: Duration = Duration::from_secs(5);
 /// Handles DES-CBC encrypted command headers + raw JPEG payload for any
 /// directly-connected VID=0x1CBE LCD device.
 pub struct WinUsbLcdDevice {
-    transport: UsbTransport,
+    transport: RusbBulk,
     builder: PacketBuilder,
     screen: ScreenInfo,
     name: String,
@@ -54,7 +54,7 @@ impl WinUsbLcdDevice {
             .unwrap_or_else(|_| format!("bus{bus}-addr{address}"));
 
         let mut transport =
-            UsbTransport::open_device(device).context("opening WinUSB LCD device")?;
+            RusbBulk::open_device(device).context("opening WinUSB LCD device")?;
         transport
             .detach_and_configure(name)
             .context("configuring WinUSB LCD device")?;

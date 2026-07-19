@@ -1,37 +1,24 @@
-use super::enumerate::{find_hid_devices_by_family, find_usb_device};
-use super::{DetectedDevice, DetectedHidDevice};
+use super::enumerate::find_usb_device;
+use super::DetectedDevice;
 use anyhow::Result;
-use hidapi::HidApi;
 use lianli_shared::device_id::DeviceFamily;
-use lianli_transport::{HidBackend, HidBackendKind, HidReopener, RusbHidTransport};
+use lianli_transport::{RusbBulk, RusbHid, RusbHidReopener};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
 
-/// Build a reopener that re-acquires the same HID device via hidapi by VID/PID.
-/// Used to recover from stale handles after USB suspend/resume.
-fn make_hidapi_reopener(path: std::ffi::CString) -> HidReopener {
-    Arc::new(move || {
-        let api = HidApi::new().map_err(|e| anyhow::anyhow!("hidapi init: {e}"))?;
-        let dev = api
-            .open_path(&path)
-            .map_err(|e| anyhow::anyhow!("hidapi open_path {:?}: {e}", path))?;
-        Ok(HidBackendKind::Hidapi(dev))
-    })
-}
-
 /// Build a reopener that re-acquires the same HID device via the rusb backend.
-/// Matches by USB topology (bus + port_numbers) to disambiguate multiple devices
-/// sharing the same VID:PID (e.g. daisy-chained TL LCD fans).
+/// Matches by USB topology (bus + port_numbers) to disambiguate multiple
+/// devices sharing the same VID:PID (e.g. daisy-chained TL LCD fans).
 fn make_rusb_reopener(
     vid: u16,
     pid: u16,
     bus: u8,
     port_numbers: Vec<u8>,
     usage_page: Option<u16>,
-) -> HidReopener {
+) -> RusbHidReopener {
     Arc::new(move || {
         let usb_dev = rusb::devices()
             .map_err(|e| anyhow::anyhow!("rusb devices: {e}"))?
@@ -49,9 +36,13 @@ fn make_rusb_reopener(
                     port_numbers
                 )
             })?;
-        let transport = RusbHidTransport::open_by_usage(usb_dev, usage_page)
-            .map_err(|e| anyhow::anyhow!("rusb hid open: {e}"))?;
-        Ok(HidBackendKind::Rusb(transport))
+        let transport = RusbHid::open_by_usage_with_reopener(
+            usb_dev,
+            usage_page,
+            make_rusb_reopener(vid, pid, bus, port_numbers.clone(), usage_page),
+        )
+        .map_err(|e| anyhow::anyhow!("rusb hid open: {e}"))?;
+        Ok(transport)
     })
 }
 
@@ -74,7 +65,7 @@ fn try_open_with_retry<T>(
                             "{label}: open attempt {} failed: {e}, resetting USB device",
                             attempt + 1
                         );
-                        let _ = RusbHidTransport::reset_usb_device(usb_dev);
+                        let _ = RusbHid::reset_usb_device(usb_dev);
                         std::thread::sleep(Duration::from_secs(3));
                     } else {
                         return Err(e.context(format!(
@@ -107,26 +98,50 @@ fn open_with_retry<T>(
     try_open_with_retry(Some(usb_device), "rusb open", open_fn)
 }
 
-/// Open a detected HID device as an LCD controller via hidapi.
+/// Open a detected HID-capable device as an LCD controller via the rusb HID
+/// backend. Returns `None` for families that don't expose an LCD.
 pub fn open_hid_lcd_device(
-    api: &HidApi,
-    det: &DetectedHidDevice,
+    det: &DetectedDevice,
 ) -> Option<Result<Box<dyn crate::traits::LcdDevice>>> {
     let pid = det.pid;
     match det.family {
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => {
-            Some(open_hidapi_with_retry(api, det, |backend| {
+            let vid = det.vid;
+            let bus = det.bus;
+            let port_numbers = det.device.port_numbers().unwrap_or_default();
+            let usage_page = det.hid_usage_page;
+            let usb_device = det.device.clone();
+            Some(open_with_retry(&det.device, || {
+                let transport = RusbHid::open_by_usage_with_reopener(
+                    usb_device.clone(),
+                    usage_page,
+                    make_rusb_reopener(vid, pid, bus, port_numbers.clone(), usage_page),
+                )?;
+                let mut backend = transport;
+                backend.read_flush();
                 let backend = Arc::new(Mutex::new(backend));
                 crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid)
                     .map(|d| Box::new(d) as Box<dyn crate::traits::LcdDevice>)
             }))
         }
-        DeviceFamily::TlLcd => Some(open_hidapi_with_retry(api, det, |backend| {
-            let backend = Arc::new(Mutex::new(backend));
-            let mut tl = crate::tl_lcd::TlLcdDevice::new(backend);
-            crate::traits::LcdDevice::initialize(&mut tl)?;
-            Ok(Box::new(tl) as Box<dyn crate::traits::LcdDevice>)
-        })),
+        DeviceFamily::TlLcd => {
+            let vid = det.vid;
+            let bus = det.bus;
+            let port_numbers = det.device.port_numbers().unwrap_or_default();
+            let usage_page = det.hid_usage_page;
+            let usb_device = det.device.clone();
+            Some(open_with_retry(&det.device, || {
+                let transport = RusbHid::open_by_usage_with_reopener(
+                    usb_device.clone(),
+                    usage_page,
+                    make_rusb_reopener(vid, pid, bus, port_numbers.clone(), usage_page),
+                )?;
+                let backend = Arc::new(Mutex::new(transport));
+                let mut tl = crate::tl_lcd::TlLcdDevice::new(backend);
+                crate::traits::LcdDevice::initialize(&mut tl)?;
+                Ok(Box::new(tl) as Box<dyn crate::traits::LcdDevice>)
+            }))
+        }
         _ => None,
     }
 }
@@ -143,6 +158,10 @@ fn usb_topology_string(bus: u8, port_numbers: &[u8]) -> String {
     )
 }
 
+/// Resolve the `/dev/hidrawN` path for a USB device by topology.
+///
+/// Walks `/sys/class/hidraw` looking for the canonicalized device symlink
+/// whose target contains the matching `{bus}-{port.port.port}` string.
 pub fn hidraw_path_for_usb_topology(bus: u8, port_numbers: &[u8]) -> Option<std::ffi::CString> {
     if port_numbers.is_empty() {
         return None;
@@ -165,8 +184,9 @@ pub fn hidraw_path_for_usb_topology(bus: u8, port_numbers: &[u8]) -> Option<std:
 }
 
 /// Open a HID LCD device by USB topology (bus + port path).
-/// Picks the specific hidraw belonging to that USB device, then opens it via hidapi.
-/// Required for devices like TL LCD where multiple physical units share VID:PID.
+///
+/// Required for devices like TL LCD where multiple physical units share
+/// VID:PID — the topology pinpoints which one to open.
 pub fn open_hid_lcd_by_topology(
     vid: u16,
     pid: u16,
@@ -174,34 +194,43 @@ pub fn open_hid_lcd_by_topology(
     bus: u8,
     port_numbers: &[u8],
 ) -> Result<Box<dyn crate::traits::LcdDevice>> {
-    let target_path = hidraw_path_for_usb_topology(bus, port_numbers).ok_or_else(|| {
-        anyhow::anyhow!(
-            "no hidraw matching USB topology {} for {vid:04x}:{pid:04x}",
-            usb_topology_string(bus, port_numbers)
-        )
-    })?;
-    let api = HidApi::new().map_err(|e| anyhow::anyhow!("hidapi init: {e}"))?;
-    let det = find_hid_devices_by_family(&api, family)
-        .into_iter()
-        .find(|d| d.path == target_path)
+    let device = rusb::devices()?
+        .iter()
+        .find(|d| {
+            d.bus_number() == bus
+                && d.port_numbers().ok().as_deref() == Some(port_numbers)
+                && d.device_descriptor()
+                    .map(|desc| desc.vendor_id() == vid && desc.product_id() == pid)
+                    .unwrap_or(false)
+        })
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "no enumerated HID device matching path {:?} for {vid:04x}:{pid:04x}",
-                target_path
+                "no USB device matching topology {} for {vid:04x}:{pid:04x}",
+                usb_topology_string(bus, port_numbers)
             )
         })?;
-    match open_hid_lcd_device(&api, &det) {
+    let det = DetectedDevice {
+        device: device.clone(),
+        family,
+        vid,
+        pid,
+        name: "",
+        bus,
+        address: device.address(),
+        serial: None,
+        hid_usage_page: None,
+    };
+    match open_hid_lcd_device(&det) {
         Some(Ok(ctrl)) => Ok(ctrl),
         Some(Err(e)) => Err(e.context("HID LCD open by topology")),
         None => Err(anyhow::anyhow!("family does not support LCD")),
     }
 }
 
-/// Open a HID LCD device by VID/PID using hidapi with retry logic.
+/// Open a HID LCD device by VID/PID with retry logic.
 ///
-/// Unlike `open_hid_lcd_device` (which requires a pre-enumerated `DetectedHidDevice`),
-/// this function handles the case where no hidraw node exists yet by performing
-/// USB reset + re-enumeration before retrying.
+/// Performs USB reset + re-enumeration between attempts so a missing HID
+/// interface (kernel didn't bind `usbhid` at boot) gets a second chance.
 pub fn open_hid_lcd_by_vid_pid(
     vid: u16,
     pid: u16,
@@ -210,11 +239,19 @@ pub fn open_hid_lcd_by_vid_pid(
     let usb_device = find_usb_device(vid, pid);
 
     for attempt in 0..=3u32 {
-        let api = HidApi::new().map_err(|e| anyhow::anyhow!("hidapi init: {e}"))?;
-        let hid_devs = find_hid_devices_by_family(&api, family);
-
-        if let Some(det) = hid_devs.into_iter().next() {
-            match open_hid_lcd_device(&api, &det) {
+        if let Some(device) = usb_device.as_ref() {
+            let det = DetectedDevice {
+                device: device.clone(),
+                family,
+                vid,
+                pid,
+                name: "",
+                bus: device.bus_number(),
+                address: device.address(),
+                serial: None,
+                hid_usage_page: None,
+            };
+            match open_hid_lcd_device(&det) {
                 Some(Ok(ctrl)) => return Ok(ctrl),
                 Some(Err(e)) if attempt < 3 => {
                     warn!(
@@ -225,131 +262,53 @@ pub fn open_hid_lcd_by_vid_pid(
                 Some(Err(e)) => {
                     return Err(e.context("HID LCD open failed after 4 attempts"));
                 }
-                None => {
-                    return Err(anyhow::anyhow!("family does not support LCD"));
-                }
+                None => return Err(anyhow::anyhow!("family does not support LCD")),
             }
         } else if attempt < 3 {
             warn!(
-                "No hidraw node for {:04x}:{:04x} (attempt {}), resetting USB",
-                vid,
-                pid,
+                "No USB device {vid:04x}:{pid:04x} found (attempt {}), retrying",
                 attempt + 1
             );
         } else {
             return Err(anyhow::anyhow!(
-                "no HID device found for {vid:04x}:{pid:04x} after 4 attempts"
+                "no USB device found for {vid:04x}:{pid:04x} after 4 attempts"
             ));
         }
 
         if let Some(ref usb_dev) = usb_device {
-            let _ = RusbHidTransport::reset_usb_device(usb_dev);
+            let _ = RusbHid::reset_usb_device(usb_dev);
             std::thread::sleep(Duration::from_secs(3));
-        } else {
-            return Err(anyhow::anyhow!(
-                "no USB device found for reset ({vid:04x}:{pid:04x})"
-            ));
         }
     }
     unreachable!()
 }
 
-/// Open a detected HID device as an LCD controller via rusb.
-pub fn open_hid_lcd_device_rusb(
-    det: &DetectedDevice,
-) -> Option<Result<Box<dyn crate::traits::LcdDevice>>> {
-    match det.family {
-        DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => {
-            let pid = det.pid;
-            let bus = det.bus;
-            let port_numbers = det.device.port_numbers().unwrap_or_default();
-            Some(open_with_retry(&det.device, || {
-                let transport =
-                    RusbHidTransport::open_by_usage(det.device.clone(), det.hid_usage_page)?;
-                let mut backend =
-                    HidBackend::from_rusb(transport).with_reopener(make_rusb_reopener(
-                        det.vid,
-                        det.pid,
-                        bus,
-                        port_numbers.clone(),
-                        det.hid_usage_page,
-                    ));
-                backend.read_flush();
-                let backend = Arc::new(Mutex::new(backend));
-                crate::hydroshift_lcd::HydroShiftLcdController::new(backend, pid)
-                    .map(|d| Box::new(d) as Box<dyn crate::traits::LcdDevice>)
-            }))
-        }
-        DeviceFamily::TlLcd => {
-            let bus = det.bus;
-            let port_numbers = det.device.port_numbers().unwrap_or_default();
-            Some(open_with_retry(&det.device, || {
-                let transport =
-                    RusbHidTransport::open_by_usage(det.device.clone(), det.hid_usage_page)?;
-                let backend = HidBackend::from_rusb(transport).with_reopener(make_rusb_reopener(
-                    det.vid,
-                    det.pid,
-                    bus,
-                    port_numbers.clone(),
-                    det.hid_usage_page,
-                ));
-                let backend = Arc::new(Mutex::new(backend));
-                let mut tl = crate::tl_lcd::TlLcdDevice::new(backend);
-                crate::traits::LcdDevice::initialize(&mut tl)?;
-                Ok(Box::new(tl) as Box<dyn crate::traits::LcdDevice>)
-            }))
-        }
-        _ => None,
-    }
-}
-
-/// Wrap hidapi open with retry logic. On failure, performs USB reset and retries.
-pub fn open_hidapi_with_retry<T>(
-    api: &HidApi,
-    det: &DetectedHidDevice,
-    mut create_fn: impl FnMut(HidBackend) -> Result<T>,
-) -> Result<T> {
-    let usb_device = find_usb_device(det.vid, det.pid);
-    let label = format!("HID open {} ({:04x}:{:04x})", det.name, det.vid, det.pid);
-
-    let backend = try_open_with_retry(usb_device.as_ref(), &label, || {
-        let hid_dev = api
-            .open_path(&det.path)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        let mut backend =
-            HidBackend::from_hidapi(hid_dev).with_reopener(make_hidapi_reopener(det.path.clone()));
-        backend.read_flush();
-        Ok(backend)
-    })?;
-    create_fn(backend)
-}
-
-/// Open a shared HID backend via hidapi with retry logic.
-/// Returns an `Arc<Mutex<HidBackend>>` that can be shared between multiple controllers.
-pub fn open_hid_backend_hidapi(
-    api: &HidApi,
-    det: &DetectedHidDevice,
-) -> Result<Arc<Mutex<HidBackend>>> {
-    open_hidapi_with_retry(api, det, |backend| Ok(Arc::new(Mutex::new(backend))))
-}
-
 /// Open a shared HID backend via rusb with retry logic.
-/// Returns an `Arc<Mutex<HidBackend>>` that can be shared between multiple controllers.
-pub fn open_hid_backend_rusb(det: &DetectedDevice) -> Result<Arc<Mutex<HidBackend>>> {
+/// Returns an `Arc<Mutex<RusbHid>>` that can be shared between multiple
+/// controllers.
+pub fn open_hid_backend(det: &DetectedDevice) -> Result<Arc<Mutex<RusbHid>>> {
     let vid = det.vid;
     let pid = det.pid;
     let bus = det.bus;
     let port_numbers = det.device.port_numbers().unwrap_or_default();
     let usage_page = det.hid_usage_page;
+    let usb_device = det.device.clone();
     open_with_retry(&det.device, || {
-        let transport = RusbHidTransport::open_by_usage(det.device.clone(), det.hid_usage_page)?;
-        let backend = HidBackend::from_rusb(transport).with_reopener(make_rusb_reopener(
-            vid,
-            pid,
-            bus,
-            port_numbers.clone(),
+        let transport = RusbHid::open_by_usage_with_reopener(
+            usb_device.clone(),
             usage_page,
-        ));
-        Ok(Arc::new(Mutex::new(backend)))
+            make_rusb_reopener(vid, pid, bus, port_numbers.clone(), usage_page),
+        )?;
+        Ok(Arc::new(Mutex::new(transport)))
+    })
+}
+
+/// Open the primary USB-bulk transport for a detected device, with retry
+/// logic and a USB reset on the second-to-last attempt.
+pub fn open_usb_bulk_backend(det: &DetectedDevice) -> Result<RusbBulk> {
+    open_with_retry(&det.device, || {
+        let mut transport = RusbBulk::open_device(det.device.clone())?;
+        transport.detach_and_configure(det.name)?;
+        Ok(transport)
     })
 }

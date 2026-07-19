@@ -200,16 +200,15 @@ fn main() {
     }
 
     // ── Set HID driver ──
+    // (hidapi backend was dropped; only rusb is supported now. The Slint UI
+    // still has the dropdown but it's a no-op until Tauri migration.)
     {
         let shared = shared.clone();
         let weak = window.as_weak();
-        window.on_set_hid_driver(move |driver| {
+        window.on_set_hid_driver(move |_driver| {
             let mut state = shared.lock().unwrap();
             if let Some(ref mut c) = state.config {
-                c.hid_driver = match driver.as_str() {
-                    "Rusb" => lianli_shared::config::HidDriver::Rusb,
-                    _ => lianli_shared::config::HidDriver::Hidapi,
-                };
+                c.hid_driver = None;
             }
             drop(state);
             if let Some(w) = weak.upgrade() {

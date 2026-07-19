@@ -130,13 +130,6 @@ impl LcdConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum HidDriver {
-    Hidapi,
-    Rusb,
-}
-
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Ene6k77DeviceConfig {
     #[serde(default)]
@@ -147,8 +140,10 @@ pub struct Ene6k77DeviceConfig {
 pub struct AppConfig {
     #[serde(default = "default_fps")]
     pub default_fps: f32,
-    #[serde(default)]
-    pub hid_driver: HidDriver,
+    /// Legacy `hid_driver` field (removed when hidapi was dropped). Kept as an
+    /// optional, ignored serde field so old config files still parse cleanly.
+    #[serde(default, skip_serializing)]
+    pub hid_driver: Option<String>,
     #[serde(default, alias = "devices")]
     pub lcds: Vec<LcdConfig>,
     #[serde(default)]
@@ -169,7 +164,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             default_fps: default_fps(),
-            hid_driver: HidDriver::default(),
+            hid_driver: None,
             lcds: Vec::new(),
             fan_curves: Vec::new(),
             fans: None,
@@ -177,12 +172,6 @@ impl Default for AppConfig {
             aio: HashMap::new(),
             ene6k77: HashMap::new(),
         }
-    }
-}
-
-impl Default for HidDriver {
-    fn default() -> Self {
-        Self::Hidapi
     }
 }
 

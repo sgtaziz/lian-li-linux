@@ -3043,7 +3043,6 @@ dependencies = [
  "clap",
  "des",
  "hex",
- "hidapi",
  "image",
  "lianli-shared",
  "lianli-transport",
@@ -3125,7 +3124,6 @@ name = "lianli-transport"
 version = "0.6.1"
 dependencies = [
  "anyhow",
- "hidapi",
  "rusb",
  "thiserror 2.0.18",
  "tracing",

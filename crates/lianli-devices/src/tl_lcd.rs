@@ -10,7 +10,7 @@
 use crate::traits::LcdDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
-use lianli_transport::HidBackend;
+use lianli_transport::RusbHid;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -86,7 +86,7 @@ pub struct TlLcdIdentity {
 /// Wraps an opened HID device for a TLLCD fan (0x04FC:0x7393).
 /// Provides LCD streaming via 512-byte HID output reports.
 pub struct TlLcdDevice {
-    device: Arc<Mutex<HidBackend>>,
+    device: Arc<Mutex<RusbHid>>,
     identity: Option<TlLcdIdentity>,
     brightness: u8,
     rotation: ScreenRotation,
@@ -95,7 +95,7 @@ pub struct TlLcdDevice {
 
 impl TlLcdDevice {
     /// Create a new TLLCD device from an opened HID device handle.
-    pub fn new(device: Arc<Mutex<HidBackend>>) -> Self {
+    pub fn new(device: Arc<Mutex<RusbHid>>) -> Self {
         Self {
             device,
             identity: None,

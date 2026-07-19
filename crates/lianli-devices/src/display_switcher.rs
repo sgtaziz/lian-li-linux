@@ -12,9 +12,11 @@
 //!   0xAD11 — Lancool 207 Digital (rev2)
 //!   0xACE1 — Universal Screen 8.8" (rev1)
 //!   0xAD21 — Universal Screen 8.8" (rev2)
+//!   0xAD22 — HydroShift II LCD Square
+//!   0xAD23 — HydroShift II OLED Curve
 
 use anyhow::{Context, Result};
-use hidapi::HidApi;
+use lianli_transport::RusbHid;
 use tracing::info;
 
 pub const SWITCHER_VID: u16 = 0x1A86;
@@ -32,22 +34,25 @@ fn is_lancool_pid(pid: u16) -> bool {
 
 /// Switch a device from desktop mode (CH340) to LCD mode.
 ///
-/// Opens the CH340 HID device and sends the mode-switch bytes.
+/// Opens the CH340 HID device via libusb and sends the mode-switch bytes.
 /// The device will reboot and re-enumerate as VID=0x1CBE on USB.
-pub fn switch_to_lcd_mode(api: &HidApi, pid: u16) -> Result<()> {
-    let device = api
-        .open(SWITCHER_VID, pid)
+pub fn switch_to_lcd_mode(pid: u16) -> Result<()> {
+    let device = rusb::devices()?
+        .iter()
+        .find(|d| {
+            d.device_descriptor()
+                .map(|desc| desc.vendor_id() == SWITCHER_VID && desc.product_id() == pid)
+                .unwrap_or(false)
+        })
         .context("opening CH340 display-mode device")?;
 
+    let mut hid = RusbHid::open_by_usage(device, None)?;
     let payload = if is_lancool_pid(pid) {
         SWITCH_TO_LCD_LANCOOL
     } else {
         SWITCH_TO_LCD
     };
-
-    device
-        .write(payload)
-        .context("sending LCD mode switch bytes")?;
+    hid.write(payload).context("sending LCD mode switch bytes")?;
 
     info!("Sent LCD mode switch to {SWITCHER_VID:#06x}:{pid:#06x} — device will reboot");
     Ok(())

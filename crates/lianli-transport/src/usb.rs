@@ -1,19 +1,33 @@
+//! USB bulk / WinUSB-style transport.
+//!
+//! Wraps a `rusb::DeviceHandle` for devices that speak bulk or interrupt
+//! transfers on fixed endpoints (EP 0x01 out, EP 0x81 in). Used by every
+//! non-HID USB device: wireless dongles, WinUSB LCDs (HydroShift II / Lancool
+//! 207 / Universal Screen), WinUSB LED controllers, and TURZX desktop-mode
+//! displays.
+
 use crate::error::TransportError;
 use rusb::{Device, DeviceHandle, GlobalContext};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+/// Default OUT endpoint address (vendor-defined but consistent across the
+/// Lian Li USB-bulk fleet).
 pub const EP_OUT: u8 = 0x01;
+/// Default IN endpoint address.
 pub const EP_IN: u8 = 0x81;
+/// Default timeout for ordinary control transfers.
 pub const USB_TIMEOUT: Duration = Duration::from_millis(5_000);
+/// Per-frame write timeout for LCD streaming (tight to keep frame pacing tight).
 pub const LCD_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
+/// Per-frame read timeout for LCD status polling.
 pub const LCD_READ_TIMEOUT: Duration = Duration::from_millis(2_000);
 
-/// Low-level USB transport wrapping a `rusb` device handle.
+/// USB bulk transport wrapping a `rusb::DeviceHandle`.
 ///
 /// Auto-detects endpoint transfer types (bulk vs interrupt) from the USB
 /// descriptor so the correct libusb call is used.
-pub struct UsbTransport {
+pub struct RusbBulk {
     handle: DeviceHandle<GlobalContext>,
     ep_out: u8,
     ep_in: u8,
@@ -24,7 +38,7 @@ pub struct UsbTransport {
     claimed: Vec<u8>,
 }
 
-impl UsbTransport {
+impl RusbBulk {
     pub fn open(vid: u16, pid: u16) -> Result<Self, TransportError> {
         let device = rusb::devices()?
             .iter()
@@ -59,6 +73,9 @@ impl UsbTransport {
         })
     }
 
+    /// Detach any kernel driver, set the active configuration, and claim
+    /// interface 0 (plus any other vendor interfaces). Recovers from a busy
+    /// or transiently-broken state via USB reset + re-detach.
     pub fn detach_and_configure(&mut self, name: &str) -> Result<(), TransportError> {
         match self.handle.kernel_driver_active(0) {
             Ok(true) => {
@@ -237,7 +254,7 @@ impl UsbTransport {
     }
 }
 
-impl Drop for UsbTransport {
+impl Drop for RusbBulk {
     fn drop(&mut self) {
         for &iface in self.claimed.iter().rev() {
             let _ = self.handle.release_interface(iface);

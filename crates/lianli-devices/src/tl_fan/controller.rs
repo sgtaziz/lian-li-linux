@@ -2,7 +2,7 @@ use super::{TlFanHandshake, TlFanInfo};
 use crate::traits::FanDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode};
-use lianli_transport::HidBackend;
+use lianli_transport::RusbHid;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -32,7 +32,7 @@ pub(super) const CMD_SET_PORT_DIRECTION: u8 = 0xAF;
 /// Wraps an opened HID device for a TL Fan controller (0x0416:0x7372).
 /// Provides fan speed control, RPM reading, and RGB/LED effects.
 pub struct TlFanController {
-    pub(super) device: Arc<Mutex<HidBackend>>,
+    pub(super) device: Arc<Mutex<RusbHid>>,
     /// Last handshake result. Behind a Mutex for interior mutability — allows
     /// `read_fan_rpm(&self)` to refresh RPMs while the device is shared across threads.
     pub(super) last_handshake: Mutex<Option<TlFanHandshake>>,
@@ -40,7 +40,7 @@ pub struct TlFanController {
 
 impl TlFanController {
     /// Open a TL Fan controller from an already-opened HID device.
-    pub fn new(device: Arc<Mutex<HidBackend>>) -> Result<Self> {
+    pub fn new(device: Arc<Mutex<RusbHid>>) -> Result<Self> {
         let ctrl = Self {
             device,
             last_handshake: Mutex::new(None),
@@ -212,7 +212,7 @@ impl TlFanController {
         Ok(())
     }
 
-    fn send_speed_locked(dev: &mut HidBackend, port: u8, fan_index: u8, duty: u8) -> Result<()> {
+    fn send_speed_locked(dev: &mut RusbHid, port: u8, fan_index: u8, duty: u8) -> Result<()> {
         let addr = (port << 4) | (fan_index & 0x0F);
         let pkt = Self::build_packet(CMD_SET_FAN_SPEED, &[addr, duty]);
         dev.read_flush();

@@ -9,10 +9,9 @@ use lianli_devices::detect::ensure_hid_devices_bound;
 use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_shared::config::AppConfig;
-use lianli_shared::config::HidDriver;
 use lianli_shared::ipc::DeviceInfo;
 use lianli_shared::systeminfo::SysSensor;
-use lianli_transport::HidBackend;
+use lianli_transport::RusbHid;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -88,7 +87,7 @@ pub struct ServiceManager {
     wired_fan_devices: Arc<HashMap<String, Box<dyn FanDevice>>>,
     /// Shared HID backends keyed by device ID — allows fan, RGB, and LCD
     /// controllers for the same physical device to share one USB handle.
-    hid_backends: HashMap<String, Arc<Mutex<HidBackend>>>,
+    hid_backends: HashMap<String, Arc<Mutex<RusbHid>>>,
     last_wired_hid_ids: std::collections::HashSet<String>,
     /// Cached USB device list from enumerate_devices() — refreshed every USB_ENUM_INTERVAL.
     cached_usb_devices: Vec<DeviceInfo>,
@@ -162,11 +161,12 @@ impl ServiceManager {
     }
 
     /// Check if the configured HID driver is rusb.
+    ///
+    /// Always `true` after the hidapi backend was dropped. Kept as a thin
+    /// helper so legacy call sites can stay readable while they're being
+    /// migrated off the `use_rusb()` branch pattern during the daemon rewrite.
     fn use_rusb(&self) -> bool {
-        self.config
-            .as_ref()
-            .map(|c| c.hid_driver == HidDriver::Rusb)
-            .unwrap_or(false)
+        true
     }
 
     /// Stable device ID for a rusb device — uses serial or USB port path.
@@ -178,29 +178,13 @@ impl ServiceManager {
     fn get_or_open_backend_rusb(
         &mut self,
         det: &lianli_devices::detect::DetectedDevice,
-    ) -> anyhow::Result<Arc<Mutex<HidBackend>>> {
+    ) -> anyhow::Result<Arc<Mutex<RusbHid>>> {
         let key = Self::rusb_device_id(det);
         if let Some(backend) = self.hid_backends.get(&key) {
             return Ok(Arc::clone(backend));
         }
-        let backend = lianli_devices::detect::open_hid_backend_rusb(det)?;
+        let backend = lianli_devices::detect::open_hid_backend(det)?;
         self.hid_backends.insert(key, Arc::clone(&backend));
-        Ok(backend)
-    }
-
-    /// Get a cached HID backend or open a new one via hidapi.
-    fn get_or_open_backend_hidapi(
-        &mut self,
-        api: &hidapi::HidApi,
-        key: &str,
-        det: &lianli_devices::detect::DetectedHidDevice,
-    ) -> anyhow::Result<Arc<Mutex<HidBackend>>> {
-        if let Some(backend) = self.hid_backends.get(key) {
-            return Ok(Arc::clone(backend));
-        }
-        let backend = lianli_devices::detect::open_hid_backend_hidapi(api, det)?;
-        self.hid_backends
-            .insert(key.to_string(), Arc::clone(&backend));
         Ok(backend)
     }
 
@@ -448,16 +432,9 @@ impl ServiceManager {
                     // Check for IPC-triggered config reload
                     let ipc_state = self.ipc_state.lock();
                     info!("Config reload triggered via IPC");
-                    let old_hid_driver = self.config.as_ref().map(|c| c.hid_driver);
                     // Force the config watcher to pick up the new file
                     drop(ipc_state);
                     if self.load_config(tx.clone()) {
-                        let new_hid_driver = self.config.as_ref().map(|c| c.hid_driver);
-                        if old_hid_driver != new_hid_driver {
-                            info!("HID driver changed ({old_hid_driver:?} -> {new_hid_driver:?}), restarting daemon...");
-                            self.restart_requested = true;
-                            break;
-                        }
                         self.start_fan_control();
                         if let (Some(aio), Some(cfg)) =
                             (self.aio_controller.as_ref(), self.config.as_ref())

@@ -11,7 +11,7 @@
 use crate::traits::RgbDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
-use lianli_transport::usb::{UsbTransport, USB_TIMEOUT};
+use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use lianli_transport::TransportError;
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
@@ -23,7 +23,7 @@ const PACKET_SIZE: usize = 64;
 const CMD_SET_LEDS: u8 = 0x11;
 
 pub struct WinUsbLedDevice {
-    transport: Arc<Mutex<UsbTransport>>,
+    transport: Arc<Mutex<RusbBulk>>,
     name: String,
     led_count: u16,
     vid: u16,
@@ -37,7 +37,7 @@ impl WinUsbLedDevice {
             .context("reading device descriptor")?;
         let vid = desc.vendor_id();
         let pid = desc.product_id();
-        let mut transport = UsbTransport::open_device(device).map_err(transport_to_anyhow)?;
+        let mut transport = RusbBulk::open_device(device).map_err(transport_to_anyhow)?;
         transport
             .detach_and_configure(name)
             .map_err(transport_to_anyhow)?;
@@ -55,7 +55,7 @@ impl WinUsbLedDevice {
     }
 
     fn reopen(&self) -> Result<()> {
-        let mut new_transport = UsbTransport::open(self.vid, self.pid)
+        let mut new_transport = RusbBulk::open(self.vid, self.pid)
             .map_err(transport_to_anyhow)
             .with_context(|| format!("reopening {}", self.name))?;
         new_transport
@@ -67,7 +67,7 @@ impl WinUsbLedDevice {
 
     fn write_with_recovery<F>(&self, label: &str, mut op: F) -> Result<()>
     where
-        F: FnMut(&UsbTransport) -> Result<()>,
+        F: FnMut(&RusbBulk) -> Result<()>,
     {
         let first = {
             let h = self.transport.lock();

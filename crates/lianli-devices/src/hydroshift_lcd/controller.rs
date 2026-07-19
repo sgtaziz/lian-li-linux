@@ -9,7 +9,7 @@ use super::{AioHandshake, AioLcdVariant, LcdControlMode, ScreenRotation};
 use crate::traits::{AioDevice, FanDevice, LcdDevice};
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
-use lianli_transport::HidBackend;
+use lianli_transport::RusbHid;
 use parking_lot::Mutex;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,7 +40,7 @@ fn find_au_split(data: &[u8]) -> Option<usize> {
 ///
 /// Provides pump + fan speed control, coolant temperature reading, and LCD streaming.
 pub struct HydroShiftLcdController {
-    device: Arc<Mutex<HidBackend>>,
+    device: Arc<Mutex<RusbHid>>,
     variant: AioLcdVariant,
     last_handshake: Option<AioHandshake>,
     brightness: u8,
@@ -53,7 +53,7 @@ pub struct HydroShiftLcdController {
 }
 
 impl HydroShiftLcdController {
-    pub fn new(device: Arc<Mutex<HidBackend>>, pid: u16) -> Result<Self> {
+    pub fn new(device: Arc<Mutex<RusbHid>>, pid: u16) -> Result<Self> {
         let variant = AioLcdVariant::from_pid(pid)
             .ok_or_else(|| anyhow::anyhow!("Unknown AIO LCD PID: {pid:#06x}"))?;
 
@@ -398,14 +398,14 @@ impl HydroShiftLcdController {
         Ok(buf[..n].to_vec())
     }
 
-    /// Public write_a_command. Locks `HidBackend` for the duration of the call —
+    /// Public write_a_command. Locks `RusbHid` for the duration of the call —
     /// do NOT call when the device is already locked.
     pub fn write_a_command(&self, cmd: u8, data: &[u8]) -> Result<()> {
         let mut dev = self.device.lock();
         self.write_a_command_internal(&mut *dev, cmd, data)
     }
 
-    fn write_a_command_internal(&self, dev: &mut HidBackend, cmd: u8, data: &[u8]) -> Result<()> {
+    fn write_a_command_internal(&self, dev: &mut RusbHid, cmd: u8, data: &[u8]) -> Result<()> {
         let max_payload = A_PACKET_SIZE - A_HEADER_LEN;
         if data.len() > max_payload {
             bail!(
@@ -507,7 +507,7 @@ impl HydroShiftLcdController {
         Ok(())
     }
 
-    fn read_ack(&self, dev: &mut HidBackend, label: &str, timeout_ms: i32) {
+    fn read_ack(&self, dev: &mut RusbHid, label: &str, timeout_ms: i32) {
         let mut buf = [0u8; 512];
         if let Err(e) = dev.read_timeout(&mut buf, timeout_ms) {
             debug!("AIO LCD: {label} ack: {e:#}");

@@ -1,19 +1,46 @@
+//! HID-over-USB transport implemented directly on `rusb` (libusb).
+//!
+//! This replaces both the old `hidapi` backend and the `HidBackend` wrapper.
+//! All HID I/O now goes through a single type: [`RusbHid`].
+//!
+//! The reopen-on-failure logic that used to live in `HidBackend` is folded
+//! directly into `RusbHid`. Callers that want self-healing construct with
+//! [`RusbHid::with_reopener`]; callers that don't (e.g. short-lived probes)
+//! just use [`RusbHid::open_by_usage`].
+
 use crate::error::TransportError;
 use rusb::{Device, DeviceHandle, GlobalContext};
+use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
-pub struct RusbHidTransport {
+/// Closure that produces a fresh [`RusbHid`] after a stale-handle event
+/// (USB suspend/resume, hub reset, transient unplug).
+///
+/// Wired in at construction so the transport can self-heal without each
+/// controller having to plumb its own retry logic.
+pub type RusbHidReopener = Arc<dyn Fn() -> anyhow::Result<RusbHid> + Send + Sync>;
+
+/// HID transport speaking HID-over-libusb (control transfers for feature /
+/// input / output reports, plus interrupt transfers for fast IN/OUT streams).
+///
+/// Holds the underlying `rusb::DeviceHandle` and the claimed interface number.
+/// On `Drop`, all claimed interfaces are released and the kernel driver is
+/// reattached.
+pub struct RusbHid {
     handle: DeviceHandle<GlobalContext>,
     iface: u8,
-    /// All HID interfaces we hold for the lifetime of this transport.
-    /// Held continuously so the kernel can't re-bind hidraw and reject our writes.
+    /// All HID interfaces we hold for the lifetime of this transport, so the
+    /// kernel can't re-bind hidraw and reject our writes.
     claimed: Vec<u8>,
     ep_in: u8,
     ep_out: Option<u8>,
+    /// Optional self-healing reopener. When set, an I/O error triggers a
+    /// fresh open + retry.
+    reopener: Option<RusbHidReopener>,
 }
 
-impl RusbHidTransport {
+impl RusbHid {
     /// Open a HID interface, discovering it by usage page on the same handle.
     ///
     /// This combines interface discovery and opening into a single call that
@@ -23,6 +50,24 @@ impl RusbHidTransport {
     pub fn open_by_usage(
         device: Device<GlobalContext>,
         usage_page: Option<u16>,
+    ) -> Result<Self, TransportError> {
+        Self::open_by_usage_impl(device, usage_page, None)
+    }
+
+    /// Like [`open_by_usage`](Self::open_by_usage) but with a reopener closure
+    /// for self-healing on I/O failure.
+    pub fn open_by_usage_with_reopener(
+        device: Device<GlobalContext>,
+        usage_page: Option<u16>,
+        reopener: RusbHidReopener,
+    ) -> Result<Self, TransportError> {
+        Self::open_by_usage_impl(device, usage_page, Some(reopener))
+    }
+
+    fn open_by_usage_impl(
+        device: Device<GlobalContext>,
+        usage_page: Option<u16>,
+        reopener: Option<RusbHidReopener>,
     ) -> Result<Self, TransportError> {
         let handle = device.open()?;
         let config = device.active_config_descriptor()?;
@@ -131,9 +176,8 @@ impl RusbHidTransport {
         let ep_in = ins.first().copied();
         let ep_out = outs.first().copied();
 
-        let ep_in = ep_in.ok_or_else(|| {
-            TransportError::Other("RusbHid: no interrupt IN endpoint found".into())
-        })?;
+        let ep_in = ep_in
+            .ok_or_else(|| TransportError::Other("RusbHid: no interrupt IN endpoint found".into()))?;
 
         if ep_out.is_some() {
             debug!(
@@ -150,12 +194,18 @@ impl RusbHidTransport {
             claimed,
             ep_in,
             ep_out,
+            reopener,
         })
     }
 
+    /// Attach a reopener after construction. Less common than
+    /// [`open_by_usage_with_reopener`](Self::open_by_usage_with_reopener) —
+    /// used when the reopener needs the same `RusbHid` it's constructing.
+    pub fn set_reopener(&mut self, reopener: RusbHidReopener) {
+        self.reopener = Some(reopener);
+    }
+
     /// Perform a USB port reset on the device (USBDEVFS_RESET ioctl).
-    /// This resets the device firmware state, which can fix malformed HID
-    /// report descriptors on devices that persist bad state across reboots.
     ///
     /// Detaches kernel drivers from all HID interfaces before the reset and
     /// reattaches them afterwards so the kernel re-enumerates the device and
@@ -199,93 +249,141 @@ impl RusbHidTransport {
         Ok(())
     }
 
-    pub fn send_feature_report(&self, data: &[u8]) -> Result<usize, TransportError> {
-        let report_id = data.first().copied().unwrap_or(0) as u16;
-        let w_value = (0x03u16 << 8) | report_id;
-        let n = self.handle.write_control(
-            0x21,
-            0x09, // SET_REPORT
-            w_value,
-            self.iface as u16,
-            data,
-            Duration::from_millis(5000),
-        )?;
-        Ok(n)
+    // ----- reopen machinery ---------------------------------------------------
+
+    fn try_reopen(&mut self) -> Result<(), TransportError> {
+        let reopener = self
+            .reopener
+            .clone()
+            .ok_or_else(|| TransportError::Other("no reopener configured".into()))?;
+        let replacement = reopener()
+            .map_err(|e| TransportError::Other(format!("reopen: {e}")))?;
+        *self = replacement;
+        Ok(())
     }
 
-    pub fn get_feature_report(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        let report_id = buf.first().copied().unwrap_or(0) as u16;
-        let w_value = (0x03u16 << 8) | report_id;
-        let n = self.handle.read_control(
-            0xA1,
-            0x01, // GET_REPORT
-            w_value,
-            self.iface as u16,
-            buf,
-            Duration::from_millis(5000),
-        )?;
-        Ok(n)
-    }
-
-    pub fn get_input_report(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        let report_id = buf.first().copied().unwrap_or(0) as u16;
-        let w_value = (0x01u16 << 8) | report_id;
-        let n = self.handle.read_control(
-            0xA1,
-            0x01, // GET_REPORT
-            w_value,
-            self.iface as u16,
-            buf,
-            Duration::from_millis(5000),
-        )?;
-        Ok(n)
-    }
-
-    pub fn write(&self, data: &[u8]) -> Result<usize, TransportError> {
-        if let Some(ep_out) = self.ep_out {
-            let n = self
-                .handle
-                .write_interrupt(ep_out, data, Duration::from_millis(5000))?;
-            Ok(n)
-        } else {
-            // SET_REPORT control transfer: report type = Output (0x02), report ID = data[0]
-            let report_id = data.first().copied().unwrap_or(0) as u16;
-            let report_type: u16 = 0x02;
-            let w_value = (report_type << 8) | report_id;
-            let n = self.handle.write_control(
-                0x21, // Host-to-device, Class, Interface
-                0x09, // SET_REPORT
-                w_value,
-                self.iface as u16,
-                data,
-                Duration::from_millis(5000),
-            )?;
-            Ok(n)
+    /// Run `op` against the inner handle. If it fails and a reopener is
+    /// configured, reopen once and retry.
+    fn with_reopen<T>(
+        &mut self,
+        mut op: impl FnMut(&Self) -> Result<T, TransportError>,
+        label: &str,
+    ) -> Result<T, TransportError> {
+        match op(self) {
+            Ok(v) => Ok(v),
+            Err(e) if self.reopener.is_some() => {
+                warn!("RusbHid {label} failed ({e}); attempting reopen");
+                self.try_reopen()?;
+                info!("RusbHid handle reopened, retrying {label}");
+                op(self)
+            }
+            Err(e) => Err(e),
         }
     }
 
-    pub fn read_timeout(&self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, TransportError> {
-        // timeout_ms semantics (matching hidapi):
-        //   0  = non-blocking poll (check if data available, don't wait)
-        //  -1  = blocking (wait indefinitely)
-        //  >0  = wait up to N milliseconds
-        // libusb uses 0 for "wait forever", so we remap.
-        let timeout = if timeout_ms < 0 {
-            Duration::from_secs(60)
-        } else if timeout_ms == 0 {
-            Duration::from_millis(1)
-        } else {
-            Duration::from_millis(timeout_ms as u64)
-        };
-        match self.handle.read_interrupt(self.ep_in, buf, timeout) {
-            Ok(n) => Ok(n),
-            Err(rusb::Error::Timeout) => Ok(0),
-            Err(e) => Err(e.into()),
+    // ----- HID report API -----------------------------------------------------
+
+    pub fn send_feature_report(&mut self, data: &[u8]) -> Result<usize, TransportError> {
+        self.with_reopen(
+            |s| {
+                let report_id = data.first().copied().unwrap_or(0) as u16;
+                let w_value = (0x03u16 << 8) | report_id;
+                s.handle
+                    .write_control(0x21, 0x09, w_value, s.iface as u16, data, Duration::from_millis(5000))
+                    .map_err(TransportError::from)
+            },
+            "send_feature_report",
+        )
+    }
+
+    pub fn get_feature_report(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        self.with_reopen(
+            |s| {
+                let report_id = buf.first().copied().unwrap_or(0) as u16;
+                let w_value = (0x03u16 << 8) | report_id;
+                s.handle
+                    .read_control(0xA1, 0x01, w_value, s.iface as u16, buf, Duration::from_millis(5000))
+                    .map_err(TransportError::from)
+            },
+            "get_feature_report",
+        )
+    }
+
+    pub fn get_input_report(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        self.with_reopen(
+            |s| {
+                let report_id = buf.first().copied().unwrap_or(0) as u16;
+                let w_value = (0x01u16 << 8) | report_id;
+                s.handle
+                    .read_control(0xA1, 0x01, w_value, s.iface as u16, buf, Duration::from_millis(5000))
+                    .map_err(TransportError::from)
+            },
+            "get_input_report",
+        )
+    }
+
+    pub fn write(&mut self, data: &[u8]) -> Result<usize, TransportError> {
+        self.with_reopen(
+            |s| {
+                if let Some(ep_out) = s.ep_out {
+                    s.handle
+                        .write_interrupt(ep_out, data, Duration::from_millis(5000))
+                        .map_err(TransportError::from)
+                } else {
+                    // SET_REPORT control transfer: report type = Output (0x02),
+                    // report ID = data[0]
+                    let report_id = data.first().copied().unwrap_or(0) as u16;
+                    let report_type: u16 = 0x02;
+                    let w_value = (report_type << 8) | report_id;
+                    s.handle
+                        .write_control(0x21, 0x09, w_value, s.iface as u16, data, Duration::from_millis(5000))
+                        .map_err(TransportError::from)
+                }
+            },
+            "write",
+        )
+    }
+
+    pub fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, TransportError> {
+        self.with_reopen(
+            |s| {
+                // timeout_ms semantics (matching hidapi):
+                //   0  = non-blocking poll (check if data available, don't wait)
+                //  -1  = blocking (wait indefinitely)
+                //  >0  = wait up to N milliseconds
+                // libusb uses 0 for "wait forever", so we remap.
+                let timeout = if timeout_ms < 0 {
+                    Duration::from_secs(60)
+                } else if timeout_ms == 0 {
+                    Duration::from_millis(1)
+                } else {
+                    Duration::from_millis(timeout_ms as u64)
+                };
+                match s.handle.read_interrupt(s.ep_in, buf, timeout) {
+                    Ok(n) => Ok(n),
+                    Err(rusb::Error::Timeout) => Ok(0),
+                    Err(e) => Err(TransportError::from(e)),
+                }
+            },
+            "read_timeout",
+        )
+    }
+
+    /// Drain any stale data from the device read buffer.
+    pub fn read_flush(&mut self) {
+        let mut buf = [0u8; 64];
+        loop {
+            // Direct read (no reopen) since this is best-effort cleanup.
+            let timeout = Duration::from_millis(5);
+            match self.handle.read_interrupt(self.ep_in, &mut buf, timeout) {
+                Ok(n) if n > 0 => continue,
+                _ => break,
+            }
         }
     }
 }
 
-impl Drop for RusbHidTransport {
+impl Drop for RusbHid {
     fn drop(&mut self) {
         for &iface in self.claimed.iter().rev() {
             let _ = self.handle.release_interface(iface);

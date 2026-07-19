@@ -2,7 +2,7 @@ use super::{Ene6k77Firmware, Ene6k77Model, CMD_DELAY, REPORT_ID};
 use crate::traits::FanDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope};
-use lianli_transport::HidBackend;
+use lianli_transport::RusbHid;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::thread;
@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 /// Wraps an opened HID device and provides fan speed control, RPM reading,
 /// and RGB/LED effects.
 pub struct Ene6k77Controller {
-    pub(super) device: Arc<Mutex<HidBackend>>,
+    pub(super) device: Arc<Mutex<RusbHid>>,
     pub(super) model: Ene6k77Model,
     pid: u16,
     firmware: Option<Ene6k77Firmware>,
@@ -22,7 +22,7 @@ pub struct Ene6k77Controller {
 }
 
 impl Ene6k77Controller {
-    pub fn new(device: Arc<Mutex<HidBackend>>, pid: u16) -> Result<Self> {
+    pub fn new(device: Arc<Mutex<RusbHid>>, pid: u16) -> Result<Self> {
         let model = Ene6k77Model::from_pid(pid)
             .ok_or_else(|| anyhow::anyhow!("Unknown ENE 6K77 PID: {pid:#06x}"))?;
 

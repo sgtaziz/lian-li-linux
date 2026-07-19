@@ -1,6 +1,6 @@
 use anyhow::Result;
 use lianli_shared::device_id::DeviceFamily;
-use lianli_transport::HidBackend;
+use lianli_transport::RusbHid;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ pub struct WiredControllerSet {
 pub fn create_wired_controllers(
     family: DeviceFamily,
     pid: u16,
-    backend: Arc<Mutex<HidBackend>>,
+    backend: Arc<Mutex<RusbHid>>,
 ) -> Option<Result<WiredControllerSet>> {
     match family {
         DeviceFamily::TlFan => Some(crate::tl_fan::TlFanController::new(backend).map(|ctrl| {
@@ -91,7 +91,7 @@ pub fn create_wired_controllers(
 pub fn create_hid_lcd_device(
     family: DeviceFamily,
     pid: u16,
-    backend: Arc<Mutex<HidBackend>>,
+    backend: Arc<Mutex<RusbHid>>,
 ) -> Option<Result<Box<dyn crate::traits::LcdDevice>>> {
     match family {
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => Some(

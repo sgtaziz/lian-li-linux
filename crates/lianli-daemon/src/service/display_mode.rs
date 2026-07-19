@@ -71,12 +71,9 @@ impl ServiceManager {
         self.mark_mode_switch(device_id);
         thread::sleep(Duration::from_millis(300));
 
-        match hidapi::HidApi::new() {
-            Ok(api) => match lianli_devices::display_switcher::switch_to_lcd_mode(&api, pid) {
-                Ok(()) => info!("Switched {device_id} to LCD mode"),
-                Err(e) => warn!("Failed to switch {device_id} to LCD mode: {e:#}"),
-            },
-            Err(e) => warn!("Failed to open HID for switch-to-LCD: {e:#}"),
+        match lianli_devices::display_switcher::switch_to_lcd_mode(pid) {
+            Ok(()) => info!("Switched {device_id} to LCD mode"),
+            Err(e) => warn!("Failed to switch {device_id} to LCD mode: {e:#}"),
         }
 
         self.schedule_post_switch_refresh();

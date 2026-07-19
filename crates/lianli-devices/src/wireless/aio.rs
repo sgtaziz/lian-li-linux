@@ -6,7 +6,7 @@ use super::{
     RF_SELECT, USB_CMD_SEND_RF,
 };
 use anyhow::{Context, Result};
-use lianli_transport::usb::{UsbTransport, USB_TIMEOUT};
+use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use std::thread;
 use std::time::Duration;
 use tracing::debug;
@@ -72,7 +72,7 @@ impl WirelessController {
 }
 
 fn send_rf_frame_via(
-    handle: &UsbTransport,
+    handle: &RusbBulk,
     device: &DiscoveredDevice,
     rf_data: &[u8],
 ) -> Result<()> {

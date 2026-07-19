@@ -5,7 +5,7 @@ use super::{
     RF_CHUNK_SIZE, RF_DATA_SIZE, RF_SELECT, RX_IDS, TX_IDS, USB_CMD_GET_MAC, USB_CMD_SEND_RF,
 };
 use anyhow::{bail, Context, Result};
-use lianli_transport::usb::{UsbTransport, USB_TIMEOUT};
+use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -16,8 +16,8 @@ use tracing::{debug, error, info, warn};
 const TX_FAILURE_THRESHOLD: u32 = 5;
 
 pub struct WirelessController {
-    pub(super) tx: Option<Arc<Mutex<UsbTransport>>>,
-    pub(super) rx: Option<Arc<Mutex<UsbTransport>>>,
+    pub(super) tx: Option<Arc<Mutex<RusbBulk>>>,
+    pub(super) rx: Option<Arc<Mutex<RusbBulk>>>,
     pub(super) poll_stop: Arc<AtomicBool>,
     pub(super) poll_thread: Option<JoinHandle<()>>,
     pub(super) video_mode_active: Arc<AtomicBool>,
@@ -410,7 +410,7 @@ impl WirelessController {
 
     pub(super) fn tx_recover<F, R>(&self, op: F) -> Result<R>
     where
-        F: FnMut(&UsbTransport) -> Result<R>,
+        F: FnMut(&RusbBulk) -> Result<R>,
     {
         let tx = self.tx.as_ref().context("TX device not connected")?;
         let result = with_transport_recovery(tx, &TX_IDS, "TX", op);
@@ -476,7 +476,7 @@ impl WirelessController {
     /// Send a 240-byte RF packet as 4× 64-byte USB chunks.
     pub(super) fn send_rf_packet(
         &self,
-        handle: &UsbTransport,
+        handle: &RusbBulk,
         device: &DiscoveredDevice,
         rf_data: &[u8],
     ) -> Result<()> {

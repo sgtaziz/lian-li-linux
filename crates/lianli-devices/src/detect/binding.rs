@@ -1,9 +1,9 @@
 use super::enumerate::enumerate_devices;
-use hidapi::HidApi;
 use lianli_shared::device_id::uses_hid;
-use lianli_transport::RusbHidTransport;
+use lianli_transport::RusbHid;
 use rusb::{Device, GlobalContext};
 use std::collections::HashSet;
+use std::path::Path;
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -24,19 +24,11 @@ pub fn ensure_hid_devices_bound() {
         return;
     }
 
-    let api = match HidApi::new() {
-        Ok(api) => api,
-        Err(_) => return,
-    };
-
-    let hid_vids_pids: HashSet<(u16, u16)> = api
-        .device_list()
-        .map(|d| (d.vendor_id(), d.product_id()))
-        .collect();
+    let bound = enumerate_bound_hid_vids_pids();
 
     let mut reset_count = 0u32;
     for (vid, pid, name) in &usb_hid_devices {
-        if hid_vids_pids.contains(&(*vid, *pid)) {
+        if bound.contains(&(*vid, *pid)) {
             continue;
         }
         info!("No hidraw node for {name} ({vid:04x}:{pid:04x}), performing USB reset");
@@ -56,7 +48,7 @@ pub fn ensure_hid_devices_bound() {
                 }
                 info!("{name}: hidraw still missing after wait, falling through to reset");
             }
-            match RusbHidTransport::reset_usb_device(&usb_dev) {
+            match RusbHid::reset_usb_device(&usb_dev) {
                 Ok(()) => {
                     info!("USB reset successful for {name}");
                     reset_count += 1;
@@ -80,8 +72,45 @@ pub fn ensure_hid_devices_bound() {
     }
 }
 
+/// Walk `/sys/class/hwmon` and `/sys/class/hidraw` to build the set of
+/// (VID, PID) pairs the kernel has already bound to a hidraw or hwmon node.
+fn enumerate_bound_hid_vids_pids() -> HashSet<(u16, u16)> {
+    let mut out = HashSet::new();
+    walk_usb_sysclass(Path::new("/sys/class/hidraw"), &mut out);
+    walk_usb_sysclass(Path::new("/sys/class/hwmon"), &mut out);
+    out
+}
+
+/// Walk a `/sys/class/*` directory and collect VID/PID pairs from each entry's
+/// `device/../uevent` or `device/idVendor/idProduct` files.
+fn walk_usb_sysclass(root: &Path, out: &mut HashSet<(u16, u16)>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let dev = entry.path().join("device");
+        let Ok(resolved) = std::fs::canonicalize(&dev) else {
+            continue;
+        };
+        // Each device symlink target contains a `idVendor` and `idProduct`
+        // file (USB devices) — read both and add to the set.
+        let vid = read_hex_file(&resolved.join("idVendor"));
+        let pid = read_hex_file(&resolved.join("idProduct"));
+        if let (Some(v), Some(p)) = (vid, pid) {
+            out.insert((v, p));
+        }
+    }
+}
+
+fn read_hex_file(path: &Path) -> Option<u16> {
+    let text = std::fs::read_to_string(path).ok()?;
+    u16::from_str_radix(text.trim(), 16).ok()
+}
+
 fn nudge_kernel_to_bind_hid(device: &Device<GlobalContext>) {
-    let Ok(handle) = device.open() else { return };
+    let Ok(handle) = device.open() else {
+        return;
+    };
     let Ok(config) = device.active_config_descriptor() else {
         return;
     };
@@ -97,13 +126,8 @@ fn nudge_kernel_to_bind_hid(device: &Device<GlobalContext>) {
 fn poll_for_hidraw(vid: u16, pid: u16, max_wait: Duration) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed() < max_wait {
-        if let Ok(api) = HidApi::new() {
-            if api
-                .device_list()
-                .any(|d| d.vendor_id() == vid && d.product_id() == pid)
-            {
-                return true;
-            }
+        if enumerate_bound_hid_vids_pids().contains(&(vid, pid)) {
+            return true;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
