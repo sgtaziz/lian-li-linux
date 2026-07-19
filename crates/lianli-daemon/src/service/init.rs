@@ -1,9 +1,9 @@
 use super::{DaemonEvent, ServiceManager};
-use crate::aio_controller::AioController;
-use crate::fan_controller::FanController;
-use crate::ipc_server;
+use crate::controllers::aio::AioController;
+use crate::controllers::fan::FanController;
 use crate::openrgb_server;
-use crate::rgb_controller::RgbController;
+use crate::persistence;
+use crate::controllers::rgb::RgbController;
 use crate::template_store;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::enumerate_devices;
@@ -107,7 +107,7 @@ impl ServiceManager {
 
         if changed {
             let snapshot = cfg.clone();
-            if let Err(e) = ipc_server::write_config(&self.config_path, &snapshot) {
+            if let Err(e) = persistence::write_config(&self.config_path, &snapshot) {
                 warn!("Failed to persist AIO config additions: {e}");
             } else {
                 self.ipc.state.lock().config = Some(snapshot);
@@ -344,7 +344,7 @@ impl ServiceManager {
                     .fan_quantities
                     .insert(port, quantity);
                 let snapshot = cfg.clone();
-                if let Err(e) = ipc_server::write_config(&self.config_path, &snapshot) {
+                if let Err(e) = persistence::write_config(&self.config_path, &snapshot) {
                     warn!("Failed to persist ENE 6K77 fan quantity: {e}");
                 } else {
                     self.ipc.state.lock().config = Some(snapshot);
@@ -470,7 +470,7 @@ impl ServiceManager {
             ));
             // Start the async writer thread that flushes buffered colors at 30fps
             if self.controllers.direct_color_writer.is_none() {
-                self.controllers.direct_color_writer = Some(crate::rgb_controller::start_direct_color_writer(
+                self.controllers.direct_color_writer = Some(crate::controllers::rgb::start_direct_color_writer(
                     Arc::clone(rgb),
                     Arc::clone(&self.controllers.direct_color_buffer),
                     Arc::clone(&self.openrgb.stop),

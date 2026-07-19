@@ -4,7 +4,7 @@
 //! Each physical device is exposed as an OpenRGB controller with its native
 //! LED modes. Clients can enumerate devices, set modes, and update per-LED colors.
 
-use crate::rgb_controller::{DirectColorBuffer, RgbController};
+use crate::controllers::rgb::{DirectColorBuffer, RgbController};
 use lianli_shared::rgb::{RgbDeviceCapabilities, RgbDirection, RgbEffect, RgbMode};
 use parking_lot::Mutex;
 use std::io::{Read, Write};

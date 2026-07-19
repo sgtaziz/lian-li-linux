@@ -8,8 +8,7 @@ use lianli_shared::ipc::IpcResponse;
 use lianli_shared::rgb::{RgbDeviceConfig, RgbPreset, RgbPresetZone, RgbZoneConfig};
 use tracing::info;
 
-use crate::ipc::SharedState;
-use crate::ipc_server::DaemonState;
+use crate::ipc::{DaemonState, SharedState};
 use crate::service::DaemonEvent;
 
 pub fn save(

@@ -1,12 +1,9 @@
-mod aio_controller;
+mod controllers;
 mod desktop_display;
-mod fan_controller;
 mod ipc;
-mod ipc_server;
 mod openrgb_server;
 mod persistence;
 mod pidlock;
-mod rgb_controller;
 mod service;
 mod template_store;
 

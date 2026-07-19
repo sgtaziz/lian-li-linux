@@ -14,9 +14,9 @@ use std::thread::JoinHandle;
 
 use parking_lot::Mutex;
 
-use crate::ipc_server::DaemonState;
+use crate::ipc::DaemonState;
 use crate::openrgb_server;
-use crate::rgb_controller::{DirectColorBuffer, RgbController};
+use crate::controllers::rgb::{DirectColorBuffer, RgbController};
 use crate::service::DaemonEvent;
 use lianli_shared::ipc::DeviceInfo;
 use lianli_transport::RusbHid;
@@ -90,8 +90,8 @@ impl Default for OpenRgbSubsystem {
 // Controller host
 // ──────────────────────────────────────────────────────────────────────
 
-use crate::aio_controller::AioController;
-use crate::fan_controller::FanController;
+use crate::controllers::aio::AioController;
+use crate::controllers::fan::FanController;
 
 /// Background controllers (fan curve evaluation, AIO pump control, RGB
 /// effects) and the per-device direct-color flush thread.

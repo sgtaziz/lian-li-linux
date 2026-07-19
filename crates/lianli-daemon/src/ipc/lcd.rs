@@ -65,12 +65,12 @@ pub fn render_template_preview(
             asset.seed_preview_history();
             match asset.render_frame(true) {
                 Ok(Some(frame)) => IpcResponse::ok(serde_json::json!({
-                    "jpeg_base64": super::super::ipc_server::base64_encode(&frame.data),
+                    "jpeg_base64": super::server::base64_encode(&frame.data),
                 })),
                 Ok(None) => {
                     let blank = asset.blank_frame();
                     IpcResponse::ok(serde_json::json!({
-                        "jpeg_base64": super::super::ipc_server::base64_encode(&blank.data),
+                        "jpeg_base64": super::server::base64_encode(&blank.data),
                     }))
                 }
                 Err(e) => IpcResponse::error(format!("preview render failed: {e}")),

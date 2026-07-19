@@ -1,6 +1,7 @@
-//! Per-concern IPC request handlers, split out from `ipc_server::handle_request`.
+//! IPC layer: Unix domain socket server + per-concern request handlers.
 //!
-//! Each submodule owns the handlers for one area of functionality:
+//! The server ([`server`]) accepts connections, deserializes [`IpcRequest`]s,
+//! and dispatches to one of the handler submodules:
 //!
 //! - [`system`] — read-only queries: ping, sensor/device enumeration, telemetry.
 //! - [`config`] — config-writing handlers (`SetConfig`, `SetLcdMedia`, etc.).
@@ -10,19 +11,8 @@
 //! - [`wireless`] — bind / unbind RF devices.
 //! - [`templates`] — LCD template CRUD.
 //! - [`presets`] — RGB preset save / load / delete / apply.
-//!
-//! Each handler takes the shared [`DaemonState`] (plus a [`Sender`] for daemon
-//! events where mutation needs to trigger a refresh) and returns an
-//! [`IpcResponse`]. The dispatcher in [`crate::ipc_server`] is a thin match
-//! that delegates here.
 
-use std::sync::mpsc::Sender;
-
-use lianli_shared::ipc::IpcResponse;
-use parking_lot::Mutex;
-use std::sync::Arc;
-
-use crate::service::DaemonEvent;
+mod server;
 
 pub mod config;
 pub mod fan;
@@ -33,15 +23,25 @@ pub mod system;
 pub mod templates;
 pub mod wireless;
 
+pub use server::{start_ipc_server, DaemonState};
+
+use std::sync::mpsc::Sender;
+
+use lianli_shared::ipc::IpcResponse;
+use parking_lot::Mutex;
+use std::sync::Arc;
+
+use crate::service::DaemonEvent;
+
 pub(crate) use crate::persistence::{write_config, write_rgb_presets};
 
 /// Type alias for the shared state reference handlers receive.
-pub(crate) type SharedState = Arc<Mutex<crate::ipc_server::DaemonState>>;
+pub(crate) type SharedState = Arc<Mutex<DaemonState>>;
 
 /// Persist `state.config` to disk and notify the daemon's event loop that
 /// something changed. Used by every IPC handler that mutates config.
 pub(crate) fn persist_and_notify(
-    state: &mut crate::ipc_server::DaemonState,
+    state: &mut DaemonState,
     tx: &Sender<DaemonEvent>,
     label: &str,
 ) -> IpcResponse {
@@ -58,8 +58,3 @@ pub(crate) fn persist_and_notify(
         Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
     }
 }
-
-/// Suppress unused-import warning — `SharedState` is re-exported for handler
-/// modules to use.
-#[allow(dead_code)]
-fn _imports_ok(_: SharedState) {}

@@ -1,4 +1,4 @@
-use crate::ipc_server::{self, DaemonState};
+use crate::ipc::{self, DaemonState};
 use anyhow::Result;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::ensure_hid_devices_bound;
@@ -270,7 +270,7 @@ impl ServiceManager {
 
         // Start IPC server
         let tx_cloned = tx.clone();
-        self.ipc.thread = Some(ipc_server::start_ipc_server(
+        self.ipc.thread = Some(ipc::start_ipc_server(
             Arc::clone(&self.ipc.state),
             Arc::clone(&self.ipc.stop),
             tx_cloned,
