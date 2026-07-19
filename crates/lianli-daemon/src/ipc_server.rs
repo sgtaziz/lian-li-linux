@@ -789,30 +789,7 @@ fn base64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-pub(crate) fn write_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(config)?;
-    fs::write(path, json)?;
-    Ok(())
-}
-
-fn read_rgb_presets(path: &Path) -> Vec<RgbPreset> {
-    match fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => Vec::new(),
-    }
-}
-
-fn write_rgb_presets(path: &Path, presets: &[RgbPreset]) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(presets)?;
-    fs::write(path, json)?;
-    Ok(())
-}
+pub(crate) use crate::persistence::{read_rgb_presets, write_config, write_rgb_presets};
 
 fn write_response(writer: &mut impl Write, response: &IpcResponse) -> anyhow::Result<()> {
     let json = serde_json::to_string(response)?;

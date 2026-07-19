@@ -3,6 +3,7 @@ mod desktop_display;
 mod fan_controller;
 mod ipc_server;
 mod openrgb_server;
+mod persistence;
 mod pidlock;
 mod rgb_controller;
 mod service;
