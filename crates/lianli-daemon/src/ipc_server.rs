@@ -275,74 +275,28 @@ fn handle_request(
             }
         }
 
-        IpcRequest::GetRgbCapabilities => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                let caps = rgb.lock().capabilities();
-                IpcResponse::ok(&caps)
-            } else {
-                IpcResponse::ok(serde_json::json!([]))
-            }
-        }
+        IpcRequest::GetRgbCapabilities => crate::ipc::rgb::capabilities(state),
 
         IpcRequest::SetRgbEffect {
             device_id,
             zone,
             effect,
-        } => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                match rgb.lock().set_effect(&device_id, zone, &effect) {
-                    Ok(()) => IpcResponse::ok(serde_json::json!(null)),
-                    Err(e) => IpcResponse::error(format!("RGB effect error: {e}")),
-                }
-            } else {
-                IpcResponse::error("RGB controller not initialized")
-            }
-        }
+        } => crate::ipc::rgb::set_effect(state, device_id, zone, effect),
 
         IpcRequest::SetRgbDirect {
             device_id,
             zone,
             colors,
-        } => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                match rgb.lock().set_direct_colors(&device_id, zone, &colors) {
-                    Ok(()) => IpcResponse::ok(serde_json::json!(null)),
-                    Err(e) => IpcResponse::error(format!("RGB direct error: {e}")),
-                }
-            } else {
-                IpcResponse::error("RGB controller not initialized")
-            }
-        }
+        } => crate::ipc::rgb::set_direct(state, device_id, zone, colors),
 
         IpcRequest::SetRgbFrames {
             device_id,
             frames,
             interval_ms,
-        } => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                match rgb.lock().set_rgb_frames(&device_id, &frames, interval_ms) {
-                    Ok(()) => IpcResponse::ok(serde_json::json!(null)),
-                    Err(e) => IpcResponse::error(format!("RGB frames error: {e}")),
-                }
-            } else {
-                IpcResponse::error("RGB controller not initialized")
-            }
-        }
+        } => crate::ipc::rgb::set_frames(state, device_id, frames, interval_ms),
 
         IpcRequest::SetMbRgbSync { device_id, enabled } => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                match rgb.lock().set_mb_rgb_sync(&device_id, enabled) {
-                    Ok(()) => IpcResponse::ok(serde_json::json!(null)),
-                    Err(e) => IpcResponse::error(format!("MB RGB sync error: {e}")),
-                }
-            } else {
-                IpcResponse::error("RGB controller not initialized")
-            }
+            crate::ipc::rgb::set_mb_sync(state, device_id, enabled)
         }
 
         IpcRequest::SetFanDirection {
@@ -350,20 +304,7 @@ fn handle_request(
             zone,
             swap_lr,
             swap_tb,
-        } => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                match rgb
-                    .lock()
-                    .set_fan_direction(&device_id, zone, swap_lr, swap_tb)
-                {
-                    Ok(()) => IpcResponse::ok(serde_json::json!(null)),
-                    Err(e) => IpcResponse::error(format!("Fan direction error: {e}")),
-                }
-            } else {
-                IpcResponse::error("RGB controller not initialized")
-            }
-        }
+        } => crate::ipc::rgb::set_fan_direction(state, device_id, zone, swap_lr, swap_tb),
 
         IpcRequest::SetRgbConfig { config } => {
             let mut state = state.lock();
@@ -503,48 +444,10 @@ fn handle_request(
             zone,
             led_index,
             color,
-        } => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                let mut rgb = rgb.lock();
-                let mut colors = match rgb.get_zone_colors(&device_id, zone) {
-                    Some(c) => c,
-                    None => {
-                        return IpcResponse::error(format!(
-                            "zone {zone} not found on device {device_id}"
-                        ));
-                    }
-                };
-                let idx = led_index as usize;
-                if idx >= colors.len() {
-                    return IpcResponse::error(format!(
-                        "LED index {led_index} out of range (zone has {} LEDs)",
-                        colors.len()
-                    ));
-                }
-                colors[idx] = color;
-                match rgb.set_direct_colors(&device_id, zone, &colors) {
-                    Ok(()) => IpcResponse::ok(serde_json::json!(null)),
-                    Err(e) => IpcResponse::error(format!("RGB direct error: {e}")),
-                }
-            } else {
-                IpcResponse::error("RGB controller not initialized")
-            }
-        }
+        } => crate::ipc::rgb::set_led_color(state, device_id, zone, led_index, color),
 
         IpcRequest::GetZoneColors { device_id, zone } => {
-            let state = state.lock();
-            if let Some(ref rgb) = state.rgb_controller {
-                let rgb = rgb.lock();
-                match rgb.get_zone_colors(&device_id, zone) {
-                    Some(colors) => IpcResponse::ok(&colors),
-                    None => {
-                        IpcResponse::error(format!("zone {zone} not found on device {device_id}"))
-                    }
-                }
-            } else {
-                IpcResponse::error("RGB controller not initialized")
-            }
+            crate::ipc::rgb::get_zone_colors(state, device_id, zone)
         }
 
         IpcRequest::SaveRgbPreset { name, device_id } => {
