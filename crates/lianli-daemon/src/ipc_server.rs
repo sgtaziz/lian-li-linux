@@ -9,9 +9,8 @@ use crate::template_store;
 use lianli_media::CustomAsset;
 use lianli_shared::config::AppConfig;
 use lianli_shared::ipc::{DeviceInfo, IpcRequest, IpcResponse, TelemetrySnapshot};
-use lianli_shared::rgb::{RgbDeviceConfig, RgbPreset, RgbPresetZone, RgbZoneConfig};
+use lianli_shared::rgb::RgbPreset;
 use lianli_shared::screen::ScreenInfo;
-use lianli_shared::sensors::Unit;
 use lianli_shared::template::LcdTemplate;
 use parking_lot::Mutex;
 use std::fs;
@@ -48,7 +47,7 @@ impl DaemonState {
             .parent()
             .unwrap_or(Path::new("."))
             .join("rgb_presets.json");
-        let rgb_presets = read_rgb_presets(&presets_path);
+        let rgb_presets = crate::persistence::read_rgb_presets(&presets_path);
         Self {
             config: None,
             config_path,
@@ -184,56 +183,20 @@ fn handle_request(
     tx: Sender<DaemonEvent>,
 ) -> IpcResponse {
     match request {
-        IpcRequest::Ping => IpcResponse::ok(serde_json::json!("pong")),
+        IpcRequest::Ping => crate::ipc::system::ping(),
 
-        IpcRequest::ListSensors => {
-            let mut sensors = lianli_shared::sensors::enumerate_sensors();
-            // Add wireless coolant sensors from live telemetry
-            let ipc_state = state.lock();
-            for (device_id, temp) in &ipc_state.telemetry.coolant_temps {
-                let display = ipc_state
-                    .devices
-                    .iter()
-                    .find(|d| d.device_id == *device_id)
-                    .map(|d| format!("{} (Coolant)", d.name))
-                    .unwrap_or_else(|| format!("{device_id} (Coolant)"));
-                sensors.push(lianli_shared::sensors::SensorInfo {
-                    source: lianli_shared::sensors::SensorSource::WirelessCoolant {
-                        device_id: device_id.clone(),
-                    },
-                    sensor_name: None,
-                    display_name: Some(display),
-                    unit: Unit::C,
-                    divider: 1,
-                    current_value: Some(*temp),
-                });
-            }
-            drop(ipc_state);
-            IpcResponse::ok(&sensors)
-        }
+        IpcRequest::ListSensors => crate::ipc::system::list_sensors(state),
 
-        IpcRequest::ListDevices => {
-            let state = state.lock();
-            IpcResponse::ok(&state.devices)
-        }
+        IpcRequest::ListDevices => crate::ipc::system::list_devices(state),
 
-        IpcRequest::GetConfig => {
-            let state = state.lock();
-            match &state.config {
-                Some(config) => IpcResponse::ok(config),
-                None => IpcResponse::error("config not loaded yet"),
-            }
-        }
+        IpcRequest::GetConfig => crate::ipc::system::get_config(state),
 
-        IpcRequest::GetTelemetry => {
-            let state = state.lock();
-            IpcResponse::ok(&state.telemetry)
-        }
+        IpcRequest::GetTelemetry => crate::ipc::system::get_telemetry(state),
 
         IpcRequest::SetConfig { config } => {
             let mut state = state.lock();
             state.config = Some(config);
-            persist_and_notify(&mut state, &tx, "SetConfig")
+            crate::ipc::persist_and_notify(&mut state, &tx, "SetConfig")
         }
 
         IpcRequest::SetLcdMedia { device_id, config } => {
@@ -585,190 +548,17 @@ fn handle_request(
         }
 
         IpcRequest::SaveRgbPreset { name, device_id } => {
-            let zones = {
-                let state = state.lock();
-
-                let led_colors = state
-                    .rgb_controller
-                    .as_ref()
-                    .and_then(|rgb| rgb.lock().get_all_zone_colors(&device_id));
-
-                let zone_configs: Vec<_> = state
-                    .config
-                    .as_ref()
-                    .and_then(|c| c.rgb.as_ref())
-                    .and_then(|r| r.devices.iter().find(|d| d.device_id == device_id))
-                    .map(|d| d.zones.clone())
-                    .unwrap_or_default();
-
-                if let Some(led_zones) = led_colors {
-                    let zones: Vec<RgbPresetZone> = led_zones
-                        .into_iter()
-                        .map(|mut z| {
-                            z.effect = zone_configs
-                                .iter()
-                                .find(|zc| zc.zone_index == z.zone)
-                                .map(|zc| zc.effect.clone());
-                            z
-                        })
-                        .collect();
-                    Some(zones)
-                } else if !zone_configs.is_empty() {
-                    Some(
-                        zone_configs
-                            .iter()
-                            .map(|z| RgbPresetZone {
-                                zone: z.zone_index,
-                                colors: Vec::new(),
-                                effect: Some(z.effect.clone()),
-                            })
-                            .collect(),
-                    )
-                } else {
-                    None
-                }
-            };
-            let zones = match zones {
-                Some(z) => z,
-                None => {
-                    return IpcResponse::error(format!("device {device_id} not found"));
-                }
-            };
-            let preset = RgbPreset {
-                name: name.clone(),
-                device_id,
-                zones,
-            };
-            let mut state = state.lock();
-            if let Some(existing) = state
-                .rgb_presets
-                .iter_mut()
-                .find(|p| p.name == name && p.device_id == preset.device_id)
-            {
-                *existing = preset;
-            } else {
-                state.rgb_presets.push(preset);
-            }
-            match write_rgb_presets(&state.presets_path, &state.rgb_presets) {
-                Ok(()) => {
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    info!("RGB preset '{name}' saved");
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write presets: {e}")),
-            }
+            crate::ipc::presets::save(state, tx, name, device_id)
         }
 
         IpcRequest::DeleteRgbPreset { name, device_id } => {
-            let mut state = state.lock();
-            let before = state.rgb_presets.len();
-            state
-                .rgb_presets
-                .retain(|p| !(p.name == name && p.device_id == device_id));
-            if state.rgb_presets.len() == before {
-                return IpcResponse::error(format!("preset '{name}' not found for {device_id}"));
-            }
-            match write_rgb_presets(&state.presets_path, &state.rgb_presets) {
-                Ok(()) => {
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    info!("RGB preset '{name}' deleted");
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write presets: {e}")),
-            }
+            crate::ipc::presets::delete(state, tx, name, device_id)
         }
 
-        IpcRequest::ListRgbPresets => {
-            let state = state.lock();
-            IpcResponse::ok(&state.rgb_presets)
-        }
+        IpcRequest::ListRgbPresets => crate::ipc::presets::list(state),
 
         IpcRequest::ApplyRgbPreset { name, device_id } => {
-            let preset = {
-                let state = state.lock();
-                state
-                    .rgb_presets
-                    .iter()
-                    .find(|p| p.name == name && p.device_id == device_id)
-                    .cloned()
-            };
-            let preset = match preset {
-                Some(p) => p,
-                None => {
-                    return IpcResponse::error(format!("preset '{name}' not found for {device_id}"))
-                }
-            };
-
-            let mut state = state.lock();
-
-            // Apply effect configs to the main config + set active_preset
-            {
-                let app_config = state.config.get_or_insert_with(AppConfig::default);
-                let rgb_cfg = app_config.rgb.get_or_insert_with(Default::default);
-                let dev_cfg = if let Some(d) = rgb_cfg
-                    .devices
-                    .iter_mut()
-                    .find(|d| d.device_id == preset.device_id)
-                {
-                    d
-                } else {
-                    rgb_cfg.devices.push(RgbDeviceConfig {
-                        device_id: preset.device_id.clone(),
-                        mb_rgb_sync: false,
-                        active_preset: None,
-                        zones: Vec::new(),
-                    });
-                    rgb_cfg.devices.last_mut().unwrap()
-                };
-                dev_cfg.active_preset = Some(name.clone());
-                for zone_entry in &preset.zones {
-                    if let Some(effect) = &zone_entry.effect {
-                        if let Some(z) = dev_cfg
-                            .zones
-                            .iter_mut()
-                            .find(|z| z.zone_index == zone_entry.zone)
-                        {
-                            z.effect = effect.clone();
-                        } else {
-                            dev_cfg.zones.push(RgbZoneConfig {
-                                zone_index: zone_entry.zone,
-                                effect: effect.clone(),
-                                swap_lr: false,
-                                swap_tb: false,
-                            });
-                        }
-                    }
-                }
-                if let Err(e) = write_config(&state.config_path, state.config.as_ref().unwrap()) {
-                    return IpcResponse::error(format!("failed to write config: {e}"));
-                }
-            }
-
-            // Apply per-LED colors if present
-            let has_led_colors = preset.zones.iter().any(|z| !z.colors.is_empty());
-            if has_led_colors {
-                if let Some(ref rgb) = state.rgb_controller {
-                    let mut rgb = rgb.lock();
-                    for zone_entry in &preset.zones {
-                        if !zone_entry.colors.is_empty() {
-                            if let Err(e) = rgb.set_direct_colors(
-                                &preset.device_id,
-                                zone_entry.zone,
-                                &zone_entry.colors,
-                            ) {
-                                return IpcResponse::error(format!(
-                                    "failed to apply preset zone {}: {e}",
-                                    zone_entry.zone
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-
-            tx.send(DaemonEvent::IpcUpdate).ok();
-            info!("RGB preset '{name}' applied to {}", preset.device_id);
-            IpcResponse::ok(serde_json::json!(null))
+            crate::ipc::presets::apply(state, tx, name, device_id)
         }
 
         IpcRequest::Subscribe => {
@@ -782,31 +572,7 @@ fn base64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-pub(crate) use crate::persistence::{read_rgb_presets, write_config, write_rgb_presets};
-
-/// Persist `state.config` to disk and notify the daemon's event loop that
-/// something changed.
-///
-/// Used by every IPC handler that mutates config (`SetConfig`, `SetLcdMedia`,
-/// `SetFanConfig`, `SetRgbConfig`, `SetLcdTemplates`, …) so the daemon can
-/// re-read fan curves, RGB effects, and LCD media.
-fn persist_and_notify(
-    state: &mut DaemonState,
-    tx: &Sender<DaemonEvent>,
-    label: &str,
-) -> IpcResponse {
-    let Some(config) = state.config.as_ref() else {
-        return IpcResponse::error("no config loaded");
-    };
-    match write_config(&state.config_path, config) {
-        Ok(()) => {
-            let _ = tx.send(DaemonEvent::IpcUpdate);
-            info!("{label}: config persisted, notified daemon");
-            IpcResponse::ok(serde_json::json!(null))
-        }
-        Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
-    }
-}
+pub(crate) use crate::persistence::write_config;
 
 fn write_response(writer: &mut impl Write, response: &IpcResponse) -> anyhow::Result<()> {
     let json = serde_json::to_string(response)?;
