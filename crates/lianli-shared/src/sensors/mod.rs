@@ -16,8 +16,8 @@ pub mod read;
 pub mod resolve;
 
 pub use enumerate::{
-    enumerate_pwm_headers, enumerate_sensors, get_display_name, get_label_name,
-    get_pci_id_from_path, read_pwm_header,
+    display_name, enumerate_pwm_headers, enumerate_sensors, label_name, pci_id_from_path,
+    read_pwm_header,
 };
 pub use picker::{
     find_default_cpu_temp, find_default_gpu_temp, infer_sensor_category, pick_source_for_category,

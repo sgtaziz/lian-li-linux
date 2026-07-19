@@ -1,4 +1,4 @@
-use super::enumerate::{get_pci_id_from_path, get_unit};
+use super::enumerate::{pci_id_from_path, unit_for};
 use super::{RateState, ResolvedSensor, SensorSource};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -37,12 +37,12 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
 
                     let curr_device_path = if let Some(dev) = &device_path_symlink {
                         if dev.starts_with("DEADBEEF") {
-                            get_pci_id_from_path(path.clone())
+                            pci_id_from_path(&path)
                         } else {
                             dev.to_string()
                         }
                     } else {
-                        get_pci_id_from_path(path.clone())
+                        pci_id_from_path(&path)
                     };
 
                     if curr_device_path != *device_path {
@@ -67,7 +67,7 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
                                     .map(|l| l.trim().to_string())
                                     .unwrap_or_default();
                             if file_label == *label {
-                                let actual_divider = get_unit(prefix).1;
+                                let actual_divider = unit_for(prefix).1;
                                 return Some(ResolvedSensor::SysfsFile {
                                     path: file.path(),
                                     divider: actual_divider,
