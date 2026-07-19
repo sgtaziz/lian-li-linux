@@ -6,11 +6,9 @@
 use crate::rgb_controller::RgbController;
 use crate::service::DaemonEvent;
 use crate::template_store;
-use lianli_media::CustomAsset;
 use lianli_shared::config::AppConfig;
 use lianli_shared::ipc::{DeviceInfo, IpcRequest, IpcResponse, TelemetrySnapshot};
 use lianli_shared::rgb::RgbPreset;
-use lianli_shared::screen::ScreenInfo;
 use lianli_shared::template::LcdTemplate;
 use parking_lot::Mutex;
 use std::fs;
@@ -200,80 +198,17 @@ fn handle_request(
         }
 
         IpcRequest::SetLcdMedia { device_id, config } => {
-            let mut state = state.lock();
-            let app_config = state.config.get_or_insert_with(AppConfig::default);
-            let found = app_config
-                .lcds
-                .iter_mut()
-                .find(|lcd| lcd.device_id() == device_id);
-            match found {
-                Some(lcd) => {
-                    *lcd = config;
-                }
-                None => {
-                    // New LCD entry
-                    app_config.lcds.push(config);
-                }
-            }
-            let cfg_clone = app_config.clone();
-            match write_config(&state.config_path, &cfg_clone) {
-                Ok(()) => {
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
-            }
+            crate::ipc::config::set_lcd_media(state, tx, device_id, config)
         }
 
         IpcRequest::SetFanConfig { config } => {
-            let mut state = state.lock();
-            let app_config = state.config.get_or_insert_with(AppConfig::default);
-            app_config.fans = Some(config);
-            let cfg_clone = app_config.clone();
-            match write_config(&state.config_path, &cfg_clone) {
-                Ok(()) => {
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
-            }
+            crate::ipc::config::set_fan_config(state, tx, config)
         }
 
         IpcRequest::SetFanSpeed {
             device_index,
             fan_pwm,
-        } => {
-            debug!("SetFanSpeed for device {device_index}: {fan_pwm:?}");
-            let mut state = state.lock();
-            let app_config = state.config.get_or_insert_with(AppConfig::default);
-            let fans = app_config.fans.get_or_insert_with(Default::default);
-            let idx = device_index as usize;
-            while fans.speeds.len() <= idx {
-                fans.speeds.push(lianli_shared::fan::FanGroup {
-                    device_id: None,
-                    speeds: [
-                        lianli_shared::fan::FanSpeed::Constant(128),
-                        lianli_shared::fan::FanSpeed::Constant(128),
-                        lianli_shared::fan::FanSpeed::Constant(128),
-                        lianli_shared::fan::FanSpeed::Constant(128),
-                    ],
-                });
-            }
-            fans.speeds[idx].speeds = [
-                lianli_shared::fan::FanSpeed::Constant(fan_pwm[0]),
-                lianli_shared::fan::FanSpeed::Constant(fan_pwm[1]),
-                lianli_shared::fan::FanSpeed::Constant(fan_pwm[2]),
-                lianli_shared::fan::FanSpeed::Constant(fan_pwm[3]),
-            ];
-            let cfg_clone = app_config.clone();
-            match write_config(&state.config_path, &cfg_clone) {
-                Ok(()) => {
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
-            }
-        }
+        } => crate::ipc::config::set_fan_speed(state, tx, device_index, fan_pwm),
 
         IpcRequest::GetRgbCapabilities => crate::ipc::rgb::capabilities(state),
 
@@ -307,137 +242,33 @@ fn handle_request(
         } => crate::ipc::rgb::set_fan_direction(state, device_id, zone, swap_lr, swap_tb),
 
         IpcRequest::SetRgbConfig { config } => {
-            let mut state = state.lock();
-            let app_config = state.config.get_or_insert_with(AppConfig::default);
-            app_config.rgb = Some(config);
-            let cfg_clone = app_config.clone();
-            match write_config(&state.config_path, &cfg_clone) {
-                Ok(()) => {
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
-            }
+            crate::ipc::config::set_rgb_config(state, tx, config)
         }
 
         IpcRequest::SwitchDisplayMode { device_id } => {
-            let (family, pid) = {
-                let state = state.lock();
-                match state.devices.iter().find(|d| d.device_id == device_id) {
-                    Some(d) => (Some(d.family), d.pid),
-                    None => (None, 0),
-                }
-            };
-            match family {
-                Some(f) if f.is_desktop_mode() => {
-                    if pid == 0 {
-                        return IpcResponse::error("device PID not available");
-                    }
-                    tx.send(DaemonEvent::DisplaySwitchToLcd { device_id, pid })
-                        .ok();
-                    IpcResponse::ok(serde_json::json!({
-                        "switched": "to_lcd",
-                        "message": "Device is rebooting into LCD mode. It will appear shortly."
-                    }))
-                }
-                Some(f) if f.supports_display_mode_switch() => {
-                    // LCD -> Desktop: service loop owns the WinUSB transport
-                    tx.send(DaemonEvent::DisplaySwitch { device_id }).ok();
-                    IpcResponse::ok(serde_json::json!({
-                        "switched": "to_desktop",
-                        "message": "Device is switching to desktop mode. It will reboot shortly."
-                    }))
-                }
-                Some(_) => IpcResponse::error("device does not support display mode switching"),
-                None => IpcResponse::error(format!("device not found: {device_id}")),
-            }
+            crate::ipc::lcd::switch_display_mode(state, tx, device_id)
         }
 
-        IpcRequest::BindWirelessDevice { mac } => {
-            tx.send(DaemonEvent::Bind { mac_address: mac }).ok();
-            IpcResponse::ok(serde_json::json!({
-                "message": "Bind command queued. Device should appear shortly."
-            }))
-        }
+        IpcRequest::BindWirelessDevice { mac } => crate::ipc::wireless::bind(tx, mac),
 
-        IpcRequest::UnbindWirelessDevice { mac } => {
-            tx.send(DaemonEvent::Unbind { mac_address: mac }).ok();
-            IpcResponse::ok(serde_json::json!({
-                "message": "Unbind command queued."
-            }))
-        }
+        IpcRequest::UnbindWirelessDevice { mac } => crate::ipc::wireless::unbind(tx, mac),
 
         IpcRequest::SetEne6k77FanQuantity {
             device_id,
             quantity,
-        } => {
-            tx.send(DaemonEvent::SetEne6k77FanQuantity {
-                device_id,
-                quantity,
-            })
-            .ok();
-            IpcResponse::ok(serde_json::json!({
-                "message": "Fan quantity update queued."
-            }))
-        }
+        } => crate::ipc::fan::set_ene6k77_fan_quantity(tx, device_id, quantity),
 
-        IpcRequest::GetLcdTemplates => {
-            let state = state.lock();
-            let sensors = lianli_shared::sensors::enumerate_sensors();
-            let all = template_store::all_templates(&state.user_templates, &sensors);
-            IpcResponse::ok(&all)
-        }
+        IpcRequest::GetLcdTemplates => crate::ipc::templates::get(state),
 
         IpcRequest::SetLcdTemplates { templates } => {
-            let mut state = state.lock();
-            let path = state.templates_path();
-            match template_store::save_user_templates(&path, &templates) {
-                Ok(()) => {
-                    state.user_templates = template_store::load_user_templates(&path);
-                    let sensors = lianli_shared::sensors::enumerate_sensors();
-                    template_store::regenerate_template_previews(&state.user_templates, &sensors);
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    info!("LCD templates updated via IPC");
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write templates: {e}")),
-            }
+            crate::ipc::templates::set(state, tx, templates)
         }
 
         IpcRequest::RenderTemplatePreview {
             template,
             width,
             height,
-        } => {
-            let preview_screen = ScreenInfo {
-                width,
-                height,
-                max_fps: 30,
-                jpeg_quality: 90,
-                max_payload: 4 * 1024 * 1024,
-                h264: false,
-                needs_keepalive: false,
-            };
-            let all_sensors = lianli_shared::sensors::enumerate_sensors();
-            match CustomAsset::new(&template, 0.0, &preview_screen, &all_sensors, false) {
-                Ok(asset) => {
-                    asset.seed_preview_history();
-                    match asset.render_frame(true) {
-                        Ok(Some(frame)) => IpcResponse::ok(serde_json::json!({
-                            "jpeg_base64": base64_encode(&frame.data),
-                        })),
-                        Ok(None) => {
-                            let blank = asset.blank_frame();
-                            IpcResponse::ok(serde_json::json!({
-                                "jpeg_base64": base64_encode(&blank.data),
-                            }))
-                        }
-                        Err(e) => IpcResponse::error(format!("preview render failed: {e}")),
-                    }
-                }
-                Err(e) => IpcResponse::error(format!("preview asset creation failed: {e}")),
-            }
-        }
+        } => crate::ipc::lcd::render_template_preview(template, width, height),
 
         IpcRequest::SetLedColor {
             device_id,
@@ -470,7 +301,7 @@ fn handle_request(
     }
 }
 
-fn base64_encode(bytes: &[u8]) -> String {
+pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
