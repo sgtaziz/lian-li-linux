@@ -545,36 +545,3 @@ impl FanDevice for TlFanController {
         1
     }
 }
-
-/// `Arc<TlFanController>` can be used directly as a `FanDevice`.
-/// This allows the same controller instance to serve both fan and RGB.
-impl FanDevice for Arc<TlFanController> {
-    fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()> {
-        (**self).set_fan_speed(slot, duty)
-    }
-    fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
-        (**self).set_fan_speeds(duties)
-    }
-    fn read_fan_rpm(&self) -> Result<Vec<u16>> {
-        (**self).read_fan_rpm()
-    }
-    fn fan_slot_count(&self) -> u8 {
-        (**self).fan_slot_count()
-    }
-    fn fan_port_info(&self) -> Vec<(u8, u8)> {
-        (**self).fan_port_info()
-    }
-    fn per_fan_control(&self) -> bool {
-        (**self).per_fan_control()
-    }
-    fn supports_mb_sync(&self) -> bool {
-        (**self).supports_mb_sync()
-    }
-    fn set_mb_rpm_sync(&self, port: u8, sync: bool) -> Result<()> {
-        self.set_port_mb_rpm_sync(port, sync)
-    }
-
-    fn stop_pwm(&self) -> u8 {
-        1
-    }
-}

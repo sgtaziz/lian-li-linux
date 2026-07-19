@@ -1,6 +1,7 @@
 use anyhow::Result;
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_shared::screen::ScreenInfo;
+use std::sync::Arc;
 
 /// A device that can control fan speeds.
 ///
@@ -63,6 +64,55 @@ pub trait FanDevice: Send + Sync {
 
     fn stop_pwm(&self) -> u8 {
         0
+    }
+}
+
+/// Blanket forwarding impl so any `Arc<T>` can be used as a `FanDevice`
+/// without per-driver boilerplate. Required for fan controllers that share
+/// their USB handle with a sibling RGB controller (e.g. `TlFanController`
+/// paired with `TlFanPortDevice`).
+impl<T: FanDevice + ?Sized> FanDevice for Arc<T> {
+    fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()> {
+        (**self).set_fan_speed(slot, duty)
+    }
+    fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
+        (**self).set_fan_speeds(duties)
+    }
+    fn read_fan_rpm(&self) -> Result<Vec<u16>> {
+        (**self).read_fan_rpm()
+    }
+    fn fan_slot_count(&self) -> u8 {
+        (**self).fan_slot_count()
+    }
+    fn fan_port_info(&self) -> Vec<(u8, u8)> {
+        (**self).fan_port_info()
+    }
+    fn per_fan_control(&self) -> bool {
+        (**self).per_fan_control()
+    }
+    fn supports_mb_sync(&self) -> bool {
+        (**self).supports_mb_sync()
+    }
+    fn set_mb_rpm_sync(&self, port: u8, sync: bool) -> Result<()> {
+        (**self).set_mb_rpm_sync(port, sync)
+    }
+    fn has_pump_control(&self) -> bool {
+        (**self).has_pump_control()
+    }
+    fn set_pump_speed(&self, duty: u8) -> Result<()> {
+        (**self).set_pump_speed(duty)
+    }
+    fn supports_fan_quantity(&self) -> bool {
+        (**self).supports_fan_quantity()
+    }
+    fn max_fan_quantity_per_port(&self) -> u8 {
+        (**self).max_fan_quantity_per_port()
+    }
+    fn set_port_fan_quantity(&self, port: u8, quantity: u8) -> Result<()> {
+        (**self).set_port_fan_quantity(port, quantity)
+    }
+    fn stop_pwm(&self) -> u8 {
+        (**self).stop_pwm()
     }
 }
 
@@ -189,5 +239,49 @@ pub trait RgbDevice: Send + Sync {
     /// software-controlled effects.
     fn set_mb_rgb_sync(&self, _enabled: bool) -> Result<()> {
         anyhow::bail!("MB RGB sync not supported by this device")
+    }
+}
+
+/// Blanket forwarding impl so any `Arc<T>` can be used as an `RgbDevice`
+/// without per-driver boilerplate.
+impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
+    fn device_name(&self) -> String {
+        (**self).device_name()
+    }
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        (**self).supported_modes()
+    }
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        (**self).zone_info()
+    }
+    fn total_led_count(&self) -> u16 {
+        (**self).total_led_count()
+    }
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        (**self).set_zone_effect(zone, effect)
+    }
+    fn set_all_effects(&self, effect: &RgbEffect) -> Result<()> {
+        (**self).set_all_effects(effect)
+    }
+    fn set_direct_colors(&self, zone: u8, colors: &[[u8; 3]]) -> Result<()> {
+        (**self).set_direct_colors(zone, colors)
+    }
+    fn supports_direct(&self) -> bool {
+        (**self).supports_direct()
+    }
+    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
+        (**self).supported_scopes()
+    }
+    fn supports_direction(&self) -> bool {
+        (**self).supports_direction()
+    }
+    fn set_fan_direction(&self, zone: u8, swap_lr: bool, swap_tb: bool) -> Result<()> {
+        (**self).set_fan_direction(zone, swap_lr, swap_tb)
+    }
+    fn supports_mb_rgb_sync(&self) -> bool {
+        (**self).supports_mb_rgb_sync()
+    }
+    fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
+        (**self).set_mb_rgb_sync(enabled)
     }
 }

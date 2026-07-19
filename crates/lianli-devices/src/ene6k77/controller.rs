@@ -487,44 +487,6 @@ impl FanDevice for Ene6k77Controller {
     fn set_port_fan_quantity(&self, port: u8, quantity: u8) -> Result<()> {
         self.set_fan_quantity(port, quantity)
     }
-}
-
-/// `Arc<Ene6k77Controller>` can be used directly as a `FanDevice`.
-/// This allows the same controller instance to serve both fan and RGB.
-impl FanDevice for Arc<Ene6k77Controller> {
-    fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()> {
-        (**self).set_fan_speed(slot, duty)
-    }
-    fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
-        (**self).set_fan_speeds(duties)
-    }
-    fn read_fan_rpm(&self) -> Result<Vec<u16>> {
-        (**self).read_fan_rpm()
-    }
-    fn fan_slot_count(&self) -> u8 {
-        (**self).fan_slot_count()
-    }
-    fn fan_port_info(&self) -> Vec<(u8, u8)> {
-        (**self).fan_port_info()
-    }
-    fn per_fan_control(&self) -> bool {
-        (**self).per_fan_control()
-    }
-    fn supports_mb_sync(&self) -> bool {
-        (**self).supports_mb_sync()
-    }
-    fn set_mb_rpm_sync(&self, port: u8, sync: bool) -> Result<()> {
-        (**self).set_mb_rpm_sync(port, sync)
-    }
-    fn supports_fan_quantity(&self) -> bool {
-        (**self).supports_fan_quantity()
-    }
-    fn max_fan_quantity_per_port(&self) -> u8 {
-        (**self).max_fan_quantity_per_port()
-    }
-    fn set_port_fan_quantity(&self, port: u8, quantity: u8) -> Result<()> {
-        (**self).set_port_fan_quantity(port, quantity)
-    }
 
     fn stop_pwm(&self) -> u8 {
         1

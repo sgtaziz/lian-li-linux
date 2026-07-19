@@ -554,27 +554,6 @@ impl FanDevice for HydroShiftLcdController {
     }
 }
 
-impl FanDevice for Arc<HydroShiftLcdController> {
-    fn set_fan_speed(&self, slot: u8, duty: u8) -> Result<()> {
-        (**self).set_fan_speed(slot, duty)
-    }
-    fn set_fan_speeds(&self, duties: &[u8]) -> Result<()> {
-        (**self).set_fan_speeds(duties)
-    }
-    fn read_fan_rpm(&self) -> Result<Vec<u16>> {
-        (**self).read_fan_rpm()
-    }
-    fn fan_slot_count(&self) -> u8 {
-        (**self).fan_slot_count()
-    }
-    fn has_pump_control(&self) -> bool {
-        (**self).has_pump_control()
-    }
-    fn set_pump_speed(&self, duty: u8) -> Result<()> {
-        (**self).set_pump_speed(duty)
-    }
-}
-
 impl AioDevice for HydroShiftLcdController {
     fn read_pump_rpm(&self) -> Result<u16> {
         Ok(self
