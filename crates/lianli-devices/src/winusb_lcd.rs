@@ -565,3 +565,58 @@ impl LcdDevice for WinUsbLcdDevice {
         Ok(())
     }
 }
+
+/// Driver entry point for the WinUSB LCD family (HydroShift II Circle/Square,
+/// Lancool 207, Universal Screen 8.8", Vision 9.2"). The specific variant is
+/// selected from the PID via [`screen_for_pid`].
+pub struct WinUsbLcdDriver;
+
+impl crate::registry::DeviceDriver for WinUsbLcdDriver {
+    fn family(&self) -> lianli_shared::device_id::DeviceFamily {
+        // The driver dispatches across multiple PIDs; the per-instance family
+        // is resolved from the PID via `screen_for_pid` below.
+        lianli_shared::device_id::DeviceFamily::HydroShift2Lcd
+    }
+
+    fn open(
+        &self,
+        ctx: &crate::registry::OpenContext,
+    ) -> anyhow::Result<crate::registry::OpenedDevice> {
+        let (screen, family, name) = screen_for_pid(ctx.pid)
+            .ok_or_else(|| anyhow::anyhow!("unknown WinUSB LCD PID {:#06x}", ctx.pid))?;
+        let mut lcd = WinUsbLcdDevice::new(ctx.device.clone(), screen, name)?;
+        crate::traits::LcdDevice::initialize(&mut lcd)?;
+        Ok(crate::registry::OpenedDevice {
+            id: ctx.device_id(),
+            family,
+            capabilities: family.capabilities(),
+            transport_kind: lianli_shared::device_id::TransportKind::UsbBulk,
+            model_name: name.to_string(),
+            firmware: None,
+            fan: None,
+            lcd: Some(Box::new(lcd)),
+            rgb: Vec::new(),
+            aio: None,
+        })
+    }
+}
+
+/// Map a WinUSB LCD PID to its `(ScreenInfo, DeviceFamily, display name)`
+/// triple. Returns `None` for unknown PIDs.
+fn screen_for_pid(
+    pid: u16,
+) -> Option<(
+    lianli_shared::screen::ScreenInfo,
+    lianli_shared::device_id::DeviceFamily,
+    &'static str,
+)> {
+    use lianli_shared::device_id::DeviceFamily;
+    use lianli_shared::screen::ScreenInfo;
+    match pid {
+        0xA021 => Some((ScreenInfo::HYDROSHIFT2, DeviceFamily::HydroShift2Lcd, "HydroShift II LCD Circle")),
+        0xA034 => Some((ScreenInfo::HYDROSHIFT2, DeviceFamily::HydroShift2Lcd, "HydroShift II LCD Square")),
+        0xA065 => Some((ScreenInfo::LANCOOL_207, DeviceFamily::Lancool207, "Lancool 207 Digital")),
+        0xA088 => Some((ScreenInfo::UNIVERSAL_SCREEN, DeviceFamily::UniversalScreen, "Universal Screen 8.8\"")),
+        _ => None,
+    }
+}

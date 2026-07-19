@@ -109,3 +109,56 @@ pub struct AioHandshake {
     pub temp_valid: bool,
     pub coolant_temp: f32,
 }
+
+/// Driver entry point for the HydroShift LCD / Galahad2 LCD / Vision family.
+pub struct HydroShiftLcdDriver;
+
+impl crate::registry::DeviceDriver for HydroShiftLcdDriver {
+    fn family(&self) -> lianli_shared::device_id::DeviceFamily {
+        lianli_shared::device_id::DeviceFamily::HydroShiftLcd
+    }
+
+    fn open(
+        &self,
+        ctx: &crate::registry::OpenContext,
+    ) -> anyhow::Result<crate::registry::OpenedDevice> {
+        let backend: crate::registry::SharedHid = crate::detect::open_hid_with_reopener(
+            ctx.device.clone(),
+            ctx.hid_usage_page,
+            ctx.vid,
+            ctx.pid,
+            ctx.bus,
+            ctx.device.port_numbers().unwrap_or_default(),
+        )?;
+        let pid = ctx.pid;
+        let variant = AioLcdVariant::from_pid(pid).unwrap_or(AioLcdVariant::HydroShiftLcd);
+        let family = match variant {
+            AioLcdVariant::Galahad2Lcd | AioLcdVariant::Galahad2Vision => {
+                lianli_shared::device_id::DeviceFamily::Galahad2Lcd
+            }
+            _ => lianli_shared::device_id::DeviceFamily::HydroShiftLcd,
+        };
+
+        let mut lcd_ctrl = HydroShiftLcdController::new(std::sync::Arc::clone(&backend), pid)?;
+        crate::traits::LcdDevice::initialize(&mut lcd_ctrl)?;
+        let firmware = lcd_ctrl.firmware_version_str().map(|s| s.to_string());
+        let rgb_ctrl = AioLcdRgbController::new(backend, pid)?;
+        let lcd_arc = std::sync::Arc::new(lcd_ctrl);
+
+        Ok(crate::registry::OpenedDevice {
+            id: ctx.device_id(),
+            family,
+            capabilities: family.capabilities(),
+            transport_kind: lianli_shared::device_id::TransportKind::Hid,
+            model_name: variant.name().to_string(),
+            firmware,
+            fan: Some(Box::new(lcd_arc)),
+            lcd: None,
+            rgb: vec![(
+                String::new(),
+                Box::new(rgb_ctrl) as Box<dyn crate::traits::RgbDevice>,
+            )],
+            aio: None,
+        })
+    }
+}

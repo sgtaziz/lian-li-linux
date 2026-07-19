@@ -54,6 +54,11 @@ impl WinUsbLedDevice {
         })
     }
 
+    /// Device display name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     fn reopen(&self) -> Result<()> {
         let mut new_transport = RusbBulk::open(self.vid, self.pid)
             .map_err(transport_to_anyhow)
@@ -155,5 +160,38 @@ impl RgbDevice for WinUsbLedDevice {
             bail!("{}: zone {zone} out of range (only zone 0)", self.name);
         }
         self.send_frame(colors)
+    }
+}
+
+/// Driver entry point for the WinUSB LED ring family (Universal Screen 8.8\"
+/// LED ring at VID=0x0416 PID=0x8050).
+pub struct WinUsbLedDriver;
+
+impl crate::registry::DeviceDriver for WinUsbLedDriver {
+    fn family(&self) -> lianli_shared::device_id::DeviceFamily {
+        lianli_shared::device_id::DeviceFamily::UniversalScreenLighting
+    }
+
+    fn open(
+        &self,
+        ctx: &crate::registry::OpenContext,
+    ) -> anyhow::Result<crate::registry::OpenedDevice> {
+        use lianli_shared::device_id::{DeviceCapabilities, DeviceFamily, TransportKind};
+        let dev = WinUsbLedDevice::new(ctx.device.clone(), 60, "Universal Screen 8.8\" LED Ring")?;
+        Ok(crate::registry::OpenedDevice {
+            id: ctx.device_id(),
+            family: DeviceFamily::UniversalScreenLighting,
+            capabilities: DeviceCapabilities::RGB,
+            transport_kind: TransportKind::UsbBulk,
+            model_name: dev.name().to_string(),
+            firmware: None,
+            fan: None,
+            lcd: None,
+            rgb: vec![(
+                String::new(),
+                Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+            )],
+            aio: None,
+        })
     }
 }

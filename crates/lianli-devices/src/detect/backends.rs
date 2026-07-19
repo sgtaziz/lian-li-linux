@@ -287,15 +287,29 @@ pub fn open_hid_lcd_by_vid_pid(
 /// Returns an `Arc<Mutex<RusbHid>>` that can be shared between multiple
 /// controllers.
 pub fn open_hid_backend(det: &DetectedDevice) -> Result<Arc<Mutex<RusbHid>>> {
-    let vid = det.vid;
-    let pid = det.pid;
-    let bus = det.bus;
-    let port_numbers = det.device.port_numbers().unwrap_or_default();
-    let usage_page = det.hid_usage_page;
-    let usb_device = det.device.clone();
-    open_with_retry(&det.device, || {
+    open_hid_with_reopener(
+        det.device.clone(),
+        det.hid_usage_page,
+        det.vid,
+        det.pid,
+        det.bus,
+        det.device.port_numbers().unwrap_or_default(),
+    )
+}
+
+/// Open a shared HID backend with self-healing reopener, given the raw USB
+/// coordinates of the device. Used by driver `open()` implementations.
+pub fn open_hid_with_reopener(
+    device: rusb::Device<GlobalContext>,
+    usage_page: Option<u16>,
+    vid: u16,
+    pid: u16,
+    bus: u8,
+    port_numbers: Vec<u8>,
+) -> Result<Arc<Mutex<RusbHid>>> {
+    open_with_retry(&device, || {
         let transport = RusbHid::open_by_usage_with_reopener(
-            usb_device.clone(),
+            device.clone(),
             usage_page,
             make_rusb_reopener(vid, pid, bus, port_numbers.clone(), usage_page),
         )?;

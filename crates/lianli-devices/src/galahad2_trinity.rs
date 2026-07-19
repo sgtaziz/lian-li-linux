@@ -488,3 +488,43 @@ impl RgbDevice for Galahad2TrinityController {
         Ok(())
     }
 }
+
+/// Driver entry point for the Galahad II Trinity AIO.
+pub struct Galahad2TrinityDriver;
+
+impl crate::registry::DeviceDriver for Galahad2TrinityDriver {
+    fn family(&self) -> lianli_shared::device_id::DeviceFamily {
+        lianli_shared::device_id::DeviceFamily::Galahad2Trinity
+    }
+
+    fn open(
+        &self,
+        ctx: &crate::registry::OpenContext,
+    ) -> anyhow::Result<crate::registry::OpenedDevice> {
+        let backend: crate::registry::SharedHid = crate::detect::open_hid_with_reopener(
+            ctx.device.clone(),
+            ctx.hid_usage_page,
+            ctx.vid,
+            ctx.pid,
+            ctx.bus,
+            ctx.device.port_numbers().unwrap_or_default(),
+        )?;
+        let ctrl = std::sync::Arc::new(Galahad2TrinityController::new(backend, ctx.pid)?);
+        let model = ctrl.model().name().to_string();
+        Ok(crate::registry::OpenedDevice {
+            id: ctx.device_id(),
+            family: lianli_shared::device_id::DeviceFamily::Galahad2Trinity,
+            capabilities: lianli_shared::device_id::DeviceFamily::Galahad2Trinity.capabilities(),
+            transport_kind: lianli_shared::device_id::TransportKind::Hid,
+            model_name: model,
+            firmware: None,
+            fan: Some(Box::new(std::sync::Arc::clone(&ctrl))),
+            lcd: None,
+            rgb: vec![(
+                String::new(),
+                Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
+            )],
+            aio: None,
+        })
+    }
+}

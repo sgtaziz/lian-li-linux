@@ -16,8 +16,55 @@ mod port_rgb;
 pub use controller::TlFanController;
 pub use port_rgb::TlFanPortDevice;
 
+use crate::registry::{DeviceDriver, OpenContext, OpenedDevice, SharedHid};
+use anyhow::Result;
+use lianli_shared::device_id::{DeviceFamily, TransportKind};
+
 /// Number of LEDs per TL fan.
 const LEDS_PER_FAN: u16 = 20;
+
+/// Driver entry point for the TL Fan controller.
+pub struct TlFanDriver;
+
+impl DeviceDriver for TlFanDriver {
+    fn family(&self) -> DeviceFamily {
+        DeviceFamily::TlFan
+    }
+
+    fn open(&self, ctx: &OpenContext) -> Result<OpenedDevice> {
+        let backend: SharedHid = crate::detect::open_hid_with_reopener(
+            ctx.device.clone(),
+            ctx.hid_usage_page,
+            ctx.vid,
+            ctx.pid,
+            ctx.bus,
+            ctx.device.port_numbers().unwrap_or_default(),
+        )?;
+        let ctrl = std::sync::Arc::new(TlFanController::new(backend)?);
+        let rgb = ctrl
+            .port_devices()
+            .into_iter()
+            .map(|(port, dev)| {
+                (
+                    format!("port{port}"),
+                    Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+                )
+            })
+            .collect();
+        Ok(OpenedDevice {
+            id: ctx.device_id(),
+            family: DeviceFamily::TlFan,
+            capabilities: DeviceFamily::TlFan.capabilities(),
+            transport_kind: TransportKind::Hid,
+            model_name: "UNI FAN TL Controller".to_string(),
+            firmware: None,
+            fan: Some(Box::new(ctrl)),
+            lcd: None,
+            rgb,
+            aio: None,
+        })
+    }
+}
 
 /// Information about a single detected fan.
 #[derive(Debug, Clone)]

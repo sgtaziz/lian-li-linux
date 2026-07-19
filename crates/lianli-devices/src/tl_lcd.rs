@@ -481,3 +481,40 @@ fn generate_unique_serial() -> String {
     }
     format!("lcd-{:016x}{:08x}", entropy, nanos as u32)
 }
+
+/// Driver entry point for the TL LCD fan.
+pub struct TlLcdDriver;
+
+impl crate::registry::DeviceDriver for TlLcdDriver {
+    fn family(&self) -> lianli_shared::device_id::DeviceFamily {
+        lianli_shared::device_id::DeviceFamily::TlLcd
+    }
+
+    fn open(
+        &self,
+        ctx: &crate::registry::OpenContext,
+    ) -> anyhow::Result<crate::registry::OpenedDevice> {
+        let backend: crate::registry::SharedHid = crate::detect::open_hid_with_reopener(
+            ctx.device.clone(),
+            ctx.hid_usage_page,
+            ctx.vid,
+            ctx.pid,
+            ctx.bus,
+            ctx.device.port_numbers().unwrap_or_default(),
+        )?;
+        let mut lcd = TlLcdDevice::new(backend);
+        crate::traits::LcdDevice::initialize(&mut lcd)?;
+        Ok(crate::registry::OpenedDevice {
+            id: ctx.device_id(),
+            family: lianli_shared::device_id::DeviceFamily::TlLcd,
+            capabilities: lianli_shared::device_id::DeviceFamily::TlLcd.capabilities(),
+            transport_kind: lianli_shared::device_id::TransportKind::Hid,
+            model_name: "UNI FAN TL LCD".to_string(),
+            firmware: None,
+            fan: None,
+            lcd: Some(Box::new(lcd)),
+            rgb: Vec::new(),
+            aio: None,
+        })
+    }
+}

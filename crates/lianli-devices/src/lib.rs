@@ -7,6 +7,7 @@ pub mod galahad2_trinity;
 pub mod hydroshift2_lcd;
 pub mod hydroshift_lcd;
 pub mod lancool207;
+pub mod registry;
 pub mod slv3_lcd;
 pub mod tinyuz;
 pub mod tl_fan;
