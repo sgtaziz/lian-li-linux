@@ -3,7 +3,7 @@ use lianli_devices::wireless::{
 };
 use lianli_shared::aio::AioConfig;
 use lianli_shared::config::AppConfig;
-use lianli_shared::fan::{FanCurve, FanSpeed};
+use lianli_shared::fan::{interpolate_curve, FanCurve, FanSpeed};
 use lianli_shared::media::SensorSourceConfig;
 use lianli_shared::sensors::{
     enumerate_sensors, read_sensor_value, resolve_sensor, ResolvedSensor, SensorInfo, SensorSource,
@@ -281,32 +281,6 @@ fn write_argb(dst: &mut [u8], rgba: [u8; 4]) {
     dst[1] = rgba[0];
     dst[2] = rgba[1];
     dst[3] = rgba[2];
-}
-
-fn interpolate_curve(curve: &[(f32, f32)], temp: f32) -> f32 {
-    if curve.is_empty() {
-        return 50.0;
-    }
-    if curve.len() == 1 {
-        return curve[0].1;
-    }
-    let mut sorted = curve.to_vec();
-    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    if temp <= sorted[0].0 {
-        return sorted[0].1;
-    }
-    if temp >= sorted[sorted.len() - 1].0 {
-        return sorted[sorted.len() - 1].1;
-    }
-    for i in 0..sorted.len() - 1 {
-        let (t1, s1) = sorted[i];
-        let (t2, s2) = sorted[i + 1];
-        if temp >= t1 && temp <= t2 {
-            let ratio = (temp - t1) / (t2 - t1);
-            return s1 + ratio * (s2 - s1);
-        }
-    }
-    50.0
 }
 
 #[cfg(test)]

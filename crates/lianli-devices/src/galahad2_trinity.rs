@@ -358,9 +358,7 @@ impl Galahad2TrinityController {
     }
 }
 
-fn duty_to_percent(duty: u8) -> u8 {
-    ((duty as u32 * 100) / 255) as u8
-}
+use lianli_shared::fan::duty_to_percent;
 
 impl FanDevice for Galahad2TrinityController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {

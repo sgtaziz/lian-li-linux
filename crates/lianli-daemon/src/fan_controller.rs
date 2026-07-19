@@ -2,7 +2,7 @@ use crate::service::DaemonEvent;
 use anyhow::{Context, Result};
 use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::WirelessController;
-use lianli_shared::fan::{FanConfig, FanCurve, FanSpeed};
+use lianli_shared::fan::{interpolate_curve, FanConfig, FanCurve, FanSpeed};
 use lianli_shared::sensors::{self, ResolvedSensor, SensorInfo, SensorSource};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -509,35 +509,3 @@ fn smoothed_temperature(
         .context("no valid temperature readings yet")
 }
 
-fn interpolate_curve(curve: &[(f32, f32)], temp: f32) -> f32 {
-    if curve.is_empty() {
-        return 50.0;
-    }
-
-    if curve.len() == 1 {
-        return curve[0].1;
-    }
-
-    let mut sorted_curve = curve.to_vec();
-    sorted_curve.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-    if temp <= sorted_curve[0].0 {
-        return sorted_curve[0].1;
-    }
-
-    if temp >= sorted_curve[sorted_curve.len() - 1].0 {
-        return sorted_curve[sorted_curve.len() - 1].1;
-    }
-
-    for i in 0..sorted_curve.len() - 1 {
-        let (temp1, speed1) = sorted_curve[i];
-        let (temp2, speed2) = sorted_curve[i + 1];
-
-        if temp >= temp1 && temp <= temp2 {
-            let ratio = (temp - temp1) / (temp2 - temp1);
-            return speed1 + ratio * (speed2 - speed1);
-        }
-    }
-
-    50.0
-}

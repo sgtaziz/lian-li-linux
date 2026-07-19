@@ -36,9 +36,7 @@ pub(super) const CMD_LCD_AVAILABLE: u8 = 0x17;
 
 pub(super) const FAN_LED_COUNT: u16 = 24;
 
-pub(super) fn duty_to_percent(duty: u8) -> u8 {
-    ((duty as u32 * 100) / 255) as u8
-}
+pub(super) use lianli_shared::fan::duty_to_percent;
 
 /// Build a B-command (1024B) or C-command (512B) LCD packet.
 /// Header layout is identical; only report ID, packet size, and max payload differ.

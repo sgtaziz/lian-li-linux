@@ -46,6 +46,53 @@ pub const MB_SYNC_KEY: &str = "__mb_sync__";
 /// Prefix for MB sync with a specific hwmon PWM source.
 pub const MB_SYNC_PREFIX: &str = "__mb_sync__:";
 
+/// Piecewise-linear interpolation across a fan/AIO curve.
+///
+/// - Empty curve → `50.0` (safe mid-PWM fallback).
+/// - Single point → that point's speed.
+/// - Temp below/above the curve's range → clamped to the first/last point.
+/// - Otherwise → linear interpolation between the bracketing points.
+///
+/// The input curve does not need to be sorted; this function sorts a copy.
+pub fn interpolate_curve(curve: &[(f32, f32)], temp: f32) -> f32 {
+    if curve.is_empty() {
+        return 50.0;
+    }
+    if curve.len() == 1 {
+        return curve[0].1;
+    }
+
+    let mut sorted = curve.to_vec();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    if temp <= sorted[0].0 {
+        return sorted[0].1;
+    }
+    let last = sorted.len() - 1;
+    if temp >= sorted[last].0 {
+        return sorted[last].1;
+    }
+
+    for i in 0..last {
+        let (t1, s1) = sorted[i];
+        let (t2, s2) = sorted[i + 1];
+        if temp >= t1 && temp <= t2 {
+            let ratio = (temp - t1) / (t2 - t1);
+            return s1 + ratio * (s2 - s1);
+        }
+    }
+    50.0
+}
+
+/// Map a 0..=255 PWM duty to a 0..=100 percentage.
+///
+/// Used by AIO drivers whose firmware reports PWM in 0..=255 but expects
+/// fan-speed arguments as a percentage.
+#[inline]
+pub fn duty_to_percent(duty: u8) -> u8 {
+    ((duty as u32 * 100) / 255) as u8
+}
+
 impl FanSpeed {
     pub fn is_mb_sync(&self) -> bool {
         match self {
@@ -160,4 +207,69 @@ where
     }
 
     deserializer.deserialize_seq(FanGroupsVisitor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interpolate_curve_empty_returns_default() {
+        assert_eq!(interpolate_curve(&[], 50.0), 50.0);
+    }
+
+    #[test]
+    fn interpolate_curve_single_point_returns_it() {
+        assert_eq!(interpolate_curve(&[(20.0, 42.0)], 50.0), 42.0);
+    }
+
+    #[test]
+    fn interpolate_curve_clamps_below_range() {
+        let curve = [(30.0, 25.0), (60.0, 100.0)];
+        assert_eq!(interpolate_curve(&curve, 10.0), 25.0);
+    }
+
+    #[test]
+    fn interpolate_curve_clamps_above_range() {
+        let curve = [(30.0, 25.0), (60.0, 100.0)];
+        assert_eq!(interpolate_curve(&curve, 90.0), 100.0);
+    }
+
+    #[test]
+    fn interpolate_curve_interpolates_inside() {
+        let curve = [(30.0, 25.0), (60.0, 100.0)];
+        // halfway: 25 + 0.5 * (100 - 25) = 62.5
+        assert!((interpolate_curve(&curve, 45.0) - 62.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn interpolate_curve_works_unsorted() {
+        let curve = [(60.0, 100.0), (30.0, 25.0)];
+        assert!((interpolate_curve(&curve, 45.0) - 62.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn interpolate_curve_handles_multi_segment() {
+        let curve = [(20.0, 0.0), (40.0, 50.0), (80.0, 100.0)];
+        assert!((interpolate_curve(&curve, 30.0) - 25.0).abs() < 1e-6);
+        assert!((interpolate_curve(&curve, 60.0) - 75.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn duty_to_percent_endpoints() {
+        assert_eq!(duty_to_percent(0), 0);
+        assert_eq!(duty_to_percent(255), 100);
+    }
+
+    #[test]
+    fn duty_to_percent_midpoint() {
+        // 127 / 255 ≈ 49.8 → floored to 49
+        assert_eq!(duty_to_percent(127), 49);
+    }
+
+    #[test]
+    fn duty_to_percent_quarter() {
+        // 64 / 255 ≈ 25.1 → floored to 25
+        assert_eq!(duty_to_percent(64), 25);
+    }
 }
