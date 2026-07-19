@@ -791,42 +791,9 @@ fn parse_colors(data: &[u8], count: usize) -> Vec<[u8; 3]> {
 
 /// Map an OpenRGB mode name (from our own exposed modes) back to RgbMode.
 fn mode_from_openrgb_name(name: &str, value: u32) -> RgbMode {
-    // First try by name
-    match name {
-        "Direct" => return RgbMode::Direct,
-        "Static" => return RgbMode::Static,
-        "Rainbow" => return RgbMode::Rainbow,
-        "Rainbow Morph" => return RgbMode::RainbowMorph,
-        "Breathing" => return RgbMode::Breathing,
-        "Runway" => return RgbMode::Runway,
-        "Meteor" => return RgbMode::Meteor,
-        "Color Cycle" => return RgbMode::ColorCycle,
-        "Staggered" => return RgbMode::Staggered,
-        "Tide" => return RgbMode::Tide,
-        "Mixing" => return RgbMode::Mixing,
-        "Voice" => return RgbMode::Voice,
-        "Door" => return RgbMode::Door,
-        "Render" => return RgbMode::Render,
-        "Ripple" => return RgbMode::Ripple,
-        "Reflect" => return RgbMode::Reflect,
-        "Tail Chasing" => return RgbMode::TailChasing,
-        "Paint" => return RgbMode::Paint,
-        "Ping Pong" => return RgbMode::PingPong,
-        "Stack" => return RgbMode::Stack,
-        "Cover Cycle" => return RgbMode::CoverCycle,
-        "Wave" => return RgbMode::Wave,
-        "Racing" => return RgbMode::Racing,
-        "Lottery" => return RgbMode::Lottery,
-        "Intertwine" => return RgbMode::Intertwine,
-        "Meteor Shower" => return RgbMode::MeteorShower,
-        "Collide" => return RgbMode::Collide,
-        "Electric Current" => return RgbMode::ElectricCurrent,
-        "Kaleidoscope" => return RgbMode::Kaleidoscope,
-        "Big Bang" => return RgbMode::BigBang,
-        "Vortex" => return RgbMode::Vortex,
-        "Pump" => return RgbMode::Pump,
-        "Colors Morph" => return RgbMode::ColorsMorph,
-        _ => {}
+    // First try by display name (covers every mode we expose to OpenRGB).
+    if let Some(mode) = RgbMode::from_display_name(name) {
+        return mode;
     }
 
     // Fall back to TL mode byte value
