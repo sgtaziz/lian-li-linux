@@ -32,7 +32,7 @@ impl ServiceManager {
         let fan_curves = cfg.fan_curves.clone();
 
         // Reuse the already-opened wired fan device handles (populated at startup).
-        let wired_devices = Arc::clone(&self.wired_fan_devices);
+        let wired_devices = Arc::clone(&self.registry.fan_devices);
 
         let wireless = if self.wireless.has_discovered_devices() {
             Some(Arc::new(self.wireless.clone()))
@@ -132,18 +132,18 @@ impl ServiceManager {
 
     pub(super) fn check_wired_hotplug(&mut self) {
         let current = self.enumerate_wired_controller_ids();
-        if current == self.last_wired_hid_ids {
+        if current == self.registry.last_wired_ids {
             return;
         }
 
-        let added = current.difference(&self.last_wired_hid_ids).count();
-        let removed = self.last_wired_hid_ids.difference(&current).count();
+        let added = current.difference(&self.registry.last_wired_ids).count();
+        let removed = self.registry.last_wired_ids.difference(&current).count();
         info!("Wired device topology changed (+{added} -{removed}): re-initializing");
 
-        self.hid_backends.retain(|k, _| current.contains(k));
+        self.registry.hid_backends.retain(|k, _| current.contains(k));
         self.init_wired_devices();
         self.start_fan_control();
-        self.last_wired_hid_ids = current;
+        self.registry.last_wired_ids = current;
     }
 
     /// Initialize all wired USB devices (fan + RGB + LCD + AIO) via the
@@ -153,13 +153,13 @@ impl ServiceManager {
         let mut fan_devices: HashMap<String, Box<dyn FanDevice>> = HashMap::new();
         let mut wired_rgb: HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>> =
             HashMap::new();
-        self.wired_fan_device_info.clear();
+        self.registry.fan_device_info.clear();
 
         let usb_devs = match enumerate_devices() {
             Ok(devs) => devs,
             Err(err) => {
                 warn!("Failed to enumerate USB devices: {err}");
-                self.wired_fan_devices = Arc::new(fan_devices);
+                self.registry.fan_devices = Arc::new(fan_devices);
                 self.init_rgb_controller_from(wired_rgb);
                 return;
             }
@@ -193,7 +193,7 @@ impl ServiceManager {
                     // physical device.
                     let shared_hid = opened.shared_hid.take();
                     if let Some(backend) = shared_hid {
-                        self.hid_backends.insert(base_id.clone(), backend);
+                        self.registry.hid_backends.insert(base_id.clone(), backend);
                     }
                     self.register_opened_device(
                         base_id,
@@ -212,9 +212,9 @@ impl ServiceManager {
         }
 
         let arc = Arc::new(fan_devices);
-        self.wired_fan_devices = Arc::clone(&arc);
+        self.registry.fan_devices = Arc::clone(&arc);
         self.init_rgb_controller_from(wired_rgb);
-        self.last_wired_hid_ids = self.enumerate_wired_controller_ids();
+        self.registry.last_wired_ids = self.enumerate_wired_controller_ids();
     }
 
     /// Dispatch an [`registry::OpenedDevice`] into the fan / RGB / AIO
@@ -268,7 +268,7 @@ impl ServiceManager {
                 } else {
                     name.to_string()
                 };
-                self.wired_fan_device_info.push(DeviceInfo {
+                self.registry.fan_device_info.push(DeviceInfo {
                     device_id,
                     family,
                     name: dev_name,
@@ -322,12 +322,12 @@ impl ServiceManager {
         };
 
         let serial = self
-            .wired_fan_device_info
+            .registry.fan_device_info
             .iter()
             .find(|d| d.device_id == device_id)
             .and_then(|d| d.serial.clone());
 
-        let Some(ctrl) = self.wired_fan_devices.get(&base_id) else {
+        let Some(ctrl) = self.registry.fan_devices.get(&base_id) else {
             warn!("Fan device not found for quantity update: {base_id}");
             return;
         };
@@ -352,7 +352,7 @@ impl ServiceManager {
             }
         }
 
-        for info in self.wired_fan_device_info.iter_mut() {
+        for info in self.registry.fan_device_info.iter_mut() {
             if info.device_id == device_id {
                 info.fan_count = Some(quantity);
                 info.fan_quantity = Some(quantity);

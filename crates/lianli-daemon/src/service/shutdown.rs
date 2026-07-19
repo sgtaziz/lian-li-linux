@@ -1,6 +1,4 @@
 use super::ServiceManager;
-use std::collections::HashMap;
-use std::sync::Arc;
 use tracing::info;
 
 impl ServiceManager {
@@ -15,11 +13,10 @@ impl ServiceManager {
         // Controllers (fan / AIO / RGB / direct-color writer)
         self.controllers.shutdown();
 
-        // Drop RGB controller reference from IPC state before clearing HID
-        // backends so device handles are released cleanly.
+        // Drop RGB controller reference from IPC state before clearing the
+        // device registry so device handles are released cleanly.
         self.ipc.state.lock().rgb_controller = None;
-        self.wired_fan_devices = Arc::new(HashMap::new());
-        self.hid_backends.clear();
+        self.registry.clear();
 
         self.wireless.stop();
         self.openrgb.shutdown();

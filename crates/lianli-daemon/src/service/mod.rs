@@ -2,12 +2,9 @@ use crate::ipc_server::{self, DaemonState};
 use anyhow::Result;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::ensure_hid_devices_bound;
-use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_shared::config::AppConfig;
-use lianli_shared::ipc::DeviceInfo;
 use lianli_shared::systeminfo::SysSensor;
-use lianli_transport::RusbHid;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -30,7 +27,7 @@ mod subsystems;
 mod sync;
 
 use aio_lcd_firmware::AioLcdFirmwareTracker;
-use subsystems::{Controllers, IpcSubsystem, OpenRgbSubsystem};
+use subsystems::{Controllers, DeviceRegistry, IpcSubsystem, OpenRgbSubsystem};
 
 use runtime::{parse_mac_str, ActiveTarget};
 
@@ -78,18 +75,8 @@ pub struct ServiceManager {
     targets: HashMap<usize, ActiveTarget>,
     wireless: WirelessController,
     packet_builder: PacketBuilder,
-    /// Per-port DeviceInfo for wired fan devices (populated by open_wired_fan_devices).
-    wired_fan_device_info: Vec<DeviceInfo>,
-    /// Shared reference to wired fan device handles (for RPM reading).
-    wired_fan_devices: Arc<HashMap<String, Box<dyn FanDevice>>>,
-    /// Shared HID backends keyed by device ID — allows fan, RGB, and LCD
-    /// controllers for the same physical device to share one USB handle.
-    hid_backends: HashMap<String, Arc<Mutex<RusbHid>>>,
-    last_wired_hid_ids: std::collections::HashSet<String>,
-    /// Cached USB device list from enumerate_devices() — refreshed every USB_ENUM_INTERVAL.
-    cached_usb_devices: Vec<DeviceInfo>,
-    /// TL LCD (port, fan_index) per device_id. Probed once at init, sync.rs reads this.
-    tl_lcd_port_index: HashMap<String, (u8, u8)>,
+    /// Wired USB device registry (fan handles, HID backends, hot-plug caches).
+    registry: DeviceRegistry,
     /// AIO LCD device IDs with pending deferred firmware reads, plus the
     /// devices whose reads previously failed and should be skipped.
     aio_lcd_firmware: AioLcdFirmwareTracker,
@@ -119,12 +106,7 @@ impl ServiceManager {
             targets: HashMap::new(),
             wireless: WirelessController::new(),
             packet_builder: PacketBuilder::new(),
-            wired_fan_device_info: Vec::new(),
-            wired_fan_devices: Arc::new(HashMap::new()),
-            hid_backends: HashMap::new(),
-            last_wired_hid_ids: std::collections::HashSet::new(),
-            cached_usb_devices: Vec::new(),
-            tl_lcd_port_index: HashMap::new(),
+            registry: DeviceRegistry::new(),
             aio_lcd_firmware: AioLcdFirmwareTracker::new(),
             last_wireless_count: 0,
             last_poll_mono: Instant::now(),

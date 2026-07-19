@@ -35,12 +35,12 @@ impl ServiceManager {
             .filter(|d| d.family == DeviceFamily::TlLcd)
             .map(|d| d.device_id())
             .collect();
-        let cached_ids: HashSet<String> = self.tl_lcd_port_index.keys().cloned().collect();
+        let cached_ids: HashSet<String> = self.registry.tl_lcd_port_index.keys().cloned().collect();
         if current_ids == cached_ids {
             return;
         }
         let probed = probe_tl_lcd_port_indices_rusb(usb_devices);
-        self.tl_lcd_port_index.clear();
+        self.registry.tl_lcd_port_index.clear();
 
         let mut entries: Vec<(String, Vec<u8>, (u8, u8))> = Vec::new();
         for det in usb_devices
@@ -85,7 +85,7 @@ impl ServiceManager {
 
         for (device_id, _, pi) in entries {
             debug!("TL LCD port_index cached: {device_id} -> {pi:?}");
-            self.tl_lcd_port_index.insert(device_id, pi);
+            self.registry.tl_lcd_port_index.insert(device_id, pi);
         }
     }
 
@@ -116,7 +116,7 @@ impl ServiceManager {
                 .get(&device_id)
                 .unwrap_or((None, false));
             let port_index = if det.family == DeviceFamily::TlLcd {
-                self.tl_lcd_port_index.get(&device_id).copied()
+                self.registry.tl_lcd_port_index.get(&device_id).copied()
             } else {
                 None
             };
@@ -148,7 +148,7 @@ impl ServiceManager {
             });
         }
 
-        self.cached_usb_devices = cached;
+        self.registry.cached_usb_devices = cached;
 
         match crate::desktop_display::enumerate_turzx() {
             Ok(present) => self.desktop_displays.sync(&present),
@@ -311,10 +311,10 @@ impl ServiceManager {
         }
 
         // Add wired USB/HID fan devices (per-port entries from open_wired_fan_devices)
-        devices.extend(self.wired_fan_device_info.clone());
+        devices.extend(self.registry.fan_device_info.clone());
 
         // Read wired fan RPMs and split per port.
-        for (base_id, dev) in self.wired_fan_devices.iter() {
+        for (base_id, dev) in self.registry.fan_devices.iter() {
             if let Ok(all_rpms) = dev.read_fan_rpm() {
                 let ports = dev.fan_port_info();
                 let per_fan = dev.per_fan_control();
@@ -343,7 +343,7 @@ impl ServiceManager {
 
         // Cache is refreshed every USB_ENUM_INTERVAL (30s) to avoid
         // USB bus contention from opening every device for serial reads.
-        devices.extend(self.cached_usb_devices.clone());
+        devices.extend(self.registry.cached_usb_devices.clone());
 
         ipc_state.devices = devices;
     }

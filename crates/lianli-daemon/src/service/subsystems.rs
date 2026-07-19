@@ -18,6 +18,8 @@ use crate::ipc_server::DaemonState;
 use crate::openrgb_server;
 use crate::rgb_controller::{DirectColorBuffer, RgbController};
 use crate::service::DaemonEvent;
+use lianli_shared::ipc::DeviceInfo;
+use lianli_transport::RusbHid;
 
 // ──────────────────────────────────────────────────────────────────────
 // IPC subsystem
@@ -136,7 +138,66 @@ impl Default for Controllers {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Wired device registry
+// ──────────────────────────────────────────────────────────────────────
+
+use lianli_devices::traits::FanDevice;
+use std::collections::{HashMap, HashSet};
+
 // Suppress unused-import warning for Sender<DaemonEvent>; it's part of the
 // public surface for handlers that send events.
 #[allow(dead_code)]
 fn _suppress_sender(_: Sender<DaemonEvent>) {}
+
+/// Wired USB device registry: shared fan device handles, cached HID backends,
+/// cached USB device list for IPC sync, hot-plug tracking, and TL LCD port
+/// indices.
+///
+/// All five fields move together whenever a device is plugged or unplugged,
+/// so keeping them in one struct makes the lifecycle obvious.
+pub struct DeviceRegistry {
+    /// Per-port `DeviceInfo` for wired fan devices (populated by init).
+    pub fan_device_info: Vec<DeviceInfo>,
+    /// Shared reference to wired fan device handles (for RPM reading).
+    pub fan_devices: Arc<HashMap<String, Box<dyn FanDevice>>>,
+    /// Shared HID backends keyed by device ID — allows fan, RGB, and LCD
+    /// controllers for the same physical device to share one USB handle.
+    pub hid_backends: HashMap<String, Arc<Mutex<RusbHid>>>,
+    /// Hot-plug detection: device IDs seen at the last topology scan.
+    pub last_wired_ids: HashSet<String>,
+    /// Cached USB device list from `enumerate_devices()` — refreshed every
+    /// 10 s and surfaced to the GUI via `sync_ipc_state`.
+    pub cached_usb_devices: Vec<DeviceInfo>,
+    /// TL LCD `(port, fan_index)` per device_id. Probed once at init.
+    pub tl_lcd_port_index: HashMap<String, (u8, u8)>,
+}
+
+impl DeviceRegistry {
+    pub fn new() -> Self {
+        Self {
+            fan_device_info: Vec::new(),
+            fan_devices: Arc::new(HashMap::new()),
+            hid_backends: HashMap::new(),
+            last_wired_ids: HashSet::new(),
+            cached_usb_devices: Vec::new(),
+            tl_lcd_port_index: HashMap::new(),
+        }
+    }
+
+    /// Clear all device state (called on shutdown).
+    pub fn clear(&mut self) {
+        self.fan_device_info.clear();
+        self.fan_devices = Arc::new(HashMap::new());
+        self.hid_backends.clear();
+        self.cached_usb_devices.clear();
+        // Keep `last_wired_ids` and `tl_lcd_port_index` — they describe what
+        // *should* be plugged in, not what currently is.
+    }
+}
+
+impl Default for DeviceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -248,7 +248,7 @@ impl ServiceManager {
                     | DeviceFamily::Galahad2Lcd
                     | DeviceFamily::TlLcd => {
                         // Try to reuse a shared HID backend (opened by init_rgb_controller).
-                        if let Some(backend) = self.hid_backends.get(&candidate.device_id) {
+                        if let Some(backend) = self.registry.hid_backends.get(&candidate.device_id) {
                             match create_hid_lcd_device(
                                 candidate.family,
                                 candidate.pid,
