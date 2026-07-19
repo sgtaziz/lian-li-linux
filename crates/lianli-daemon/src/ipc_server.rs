@@ -232,15 +232,8 @@ fn handle_request(
 
         IpcRequest::SetConfig { config } => {
             let mut state = state.lock();
-            match write_config(&state.config_path, &config) {
-                Ok(()) => {
-                    state.config = Some(config);
-                    tx.send(DaemonEvent::IpcUpdate).ok();
-                    info!("Config updated via IPC");
-                    IpcResponse::ok(serde_json::json!(null))
-                }
-                Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
-            }
+            state.config = Some(config);
+            persist_and_notify(&mut state, &tx, "SetConfig")
         }
 
         IpcRequest::SetLcdMedia { device_id, config } => {
@@ -790,6 +783,30 @@ fn base64_encode(bytes: &[u8]) -> String {
 }
 
 pub(crate) use crate::persistence::{read_rgb_presets, write_config, write_rgb_presets};
+
+/// Persist `state.config` to disk and notify the daemon's event loop that
+/// something changed.
+///
+/// Used by every IPC handler that mutates config (`SetConfig`, `SetLcdMedia`,
+/// `SetFanConfig`, `SetRgbConfig`, `SetLcdTemplates`, …) so the daemon can
+/// re-read fan curves, RGB effects, and LCD media.
+fn persist_and_notify(
+    state: &mut DaemonState,
+    tx: &Sender<DaemonEvent>,
+    label: &str,
+) -> IpcResponse {
+    let Some(config) = state.config.as_ref() else {
+        return IpcResponse::error("no config loaded");
+    };
+    match write_config(&state.config_path, config) {
+        Ok(()) => {
+            let _ = tx.send(DaemonEvent::IpcUpdate);
+            info!("{label}: config persisted, notified daemon");
+            IpcResponse::ok(serde_json::json!(null))
+        }
+        Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
+    }
+}
 
 fn write_response(writer: &mut impl Write, response: &IpcResponse) -> anyhow::Result<()> {
     let json = serde_json::to_string(response)?;
