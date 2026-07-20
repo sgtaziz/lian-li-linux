@@ -5,7 +5,7 @@ use lianli_media::CustomAsset;
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
-use lianli_shared::template_catalog::template_preview_path;
+use lianli_shared::template::catalog::template_preview_path;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::warn;
@@ -61,15 +61,6 @@ pub fn save_user_templates(path: &Path, templates: &[LcdTemplate]) -> Result<()>
 
 pub fn all_templates(user: &[LcdTemplate], _sensors: &[SensorInfo]) -> Vec<LcdTemplate> {
     user.to_vec()
-}
-
-#[allow(dead_code)]
-pub fn resolve_template(
-    id: &str,
-    user: &[LcdTemplate],
-    _sensors: &[SensorInfo],
-) -> Option<LcdTemplate> {
-    user.iter().find(|t| t.id == id).cloned()
 }
 
 pub fn regenerate_template_previews(templates: &[LcdTemplate], sensors: &[SensorInfo]) {

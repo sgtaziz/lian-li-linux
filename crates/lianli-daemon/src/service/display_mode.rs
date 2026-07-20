@@ -1,6 +1,6 @@
 use super::runtime::LcdBackend;
 use super::{DaemonEvent, ServiceManager};
-use lianli_devices::winusb_lcd::WinUsbLcdDevice;
+use lianli_devices::winusb::lcd::WinUsbLcdDevice;
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};

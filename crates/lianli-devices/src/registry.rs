@@ -99,8 +99,8 @@ pub static REGISTRY: &[&dyn DeviceDriver] = &[
     &crate::tl_lcd::TlLcdDriver,
     &crate::galahad2_trinity::Galahad2TrinityDriver,
     &crate::hydroshift_lcd::HydroShiftLcdDriver,
-    &crate::winusb_lcd::WinUsbLcdDriver,
-    &crate::winusb_led::WinUsbLedDriver,
+    &crate::winusb::lcd::WinUsbLcdDriver,
+    &crate::winusb::led::WinUsbLedDriver,
 ];
 
 /// Look up the driver for a given family.

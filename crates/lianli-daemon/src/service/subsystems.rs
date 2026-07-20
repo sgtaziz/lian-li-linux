@@ -8,7 +8,6 @@
 //! Pattern: extract → update `ServiceManager::new` → fix `self.X` call sites.
 
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -17,7 +16,6 @@ use parking_lot::Mutex;
 use crate::ipc::DaemonState;
 use crate::openrgb_server;
 use crate::controllers::rgb::{DirectColorBuffer, RgbController};
-use crate::service::DaemonEvent;
 use lianli_shared::ipc::DeviceInfo;
 use lianli_transport::RusbHid;
 
@@ -144,11 +142,6 @@ impl Default for Controllers {
 
 use lianli_devices::traits::FanDevice;
 use std::collections::{HashMap, HashSet};
-
-// Suppress unused-import warning for Sender<DaemonEvent>; it's part of the
-// public surface for handlers that send events.
-#[allow(dead_code)]
-fn _suppress_sender(_: Sender<DaemonEvent>) {}
 
 /// Wired USB device registry: shared fan device handles, cached HID backends,
 /// cached USB device list for IPC sync, hot-plug tracking, and TL LCD port

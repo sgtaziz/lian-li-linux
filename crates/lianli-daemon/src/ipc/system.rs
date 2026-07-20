@@ -1,10 +1,7 @@
 //! System-level queries: `Ping`, `ListSensors`, `ListDevices`, `GetConfig`,
 //! `GetTelemetry`.
 
-use std::sync::Arc;
-
 use lianli_shared::ipc::IpcResponse;
-use parking_lot::Mutex;
 
 use crate::ipc::SharedState;
 
@@ -51,6 +48,3 @@ pub fn get_telemetry(state: &SharedState) -> IpcResponse {
     let ipc_state = state.lock();
     IpcResponse::ok(&ipc_state.telemetry)
 }
-
-#[allow(dead_code)]
-fn _suppress_unused(_: Arc<Mutex<()>>) {}

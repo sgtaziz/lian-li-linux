@@ -4,7 +4,9 @@ use crate::sensors::{pick_source_for_category, SensorCategory, SensorInfo};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub mod catalog;
 pub mod widget_kind;
+
 pub use widget_kind::{default_gradient_stops, GradientStop, WidgetKind};
 
 /// Accepts both `[r,g,b]` (alpha defaults to 255) and `[r,g,b,a]` so older

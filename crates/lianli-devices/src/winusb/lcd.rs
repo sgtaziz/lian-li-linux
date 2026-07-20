@@ -602,6 +602,15 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
     }
 }
 
+/// Open a WinUSB LCD device by PID, resolving the screen info and display
+/// name automatically. Used by both the registry driver and the daemon's
+/// media-backend path.
+pub fn open_for_pid(pid: u16, device: Device<GlobalContext>) -> Result<WinUsbLcdDevice> {
+    let (screen, _family, name) = screen_for_pid(pid)
+        .ok_or_else(|| anyhow::anyhow!("unknown WinUSB LCD PID {:#06x}", pid))?;
+    WinUsbLcdDevice::new(device, screen, name)
+}
+
 /// Map a WinUSB LCD PID to its `(ScreenInfo, DeviceFamily, display name)`
 /// triple. Returns `None` for unknown PIDs.
 fn screen_for_pid(

@@ -13,8 +13,6 @@ use std::time::{Duration, Instant};
 use tracing::warn;
 
 pub(super) struct AsyncSensorRenderer {
-    #[allow(dead_code)]
-    asset: Arc<SensorAsset>,
     current_frame: Arc<Mutex<FrameInfo>>,
     stop_flag: Arc<AtomicBool>,
     _thread: Option<JoinHandle<()>>,
@@ -77,7 +75,6 @@ impl AsyncSensorRenderer {
         });
 
         Self {
-            asset,
             current_frame,
             stop_flag,
             _thread: Some(thread),

@@ -1,10 +1,10 @@
 //! Template browser: fetches the online catalog manifest and installs
 //! selected templates. Session-only state — closing the window drops
 //! everything in memory; only [`install`]'d templates persist (to
-//! `~/.config/lianli/templates/<id>/` via `lianli_shared::template_catalog`).
+//! `~/.config/lianli/templates/<id>/` via `lianli_shared::template::catalog`).
 
 use crate::{refresh_lcd_ui, CatalogEntry, MainWindow, Shared, TemplateBrowserWindow};
-use lianli_shared::template_catalog::{self, CatalogManifest, CatalogTemplate};
+use lianli_shared::template::catalog::{self, CatalogManifest, CatalogTemplate};
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedPixelBuffer, SharedString, VecModel};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -66,7 +66,7 @@ pub fn install(main: &MainWindow, shared: Shared) -> BrowserHandle {
             set_entry_state(&weak, &tpl.id, "installing", "");
             std::thread::spawn(move || {
                 let sensors = shared.lock().unwrap().available_sensors.clone();
-                match template_catalog::install_template(&tpl, &sensors) {
+                match catalog::install_template(&tpl, &sensors) {
                     Ok(new_template) => {
                         let new_template = Arc::new(new_template);
                         let id_for_ui = tpl.id.clone();
@@ -116,7 +116,7 @@ fn start_fetch(
         w.set_templates(ModelRc::new(VecModel::<CatalogEntry>::default()));
     }
     let weak = weak.clone();
-    std::thread::spawn(move || match template_catalog::fetch_manifest() {
+    std::thread::spawn(move || match catalog::fetch_manifest() {
         Ok(manifest) => on_manifest(weak, catalog, manifest),
         Err(e) => {
             let msg = format!("{e:#}");
@@ -135,7 +135,7 @@ fn on_manifest(
     catalog: Arc<Mutex<Vec<CatalogTemplate>>>,
     manifest: CatalogManifest,
 ) {
-    let supported = template_catalog::filter_supported(manifest.templates, DAEMON_VERSION_STR);
+    let supported = catalog::filter_supported(manifest.templates, DAEMON_VERSION_STR);
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(w) = weak.upgrade() {
             let entries: Vec<CatalogEntry> = supported
@@ -166,7 +166,7 @@ fn on_manifest(
 fn kick_preview_fetches(weak: slint::Weak<TemplateBrowserWindow>, templates: Vec<CatalogTemplate>) {
     for (idx, t) in templates.into_iter().enumerate() {
         let weak = weak.clone();
-        std::thread::spawn(move || match template_catalog::fetch_preview(&t) {
+        std::thread::spawn(move || match catalog::fetch_preview(&t) {
             Ok(bytes) => match image::load_from_memory(&bytes) {
                 Ok(img) => {
                     let rgba = img.to_rgba8();

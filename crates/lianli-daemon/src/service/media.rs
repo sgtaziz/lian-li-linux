@@ -229,19 +229,11 @@ impl ServiceManager {
                         let device = Device::clone(candidate.usb_device.as_ref().unwrap());
                         Slv3LcdDevice::new(device).map(LcdBackend::Slv3)
                     }
-                    DeviceFamily::HydroShift2Lcd => {
+                    DeviceFamily::HydroShift2Lcd
+                    | DeviceFamily::Lancool207
+                    | DeviceFamily::UniversalScreen => {
                         let device = Device::clone(candidate.usb_device.as_ref().unwrap());
-                        lianli_devices::hydroshift2_lcd::open(device)
-                            .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
-                    }
-                    DeviceFamily::Lancool207 => {
-                        let device = Device::clone(candidate.usb_device.as_ref().unwrap());
-                        lianli_devices::lancool207::open(device)
-                            .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
-                    }
-                    DeviceFamily::UniversalScreen => {
-                        let device = Device::clone(candidate.usb_device.as_ref().unwrap());
-                        lianli_devices::universal_screen::open(device)
+                        lianli_devices::winusb::lcd::open_for_pid(candidate.pid, device)
                             .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
                     }
                     DeviceFamily::HydroShiftLcd

@@ -6,7 +6,7 @@ use super::DaemonEvent;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
 use lianli_devices::traits::LcdDevice;
-use lianli_devices::winusb_lcd::WinUsbLcdDevice;
+use lianli_devices::winusb::lcd::WinUsbLcdDevice;
 use lianli_devices::wireless::WirelessController;
 use lianli_media::{MediaAsset, MediaAssetKind};
 use lianli_shared::config::ConfigKey;

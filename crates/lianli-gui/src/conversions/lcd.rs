@@ -149,7 +149,7 @@ pub fn lcd_entries_to_model(
                 if let Some(tpl) = templates.iter().find(|t| &t.id == tid) {
                     entry.template_name = SharedString::from(tpl.name.as_str());
                     if let Some(path) =
-                        lianli_shared::template_catalog::template_preview_path(&tpl.id)
+                        lianli_shared::template::catalog::template_preview_path(&tpl.id)
                     {
                         if path.exists() {
                             if let Ok(img) = slint::Image::load_from_path(&path) {

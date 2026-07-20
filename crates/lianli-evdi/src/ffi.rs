@@ -3,7 +3,7 @@
 
 #![allow(non_camel_case_types, dead_code)]
 
-use std::os::raw::{c_char, c_int, c_uint, c_void};
+use std::os::raw::{c_int, c_uint, c_void};
 
 pub enum evdi_device_context {}
 pub type evdi_handle = *mut evdi_device_context;
@@ -124,15 +124,6 @@ extern "C" {
     pub fn evdi_handle_events(handle: evdi_handle, evtctx: *mut evdi_event_context);
     pub fn evdi_get_event_ready(handle: evdi_handle) -> evdi_selectable;
     pub fn evdi_get_lib_version(version: *mut evdi_lib_version);
-    #[allow(dead_code)]
-    pub fn evdi_enable_cursor_events(handle: evdi_handle, enable: bool);
-    #[allow(dead_code)]
-    pub fn Xorg_running() -> bool;
-    #[allow(dead_code)]
-    pub fn evdi_open_attached_to_fixed(
-        sysfs_parent_device: *const c_char,
-        length: usize,
-    ) -> evdi_handle;
     pub fn evdi_ddcci_response(
         handle: evdi_handle,
         buffer: *const u8,
