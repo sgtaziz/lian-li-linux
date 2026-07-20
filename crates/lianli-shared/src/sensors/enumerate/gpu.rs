@@ -63,10 +63,7 @@ pub fn enumerate_nvidia(sensors: &mut Vec<SensorInfo>) {
 /// Walks `/sys/class/drm/cardN/device/gpu_busy_percent` and filters by vendor
 /// `0x1002` (AMD). Names come from the pre-computed `gpu_names` map (keyed by
 /// PCI ID with the `0000:` prefix stripped).
-pub fn enumerate_amd(
-    gpu_names: &HashMap<String, String>,
-    sensors: &mut Vec<SensorInfo>,
-) {
+pub fn enumerate_amd(gpu_names: &HashMap<String, String>, sensors: &mut Vec<SensorInfo>) {
     let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
         return;
     };

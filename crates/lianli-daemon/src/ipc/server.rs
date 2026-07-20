@@ -220,9 +220,7 @@ fn handle_request(
             swap_lr,
             swap_tb,
         } => super::rgb::set_fan_direction(state, device_id, zone, swap_lr, swap_tb),
-        IpcRequest::SetRgbConfig { config } => {
-            super::config::set_rgb_config(state, tx, config)
-        }
+        IpcRequest::SetRgbConfig { config } => super::config::set_rgb_config(state, tx, config),
 
         IpcRequest::SwitchDisplayMode { device_id } => {
             super::lcd::switch_display_mode(state, tx, device_id)
@@ -237,9 +235,7 @@ fn handle_request(
         } => super::fan::set_ene6k77_fan_quantity(tx, device_id, quantity),
 
         IpcRequest::GetLcdTemplates => super::templates::get(state),
-        IpcRequest::SetLcdTemplates { templates } => {
-            super::templates::set(state, tx, templates)
-        }
+        IpcRequest::SetLcdTemplates { templates } => super::templates::set(state, tx, templates),
         IpcRequest::RenderTemplatePreview {
             template,
             width,

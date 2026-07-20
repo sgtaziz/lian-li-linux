@@ -177,13 +177,8 @@ fn apply_config_and_leds(
             }
         }
     }
-    if let Err(e) = super::write_config(
-        &state.config_path,
-        state.config.as_ref().unwrap(),
-    ) {
-        return Err(IpcResponse::error(format!(
-            "failed to write config: {e}"
-        )));
+    if let Err(e) = super::write_config(&state.config_path, state.config.as_ref().unwrap()) {
+        return Err(IpcResponse::error(format!("failed to write config: {e}")));
     }
 
     // 2. Push per-LED colors to the live RGB controller.
@@ -211,11 +206,7 @@ fn apply_config_and_leds(
 }
 
 /// Persist the preset list and send an `IpcUpdate` event.
-fn save_and_notify(
-    state: &mut DaemonState,
-    tx: &Sender<DaemonEvent>,
-    name: &str,
-) -> IpcResponse {
+fn save_and_notify(state: &mut DaemonState, tx: &Sender<DaemonEvent>, name: &str) -> IpcResponse {
     match super::write_rgb_presets(&state.presets_path, &state.rgb_presets) {
         Ok(()) => {
             let _ = tx.send(DaemonEvent::IpcUpdate);

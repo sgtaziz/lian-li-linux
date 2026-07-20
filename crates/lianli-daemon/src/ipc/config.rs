@@ -5,10 +5,10 @@
 use std::sync::mpsc::Sender;
 
 use lianli_shared::config::AppConfig;
+use lianli_shared::config::LcdConfig;
 use lianli_shared::fan::{FanConfig, FanGroup, FanSpeed};
 use lianli_shared::ipc::IpcResponse;
 use lianli_shared::rgb::RgbAppConfig;
-use lianli_shared::config::LcdConfig;
 use tracing::debug;
 
 use crate::ipc::{persist_and_notify, SharedState};
@@ -22,7 +22,11 @@ pub fn set_lcd_media(
 ) -> IpcResponse {
     let mut state = state.lock();
     let app_config = state.config.get_or_insert_with(AppConfig::default);
-    if let Some(lcd) = app_config.lcds.iter_mut().find(|l| l.device_id() == device_id) {
+    if let Some(lcd) = app_config
+        .lcds
+        .iter_mut()
+        .find(|l| l.device_id() == device_id)
+    {
         *lcd = config;
     } else {
         app_config.lcds.push(config);

@@ -253,8 +253,7 @@ impl ActiveTarget {
         custom_h264: bool,
         tx: Option<Sender<DaemonEvent>>,
     ) -> Self {
-        let media =
-            make_frame_source(Arc::clone(&asset), tx.clone(), &lcd, &screen, custom_h264);
+        let media = make_frame_source(Arc::clone(&asset), tx.clone(), &lcd, &screen, custom_h264);
         let recovery_stop = Arc::new(AtomicBool::new(false));
         let recovery_thread = match &lcd {
             LcdBackend::HidLcd(d) => {
@@ -326,9 +325,7 @@ impl ActiveTarget {
         // H.264 / autonomous sources: kick off streaming on the first call,
         // then short-circuit (their threads push frames directly to the LCD).
         if self.media.is_autonomous() {
-            self.media
-                .start(&self.lcd)
-                .map_err(SendError::Other)?;
+            self.media.start(&self.lcd).map_err(SendError::Other)?;
             return Ok(true);
         }
 
@@ -564,7 +561,9 @@ fn make_frame_source(
                 sent_index: 0,
             })
         }
-        MediaAssetKind::Sensor { asset: sensor_asset } => {
+        MediaAssetKind::Sensor {
+            asset: sensor_asset,
+        } => {
             if screen.h264 && matches!(lcd, LcdBackend::WinUsb(_) | LcdBackend::HidLcd(_)) {
                 match AsyncSensorH264Renderer::new(Arc::clone(sensor_asset), lcd, screen) {
                     Ok(renderer) => {
@@ -591,10 +590,12 @@ fn make_frame_source(
                 sent_index: 0,
             })
         }
-        MediaAssetKind::H264Stream { path, looping, fps, .. } => {
-            Box::new(H264FileSource::new(path.clone(), *looping, *fps))
-        }
-        MediaAssetKind::Custom { asset: custom_asset } => {
+        MediaAssetKind::H264Stream {
+            path, looping, fps, ..
+        } => Box::new(H264FileSource::new(path.clone(), *looping, *fps)),
+        MediaAssetKind::Custom {
+            asset: custom_asset,
+        } => {
             if custom_h264 && screen.h264 {
                 if matches!(lcd, LcdBackend::WinUsb(_) | LcdBackend::HidLcd(_)) {
                     match AsyncCustomH264Renderer::new(
@@ -667,7 +668,6 @@ fn stream_h264_file_to_hid(
         }
     }
 }
-
 
 pub(super) enum SendError {
     Usb(lianli_transport::TransportError),

@@ -176,8 +176,9 @@ impl RusbHid {
         let ep_in = ins.first().copied();
         let ep_out = outs.first().copied();
 
-        let ep_in = ep_in
-            .ok_or_else(|| TransportError::Other("RusbHid: no interrupt IN endpoint found".into()))?;
+        let ep_in = ep_in.ok_or_else(|| {
+            TransportError::Other("RusbHid: no interrupt IN endpoint found".into())
+        })?;
 
         if ep_out.is_some() {
             debug!(
@@ -256,8 +257,7 @@ impl RusbHid {
             .reopener
             .clone()
             .ok_or_else(|| TransportError::Other("no reopener configured".into()))?;
-        let replacement = reopener()
-            .map_err(|e| TransportError::Other(format!("reopen: {e}")))?;
+        let replacement = reopener().map_err(|e| TransportError::Other(format!("reopen: {e}")))?;
         *self = replacement;
         Ok(())
     }
@@ -289,7 +289,14 @@ impl RusbHid {
                 let report_id = data.first().copied().unwrap_or(0) as u16;
                 let w_value = (0x03u16 << 8) | report_id;
                 s.handle
-                    .write_control(0x21, 0x09, w_value, s.iface as u16, data, Duration::from_millis(5000))
+                    .write_control(
+                        0x21,
+                        0x09,
+                        w_value,
+                        s.iface as u16,
+                        data,
+                        Duration::from_millis(5000),
+                    )
                     .map_err(TransportError::from)
             },
             "send_feature_report",
@@ -302,7 +309,14 @@ impl RusbHid {
                 let report_id = buf.first().copied().unwrap_or(0) as u16;
                 let w_value = (0x03u16 << 8) | report_id;
                 s.handle
-                    .read_control(0xA1, 0x01, w_value, s.iface as u16, buf, Duration::from_millis(5000))
+                    .read_control(
+                        0xA1,
+                        0x01,
+                        w_value,
+                        s.iface as u16,
+                        buf,
+                        Duration::from_millis(5000),
+                    )
                     .map_err(TransportError::from)
             },
             "get_feature_report",
@@ -315,7 +329,14 @@ impl RusbHid {
                 let report_id = buf.first().copied().unwrap_or(0) as u16;
                 let w_value = (0x01u16 << 8) | report_id;
                 s.handle
-                    .read_control(0xA1, 0x01, w_value, s.iface as u16, buf, Duration::from_millis(5000))
+                    .read_control(
+                        0xA1,
+                        0x01,
+                        w_value,
+                        s.iface as u16,
+                        buf,
+                        Duration::from_millis(5000),
+                    )
                     .map_err(TransportError::from)
             },
             "get_input_report",
@@ -336,7 +357,14 @@ impl RusbHid {
                     let report_type: u16 = 0x02;
                     let w_value = (report_type << 8) | report_id;
                     s.handle
-                        .write_control(0x21, 0x09, w_value, s.iface as u16, data, Duration::from_millis(5000))
+                        .write_control(
+                            0x21,
+                            0x09,
+                            w_value,
+                            s.iface as u16,
+                            data,
+                            Duration::from_millis(5000),
+                        )
                         .map_err(TransportError::from)
                 }
             },
@@ -344,7 +372,11 @@ impl RusbHid {
         )
     }
 
-    pub fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, TransportError> {
+    pub fn read_timeout(
+        &mut self,
+        buf: &mut [u8],
+        timeout_ms: i32,
+    ) -> Result<usize, TransportError> {
         self.with_reopen(
             |s| {
                 // timeout_ms semantics (matching hidapi):

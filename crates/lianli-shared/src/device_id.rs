@@ -449,12 +449,8 @@ impl DeviceFamily {
     pub const fn capabilities(self) -> DeviceCapabilities {
         match self {
             // Wired HID fan controllers.
-            Self::Ene6k77 => {
-                DeviceCapabilities::FAN.or(DeviceCapabilities::RGB)
-            }
-            Self::TlFan => {
-                DeviceCapabilities::FAN.or(DeviceCapabilities::RGB)
-            }
+            Self::Ene6k77 => DeviceCapabilities::FAN.or(DeviceCapabilities::RGB),
+            Self::TlFan => DeviceCapabilities::FAN.or(DeviceCapabilities::RGB),
             Self::StrimerPlus => DeviceCapabilities::RGB,
 
             // Wired HID AIOs (fans + pump + RGB; LCD on HydroShift/Galahad2 LCD).
@@ -500,10 +496,7 @@ impl DeviceFamily {
             Self::Slv3Lcd | Self::Tlv2Lcd => DeviceCapabilities::FAN
                 .or(DeviceCapabilities::LCD)
                 .or(DeviceCapabilities::RGB),
-            Self::Slv3Led
-            | Self::Tlv2Led
-            | Self::SlInf
-            | Self::Clv1 => {
+            Self::Slv3Led | Self::Tlv2Led | Self::SlInf | Self::Clv1 => {
                 DeviceCapabilities::FAN.or(DeviceCapabilities::RGB)
             }
             Self::WirelessAio => DeviceCapabilities::FAN
@@ -598,14 +591,16 @@ impl DeviceFamily {
     /// `true` if this is the RF dongle (TX/RX).
     #[inline]
     pub fn is_wireless_dongle(self) -> bool {
-        self.capabilities().contains(DeviceCapabilities::WIRELESS_DONGLE)
+        self.capabilities()
+            .contains(DeviceCapabilities::WIRELESS_DONGLE)
     }
 
     /// Whether this device is in desktop/display mode (CH340 firmware).
     /// These devices can be switched back to LCD mode via a button in the GUI.
     #[inline]
     pub fn is_desktop_mode(self) -> bool {
-        self.capabilities().contains(DeviceCapabilities::DESKTOP_MODE)
+        self.capabilities()
+            .contains(DeviceCapabilities::DESKTOP_MODE)
     }
 
     /// Whether this device supports switching to desktop mode.
@@ -669,10 +664,7 @@ mod tests {
             assert_eq!(family.has_fan(), caps.contains(DeviceCapabilities::FAN));
             assert_eq!(family.has_pump(), caps.contains(DeviceCapabilities::PUMP));
             assert_eq!(family.has_rgb(), caps.contains(DeviceCapabilities::RGB));
-            assert_eq!(
-                family.is_aio(),
-                caps.contains(DeviceCapabilities::AIO)
-            );
+            assert_eq!(family.is_aio(), caps.contains(DeviceCapabilities::AIO));
             assert_eq!(
                 family.is_wireless_dongle(),
                 caps.contains(DeviceCapabilities::WIRELESS_DONGLE)

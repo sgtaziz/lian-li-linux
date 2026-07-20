@@ -20,8 +20,7 @@ pub fn write_json<T: serde::Serialize + ?Sized>(path: &Path, value: &T) -> Resul
     }
     let json = serde_json::to_string_pretty(value)?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json)
-        .with_context(|| format!("writing tmp file {}", tmp.display()))?;
+    fs::write(&tmp, json).with_context(|| format!("writing tmp file {}", tmp.display()))?;
     fs::rename(&tmp, path)
         .with_context(|| format!("renaming {} -> {}", tmp.display(), path.display()))?;
     Ok(())

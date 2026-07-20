@@ -26,7 +26,12 @@ impl AioLcdFirmwareTracker {
     }
 
     /// Schedule a deferred firmware read for `device_id` after `delay`.
-    pub fn schedule(&mut self, device_id: impl Into<String>, delay: std::time::Duration, enable_512: bool) {
+    pub fn schedule(
+        &mut self,
+        device_id: impl Into<String>,
+        delay: std::time::Duration,
+        enable_512: bool,
+    ) {
         self.pending
             .insert(device_id.into(), (Instant::now() + delay, enable_512));
     }
@@ -42,8 +47,14 @@ impl AioLcdFirmwareTracker {
     }
 
     /// Record a successful firmware read.
-    pub fn record(&mut self, device_id: impl Into<String>, firmware: Option<String>, supports_c_command: bool) {
-        self.info.insert(device_id.into(), (firmware, supports_c_command));
+    pub fn record(
+        &mut self,
+        device_id: impl Into<String>,
+        firmware: Option<String>,
+        supports_c_command: bool,
+    ) {
+        self.info
+            .insert(device_id.into(), (firmware, supports_c_command));
     }
 
     /// Look up the firmware + C-command support for a device.

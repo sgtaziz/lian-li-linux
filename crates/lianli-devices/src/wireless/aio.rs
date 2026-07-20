@@ -71,11 +71,7 @@ impl WirelessController {
     }
 }
 
-fn send_rf_frame_via(
-    handle: &RusbBulk,
-    device: &DiscoveredDevice,
-    rf_data: &[u8],
-) -> Result<()> {
+fn send_rf_frame_via(handle: &RusbBulk, device: &DiscoveredDevice, rf_data: &[u8]) -> Result<()> {
     assert_eq!(rf_data.len(), RF_DATA_SIZE);
     for chunk_idx in 0..RF_CHUNKS as u8 {
         let mut packet = vec![0u8; 64];

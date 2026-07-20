@@ -13,9 +13,9 @@ use std::thread::JoinHandle;
 
 use parking_lot::Mutex;
 
+use crate::controllers::rgb::{DirectColorBuffer, RgbController};
 use crate::ipc::DaemonState;
 use crate::openrgb_server;
-use crate::controllers::rgb::{DirectColorBuffer, RgbController};
 use lianli_shared::ipc::DeviceInfo;
 use lianli_transport::RusbHid;
 

@@ -508,4 +508,3 @@ fn smoothed_temperature(
         .copied()
         .context("no valid temperature readings yet")
 }
-

@@ -1,9 +1,9 @@
 use super::{DaemonEvent, ServiceManager};
 use crate::controllers::aio::AioController;
 use crate::controllers::fan::FanController;
+use crate::controllers::rgb::RgbController;
 use crate::openrgb_server;
 use crate::persistence;
-use crate::controllers::rgb::RgbController;
 use crate::template_store;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::enumerate_devices;
@@ -140,7 +140,9 @@ impl ServiceManager {
         let removed = self.registry.last_wired_ids.difference(&current).count();
         info!("Wired device topology changed (+{added} -{removed}): re-initializing");
 
-        self.registry.hid_backends.retain(|k, _| current.contains(k));
+        self.registry
+            .hid_backends
+            .retain(|k, _| current.contains(k));
         self.init_wired_devices();
         self.start_fan_control();
         self.registry.last_wired_ids = current;
@@ -207,7 +209,10 @@ impl ServiceManager {
                         &mut wired_rgb,
                     );
                 }
-                Err(e) => warn!("Failed to open {} ({:04x}:{:04x}): {e}", det.name, det.vid, det.pid),
+                Err(e) => warn!(
+                    "Failed to open {} ({:04x}:{:04x}): {e}",
+                    det.name, det.vid, det.pid
+                ),
             }
         }
 
@@ -322,7 +327,8 @@ impl ServiceManager {
         };
 
         let serial = self
-            .registry.fan_device_info
+            .registry
+            .fan_device_info
             .iter()
             .find(|d| d.device_id == device_id)
             .and_then(|d| d.serial.clone());
@@ -470,11 +476,12 @@ impl ServiceManager {
             ));
             // Start the async writer thread that flushes buffered colors at 30fps
             if self.controllers.direct_color_writer.is_none() {
-                self.controllers.direct_color_writer = Some(crate::controllers::rgb::start_direct_color_writer(
-                    Arc::clone(rgb),
-                    Arc::clone(&self.controllers.direct_color_buffer),
-                    Arc::clone(&self.openrgb.stop),
-                ));
+                self.controllers.direct_color_writer =
+                    Some(crate::controllers::rgb::start_direct_color_writer(
+                        Arc::clone(rgb),
+                        Arc::clone(&self.controllers.direct_color_buffer),
+                        Arc::clone(&self.openrgb.stop),
+                    ));
             }
         }
     }

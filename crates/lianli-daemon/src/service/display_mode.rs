@@ -34,7 +34,8 @@ impl ServiceManager {
         } else {
             info!("No active LCD target for {device_id}, opening temporary connection");
             let det = self
-                .registry.cached_usb_devices
+                .registry
+                .cached_usb_devices
                 .iter()
                 .find(|d| d.device_id == *device_id);
             if let Some(det) = det {

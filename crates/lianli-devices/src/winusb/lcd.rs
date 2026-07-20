@@ -53,8 +53,7 @@ impl WinUsbLcdDevice {
             .and_then(|h| h.read_serial_number_string_ascii(&desc))
             .unwrap_or_else(|_| format!("bus{bus}-addr{address}"));
 
-        let mut transport =
-            RusbBulk::open_device(device).context("opening WinUSB LCD device")?;
+        let mut transport = RusbBulk::open_device(device).context("opening WinUSB LCD device")?;
         transport
             .detach_and_configure(name)
             .context("configuring WinUSB LCD device")?;
@@ -623,10 +622,26 @@ fn screen_for_pid(
     use lianli_shared::device_id::DeviceFamily;
     use lianli_shared::screen::ScreenInfo;
     match pid {
-        0xA021 => Some((ScreenInfo::HYDROSHIFT2, DeviceFamily::HydroShift2Lcd, "HydroShift II LCD Circle")),
-        0xA034 => Some((ScreenInfo::HYDROSHIFT2, DeviceFamily::HydroShift2Lcd, "HydroShift II LCD Square")),
-        0xA065 => Some((ScreenInfo::LANCOOL_207, DeviceFamily::Lancool207, "Lancool 207 Digital")),
-        0xA088 => Some((ScreenInfo::UNIVERSAL_SCREEN, DeviceFamily::UniversalScreen, "Universal Screen 8.8\"")),
+        0xA021 => Some((
+            ScreenInfo::HYDROSHIFT2,
+            DeviceFamily::HydroShift2Lcd,
+            "HydroShift II LCD Circle",
+        )),
+        0xA034 => Some((
+            ScreenInfo::HYDROSHIFT2,
+            DeviceFamily::HydroShift2Lcd,
+            "HydroShift II LCD Square",
+        )),
+        0xA065 => Some((
+            ScreenInfo::LANCOOL_207,
+            DeviceFamily::Lancool207,
+            "Lancool 207 Digital",
+        )),
+        0xA088 => Some((
+            ScreenInfo::UNIVERSAL_SCREEN,
+            DeviceFamily::UniversalScreen,
+            "Universal Screen 8.8\"",
+        )),
         _ => None,
     }
 }

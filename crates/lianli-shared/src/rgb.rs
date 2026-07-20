@@ -239,9 +239,9 @@ impl RgbMode {
             | DeviceFamily::SlInf
             | DeviceFamily::Clv1 => self.to_tl_mode_byte(),
             DeviceFamily::Galahad2Trinity => self.to_galahad2_mode_byte(),
-            DeviceFamily::HydroShiftLcd
-            | DeviceFamily::Galahad2Lcd
-            | DeviceFamily::WirelessAio => self.to_hydroshift_lcd_mode_byte(),
+            DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd | DeviceFamily::WirelessAio => {
+                self.to_hydroshift_lcd_mode_byte()
+            }
             _ => None,
         }
     }
@@ -254,9 +254,9 @@ impl RgbMode {
             | DeviceFamily::SlInf
             | DeviceFamily::Clv1 => Self::from_tl_mode_byte(byte),
             DeviceFamily::Galahad2Trinity => Self::from_galahad2_mode_byte(byte),
-            DeviceFamily::HydroShiftLcd
-            | DeviceFamily::Galahad2Lcd
-            | DeviceFamily::WirelessAio => Self::from_hydroshift_lcd_mode_byte(byte),
+            DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd | DeviceFamily::WirelessAio => {
+                Self::from_hydroshift_lcd_mode_byte(byte)
+            }
             _ => None,
         }
     }
@@ -646,7 +646,9 @@ mod tests {
     #[test]
     fn tl_mode_byte_round_trip() {
         for &mode in ALL_MODES {
-            let Some(byte) = mode.to_tl_mode_byte() else { continue };
+            let Some(byte) = mode.to_tl_mode_byte() else {
+                continue;
+            };
             let back = RgbMode::from_tl_mode_byte(byte).expect("inverse missing");
             assert_eq!(back, mode, "tl mode byte round trip failed for {:?}", mode);
         }
@@ -655,7 +657,9 @@ mod tests {
     #[test]
     fn galahad2_mode_byte_round_trip() {
         for &mode in ALL_MODES {
-            let Some(byte) = mode.to_galahad2_mode_byte() else { continue };
+            let Some(byte) = mode.to_galahad2_mode_byte() else {
+                continue;
+            };
             let back = RgbMode::from_galahad2_mode_byte(byte).expect("inverse missing");
             assert_eq!(back, mode, "galahad2 byte round trip failed for {:?}", mode);
         }
@@ -664,9 +668,15 @@ mod tests {
     #[test]
     fn hydroshift_lcd_mode_byte_round_trip() {
         for &mode in ALL_MODES {
-            let Some(byte) = mode.to_hydroshift_lcd_mode_byte() else { continue };
+            let Some(byte) = mode.to_hydroshift_lcd_mode_byte() else {
+                continue;
+            };
             let back = RgbMode::from_hydroshift_lcd_mode_byte(byte).expect("inverse missing");
-            assert_eq!(back, mode, "hydroshift byte round trip failed for {:?}", mode);
+            assert_eq!(
+                back, mode,
+                "hydroshift byte round trip failed for {:?}",
+                mode
+            );
         }
     }
 

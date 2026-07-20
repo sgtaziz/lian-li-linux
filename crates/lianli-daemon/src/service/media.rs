@@ -1,8 +1,6 @@
 use super::runtime::{ActiveTarget, LcdBackend, ThreadedWinUsbSender};
 use super::{DaemonEvent, ServiceManager};
-use lianli_devices::detect::{
-    create_hid_lcd_device, enumerate_devices, open_hid_lcd_device,
-};
+use lianli_devices::detect::{create_hid_lcd_device, enumerate_devices, open_hid_lcd_device};
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
 use lianli_media::{prepare_media_asset, MediaAsset};
 use lianli_shared::config::{config_identity, ConfigKey, LcdConfig};
@@ -240,7 +238,8 @@ impl ServiceManager {
                     | DeviceFamily::Galahad2Lcd
                     | DeviceFamily::TlLcd => {
                         // Try to reuse a shared HID backend (opened by init_rgb_controller).
-                        if let Some(backend) = self.registry.hid_backends.get(&candidate.device_id) {
+                        if let Some(backend) = self.registry.hid_backends.get(&candidate.device_id)
+                        {
                             match create_hid_lcd_device(
                                 candidate.family,
                                 candidate.pid,

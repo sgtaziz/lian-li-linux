@@ -114,9 +114,7 @@ pub fn set_led_color(
         let mut colors = match rgb.get_zone_colors(&device_id, zone) {
             Some(c) => c,
             None => {
-                return IpcResponse::error(format!(
-                    "zone {zone} not found on device {device_id}"
-                ));
+                return IpcResponse::error(format!("zone {zone} not found on device {device_id}"));
             }
         };
         let idx = led_index as usize;
@@ -142,9 +140,7 @@ pub fn get_zone_colors(state: &SharedState, device_id: String, zone: u8) -> IpcR
         let rgb = rgb.lock();
         match rgb.get_zone_colors(&device_id, zone) {
             Some(colors) => IpcResponse::ok(&colors),
-            None => IpcResponse::error(format!(
-                "zone {zone} not found on device {device_id}"
-            )),
+            None => IpcResponse::error(format!("zone {zone} not found on device {device_id}")),
         }
     } else {
         IpcResponse::error("RGB controller not initialized")

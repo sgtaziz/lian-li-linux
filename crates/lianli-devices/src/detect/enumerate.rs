@@ -63,19 +63,16 @@ pub fn enumerate_devices() -> Result<Vec<DetectedDevice>> {
 /// iSerial across daisy-chained devices, so they cannot be told apart by
 /// serial alone — we open each one and read its `(port, index)` identity
 /// record to disambiguate.
-pub fn probe_tl_lcd_port_indices_rusb(
-    devices: &[DetectedDevice],
-) -> HashMap<String, (u8, u8)> {
+pub fn probe_tl_lcd_port_indices_rusb(devices: &[DetectedDevice]) -> HashMap<String, (u8, u8)> {
     let mut out = HashMap::new();
     for det in devices.iter().filter(|d| d.family == DeviceFamily::TlLcd) {
-        let transport =
-            match RusbHid::open_by_usage(det.device.clone(), det.hid_usage_page) {
-                Ok(t) => t,
-                Err(e) => {
-                    warn!("TL LCD rusb open failed for {}: {e:#}", det.device_id());
-                    continue;
-                }
-            };
+        let transport = match RusbHid::open_by_usage(det.device.clone(), det.hid_usage_page) {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("TL LCD rusb open failed for {}: {e:#}", det.device_id());
+                continue;
+            }
+        };
         let backend = Arc::new(Mutex::new(transport));
         let tl = crate::tl_lcd::TlLcdDevice::new(backend);
         match tl.read_identity_raw() {

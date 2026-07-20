@@ -52,7 +52,8 @@ pub fn switch_to_lcd_mode(pid: u16) -> Result<()> {
     } else {
         SWITCH_TO_LCD
     };
-    hid.write(payload).context("sending LCD mode switch bytes")?;
+    hid.write(payload)
+        .context("sending LCD mode switch bytes")?;
 
     info!("Sent LCD mode switch to {SWITCHER_VID:#06x}:{pid:#06x} — device will reboot");
     Ok(())
