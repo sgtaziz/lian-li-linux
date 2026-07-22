@@ -165,13 +165,13 @@ impl crate::registry::DeviceDriver for HydroShiftLcdDriver {
             transport_kind: lianli_shared::device_id::TransportKind::Hid,
             model_name: variant.name().to_string(),
             firmware,
-            fan: Some(Box::new(lcd_arc)),
+            fan: Some(Box::new(std::sync::Arc::clone(&lcd_arc))),
             lcd: None,
             rgb: vec![(
                 String::new(),
                 Box::new(rgb_ctrl) as Box<dyn crate::traits::RgbDevice>,
             )],
-            aio: None,
+            aio: Some(Box::new(lcd_arc)),
             shared_hid: Some(backend),
         })
     }

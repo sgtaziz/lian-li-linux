@@ -89,6 +89,7 @@ pub struct Galahad2TrinityController {
     model: Galahad2TrinityModel,
     handshake_cache: Mutex<Option<(Galahad2Handshake, Instant)>>,
     mb_sync: AtomicBool,
+    firmware_version: Mutex<Option<String>>,
 }
 
 const HANDSHAKE_REFRESH: Duration = Duration::from_millis(500);
@@ -103,6 +104,7 @@ impl Galahad2TrinityController {
             model,
             handshake_cache: Mutex::new(None),
             mb_sync: AtomicBool::new(false),
+            firmware_version: Mutex::new(None),
         };
 
         ctrl.initialize()?;
@@ -120,7 +122,10 @@ impl Galahad2TrinityController {
         );
 
         match self.read_firmware(INIT_READ_TIMEOUT_MS) {
-            Ok(fw) => info!("  Firmware: {fw}"),
+            Ok(fw) => {
+                info!("  Firmware: {fw}");
+                *self.firmware_version.lock() = Some(fw);
+            }
             Err(e) => warn!("  Failed to read firmware: {e}"),
         }
 
@@ -211,6 +216,10 @@ impl Galahad2TrinityController {
 
     pub fn model(&self) -> Galahad2TrinityModel {
         self.model
+    }
+
+    pub fn firmware_str(&self) -> Option<String> {
+        self.firmware_version.lock().clone()
     }
 
     /// Set pump LED effect.
@@ -531,20 +540,21 @@ impl crate::registry::DeviceDriver for Galahad2TrinityDriver {
         )?;
         let ctrl = std::sync::Arc::new(Galahad2TrinityController::new(backend.clone(), ctx.pid)?);
         let model = ctrl.model().name().to_string();
+        let firmware = ctrl.firmware_str();
         Ok(crate::registry::OpenedDevice {
             id: ctx.device_id(),
             family: lianli_shared::device_id::DeviceFamily::Galahad2Trinity,
             capabilities: lianli_shared::device_id::DeviceFamily::Galahad2Trinity.capabilities(),
             transport_kind: lianli_shared::device_id::TransportKind::Hid,
             model_name: model,
-            firmware: None,
+            firmware,
             fan: Some(Box::new(std::sync::Arc::clone(&ctrl))),
             lcd: None,
             rgb: vec![(
                 String::new(),
-                Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
+                Box::new(ctrl.clone()) as Box<dyn crate::traits::RgbDevice>,
             )],
-            aio: None,
+            aio: Some(Box::new(ctrl)),
             shared_hid: Some(backend),
         })
     }

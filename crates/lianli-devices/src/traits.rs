@@ -161,6 +161,15 @@ pub trait AioDevice: FanDevice {
     fn read_coolant_temp(&self) -> Result<f32>;
 }
 
+impl<T: AioDevice> AioDevice for std::sync::Arc<T> {
+    fn read_pump_rpm(&self) -> Result<u16> {
+        (**self).read_pump_rpm()
+    }
+    fn read_coolant_temp(&self) -> Result<f32> {
+        (**self).read_coolant_temp()
+    }
+}
+
 /// A device that can control RGB/LED effects.
 ///
 /// Two control modes:
