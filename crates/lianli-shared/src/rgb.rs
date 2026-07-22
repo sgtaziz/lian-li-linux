@@ -79,6 +79,16 @@ pub enum RgbMode {
     Groove,
     Tunnel,
     BreathingRainbow,
+    // Strimer Plus modes
+    Snooker,
+    BlowUp,
+    ShockWave,
+    BulletStack,
+    Drizzling,
+    FadeOut,
+    ColorTransfer,
+    CrossOver,
+    Parallel,
 }
 
 impl RgbMode {
@@ -358,6 +368,15 @@ impl RgbMode {
             Self::Groove => "Groove",
             Self::Tunnel => "Tunnel",
             Self::BreathingRainbow => "Breathing Rainbow",
+            Self::Snooker => "Snooker",
+            Self::BlowUp => "Blow Up",
+            Self::ShockWave => "Shock Wave",
+            Self::BulletStack => "Bullet Stack",
+            Self::Drizzling => "Drizzling",
+            Self::FadeOut => "Fade Out",
+            Self::ColorTransfer => "Color Transfer",
+            Self::CrossOver => "Cross Over",
+            Self::Parallel => "Parallel",
         }
     }
 
@@ -439,6 +458,15 @@ impl RgbMode {
             "Groove" => Self::Groove,
             "Tunnel" => Self::Tunnel,
             "Breathing Rainbow" => Self::BreathingRainbow,
+            "Snooker" => Self::Snooker,
+            "Blow Up" => Self::BlowUp,
+            "Shock Wave" => Self::ShockWave,
+            "Bullet Stack" => Self::BulletStack,
+            "Drizzling" => Self::Drizzling,
+            "Fade Out" => Self::FadeOut,
+            "Color Transfer" => Self::ColorTransfer,
+            "Cross Over" => Self::CrossOver,
+            "Parallel" => Self::Parallel,
             _ => return None,
         })
     }
@@ -718,6 +746,15 @@ mod tests {
         RgbMode::Groove,
         RgbMode::Tunnel,
         RgbMode::BreathingRainbow,
+        RgbMode::Snooker,
+        RgbMode::BlowUp,
+        RgbMode::ShockWave,
+        RgbMode::BulletStack,
+        RgbMode::Drizzling,
+        RgbMode::FadeOut,
+        RgbMode::ColorTransfer,
+        RgbMode::CrossOver,
+        RgbMode::Parallel,
     ];
 
     #[test]
