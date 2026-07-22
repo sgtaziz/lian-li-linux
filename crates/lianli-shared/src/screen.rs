@@ -50,7 +50,11 @@ impl ScreenInfo {
         max_fps: 24,
         jpeg_quality: 85,
         max_payload: 153_600,
-        h264: true,
+        // Live H.264 disabled: the WinUsb live-pipe path (stream_h264_reader)
+        // emits variable-size StartPlay chunks instead of the fixed 202_752-byte
+        // chunks the firmware expects (C# WinUsb.cs:369). File-based H.264 still
+        // works — it uses the correct fixed-chunk path (stream_h264).
+        h264: false,
         needs_keepalive: false,
     };
 
@@ -64,31 +68,15 @@ impl ScreenInfo {
         needs_keepalive: false,
     };
 
-    pub const LANCOOL_207_H264: Self = Self {
-        width: 720,
-        height: 1472,
-        max_fps: 30,
-        jpeg_quality: 95,
-        max_payload: 512_000,
-        h264: true,
-        needs_keepalive: false,
-    };
-
     pub const UNIVERSAL_SCREEN: Self = Self {
         width: 480,
         height: 1920,
         max_fps: 30,
         jpeg_quality: 95,
         max_payload: 512_000,
-        h264: true,
+        h264: false,
         needs_keepalive: false,
     };
-}
-
-fn lancool207_h264_enabled() -> bool {
-    std::env::var("LIANLI_LANCOOL207_H264")
-        .map(|v| v != "0" && !v.is_empty())
-        .unwrap_or(false)
 }
 
 /// Get the screen info for a given device family.
@@ -99,11 +87,7 @@ pub fn screen_info_for(family: DeviceFamily) -> Option<ScreenInfo> {
         DeviceFamily::TlLcd => Some(ScreenInfo::TLLCD),
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => Some(ScreenInfo::AIO_LCD_480),
         DeviceFamily::HydroShift2Lcd => Some(ScreenInfo::HYDROSHIFT2),
-        DeviceFamily::Lancool207 => Some(if lancool207_h264_enabled() {
-            ScreenInfo::LANCOOL_207_H264
-        } else {
-            ScreenInfo::LANCOOL_207
-        }),
+        DeviceFamily::Lancool207 => Some(ScreenInfo::LANCOOL_207),
         DeviceFamily::UniversalScreen => Some(ScreenInfo::UNIVERSAL_SCREEN),
         _ => None,
     }

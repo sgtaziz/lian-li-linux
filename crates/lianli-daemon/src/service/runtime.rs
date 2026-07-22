@@ -66,10 +66,6 @@ impl LcdBackend {
         fps: f32,
     ) -> anyhow::Result<Option<JoinHandle<()>>> {
         match self {
-            Self::WinUsb(sender) => {
-                sender.stream_h264_reader(stdout, fps)?;
-                Ok(None)
-            }
             Self::HidLcd(lcd) => {
                 let lcd = Arc::clone(lcd);
                 let mut stdout = stdout;
@@ -94,7 +90,6 @@ enum LcdThreadMsg {
         looping: bool,
         fps: f32,
     },
-    StreamH264Reader(ChildStdout, f32),
     SwitchDesktop(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     Stop,
 }
@@ -128,12 +123,6 @@ impl ThreadedWinUsbSender {
                             warn!("LCD[{index}] h264 stream error: {e}");
                         }
                     }
-                    LcdThreadMsg::StreamH264Reader(mut stdout, fps) => {
-                        stop_clone.store(false, Ordering::Relaxed);
-                        if let Err(e) = device.stream_h264_reader(&mut stdout, &stop_clone, fps) {
-                            warn!("LCD[{index}] live h264 stream error: {e}");
-                        }
-                    }
                     LcdThreadMsg::SwitchDesktop(reply) => {
                         let result = device.switch_to_desktop_mode();
                         let _ = reply.send(result);
@@ -155,14 +144,6 @@ impl ThreadedWinUsbSender {
         self.h264_stop.store(true, Ordering::Relaxed);
         self.tx
             .send(LcdThreadMsg::StreamH264 { path, looping, fps })
-            .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
-        Ok(())
-    }
-
-    fn stream_h264_reader(&self, stdout: ChildStdout, fps: f32) -> anyhow::Result<()> {
-        self.h264_stop.store(true, Ordering::Relaxed);
-        self.tx
-            .send(LcdThreadMsg::StreamH264Reader(stdout, fps))
             .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
         Ok(())
     }
@@ -564,7 +545,7 @@ fn make_frame_source(
         MediaAssetKind::Sensor {
             asset: sensor_asset,
         } => {
-            if screen.h264 && matches!(lcd, LcdBackend::WinUsb(_) | LcdBackend::HidLcd(_)) {
+            if screen.h264 && matches!(lcd, LcdBackend::HidLcd(_)) {
                 match AsyncSensorH264Renderer::new(Arc::clone(sensor_asset), lcd, screen) {
                     Ok(renderer) => {
                         info!("Sensor mode using live h264 pipeline");
@@ -596,25 +577,23 @@ fn make_frame_source(
         MediaAssetKind::Custom {
             asset: custom_asset,
         } => {
-            if custom_h264 && screen.h264 {
-                if matches!(lcd, LcdBackend::WinUsb(_) | LcdBackend::HidLcd(_)) {
-                    match AsyncCustomH264Renderer::new(
-                        Arc::clone(custom_asset),
-                        lcd,
-                        screen,
-                        custom_asset.canvas_width(),
-                        custom_asset.canvas_height(),
-                        custom_asset.total_rotation_deg(),
-                    ) {
-                        Ok(renderer) => {
-                            info!("Custom mode using live h264 pipeline");
-                            return Box::new(CustomH264Source {
-                                renderer: Arc::new(renderer),
-                            });
-                        }
-                        Err(e) => {
-                            warn!("Custom h264 pipeline unavailable, falling back to JPEG: {e}");
-                        }
+            if custom_h264 && screen.h264 && matches!(lcd, LcdBackend::HidLcd(_)) {
+                match AsyncCustomH264Renderer::new(
+                    Arc::clone(custom_asset),
+                    lcd,
+                    screen,
+                    custom_asset.canvas_width(),
+                    custom_asset.canvas_height(),
+                    custom_asset.total_rotation_deg(),
+                ) {
+                    Ok(renderer) => {
+                        info!("Custom mode using live h264 pipeline");
+                        return Box::new(CustomH264Source {
+                            renderer: Arc::new(renderer),
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Custom h264 pipeline unavailable, falling back to JPEG: {e}");
                     }
                 }
             }

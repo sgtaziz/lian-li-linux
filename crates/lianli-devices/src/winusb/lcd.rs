@@ -210,39 +210,6 @@ impl WinUsbLcdDevice {
         Ok(())
     }
 
-    /// Stream H264 NAL bytes from any reader (pipe, file, etc) via StartPlay (0x79)
-    pub fn stream_h264_reader(
-        &mut self,
-        reader: &mut dyn std::io::Read,
-        stop: &std::sync::atomic::AtomicBool,
-        fps: f32,
-    ) -> Result<()> {
-        use std::sync::atomic::Ordering;
-
-        if !self.initialized {
-            self.do_init()?;
-        }
-
-        let mut buf = vec![0u8; Self::H264_CHUNK_SIZE];
-        let interval = chunk_interval(fps);
-        let mut next_deadline = std::time::Instant::now() + interval;
-        loop {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-            let n = reader.read(&mut buf).context("reading h264 chunk")?;
-            if n == 0 {
-                break;
-            }
-            self.send_h264_chunk(&buf[..n], false)?;
-            sleep_until(&mut next_deadline, interval);
-        }
-
-        self.transport.read_flush();
-        self.initialized = false;
-        Ok(())
-    }
-
     fn send_h264_chunk(&mut self, data: &[u8], is_last: bool) -> Result<()> {
         let header = self.builder.start_play_header_winusb(data.len(), is_last);
         let mut packet = vec![0u8; 512 + data.len()];
