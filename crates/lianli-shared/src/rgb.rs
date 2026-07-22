@@ -234,14 +234,17 @@ impl RgbMode {
     /// hardware byte (or `None` if the mode isn't supported by that family).
     pub fn mode_byte_for(self, family: DeviceFamily) -> Option<u8> {
         match family {
-            DeviceFamily::TlFan
-            | DeviceFamily::Ene6k77
-            | DeviceFamily::SlInf
-            | DeviceFamily::Clv1 => self.to_tl_mode_byte(),
+            DeviceFamily::TlFan | DeviceFamily::SlInf | DeviceFamily::Clv1 => {
+                self.to_tl_mode_byte()
+            }
             DeviceFamily::Galahad2Trinity => self.to_galahad2_mode_byte(),
             DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd | DeviceFamily::WirelessAio => {
                 self.to_hydroshift_lcd_mode_byte()
             }
+            // Ene6k77 has per-variant mode tables handled by the driver's
+            // map_mode_to_ene (single-ring vs dual-ring differ). Returning
+            // None here prevents the stale TL-table fallback from sending
+            // wrong bytes if a caller ever wires this path.
             _ => None,
         }
     }
@@ -249,10 +252,9 @@ impl RgbMode {
     /// Family-aware inverse of `mode_byte_for`.
     pub fn from_mode_byte_for(family: DeviceFamily, byte: u8) -> Option<Self> {
         match family {
-            DeviceFamily::TlFan
-            | DeviceFamily::Ene6k77
-            | DeviceFamily::SlInf
-            | DeviceFamily::Clv1 => Self::from_tl_mode_byte(byte),
+            DeviceFamily::TlFan | DeviceFamily::SlInf | DeviceFamily::Clv1 => {
+                Self::from_tl_mode_byte(byte)
+            }
             DeviceFamily::Galahad2Trinity => Self::from_galahad2_mode_byte(byte),
             DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd | DeviceFamily::WirelessAio => {
                 Self::from_hydroshift_lcd_mode_byte(byte)
@@ -684,7 +686,6 @@ mod tests {
     fn family_dispatcher_matches_direct_calls() {
         let families = [
             (DeviceFamily::TlFan, "tl"),
-            (DeviceFamily::Ene6k77, "ene"),
             (DeviceFamily::SlInf, "slinf"),
             (DeviceFamily::Clv1, "clv1"),
             (DeviceFamily::Galahad2Trinity, "galahad2"),
@@ -696,10 +697,9 @@ mod tests {
             for &mode in ALL_MODES {
                 let dispatched = mode.mode_byte_for(family);
                 let direct = match family {
-                    DeviceFamily::TlFan
-                    | DeviceFamily::Ene6k77
-                    | DeviceFamily::SlInf
-                    | DeviceFamily::Clv1 => mode.to_tl_mode_byte(),
+                    DeviceFamily::TlFan | DeviceFamily::SlInf | DeviceFamily::Clv1 => {
+                        mode.to_tl_mode_byte()
+                    }
                     DeviceFamily::Galahad2Trinity => mode.to_galahad2_mode_byte(),
                     DeviceFamily::HydroShiftLcd
                     | DeviceFamily::Galahad2Lcd
@@ -723,11 +723,13 @@ mod tests {
     #[test]
     fn family_dispatcher_returns_none_for_unsupported_families() {
         // LCD-only / RGB-only families have no mode byte table.
+        // Ene6k77 uses per-variant tables in the driver, not the shared dispatcher.
         for family in [
             DeviceFamily::TlLcd,
             DeviceFamily::UniversalScreenLighting,
             DeviceFamily::StrimerPlus,
             DeviceFamily::WirelessTx,
+            DeviceFamily::Ene6k77,
         ] {
             assert_eq!(RgbMode::Static.mode_byte_for(family), None);
             assert_eq!(RgbMode::from_mode_byte_for(family, 1), None);
