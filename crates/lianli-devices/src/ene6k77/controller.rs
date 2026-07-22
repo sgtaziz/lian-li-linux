@@ -317,7 +317,13 @@ impl Ene6k77Controller {
         let palette = self.model.palette_size();
 
         let colors = if matches!(effect.mode, RgbMode::Static | RgbMode::Breathing) {
-            expand_per_led(&effect.colors, max_fans, leds_per_fan)
+            if leds_per_fan == 12 && effect.colors.len() >= 2 {
+                // Outer-ring "colorful" expansion: 4 corners × 3 LEDs each
+                // Ref: ALFanController.cs:1087-1103
+                expand_outer_corner(&effect.colors, max_fans)
+            } else {
+                expand_per_led(&effect.colors, max_fans, leds_per_fan)
+            }
         } else {
             expand_palette(&effect.colors, max_fans, palette)
         };
@@ -604,10 +610,9 @@ impl FanDevice for Ene6k77Controller {
 }
 
 fn expand_per_led(ui: &[[u8; 3]], num_fans: usize, leds_per_fan: usize) -> Vec<[u8; 3]> {
-    let fallback = ui.last().copied().unwrap_or([0, 0, 0]);
     let mut out = vec![[0u8; 3]; num_fans * leds_per_fan];
     for fan in 0..num_fans {
-        let c = ui.get(fan).copied().unwrap_or(fallback);
+        let c = ui.get(fan).copied().unwrap_or([0, 0, 0]);
         for led in 0..leds_per_fan {
             out[fan * leds_per_fan + led] = c;
         }
@@ -616,11 +621,26 @@ fn expand_per_led(ui: &[[u8; 3]], num_fans: usize, leds_per_fan: usize) -> Vec<[
 }
 
 fn expand_palette(ui: &[[u8; 3]], num_fans: usize, palette: usize) -> Vec<[u8; 3]> {
-    let fallback = ui.last().copied().unwrap_or([0, 0, 0]);
     let mut out = vec![[0u8; 3]; num_fans * palette];
     for fan in 0..num_fans {
         for slot in 0..palette {
-            out[fan * palette + slot] = ui.get(slot).copied().unwrap_or(fallback);
+            out[fan * palette + slot] = ui.get(slot).copied().unwrap_or([0, 0, 0]);
+        }
+    }
+    out
+}
+
+/// Outer-corner expansion: 12 outer LEDs per fan split into 4 corners × 3 LEDs,
+/// each corner gets a different user color.
+/// Ref: ALFanController.cs:1087-1103 convertToOuterCornerLEDColor
+fn expand_outer_corner(ui: &[[u8; 3]], num_fans: usize) -> Vec<[u8; 3]> {
+    let mut out = vec![[0u8; 3]; num_fans * 12];
+    for fan in 0..num_fans {
+        for corner in 0..4 {
+            let c = ui.get(corner).copied().unwrap_or([0, 0, 0]);
+            for led in 0..3 {
+                out[fan * 12 + corner * 3 + led] = c;
+            }
         }
     }
     out
