@@ -5,6 +5,7 @@
 //! - [`h2_aio`] — HydroShift II AIO pump/fan controller (SyncPumpFan opcode).
 
 pub mod h2_aio;
+pub mod hs2_oled_led;
 pub mod lcd;
 pub mod led;
 pub mod wired_receiver;

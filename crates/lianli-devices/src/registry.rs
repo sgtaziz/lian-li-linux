@@ -109,6 +109,7 @@ pub static REGISTRY: &[&dyn DeviceDriver] = &[
     // The fabricated 0x11 protocol in winusb/led.rs does not match any C# path.
     &crate::strimer_plus::StrimerPlusDriver,
     &crate::winusb::wired_receiver::WiredReceiverDriver,
+    &crate::winusb::hs2_oled_led::Hs2OledLedDriver,
 ];
 
 /// Look up the driver for a given family.

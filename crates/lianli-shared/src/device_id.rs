@@ -489,6 +489,12 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         name: "HydroShift II OLED Curve",
         hid_usage_page: None,
     },
+    DeviceEntry {
+        id: UsbId::new(0x0416, 0x8051),
+        family: DeviceFamily::HydroShift2OledCurve,
+        name: "HydroShift II OLED Curve LED MCU",
+        hid_usage_page: None,
+    },
 ];
 
 impl DeviceFamily {
@@ -532,9 +538,11 @@ impl DeviceFamily {
             }
             Self::TlFlexLcd | Self::SlInfFlexLcd => DeviceCapabilities::LCD,
             Self::WiredReceiver => DeviceCapabilities::FAN.or(DeviceCapabilities::RGB),
-            Self::HydroShift2OledCurve => {
-                DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
-            }
+            Self::HydroShift2OledCurve => DeviceCapabilities::LCD
+                .or(DeviceCapabilities::FAN)
+                .or(DeviceCapabilities::PUMP)
+                .or(DeviceCapabilities::AIO)
+                .or(DeviceCapabilities::DISPLAY_MODE_SWITCH),
 
             // Desktop-mode companions (CH340 firmware) — same physical device
             // as the WinUSB LCDs above, currently in display mode.
