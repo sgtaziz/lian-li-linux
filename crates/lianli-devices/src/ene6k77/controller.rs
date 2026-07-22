@@ -348,8 +348,8 @@ impl Ene6k77Controller {
                 RgbMode::Rainbow => 5,
                 RgbMode::Runway => 26,
                 RgbMode::Meteor => 25,
-                RgbMode::Tide => 45,
-                RgbMode::Mixing => 43,
+                RgbMode::Tide => 37,
+                RgbMode::Mixing => 35,
                 _ => 1,
             }
         } else {
