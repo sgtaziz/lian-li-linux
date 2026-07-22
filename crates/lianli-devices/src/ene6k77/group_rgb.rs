@@ -181,4 +181,28 @@ impl RgbDevice for Ene6k77GroupDevice {
         thread::sleep(CMD_DELAY);
         Ok(())
     }
+
+    fn supports_merge_lighting(&self) -> bool {
+        true
+    }
+
+    fn start_merge_lighting(&self) -> Result<()> {
+        match self.controller.model {
+            Ene6k77Model::SlFan | Ene6k77Model::SlRedragon => self.controller.start_merge(),
+            Ene6k77Model::AlFan => self.controller.send_merge_command(true),
+            Ene6k77Model::SlV2Fan
+            | Ene6k77Model::SlV2aFan
+            | Ene6k77Model::AlV2Fan
+            | Ene6k77Model::SlInfinity => self.controller.set_merge_order([0, 1, 2, 3]),
+        }
+    }
+
+    fn stop_merge_lighting(&self) -> Result<()> {
+        match self.controller.model {
+            Ene6k77Model::SlFan | Ene6k77Model::SlRedragon => self.controller.stop_merge(),
+            Ene6k77Model::AlFan => self.controller.send_merge_command(false),
+            // V2/SLInfinity variants: set_merge_order with identity exits merge mode
+            _ => self.controller.set_merge_order([0, 1, 2, 3]),
+        }
+    }
 }

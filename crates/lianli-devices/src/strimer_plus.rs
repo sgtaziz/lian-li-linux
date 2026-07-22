@@ -275,6 +275,24 @@ impl RgbDevice for StrimerPlusController {
         debug!("Strimer Plus MB RGB sync: {enabled}");
         Ok(())
     }
+
+    fn supports_merge_lighting(&self) -> bool {
+        true
+    }
+
+    fn start_merge_lighting(&self) -> Result<()> {
+        // Enable all 12 ports at once (bitmap 0x0FFF)
+        self.set_effect_enable_multi(0x0FFF)?;
+        debug!("Strimer Plus merge lighting started");
+        Ok(())
+    }
+
+    fn stop_merge_lighting(&self) -> Result<()> {
+        // Revert to per-port mode (only port 0)
+        self.set_effect_enable(0)?;
+        debug!("Strimer Plus merge lighting stopped");
+        Ok(())
+    }
 }
 
 pub struct StrimerPlusDriver;

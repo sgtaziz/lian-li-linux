@@ -249,6 +249,22 @@ pub trait RgbDevice: Send + Sync {
     fn set_mb_rgb_sync(&self, _enabled: bool) -> Result<()> {
         anyhow::bail!("MB RGB sync not supported by this device")
     }
+
+    /// Whether this device supports merge-lighting (cross-group synchronized animation).
+    fn supports_merge_lighting(&self) -> bool {
+        false
+    }
+
+    /// Enter merge-lighting mode. After this call, effects applied to zone 0
+    /// propagate across all groups as a single synchronized animation.
+    fn start_merge_lighting(&self) -> Result<()> {
+        anyhow::bail!("Merge lighting not supported by this device")
+    }
+
+    /// Exit merge-lighting mode. Restores per-group independent control.
+    fn stop_merge_lighting(&self) -> Result<()> {
+        anyhow::bail!("Merge lighting not supported by this device")
+    }
 }
 
 /// Blanket forwarding impl so any `Arc<T>` can be used as an `RgbDevice`
@@ -292,5 +308,14 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
         (**self).set_mb_rgb_sync(enabled)
+    }
+    fn supports_merge_lighting(&self) -> bool {
+        (**self).supports_merge_lighting()
+    }
+    fn start_merge_lighting(&self) -> Result<()> {
+        (**self).start_merge_lighting()
+    }
+    fn stop_merge_lighting(&self) -> Result<()> {
+        (**self).stop_merge_lighting()
     }
 }
