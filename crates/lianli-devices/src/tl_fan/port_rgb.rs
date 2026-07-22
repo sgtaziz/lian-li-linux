@@ -169,11 +169,21 @@ impl RgbDevice for TlFanPortDevice {
             .map(|hs| hs.port_fan_counts)
             .unwrap_or([0; 4]);
 
-        let dummy_effect = RgbEffect::default();
+        // C# sends zero-filled effect data when toggling MB sync — the firmware
+        // ignores effect fields in sync mode. Match that to avoid stale data.
+        let zero_effect = RgbEffect {
+            mode: RgbMode::Static,
+            colors: vec![],
+            speed: 0,
+            brightness: 0,
+            direction: Default::default(),
+            scope: Default::default(),
+            disabled: false,
+        };
         for (port, &fan_count) in port_fan_counts.iter().enumerate() {
             for fan in 0..fan_count {
                 self.controller
-                    .set_fan_light(port as u8, fan, &dummy_effect, enabled)?;
+                    .set_fan_light(port as u8, fan, &zero_effect, enabled)?;
             }
         }
         debug!("Set MB RGB sync (all ports): enabled={enabled}");
