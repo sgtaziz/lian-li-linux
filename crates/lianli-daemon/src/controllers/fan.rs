@@ -262,6 +262,7 @@ fn fan_control_thread(
                 fan_states.get(&group_idx),
                 config.hysteresis_temp,
                 config.hysteresis_pwm,
+                &wired,
             ) {
                 Ok(speeds) => speeds,
                 Err(err) => {
@@ -426,6 +427,7 @@ fn calculate_fan_speeds(
     prev_state: Option<&FanState>,
     hysteresis_temp: f32,
     hysteresis_pwm: u8,
+    wired: &HashMap<String, Box<dyn FanDevice>>,
 ) -> Result<[u8; 4]> {
     let mut pwm_values = [0u8; 4];
 
@@ -445,7 +447,8 @@ fn calculate_fan_speeds(
                     .ok_or_else(|| anyhow::anyhow!("Curve '{curve_name}' not found"))?;
 
                 let source = curve.effective_source();
-                let temp = smoothed_temperature(&source, sensor_cache, temp_ema, all_sensors)?;
+                let temp =
+                    smoothed_temperature(&source, sensor_cache, temp_ema, all_sensors, wired)?;
                 let speed_percent = interpolate_curve(&curve.curve, temp);
                 let target_pwm = (speed_percent * 2.55) as u8;
 
@@ -475,7 +478,33 @@ fn smoothed_temperature(
     cache: &mut HashMap<SensorSource, ResolvedSensor>,
     ema: &mut HashMap<SensorSource, f32>,
     all_sensors: &[SensorInfo],
+    wired: &HashMap<String, Box<dyn FanDevice>>,
 ) -> Result<f32> {
+    // Wired AIO coolant: poll the device directly, bypass sensor resolver.
+    // Fan curves reference this via SensorSource::WirelessCoolant { device_id }
+    // where device_id is the wired device's ID (e.g. "hid:serial123").
+    if let SensorSource::WirelessCoolant { device_id } = source {
+        if let Some(dev) = wired.get(device_id) {
+            if let Some(temp) = dev.poll_coolant_temp() {
+                if temp > 0.0 && temp <= 100.0 {
+                    let smoothed = match ema.get(source) {
+                        Some(&prev) => TEMP_EMA_ALPHA * temp + (1.0 - TEMP_EMA_ALPHA) * prev,
+                        None => temp,
+                    };
+                    ema.insert(source.clone(), smoothed);
+                    return Ok(smoothed);
+                }
+                debug!("Wired coolant out of range: {temp:.1}°C for {device_id}");
+            }
+            // Poll failed or out of range — use last EMA value (keeps fans at
+            // last commanded speed rather than spiking to 0 or 100%).
+            return ema
+                .get(source)
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("Coolant telemetry unavailable for {device_id}"));
+        }
+    }
+
     let resolved = match cache.get(source) {
         Some(r) => r.clone(),
         None => {
