@@ -350,25 +350,12 @@ impl Ene6k77Controller {
     }
 
     fn map_mode_to_ene(&self, mode: RgbMode) -> u8 {
-        if self.model.uses_double_port() {
-            // Inner/outer ring models (SL Infinity, AL Fan, AL V2).
-            // Inner and outer ports share the same mode byte values.
-            match mode {
-                RgbMode::Off => 0,
-                RgbMode::Static => 1,
-                RgbMode::Breathing => 2,
-                RgbMode::ColorCycle => 24,
-                RgbMode::Rainbow => 5,
-                RgbMode::Runway => 26,
-                RgbMode::Meteor => 25,
-                RgbMode::Tide => 37,
-                RgbMode::Mixing => 35,
-                _ => 1,
-            }
-        } else {
+        match self.model {
+            Ene6k77Model::SlInfinity => self.map_mode_sl_inf(mode),
+            Ene6k77Model::AlFan | Ene6k77Model::AlV2Fan => self.map_mode_al(mode),
             // Single-ring models (SL Fan, SL V2, SL V2a, SL Redragon).
-            // Ref: SLFanController.cs:62-79
-            match mode {
+            // Ref: SLFanController.cs:62-79, SLV2FanController.cs:65-89
+            _ => match mode {
                 RgbMode::Off => 0,
                 RgbMode::Static => 1,
                 RgbMode::Breathing => 2,
@@ -383,8 +370,79 @@ impl Ene6k77Controller {
                 RgbMode::Stack => 32,
                 RgbMode::StackMulti => 33,
                 RgbMode::Neon => 34,
+                RgbMode::Voice => 38,
+                RgbMode::Groove => 39,
+                RgbMode::Render => 40,
+                RgbMode::Tunnel => 41,
                 _ => 1,
-            }
+            },
+        }
+    }
+
+    /// AL Fan + AL V2 Fan inner/outer mode bytes (shared).
+    /// Ref: ALFanController.cs:76-100, ALV2FanController.cs:88-114
+    fn map_mode_al(&self, mode: RgbMode) -> u8 {
+        match mode {
+            RgbMode::Off => 0,
+            RgbMode::Static => 1,
+            RgbMode::Breathing => 2,
+            RgbMode::RainbowMorph => 4,
+            RgbMode::Rainbow => 5,
+            RgbMode::MeteorRainbow => 8,
+            RgbMode::ColorCycle => 24,
+            RgbMode::Meteor => 25,
+            RgbMode::Runway => 26,
+            RgbMode::MopUp => 27,
+            RgbMode::Lottery => 29,
+            RgbMode::Wave => 30,
+            RgbMode::Spring => 31,
+            RgbMode::TailChasing => 32,
+            RgbMode::Warning => 33,
+            RgbMode::Voice => 34,
+            RgbMode::Mixing => 35,
+            RgbMode::Stack => 36,
+            RgbMode::Tide => 37,
+            RgbMode::Scan => 38,
+            RgbMode::PacMan => 39,
+            RgbMode::ColorfulCity => 40,
+            RgbMode::Render => 41,
+            RgbMode::Twinkle => 42,
+            _ => 1,
+        }
+    }
+
+    /// SL Infinity inner/outer mode bytes.
+    /// Ref: SLInfinityController.cs:89-116
+    fn map_mode_sl_inf(&self, mode: RgbMode) -> u8 {
+        match mode {
+            RgbMode::Off => 0,
+            RgbMode::Static => 1,
+            RgbMode::Breathing => 2,
+            RgbMode::RainbowMorph => 4,
+            RgbMode::Rainbow => 5,
+            RgbMode::BreathingRainbow => 6,
+            RgbMode::MeteorRainbow => 8,
+            RgbMode::ColorCycle => 24,
+            RgbMode::Meteor => 25,
+            RgbMode::Runway => 26,
+            RgbMode::MopUp => 27,
+            RgbMode::DoubleMeteor => 29,
+            RgbMode::MeteorContest => 30,
+            RgbMode::MeteorMix => 31,
+            RgbMode::ReturnArc => 32,
+            RgbMode::DoubleArc => 33,
+            RgbMode::Door => 34,
+            RgbMode::Disco => 35,
+            RgbMode::HeartBeat => 36,
+            RgbMode::Lottery => 38,
+            RgbMode::Warning => 41,
+            RgbMode::Voice => 42,
+            RgbMode::Mixing => 43,
+            RgbMode::Stack => 44,
+            RgbMode::Tide => 45,
+            RgbMode::Scan => 46,
+            RgbMode::HeartBeatRunway => 69,
+            _ => 1,
         }
     }
 
@@ -452,6 +510,24 @@ impl Ene6k77Controller {
     /// Ref: SLFanDevice.cs:174-177
     pub fn stop_merge(&self) -> Result<()> {
         self.send_feature(&[REPORT_ID, 0x10, 0x34, 0x00, 0x00, 0x00])?;
+        thread::sleep(CMD_DELAY);
+        Ok(())
+    }
+
+    /// Set merge group order (SLV2/SLV2A/ALV2/SLInfinity).
+    /// Ref: SLV2FanDevice.cs:167-175
+    pub fn set_merge_order(&self, order: [u8; 4]) -> Result<()> {
+        self.send_feature(&[
+            REPORT_ID, 0x10, 0x63, order[0], order[1], order[2], order[3], 0x08,
+        ])?;
+        thread::sleep(CMD_DELAY);
+        Ok(())
+    }
+
+    /// Send merge command (ALFan only — distinct from StartMerge/StopMerge).
+    /// Ref: ALFanDevice.cs:162-167
+    pub fn send_merge_command(&self, enable: bool) -> Result<()> {
+        self.send_feature(&[REPORT_ID, 0x10, 0x43, enable as u8, 0x00, 0x00])?;
         thread::sleep(CMD_DELAY);
         Ok(())
     }

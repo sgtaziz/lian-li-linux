@@ -37,25 +37,104 @@ impl RgbDevice for Ene6k77GroupDevice {
     }
 
     fn supported_modes(&self) -> Vec<RgbMode> {
-        let mut modes = vec![
-            RgbMode::Off,
-            RgbMode::Static,
-            RgbMode::Breathing,
-            RgbMode::ColorCycle,
-            RgbMode::Rainbow,
-            RgbMode::RainbowMorph,
-            RgbMode::Runway,
-            RgbMode::Meteor,
-            RgbMode::Staggered,
-            RgbMode::Tide,
-            RgbMode::Mixing,
-        ];
-        if !self.controller.model.uses_double_port() {
-            // Single-ring modes (SLFan/SLV2/SLV2A/SLRedragon).
-            // Ref: SLFanController.cs:62-79
-            modes.extend([RgbMode::Stack, RgbMode::StackMulti, RgbMode::Neon]);
+        use super::Ene6k77Model;
+        let m = self.controller.model;
+        if m.uses_double_port() {
+            // Shared base for all dual-ring models
+            let mut modes = vec![
+                RgbMode::Off,
+                RgbMode::Static,
+                RgbMode::Breathing,
+                RgbMode::Rainbow,
+                RgbMode::MeteorRainbow,
+                RgbMode::ColorCycle,
+                RgbMode::Meteor,
+                RgbMode::Runway,
+                RgbMode::MopUp,
+                RgbMode::Lottery,
+                RgbMode::Wave,
+                RgbMode::Spring,
+                RgbMode::TailChasing,
+                RgbMode::Warning,
+                RgbMode::Voice,
+                RgbMode::Mixing,
+                RgbMode::Stack,
+                RgbMode::Tide,
+                RgbMode::Scan,
+                RgbMode::PacMan,
+            ];
+            match m {
+                Ene6k77Model::AlV2Fan => {
+                    modes.extend([
+                        RgbMode::RainbowMorph,
+                        RgbMode::ColorfulCity,
+                        RgbMode::Render,
+                        RgbMode::Twinkle,
+                    ]);
+                }
+                Ene6k77Model::SlInfinity => {
+                    // SL Infinity has a completely different set
+                    return vec![
+                        RgbMode::Off,
+                        RgbMode::Static,
+                        RgbMode::Breathing,
+                        RgbMode::Rainbow,
+                        RgbMode::RainbowMorph,
+                        RgbMode::BreathingRainbow,
+                        RgbMode::MeteorRainbow,
+                        RgbMode::ColorCycle,
+                        RgbMode::Meteor,
+                        RgbMode::Runway,
+                        RgbMode::MopUp,
+                        RgbMode::DoubleMeteor,
+                        RgbMode::MeteorContest,
+                        RgbMode::MeteorMix,
+                        RgbMode::ReturnArc,
+                        RgbMode::DoubleArc,
+                        RgbMode::Door,
+                        RgbMode::Disco,
+                        RgbMode::HeartBeat,
+                        RgbMode::Lottery,
+                        RgbMode::Warning,
+                        RgbMode::Voice,
+                        RgbMode::Mixing,
+                        RgbMode::Stack,
+                        RgbMode::Tide,
+                        RgbMode::Scan,
+                        RgbMode::HeartBeatRunway,
+                    ];
+                }
+                _ => {}
+            }
+            modes
+        } else {
+            // Single-ring models
+            let mut modes = vec![
+                RgbMode::Off,
+                RgbMode::Static,
+                RgbMode::Breathing,
+                RgbMode::ColorCycle,
+                RgbMode::Rainbow,
+                RgbMode::RainbowMorph,
+                RgbMode::Runway,
+                RgbMode::Meteor,
+                RgbMode::Staggered,
+                RgbMode::Tide,
+                RgbMode::Mixing,
+                RgbMode::Stack,
+                RgbMode::StackMulti,
+                RgbMode::Neon,
+            ];
+            if m.is_v2() {
+                modes.extend([
+                    RgbMode::Voice,
+                    RgbMode::Groove,
+                    RgbMode::Render,
+                    RgbMode::Tunnel,
+                ]);
+            }
+            modes
         }
-        modes
     }
 
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
