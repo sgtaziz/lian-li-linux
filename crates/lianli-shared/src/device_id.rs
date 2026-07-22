@@ -67,6 +67,8 @@ pub enum DeviceFamily {
     SlInfFlexLcd,
     /// Wired receiver controllers (P28 V2 0x43A8:0x0105, TL Flex 0x43A8:0x0101)
     WiredReceiver,
+    /// HydroShift II OLED Curve LCD (0x1CBE:0xA068)
+    HydroShift2OledCurve,
 }
 
 /// USB transport protocol a device uses on the wire.
@@ -481,6 +483,12 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         name: "P28 V2 Controller",
         hid_usage_page: None,
     },
+    DeviceEntry {
+        id: UsbId::new(0x1CBE, 0xA068),
+        family: DeviceFamily::HydroShift2OledCurve,
+        name: "HydroShift II OLED Curve",
+        hid_usage_page: None,
+    },
 ];
 
 impl DeviceFamily {
@@ -524,6 +532,9 @@ impl DeviceFamily {
             }
             Self::TlFlexLcd | Self::SlInfFlexLcd => DeviceCapabilities::LCD,
             Self::WiredReceiver => DeviceCapabilities::FAN.or(DeviceCapabilities::RGB),
+            Self::HydroShift2OledCurve => {
+                DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
+            }
 
             // Desktop-mode companions (CH340 firmware) — same physical device
             // as the WinUSB LCDs above, currently in display mode.
@@ -592,7 +603,8 @@ impl DeviceFamily {
             | Self::Lancool207Desktop
             | Self::UniversalScreenDesktop
             | Self::Vision9p2Desktop
-            | Self::WiredReceiver => TransportKind::UsbBulk,
+            | Self::WiredReceiver
+            | Self::HydroShift2OledCurve => TransportKind::UsbBulk,
 
             // Pure wireless-discovered (no USB identity of their own).
             Self::Slv3Led

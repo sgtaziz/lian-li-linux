@@ -67,6 +67,9 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a019", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="43a8", ATTR{idProduct}=="0101", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="43a8", ATTR{idProduct}=="0105", MODE="0666"
 
+# HydroShift II OLED Curve
+SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a068", MODE="0666"
+
 # Desktop-mode LCD devices (CH340, VID=0x1A86)
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="acd1", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ace1", MODE="0666"

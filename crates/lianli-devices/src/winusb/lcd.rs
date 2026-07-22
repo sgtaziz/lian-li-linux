@@ -669,6 +669,11 @@ fn screen_for_pid(
             DeviceFamily::SlInfFlexLcd,
             "SL Infinity Flex LCD",
         )),
+        0xA068 => Some((
+            ScreenInfo::HYDROSHIFT2,
+            DeviceFamily::HydroShift2OledCurve,
+            "HydroShift II OLED Curve",
+        )),
         _ => None,
     }
 }
