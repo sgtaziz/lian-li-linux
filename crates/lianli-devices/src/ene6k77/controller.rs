@@ -77,6 +77,7 @@ impl Ene6k77Controller {
         thread::sleep(CMD_DELAY);
         let data = self.read_input(5)?;
         Ok(Ene6k77Firmware {
+            model: self.model,
             customer_id: data[0],
             project_id: data[1],
             major_id: data[2],
