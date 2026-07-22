@@ -6,7 +6,6 @@
 //!   - PWM floor: P28 = 8% (zero→1), TL Flex = 11% (zero→5)
 //!   - RGB transport: P28 streams via 0x11, TL Flex flash-saves via 0x18+0x19
 //!
-//! Ref: WinUsbLed.cs, UsbRecevierController.cs, P28V2Controller.cs, TLFLEXController.cs
 
 use crate::traits::{FanDevice, RgbDevice};
 use anyhow::{Context, Result};
@@ -18,7 +17,7 @@ use tracing::{debug, info, warn};
 
 const PACKET_SIZE: usize = 64;
 
-// LEDCmdType opcodes (WinUsbLed.cs:15-36)
+// LEDCmdType opcodes
 const CMD_GET_VER: u8 = 0x10;
 const CMD_GET_INFO: u8 = 0x12;
 const CMD_SET_FANS_PWM: u8 = 0x13;

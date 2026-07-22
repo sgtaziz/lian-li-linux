@@ -22,14 +22,13 @@ pub const CMD_STOP_PLAY: u8 = 0x7B;
 pub const CMD_REBOOT: u8 = 0x0B;
 pub const CMD_SWITCH_TO_DESKTOP: u8 = 0x96;
 
-// HydroShift II AIO opcodes ( WinUsbH2.cs )
+// HydroShift II AIO opcodes
 pub const CMD_GET_H2_PARAMS: u8 = 0xFA;
 pub const CMD_SYNC_PUMP_FAN: u8 = 0xFB;
 pub const CMD_PUSH_RGB_DATA: u8 = 0xFC;
 pub const CMD_SET_WTHEME_INDEX: u8 = 0xF9;
 
 /// CRC-16/CCITT (poly 0x1021, init 0, no final XOR, no reflection).
-/// Ref: Util.cs:136-145
 pub fn crc16_ccitt(data: &[u8]) -> u16 {
     let mut crc: u16 = 0;
     for &byte in data {
@@ -229,7 +228,6 @@ impl PacketBuilder {
     }
 
     /// Build a SyncPumpFan header (cmd 0xFB) with CRC16.
-    /// Ref: WinUsbH2.cs:1123-1201
     pub fn sync_pump_fan_header_winusb(
         &mut self,
         pump_pwm: u16,
@@ -276,7 +274,7 @@ mod tests {
 
     #[test]
     fn crc16_single_byte_matches_table() {
-        // table[1] = 4129 = 0x1021 in the C# crcTable
+        // table[1] = 4129 = 0x1021
         assert_eq!(crc16_ccitt(&[0x01]), 0x1021);
     }
 

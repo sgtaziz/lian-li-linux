@@ -18,7 +18,6 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 /// Remap fan PWM for HydroShift LCD RGB variant: Map(10..100 → 12..95).
-/// Ref: HydroShiftLCDController.cs:295-301
 fn remap_fan_pwm_rgb(pwm: u8) -> u8 {
     if pwm < 10 {
         return 0;
@@ -30,11 +29,10 @@ fn remap_fan_pwm_rgb(pwm: u8) -> u8 {
 /// Used by `stream_h264_reader` to split the pipe byte stream into complete
 /// access units (AUs).
 ///
-/// C#'s `WMSQLibAV` (`WMSQLibAV.cs:230`) uses `avcodec_receive_packet()` which
-/// returns one complete AU per call — no re-splitting needed. Since Rust reads
-/// from a continuous pipe, we must detect AU boundaries ourselves.
+/// Since Rust reads from a continuous pipe, we must detect AU boundaries
+/// ourselves.
 ///
-/// Boundary policy (H.264 §7.4.1.2.3): if AUD NALs (type 9) are present, they
+/// Boundary policy: if AUD NALs (type 9) are present, they
 /// alone delimit AUs. Otherwise, primary coded picture NALs (types 1 and 5)
 /// are the boundary markers. This is determined lazily from the first
 /// boundary-eligible NAL encountered.
@@ -622,7 +620,6 @@ impl FanDevice for HydroShiftLcdController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
         let mut pwm = duty_to_percent(duty);
         // RGB variant remap: Map(speed, 10..100 → 12..95)
-        // Ref: HydroShiftLCDController.cs:295-301
         if matches!(self.variant, super::AioLcdVariant::HydroShiftLcdRgb) {
             pwm = remap_fan_pwm_rgb(pwm);
         }

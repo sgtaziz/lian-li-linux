@@ -2,8 +2,6 @@
 //!
 //! Opens a separate USB handle to the same physical device as the LCD driver.
 //! Both handles can coexist on Linux (interface claims are reference-counted).
-//!
-//! Ref: WinUsbH2.cs, H2Controller.cs
 
 use crate::crypto::PacketBuilder;
 use crate::traits::{AioDevice, FanDevice};
@@ -136,7 +134,7 @@ impl H2AioController {
         Ok(())
     }
 
-    /// Convert pump RPM to raw PWM via the C# piecewise-linear curve.
+    /// Convert pump RPM to raw PWM via the piecewise-linear curve.
     fn rpm_to_pwm(rpm: u16) -> u16 {
         let rpm = rpm.clamp(PUMP_MIN_RPM, PUMP_MAX_RPM) as f32;
         let pwm = if rpm < 1720.0 {

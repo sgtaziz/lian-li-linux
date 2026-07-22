@@ -3,8 +3,6 @@
 //! Separate microcontroller from the LCD MCU — handles pump PWM, motor,
 //! RGB, and telemetry via 8-byte unencrypted bulk packets.
 //!
-//! Ref: WinUsbHS2.cs, HS2Controller.cs
-
 use crate::traits::{AioDevice, FanDevice, RgbDevice};
 use anyhow::{Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
@@ -15,7 +13,7 @@ use tracing::{debug, info};
 
 const PACKET_SIZE: usize = 8;
 
-// Opcodes (WinUsbHS2.cs)
+// Opcodes
 const CMD_GET_VER: u8 = 0x10;
 const CMD_SET_MOTOR: u8 = 0x50;
 const CMD_STOP_MOTOR: u8 = 0x51;
@@ -25,7 +23,6 @@ const CMD_GET_PUMP: u8 = 0x62;
 const CMD_SET_MB_SYNC: u8 = 0x64;
 
 /// 22-segment pump RPM→PWM table (monotonically decreasing).
-/// Ref: HS2Controller.cs:86-110
 const PUMP_DATA_POINTS: &[(u16, u16)] = &[
     (1577, 250),
     (1608, 300),
@@ -52,7 +49,6 @@ const PUMP_DATA_POINTS: &[(u16, u16)] = &[
 ];
 
 /// Linear-interpolate the pump output value from user RPM.
-/// Ref: HS2Controller.cs:3019-3045 GetOutputValue
 fn rpm_to_output(rpm: u16) -> u16 {
     if rpm <= PUMP_DATA_POINTS[0].0 {
         return PUMP_DATA_POINTS[0].1;
@@ -139,7 +135,6 @@ impl Hs2OledLedController {
     }
 
     /// GetPumpSpeed (0x62) — read pump RPM with calibration offset.
-    /// Ref: HS2Controller.cs:2948-2966
     pub fn read_pump_rpm_raw(&self) -> Result<u16> {
         let rx = self.send_and_read(&[CMD_GET_PUMP, 0, 0, 0, 0, 0, 0, 0])?;
         let raw = u16::from_be_bytes([rx[1], rx[2]]);

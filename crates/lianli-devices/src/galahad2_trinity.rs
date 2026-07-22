@@ -62,8 +62,6 @@ impl Galahad2TrinityModel {
     }
 
     /// Per-variant pump RPM envelope.
-    /// Ref: Galahad2TrinityPerformanceController.cs:20-27,
-    ///      Galahad2TrinityRegularController.cs:23-30
     pub fn pump_envelope(&self) -> lianli_shared::aio::PumpEnvelope {
         use lianli_shared::aio::PumpEnvelope;
         match self {

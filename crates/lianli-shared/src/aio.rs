@@ -4,16 +4,11 @@ use serde::{Deserialize, Serialize};
 
 // ─── Pump envelopes ───────────────────────────────────────────────────
 //
-// Per-variant RPM→PWM translation tables extracted from the C# reference:
-// - Galahad2TrinityPerformanceController.cs:20-27
-// - Galahad2TrinityRegularController.cs:23-30
-// - HydroShiftLCDController.cs:213-248
-//
-// C# translates a target RPM to a PWM percentage via piecewise-linear
-// interpolation, clamping to [min_rpm, max_rpm] first. Rust's wired AIO
-// drivers send raw PWM duty, so the primary use of these tables today is
-// to clamp the PWM floor (prevent stall) and to provide the data for
-// future RPM-target control.
+// Per-variant RPM→PWM translation tables. The firmware translates a target
+// RPM to a PWM percentage via piecewise-linear interpolation, clamping to
+// [min_rpm, max_rpm] first. Rust's wired AIO drivers send raw PWM duty, so
+// the primary use of these tables today is to clamp the PWM floor (prevent
+// stall) and to provide the data for future RPM-target control.
 
 /// Per-variant pump RPM envelope and RPM→PWM translation table.
 #[derive(Debug, Clone, Copy)]
@@ -29,7 +24,7 @@ impl PumpEnvelope {
     /// Translate a target RPM to a PWM percentage (0-100).
     ///
     /// Clamps `rpm` to `[min_rpm, max_rpm]`, then interpolates via the
-    /// piecewise-linear table. Matches C# `RPMConfig.CalculateSpeed`.
+    /// piecewise-linear table.
     pub fn rpm_to_pwm(&self, rpm: u16) -> u8 {
         let clamped = rpm.clamp(self.min_rpm, self.max_rpm);
         let table = self.rpm_to_pwm;
@@ -59,7 +54,6 @@ impl PumpEnvelope {
     // ── Galahad2 Trinity ──
 
     /// Galahad2 Trinity Performance (PID 0x7371).
-    /// Ref: Galahad2TrinityPerformanceController.cs:20-27
     pub const GALAHAD2_PERFORMANCE: Self = Self {
         min_rpm: 2200,
         max_rpm: 4200,
@@ -67,7 +61,6 @@ impl PumpEnvelope {
     };
 
     /// Galahad2 Trinity Regular (PID 0x7373).
-    /// Ref: Galahad2TrinityRegularController.cs:23-30
     pub const GALAHAD2_REGULAR: Self = Self {
         min_rpm: 2200,
         max_rpm: 3200,
@@ -77,7 +70,6 @@ impl PumpEnvelope {
     // ── HydroShift LCD / Galahad2 LCD ──
 
     /// HydroShift LCD base (PID 0x7398) / Galahad2 LCD (0x7391) / Vision (0x7395).
-    /// Ref: HydroShiftLCDController.cs:215-224
     pub const HYDROSHIFT_LCD: Self = Self {
         min_rpm: 2200,
         max_rpm: 3800,
@@ -86,7 +78,6 @@ impl PumpEnvelope {
 
     /// HydroShift LCD RGB (PID 0x7399).
     /// ~18% lower max RPM than base — over-speeding risk if confused.
-    /// Ref: HydroShiftLCDController.cs:226-235
     pub const HYDROSHIFT_LCD_RGB: Self = Self {
         min_rpm: 2000,
         max_rpm: 3200,
@@ -94,7 +85,6 @@ impl PumpEnvelope {
     };
 
     /// HydroShift LCD TL (PID 0x739A). Same envelope as RGB.
-    /// Ref: HydroShiftLCDController.cs:237-247
     pub const HYDROSHIFT_LCD_TL: Self = Self::HYDROSHIFT_LCD_RGB;
 }
 

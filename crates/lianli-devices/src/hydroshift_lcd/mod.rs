@@ -70,13 +70,12 @@ impl AioLcdVariant {
     }
 
     /// Whether this variant has fan control.
-    /// TL variant has no fan control (C# HydroShiftLCDFanLEDPage.cs:262).
+    /// TL variant has no fan control.
     pub fn has_fan_control(&self) -> bool {
         !matches!(self, Self::HydroShiftLcdTl)
     }
 
     /// Per-variant pump RPM envelope for clamping/translation.
-    /// Ref: HydroShiftLCDController.cs:213-248
     pub fn pump_envelope(&self) -> lianli_shared::aio::PumpEnvelope {
         use lianli_shared::aio::PumpEnvelope;
         match self {

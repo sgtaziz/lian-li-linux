@@ -104,9 +104,9 @@ pub static REGISTRY: &[&dyn DeviceDriver] = &[
     &crate::hydroshift_lcd::HydroShiftLcdDriver,
     &crate::winusb::lcd::WinUsbLcdDriver,
     // WinUsbLedDriver removed: the 0x8050 LED companion endpoint speaks a
-    // DES-CBC encrypted protocol for firmware update only (WinUsbLed.cs).
+    // DES-CBC encrypted protocol for firmware update only.
     // Runtime RGB goes through the SLV3 SDK SetEffect path, not raw LED writes.
-    // The fabricated 0x11 protocol in winusb/led.rs does not match any C# path.
+    // The fabricated 0x11 protocol in winusb/led.rs does not match any stock path.
     &crate::strimer_plus::StrimerPlusDriver,
     &crate::winusb::wired_receiver::WiredReceiverDriver,
     &crate::winusb::hs2_oled_led::Hs2OledLedDriver,

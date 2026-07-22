@@ -169,7 +169,7 @@ impl RgbDevice for TlFanPortDevice {
             .map(|hs| hs.port_fan_counts)
             .unwrap_or([0; 4]);
 
-        // C# sends zero-filled effect data when toggling MB sync — the firmware
+        // Zero-filled effect data is sent when toggling MB sync — the firmware
         // ignores effect fields in sync mode. Match that to avoid stale data.
         let zero_effect = RgbEffect {
             mode: RgbMode::Static,

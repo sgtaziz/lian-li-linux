@@ -52,8 +52,8 @@ impl ScreenInfo {
         max_payload: 153_600,
         // Live H.264 disabled: the WinUsb live-pipe path (stream_h264_reader)
         // emits variable-size StartPlay chunks instead of the fixed 202_752-byte
-        // chunks the firmware expects (C# WinUsb.cs:369). File-based H.264 still
-        // works — it uses the correct fixed-chunk path (stream_h264).
+        // chunks the firmware expects. File-based H.264 still works — it uses
+        // the correct fixed-chunk path (stream_h264).
         h264: false,
         needs_keepalive: false,
     };

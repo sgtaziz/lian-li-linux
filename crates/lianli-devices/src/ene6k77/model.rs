@@ -103,7 +103,6 @@ impl Ene6k77Model {
 
     /// Expected `(MajorID, MinorID)` pairs from the firmware-version response.
     /// Some variants accept multiple MinorIDs (e.g. SLV2Fan accepts 0xC5 and 0xC7).
-    /// Ref: per-variant `Load()` methods in `*FirmwareVersion.cs`.
     pub fn expected_firmware_ids(&self) -> &'static [(u8, u8)] {
         match self {
             Self::SlFan => &[(0x64, 0xC2)],
@@ -129,8 +128,8 @@ pub struct Ene6k77Firmware {
 
 impl Ene6k77Firmware {
     /// Validate the firmware-ID bytes against the expected values for this
-    /// variant. Ref: per-variant `Load()` methods — `CustomerID==0xE0 &&
-    /// ProjectID==0x50` plus per-variant `(MajorID, MinorID)`.
+    /// variant: `CustomerID==0xE0 && ProjectID==0x50` plus per-variant
+    /// `(MajorID, MinorID)`.
     ///
     /// Returns `false` on mismatch; the caller should log a warning but
     /// not fail (the device may be running newer firmware).
@@ -145,13 +144,6 @@ impl Ene6k77Firmware {
     }
 
     /// Per-variant version number as `(major, minor)`.
-    ///
-    /// Faithful port of the C# per-variant `GetVersion()` overrides:
-    /// - `SLFanFirmwareVersion.cs` / `SLRedragonFirmwareVersion.cs`
-    /// - `ALFanFirmwareVersion.cs`
-    /// - `SLInfinityFirmwareVersion.cs`
-    /// - `ALV2FanFirmwareVersion.cs`
-    /// - `SLV2FanFirmwareVersion.cs` (also covers SLV2AFan)
     pub fn version(&self) -> (u32, u32) {
         let hi = (self.fine_tune >> 4) as u32;
         let lo = (self.fine_tune & 0x0F) as u32;

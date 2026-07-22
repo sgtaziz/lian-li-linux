@@ -313,7 +313,6 @@ impl WinUsbLcdDevice {
         }
         if let Some(resp) = self.read_response("GetVer", LCD_READ_TIMEOUT) {
             // Firmware version string is at bytes 8..40 (32 bytes, UTF-8, null-trimmed).
-            // Ref: WinUsb.cs:809-821
             let fw_bytes = &resp[8..40.min(resp.len())];
             let end = fw_bytes
                 .iter()

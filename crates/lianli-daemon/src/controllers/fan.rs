@@ -185,7 +185,7 @@ fn fan_control_thread(
         // Broadcast master clock heartbeat (RF 0x14) once per second regardless
         // of the user-configured fan update interval. Without this packet the
         // fan firmware appears to enter an autonomous fallback that briefly
-        // spikes RPM. L-Connect sends this every second.
+        // spikes RPM. This must be sent every second.
         if now.duration_since(last_heartbeat) >= heartbeat_interval {
             if let Some(ref w) = wireless {
                 if let Err(err) = w.send_master_clock() {

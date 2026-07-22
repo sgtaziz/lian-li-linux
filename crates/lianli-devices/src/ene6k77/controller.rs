@@ -364,7 +364,6 @@ impl Ene6k77Controller {
             Ene6k77Model::SlInfinity => self.map_mode_sl_inf(mode),
             Ene6k77Model::AlFan | Ene6k77Model::AlV2Fan => self.map_mode_al(mode),
             // Single-ring models (SL Fan, SL V2, SL V2a, SL Redragon).
-            // Ref: SLFanController.cs:62-79, SLV2FanController.cs:65-89
             _ => match mode {
                 RgbMode::Off => 0,
                 RgbMode::Static => 1,
@@ -390,7 +389,6 @@ impl Ene6k77Controller {
     }
 
     /// AL Fan + AL V2 Fan inner/outer mode bytes (shared).
-    /// Ref: ALFanController.cs:76-100, ALV2FanController.cs:88-114
     fn map_mode_al(&self, mode: RgbMode) -> u8 {
         match mode {
             RgbMode::Off => 0,
@@ -422,7 +420,6 @@ impl Ene6k77Controller {
     }
 
     /// SL Infinity inner/outer mode bytes.
-    /// Ref: SLInfinityController.cs:89-116
     fn map_mode_sl_inf(&self, mode: RgbMode) -> u8 {
         match mode {
             RgbMode::Off => 0,
@@ -509,7 +506,6 @@ impl Ene6k77Controller {
     }
 
     /// Enter merge-lighting mode (SLFan/SLRedragon only).
-    /// Ref: SLFanDevice.cs:169-172
     pub fn start_merge(&self) -> Result<()> {
         self.send_feature(&[REPORT_ID, 0x10, 0x33, 0x00, 0x01, 0x02, 0x03, 0x08])?;
         thread::sleep(CMD_DELAY);
@@ -517,7 +513,6 @@ impl Ene6k77Controller {
     }
 
     /// Exit merge-lighting mode (SLFan/SLRedragon only).
-    /// Ref: SLFanDevice.cs:174-177
     pub fn stop_merge(&self) -> Result<()> {
         self.send_feature(&[REPORT_ID, 0x10, 0x34, 0x00, 0x00, 0x00])?;
         thread::sleep(CMD_DELAY);
@@ -525,7 +520,6 @@ impl Ene6k77Controller {
     }
 
     /// Set merge group order (SLV2/SLV2A/ALV2/SLInfinity).
-    /// Ref: SLV2FanDevice.cs:167-175
     pub fn set_merge_order(&self, order: [u8; 4]) -> Result<()> {
         self.send_feature(&[
             REPORT_ID, 0x10, 0x63, order[0], order[1], order[2], order[3], 0x08,
@@ -535,7 +529,6 @@ impl Ene6k77Controller {
     }
 
     /// Send merge command (ALFan only — distinct from StartMerge/StopMerge).
-    /// Ref: ALFanDevice.cs:162-167
     pub fn send_merge_command(&self, enable: bool) -> Result<()> {
         self.send_feature(&[REPORT_ID, 0x10, 0x43, enable as u8, 0x00, 0x00])?;
         thread::sleep(CMD_DELAY);
@@ -636,7 +629,6 @@ fn expand_palette(ui: &[[u8; 3]], num_fans: usize, palette: usize) -> Vec<[u8; 3
 
 /// Outer-corner expansion: 12 outer LEDs per fan split into 4 corners × 3 LEDs,
 /// each corner gets a different user color.
-/// Ref: ALFanController.cs:1087-1103 convertToOuterCornerLEDColor
 fn expand_outer_corner(ui: &[[u8; 3]], num_fans: usize) -> Vec<[u8; 3]> {
     let mut out = vec![[0u8; 3]; num_fans * 12];
     for fan in 0..num_fans {
@@ -652,7 +644,6 @@ fn expand_outer_corner(ui: &[[u8; 3]], num_fans: usize) -> Vec<[u8; 3]> {
 
 /// Cycle-fill palette expansion: wraps the user palette modulo slot index
 /// instead of padding with black. Used exclusively for Meteor mode on ALV2Fan.
-/// Ref: ALV2FanController.cs:1121-1139 convertToFanGroupColor(cycleFill: true)
 fn expand_palette_cycle(ui: &[[u8; 3]], num_fans: usize, palette: usize) -> Vec<[u8; 3]> {
     if ui.is_empty() {
         return vec![[0, 0, 0]; num_fans * palette];

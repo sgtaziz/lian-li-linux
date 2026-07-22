@@ -67,7 +67,7 @@ impl Slv3LcdDevice {
         }
         debug!("LCD[bus {} addr {}] init sequence", self.bus, self.address);
 
-        // C# Init() sequence (WinUsb.cs:411-415):
+        // Init sequence:
         // 1. Rotate(0)
         let header = builder.header(0, 0x0D, false);
         self.transport.write(&header, LCD_WRITE_TIMEOUT)?;
@@ -79,7 +79,7 @@ impl Slv3LcdDevice {
         self.transport.write(&check, LCD_WRITE_TIMEOUT)?;
         let _ = self.transport.read(&mut buf, USB_TIMEOUT);
 
-        // 3. SetFrameRate(120) — C# hardcodes 120 for wireless LCDs
+        // 3. SetFrameRate(120) — hardcoded 120 for wireless LCDs
         let fps = builder.frame_rate_header(120);
         self.transport.write(&fps, LCD_WRITE_TIMEOUT)?;
         let _ = self.transport.read(&mut buf, USB_TIMEOUT);

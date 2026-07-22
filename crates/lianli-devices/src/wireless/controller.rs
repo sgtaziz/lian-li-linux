@@ -303,7 +303,7 @@ impl WirelessController {
     }
 
     /// Broadcast a "master clock" sync packet (RF sub-command 0x14) carrying
-    /// 220 bytes of CPU/GPU info. L-Connect sends this once per second; missing
+    /// 220 bytes of CPU/GPU info. This must be sent once per second; missing
     /// it appears to put the fan firmware into an autonomous fallback that
     /// occasionally spikes RPM. We send all-zero info bytes — the firmware
     /// only seems to need the heartbeat itself.

@@ -1,8 +1,6 @@
 //! Thermal alert subsystem — overrides RGB lighting when CPU/GPU temperature
 //! exceeds a configured threshold.
 //!
-//! Ref: TemperatureAlertController.cs (static class, 1 s evaluate loop).
-//!
 //! Architecture: a background thread polls CPU/GPU sensors every 1 second.
 //! When temp >= threshold, it pushes an override color to the shared state.
 //! The RGB controller checks the override before applying user effects — when
@@ -117,7 +115,7 @@ fn run(
             cfg.gpu.enabled && gpu_temp.map_or(false, |t| t >= cfg.gpu.threshold as f32);
 
         // Determine override color: GPU takes priority if both triggered
-        // (matches C# stack behaviour where last-pushed wins)
+        // (last-pushed wins behaviour)
         let new_override = if gpu_triggered {
             Some(cfg.gpu.alert_color)
         } else if cpu_triggered {
