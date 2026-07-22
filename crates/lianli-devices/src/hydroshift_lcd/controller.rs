@@ -640,9 +640,19 @@ impl FanDevice for HydroShiftLcdController {
     }
 
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
-        let pwm = duty_to_percent(duty);
+        let mut pwm = duty_to_percent(duty);
+        let envelope = self.variant.pump_envelope();
+        let min_pwm = envelope.min_pwm();
+        if pwm < min_pwm {
+            debug!("Pump PWM {pwm}% clamped to variant floor {min_pwm}%");
+            pwm = min_pwm;
+        }
         self.write_a_command(CMD_SET_PUMP_PWM, &[0x00, pwm])?;
-        debug!("Set pump PWM to {pwm}%");
+        debug!(
+            "Set pump PWM to {pwm}% (variant={}, max_rpm={})",
+            self.variant.name(),
+            envelope.max_rpm
+        );
         Ok(())
     }
 }

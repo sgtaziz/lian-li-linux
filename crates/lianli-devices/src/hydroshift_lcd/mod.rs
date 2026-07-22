@@ -68,6 +68,19 @@ impl AioLcdVariant {
             Self::Galahad2Lcd | Self::Galahad2Vision => (1, 5),
         }
     }
+
+    /// Per-variant pump RPM envelope for clamping/translation.
+    /// Ref: HydroShiftLCDController.cs:213-248
+    pub fn pump_envelope(&self) -> lianli_shared::aio::PumpEnvelope {
+        use lianli_shared::aio::PumpEnvelope;
+        match self {
+            Self::HydroShiftLcd | Self::Galahad2Lcd | Self::Galahad2Vision => {
+                PumpEnvelope::HYDROSHIFT_LCD
+            }
+            Self::HydroShiftLcdRgb => PumpEnvelope::HYDROSHIFT_LCD_RGB,
+            Self::HydroShiftLcdTl => PumpEnvelope::HYDROSHIFT_LCD_TL,
+        }
+    }
 }
 
 #[repr(u8)]

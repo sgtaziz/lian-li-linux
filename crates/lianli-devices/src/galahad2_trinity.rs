@@ -60,6 +60,17 @@ impl Galahad2TrinityModel {
             Self::Regular => "Galahad II Trinity",
         }
     }
+
+    /// Per-variant pump RPM envelope.
+    /// Ref: Galahad2TrinityPerformanceController.cs:20-27,
+    ///      Galahad2TrinityRegularController.cs:23-30
+    pub fn pump_envelope(&self) -> lianli_shared::aio::PumpEnvelope {
+        use lianli_shared::aio::PumpEnvelope;
+        match self {
+            Self::Performance => PumpEnvelope::GALAHAD2_PERFORMANCE,
+            Self::Regular => PumpEnvelope::GALAHAD2_REGULAR,
+        }
+    }
 }
 
 /// Handshake response data.
@@ -399,10 +410,19 @@ impl FanDevice for Galahad2TrinityController {
     }
 
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
-        let pwm = duty_to_percent(duty);
+        let mut pwm = duty_to_percent(duty);
+        let envelope = self.model.pump_envelope();
+        let min_pwm = envelope.min_pwm();
+        if pwm < min_pwm {
+            debug!("Pump PWM {pwm}% clamped to variant floor {min_pwm}%");
+            pwm = min_pwm;
+        }
         let mb = self.mb_sync.load(Ordering::Relaxed) as u8;
         self.send_write_command(CMD_SET_PUMP_PWM, &[mb, pwm])?;
-        debug!("Set pump PWM to {pwm}% (mb_sync={mb})");
+        debug!(
+            "Set pump PWM to {pwm}% (model={}, mb_sync={mb})",
+            self.model.name()
+        );
         Ok(())
     }
 }
