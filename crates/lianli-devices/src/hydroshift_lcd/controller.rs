@@ -17,6 +17,16 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
+/// Remap fan PWM for HydroShift LCD RGB variant: Map(10..100 → 12..95).
+/// Ref: HydroShiftLCDController.cs:295-301
+fn remap_fan_pwm_rgb(pwm: u8) -> u8 {
+    if pwm < 10 {
+        return 0;
+    }
+    let scaled = ((pwm as u32 - 10) * 83) / 90;
+    (12 + scaled as u8).min(95)
+}
+
 /// Used by `stream_h264_reader` to split the pipe byte stream into complete
 /// access units (AUs).
 ///
@@ -610,9 +620,14 @@ impl HydroShiftLcdController {
 
 impl FanDevice for HydroShiftLcdController {
     fn set_fan_speed(&self, _slot: u8, duty: u8) -> Result<()> {
-        let pwm = duty_to_percent(duty);
+        let mut pwm = duty_to_percent(duty);
+        // RGB variant remap: Map(speed, 10..100 → 12..95)
+        // Ref: HydroShiftLCDController.cs:295-301
+        if matches!(self.variant, super::AioLcdVariant::HydroShiftLcdRgb) {
+            pwm = remap_fan_pwm_rgb(pwm);
+        }
         self.write_a_command(CMD_SET_FAN_PWM, &[0x00, pwm])?;
-        debug!("Set fan PWM to {pwm}%");
+        debug!("Set fan PWM to {pwm}% (variant={})", self.variant.name());
         Ok(())
     }
 
@@ -632,7 +647,11 @@ impl FanDevice for HydroShiftLcdController {
     }
 
     fn fan_slot_count(&self) -> u8 {
-        1
+        if self.variant.has_fan_control() {
+            1
+        } else {
+            0
+        }
     }
 
     fn has_pump_control(&self) -> bool {
