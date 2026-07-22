@@ -105,6 +105,7 @@ pub static REGISTRY: &[&dyn DeviceDriver] = &[
     &crate::winusb::lcd::WinUsbLcdDriver,
     &crate::winusb::led::WinUsbLedDriver,
     &crate::strimer_plus::StrimerPlusDriver,
+    &crate::winusb::wired_receiver::WiredReceiverDriver,
 ];
 
 /// Look up the driver for a given family.

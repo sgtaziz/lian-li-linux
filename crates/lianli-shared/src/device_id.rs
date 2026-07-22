@@ -65,6 +65,8 @@ pub enum DeviceFamily {
     TlFlexLcd,
     /// SL Infinity Flex LCD — WinUSB fan-hub LCD (0x1CBE:0xA019)
     SlInfFlexLcd,
+    /// Wired receiver controllers (P28 V2 0x43A8:0x0105, TL Flex 0x43A8:0x0101)
+    WiredReceiver,
 }
 
 /// USB transport protocol a device uses on the wire.
@@ -467,6 +469,18 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         name: "SL Infinity Flex LCD",
         hid_usage_page: None,
     },
+    DeviceEntry {
+        id: UsbId::new(0x43A8, 0x0101),
+        family: DeviceFamily::WiredReceiver,
+        name: "TL Flex Controller",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x43A8, 0x0105),
+        family: DeviceFamily::WiredReceiver,
+        name: "P28 V2 Controller",
+        hid_usage_page: None,
+    },
 ];
 
 impl DeviceFamily {
@@ -509,6 +523,7 @@ impl DeviceFamily {
                 DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
             }
             Self::TlFlexLcd | Self::SlInfFlexLcd => DeviceCapabilities::LCD,
+            Self::WiredReceiver => DeviceCapabilities::FAN.or(DeviceCapabilities::RGB),
 
             // Desktop-mode companions (CH340 firmware) — same physical device
             // as the WinUSB LCDs above, currently in display mode.
@@ -576,7 +591,8 @@ impl DeviceFamily {
             | Self::HydroShift2LcdDesktop
             | Self::Lancool207Desktop
             | Self::UniversalScreenDesktop
-            | Self::Vision9p2Desktop => TransportKind::UsbBulk,
+            | Self::Vision9p2Desktop
+            | Self::WiredReceiver => TransportKind::UsbBulk,
 
             // Pure wireless-discovered (no USB identity of their own).
             Self::Slv3Led

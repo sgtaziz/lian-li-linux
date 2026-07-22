@@ -35,6 +35,7 @@ pub(super) fn family_display_name(f: DeviceFamily) -> &'static str {
         DeviceFamily::Vision9p2Desktop => "Vision 9.2\" (Desktop Mode)",
         DeviceFamily::TlFlexLcd => "TL Flex LCD",
         DeviceFamily::SlInfFlexLcd => "SL Infinity Flex LCD",
+        DeviceFamily::WiredReceiver => "Wired Controller",
     }
 }
 

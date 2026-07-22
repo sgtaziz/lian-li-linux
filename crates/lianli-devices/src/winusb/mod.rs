@@ -7,3 +7,4 @@
 pub mod h2_aio;
 pub mod lcd;
 pub mod led;
+pub mod wired_receiver;
