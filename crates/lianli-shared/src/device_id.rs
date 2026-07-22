@@ -468,10 +468,9 @@ impl DeviceFamily {
             Self::TlLcd => DeviceCapabilities::LCD,
 
             // WinUSB bulk LCDs (support switching to CH340 desktop mode).
-            Self::HydroShift2Lcd => DeviceCapabilities::LCD
-                .or(DeviceCapabilities::PUMP)
-                .or(DeviceCapabilities::AIO)
-                .or(DeviceCapabilities::DISPLAY_MODE_SWITCH),
+            Self::HydroShift2Lcd => {
+                DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
+            }
             Self::Lancool207 | Self::UniversalScreen => {
                 DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
             }

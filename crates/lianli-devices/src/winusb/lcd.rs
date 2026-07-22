@@ -37,6 +37,7 @@ pub struct WinUsbLcdDevice {
     consecutive_failures: u32,
     last_reset: Option<Instant>,
     device_gone: bool,
+    firmware: Option<String>,
 }
 
 impl WinUsbLcdDevice {
@@ -76,6 +77,7 @@ impl WinUsbLcdDevice {
             consecutive_failures: 0,
             last_reset: None,
             device_gone: false,
+            firmware: None,
         })
     }
 
@@ -89,6 +91,10 @@ impl WinUsbLcdDevice {
 
     pub fn serial(&self) -> &str {
         &self.serial
+    }
+
+    pub fn firmware_str(&self) -> Option<&str> {
+        self.firmware.as_deref()
     }
 
     pub fn transport_release(&self) {
@@ -301,7 +307,24 @@ impl WinUsbLcdDevice {
         self.transport.read_flush();
 
         let ver = self.builder.get_ver_header_winusb();
-        self.send_command(ver, "GetVer");
+        match self.transport.write(&ver, LCD_WRITE_TIMEOUT) {
+            Ok(_) => self.note_write_success(),
+            Err(e) => warn!("GetVer write failed: {e}"),
+        }
+        if let Some(resp) = self.read_response("GetVer", LCD_READ_TIMEOUT) {
+            // Firmware version string is at bytes 8..40 (32 bytes, UTF-8, null-trimmed).
+            // Ref: WinUsb.cs:809-821
+            let fw_bytes = &resp[8..40.min(resp.len())];
+            let end = fw_bytes
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(fw_bytes.len());
+            let fw_str = String::from_utf8_lossy(&fw_bytes[..end]).to_string();
+            if !fw_str.is_empty() {
+                info!("LCD firmware: {fw_str}");
+                self.firmware = Some(fw_str);
+            }
+        }
         let stop_play = self.builder.stop_play_header_winusb();
         self.send_command(stop_play, "StopPlay");
 
@@ -552,13 +575,14 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
             .ok_or_else(|| anyhow::anyhow!("unknown WinUSB LCD PID {:#06x}", ctx.pid))?;
         let mut lcd = WinUsbLcdDevice::new(ctx.device.clone(), screen, name)?;
         crate::traits::LcdDevice::initialize(&mut lcd)?;
+        let firmware = lcd.firmware_str().map(|s| s.to_string());
         Ok(crate::registry::OpenedDevice {
             id: ctx.device_id(),
             family,
             capabilities: family.capabilities(),
             transport_kind: lianli_shared::device_id::TransportKind::UsbBulk,
             model_name: name.to_string(),
-            firmware: None,
+            firmware,
             fan: None,
             lcd: Some(Box::new(lcd)),
             rgb: Vec::new(),
