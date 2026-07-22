@@ -100,6 +100,20 @@ impl Ene6k77Model {
             _ => 1,
         }
     }
+
+    /// Expected `(MajorID, MinorID)` pairs from the firmware-version response.
+    /// Some variants accept multiple MinorIDs (e.g. SLV2Fan accepts 0xC5 and 0xC7).
+    /// Ref: per-variant `Load()` methods in `*FirmwareVersion.cs`.
+    pub fn expected_firmware_ids(&self) -> &'static [(u8, u8)] {
+        match self {
+            Self::SlFan => &[(0x64, 0xC2)],
+            Self::SlRedragon => &[(0x64, 0xC8)],
+            Self::AlFan => &[(0x80, 0xC3)],
+            Self::SlInfinity => &[(0x80, 0xC4)],
+            Self::SlV2Fan | Self::SlV2aFan => &[(0x64, 0xC5), (0x64, 0xC7)],
+            Self::AlV2Fan => &[(0x80, 0xC6)],
+        }
+    }
 }
 
 /// Firmware version info read from the device.
@@ -114,6 +128,22 @@ pub struct Ene6k77Firmware {
 }
 
 impl Ene6k77Firmware {
+    /// Validate the firmware-ID bytes against the expected values for this
+    /// variant. Ref: per-variant `Load()` methods — `CustomerID==0xE0 &&
+    /// ProjectID==0x50` plus per-variant `(MajorID, MinorID)`.
+    ///
+    /// Returns `false` on mismatch; the caller should log a warning but
+    /// not fail (the device may be running newer firmware).
+    pub fn is_valid(&self) -> bool {
+        if self.customer_id != 0xE0 || self.project_id != 0x50 {
+            return false;
+        }
+        self.model
+            .expected_firmware_ids()
+            .iter()
+            .any(|&(maj, min)| maj == self.major_id && min == self.minor_id)
+    }
+
     /// Per-variant version number as `(major, minor)`.
     ///
     /// Faithful port of the C# per-variant `GetVersion()` overrides:
@@ -267,5 +297,29 @@ mod tests {
         // lo nibble > 9 → (0, 0) for all non-SLInfinity variants
         assert_eq!(fw(Ene6k77Model::SlFan, 0xC2, 0x0A).version(), (0, 0));
         assert_eq!(fw(Ene6k77Model::AlFan, 0xC3, 0x0F).version(), (0, 0));
+    }
+
+    #[test]
+    fn firmware_id_validation() {
+        // Valid IDs
+        assert!(fw(Ene6k77Model::SlFan, 0xC2, 0x42).is_valid());
+        assert!(fw(Ene6k77Model::SlRedragon, 0xC8, 0x42).is_valid());
+        assert!(fw(Ene6k77Model::AlFan, 0xC3, 0x42).is_valid());
+        assert!(fw(Ene6k77Model::SlInfinity, 0xC4, 0x42).is_valid());
+        assert!(fw(Ene6k77Model::AlV2Fan, 0xC6, 0x42).is_valid());
+        // SLV2Fan accepts both 0xC5 and 0xC7
+        assert!(fw(Ene6k77Model::SlV2Fan, 0xC5, 0x42).is_valid());
+        assert!(fw(Ene6k77Model::SlV2Fan, 0xC7, 0x42).is_valid());
+        assert!(fw(Ene6k77Model::SlV2aFan, 0xC7, 0x42).is_valid());
+
+        // Invalid customer ID
+        let mut bad_customer = fw(Ene6k77Model::SlFan, 0xC2, 0x42);
+        bad_customer.customer_id = 0xFF;
+        assert!(!bad_customer.is_valid());
+
+        // Wrong MinorID for variant
+        let mut mismatched = fw(Ene6k77Model::SlFan, 0xC2, 0x42);
+        mismatched.minor_id = 0xC8; // SLRedragon's MinorID
+        assert!(!mismatched.is_valid());
     }
 }

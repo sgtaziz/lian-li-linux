@@ -76,14 +76,26 @@ impl Ene6k77Controller {
         self.send_feature(&[REPORT_ID, 0x50, 0x01])?;
         thread::sleep(CMD_DELAY);
         let data = self.read_input(5)?;
-        Ok(Ene6k77Firmware {
+        let fw = Ene6k77Firmware {
             model: self.model,
             customer_id: data[0],
             project_id: data[1],
             major_id: data[2],
             minor_id: data[3],
             fine_tune: data[4],
-        })
+        };
+        if !fw.is_valid() {
+            warn!(
+                "Firmware ID mismatch for {}: got cust={:#04x} proj={:#04x} major={:#04x} minor={:#04x}, expected {:?}",
+                self.model.name(),
+                fw.customer_id,
+                fw.project_id,
+                fw.major_id,
+                fw.minor_id,
+                self.model.expected_firmware_ids(),
+            );
+        }
+        Ok(fw)
     }
 
     /// Set fan quantity for a group. Tells the controller how many fans are
