@@ -46,6 +46,13 @@ pub trait FanDevice: Send + Sync {
         anyhow::bail!("Pump speed control not supported by this device")
     }
 
+    /// Poll coolant temperature from wired AIO devices (HydroShift LCD, Galahad2).
+    /// Returns `None` if the device doesn't have a coolant sensor.
+    /// Ref: PR #103 — exposes wired coolant telemetry to fan curves.
+    fn poll_coolant_temp(&self) -> Option<f32> {
+        None
+    }
+
     /// Whether this device exposes a per-port daisy-chain "fan quantity" override.
     fn supports_fan_quantity(&self) -> bool {
         false
@@ -101,6 +108,9 @@ impl<T: FanDevice + ?Sized> FanDevice for Arc<T> {
     }
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         (**self).set_pump_speed(duty)
+    }
+    fn poll_coolant_temp(&self) -> Option<f32> {
+        (**self).poll_coolant_temp()
     }
     fn supports_fan_quantity(&self) -> bool {
         (**self).supports_fan_quantity()

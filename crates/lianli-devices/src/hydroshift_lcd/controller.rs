@@ -658,6 +658,16 @@ impl FanDevice for HydroShiftLcdController {
         true
     }
 
+    fn poll_coolant_temp(&self) -> Option<f32> {
+        self.last_handshake
+            .as_ref()
+            .filter(|hs| {
+                // Reject startup placeholder (1.0°C, 0 RPM fan + pump)
+                !(hs.coolant_temp == 1.0 && hs.fan_rpm == 0 && hs.pump_rpm == 0)
+            })
+            .map(|hs| hs.coolant_temp)
+    }
+
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         let mut pwm = duty_to_percent(duty);
         let envelope = self.variant.pump_envelope();

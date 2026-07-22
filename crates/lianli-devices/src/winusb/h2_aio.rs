@@ -195,6 +195,10 @@ impl FanDevice for H2AioController {
         true
     }
 
+    fn poll_coolant_temp(&self) -> Option<f32> {
+        self.get_h2_params().ok().map(|p| p.coolant_temp as f32)
+    }
+
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         *self.last_pump_duty.lock() = duty;
         let pump_pwm = Self::duty_to_pwm(duty);
