@@ -56,6 +56,12 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a034", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a065", MODE="0666"
 # Universal Screen 8.8"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a088", MODE="0666"
+# Vision 9.2"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a092", MODE="0666"
+# TL Flex LCD
+SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a018", MODE="0666"
+# SL Infinity Flex LCD
+SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a019", MODE="0666"
 
 # Desktop-mode LCD devices (CH340, VID=0x1A86)
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="acd1", MODE="0666"
@@ -65,6 +71,7 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad20", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad21", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad22", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad23", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad26", MODE="0666"
 
 # --- Force usbhid to bind HID devices the kernel may not claim automatically ---
 # Some devices have HID interfaces that usbhid doesn't recognise, so no

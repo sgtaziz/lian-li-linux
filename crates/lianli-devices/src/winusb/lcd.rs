@@ -633,6 +633,17 @@ fn screen_for_pid(
             DeviceFamily::UniversalScreen,
             "Universal Screen 8.8\"",
         )),
+        0xA092 => Some((
+            ScreenInfo::VISION_9P2,
+            DeviceFamily::Vision9p2,
+            "Vision 9.2\"",
+        )),
+        0xA018 => Some((ScreenInfo::FLEX_LCD, DeviceFamily::TlFlexLcd, "TL Flex LCD")),
+        0xA019 => Some((
+            ScreenInfo::FLEX_LCD,
+            DeviceFamily::SlInfFlexLcd,
+            "SL Infinity Flex LCD",
+        )),
         _ => None,
     }
 }

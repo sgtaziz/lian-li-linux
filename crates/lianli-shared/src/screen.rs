@@ -77,6 +77,26 @@ impl ScreenInfo {
         h264: false,
         needs_keepalive: false,
     };
+
+    pub const VISION_9P2: Self = Self {
+        width: 464,
+        height: 1920,
+        max_fps: 30,
+        jpeg_quality: 95,
+        max_payload: 512_000,
+        h264: false,
+        needs_keepalive: false,
+    };
+
+    pub const FLEX_LCD: Self = Self {
+        width: 480,
+        height: 480,
+        max_fps: 30,
+        jpeg_quality: 90,
+        max_payload: 153_600,
+        h264: false,
+        needs_keepalive: false,
+    };
 }
 
 /// Get the screen info for a given device family.
@@ -89,6 +109,8 @@ pub fn screen_info_for(family: DeviceFamily) -> Option<ScreenInfo> {
         DeviceFamily::HydroShift2Lcd => Some(ScreenInfo::HYDROSHIFT2),
         DeviceFamily::Lancool207 => Some(ScreenInfo::LANCOOL_207),
         DeviceFamily::UniversalScreen => Some(ScreenInfo::UNIVERSAL_SCREEN),
+        DeviceFamily::Vision9p2 => Some(ScreenInfo::VISION_9P2),
+        DeviceFamily::TlFlexLcd | DeviceFamily::SlInfFlexLcd => Some(ScreenInfo::FLEX_LCD),
         _ => None,
     }
 }

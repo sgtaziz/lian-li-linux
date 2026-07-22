@@ -57,6 +57,14 @@ pub enum DeviceFamily {
     StrimerPlus,
     /// Universal Screen 8.8" LED Ring — HID RGB controller (0x0416:0x8050)
     UniversalScreenLighting,
+    /// Vision 9.2" LCD panel — WinUSB 464x1920
+    Vision9p2,
+    /// Vision 9.2" in desktop mode (CH340, 0x1A86:0xAD26)
+    Vision9p2Desktop,
+    /// TL Flex LCD — WinUSB fan-hub LCD (0x1CBE:0xA018)
+    TlFlexLcd,
+    /// SL Infinity Flex LCD — WinUSB fan-hub LCD (0x1CBE:0xA019)
+    SlInfFlexLcd,
 }
 
 /// USB transport protocol a device uses on the wire.
@@ -435,6 +443,30 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         name: "Universal Screen 8.8\" (Desktop Mode)",
         hid_usage_page: None,
     },
+    DeviceEntry {
+        id: UsbId::new(0x1CBE, 0xA092),
+        family: DeviceFamily::Vision9p2,
+        name: "Vision 9.2\"",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1A86, 0xAD26),
+        family: DeviceFamily::Vision9p2Desktop,
+        name: "Vision 9.2\" (Desktop Mode)",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1CBE, 0xA018),
+        family: DeviceFamily::TlFlexLcd,
+        name: "TL Flex LCD",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x1CBE, 0xA019),
+        family: DeviceFamily::SlInfFlexLcd,
+        name: "SL Infinity Flex LCD",
+        hid_usage_page: None,
+    },
 ];
 
 impl DeviceFamily {
@@ -471,15 +503,17 @@ impl DeviceFamily {
             Self::HydroShift2Lcd => {
                 DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
             }
-            Self::Lancool207 | Self::UniversalScreen => {
+            Self::Lancool207 | Self::UniversalScreen | Self::Vision9p2 => {
                 DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
             }
+            Self::TlFlexLcd | Self::SlInfFlexLcd => DeviceCapabilities::LCD,
 
             // Desktop-mode companions (CH340 firmware) — same physical device
             // as the WinUSB LCDs above, currently in display mode.
             Self::HydroShift2LcdDesktop
             | Self::Lancool207Desktop
-            | Self::UniversalScreenDesktop => DeviceCapabilities::LCD
+            | Self::UniversalScreenDesktop
+            | Self::Vision9p2Desktop => DeviceCapabilities::LCD
                 .or(DeviceCapabilities::DESKTOP_MODE)
                 .or(DeviceCapabilities::DISPLAY_MODE_SWITCH),
 
@@ -534,9 +568,13 @@ impl DeviceFamily {
             | Self::HydroShift2Lcd
             | Self::Lancool207
             | Self::UniversalScreen
+            | Self::Vision9p2
+            | Self::TlFlexLcd
+            | Self::SlInfFlexLcd
             | Self::HydroShift2LcdDesktop
             | Self::Lancool207Desktop
-            | Self::UniversalScreenDesktop => TransportKind::UsbBulk,
+            | Self::UniversalScreenDesktop
+            | Self::Vision9p2Desktop => TransportKind::UsbBulk,
 
             // Pure wireless-discovered (no USB identity of their own).
             Self::Slv3Led

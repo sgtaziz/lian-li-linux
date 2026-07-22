@@ -31,6 +31,10 @@ pub(super) fn family_display_name(f: DeviceFamily) -> &'static str {
         DeviceFamily::WirelessV150 => "Lancool V150 Wireless",
         DeviceFamily::StrimerPlus => "Strimer Plus",
         DeviceFamily::UniversalScreenLighting => "Universal Screen 8.8\" LED Ring",
+        DeviceFamily::Vision9p2 => "Vision 9.2\"",
+        DeviceFamily::Vision9p2Desktop => "Vision 9.2\" (Desktop Mode)",
+        DeviceFamily::TlFlexLcd => "TL Flex LCD",
+        DeviceFamily::SlInfFlexLcd => "SL Infinity Flex LCD",
     }
 }
 
