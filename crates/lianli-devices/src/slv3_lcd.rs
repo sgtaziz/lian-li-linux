@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
 use lianli_transport::usb::{RusbBulk, LCD_WRITE_TIMEOUT, USB_TIMEOUT};
 use rusb::{Device, GlobalContext};
-use tracing::debug;
+use tracing::{debug, info};
 
 /// SLV3/TLV2 wireless LCD fan — USB bulk with DES-encrypted headers.
 pub struct Slv3LcdDevice {
@@ -13,6 +13,7 @@ pub struct Slv3LcdDevice {
     serial: String,
     initialized: bool,
     screen: ScreenInfo,
+    firmware: Option<String>,
 }
 
 impl Slv3LcdDevice {
@@ -40,6 +41,7 @@ impl Slv3LcdDevice {
             serial,
             initialized: false,
             screen: ScreenInfo::WIRELESS_LCD,
+            firmware: None,
         })
     }
 
@@ -63,18 +65,67 @@ impl Slv3LcdDevice {
         if self.initialized {
             return Ok(());
         }
-        debug!(
-            "LCD[bus {} addr {}] sending 0x0d init header",
-            self.bus, self.address
-        );
+        debug!("LCD[bus {} addr {}] init sequence", self.bus, self.address);
+
+        // C# Init() sequence (WinUsb.cs:411-415):
+        // 1. Rotate(0)
         let header = builder.header(0, 0x0D, false);
-        self.transport
-            .write(&header, LCD_WRITE_TIMEOUT)
-            .context("writing LCD init header")?;
+        self.transport.write(&header, LCD_WRITE_TIMEOUT)?;
         let mut buf = [0u8; 511];
         let _ = self.transport.read(&mut buf, USB_TIMEOUT);
+
+        // 2. CheckNewLcd (0x80) — probe LCD hardware revision
+        let check = builder.header(0, 0x80, false);
+        self.transport.write(&check, LCD_WRITE_TIMEOUT)?;
+        let _ = self.transport.read(&mut buf, USB_TIMEOUT);
+
+        // 3. SetFrameRate(120) — C# hardcodes 120 for wireless LCDs
+        let fps = builder.frame_rate_header(120);
+        self.transport.write(&fps, LCD_WRITE_TIMEOUT)?;
+        let _ = self.transport.read(&mut buf, USB_TIMEOUT);
+
+        // 4. GetVer (0x0A) — read firmware version
+        let ver = builder.header(0, 0x0A, false);
+        self.transport.write(&ver, LCD_WRITE_TIMEOUT)?;
+        let n = self.transport.read(&mut buf, USB_TIMEOUT).unwrap_or(0);
+        if n > 8 {
+            let end = buf[8..]
+                .iter()
+                .position(|&b| b == 0)
+                .map(|p| 8 + p)
+                .unwrap_or(n.min(40));
+            let fw = String::from_utf8_lossy(&buf[8..end]).trim().to_string();
+            if !fw.is_empty() {
+                info!("SLV3/TLV2 LCD firmware: {fw}");
+                self.firmware = Some(fw);
+            }
+        }
+
         self.initialized = true;
         Ok(())
+    }
+
+    /// Set LCD brightness (0-100). Uses legacy DES path opcode 0x0E.
+    pub fn set_brightness(&mut self, builder: &mut PacketBuilder, brightness: u8) -> Result<()> {
+        self.send_init(builder)?;
+        let header = builder.brightness_header(brightness);
+        self.transport.write(&header, LCD_WRITE_TIMEOUT)?;
+        let mut buf = [0u8; 511];
+        let _ = self.transport.read(&mut buf, USB_TIMEOUT);
+        debug!("SLV3/TLV2 LCD brightness: {brightness}");
+        Ok(())
+    }
+
+    /// Reboot the LCD MCU. Uses legacy DES path opcode 0x0B.
+    pub fn reboot(&mut self, builder: &mut PacketBuilder) -> Result<()> {
+        let header = builder.header(0, 0x0B, false);
+        self.transport.write(&header, LCD_WRITE_TIMEOUT)?;
+        debug!("SLV3/TLV2 LCD reboot sent");
+        Ok(())
+    }
+
+    pub fn firmware_str(&self) -> Option<&str> {
+        self.firmware.as_deref()
     }
 
     pub fn send_frame(&mut self, builder: &mut PacketBuilder, frame: &[u8]) -> Result<()> {

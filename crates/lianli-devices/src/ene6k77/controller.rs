@@ -319,11 +319,15 @@ impl Ene6k77Controller {
         let colors = if matches!(effect.mode, RgbMode::Static | RgbMode::Breathing) {
             if leds_per_fan == 12 && effect.colors.len() >= 2 {
                 // Outer-ring "colorful" expansion: 4 corners × 3 LEDs each
-                // Ref: ALFanController.cs:1087-1103
                 expand_outer_corner(&effect.colors, max_fans)
             } else {
                 expand_per_led(&effect.colors, max_fans, leds_per_fan)
             }
+        } else if matches!(effect.mode, RgbMode::Meteor)
+            && matches!(self.model, Ene6k77Model::AlV2Fan)
+        {
+            // ALV2Fan Meteor cycleFill: wrap palette modulo instead of black padding
+            expand_palette_cycle(&effect.colors, max_fans, palette)
         } else {
             expand_palette(&effect.colors, max_fans, palette)
         };
@@ -641,6 +645,22 @@ fn expand_outer_corner(ui: &[[u8; 3]], num_fans: usize) -> Vec<[u8; 3]> {
             for led in 0..3 {
                 out[fan * 12 + corner * 3 + led] = c;
             }
+        }
+    }
+    out
+}
+
+/// Cycle-fill palette expansion: wraps the user palette modulo slot index
+/// instead of padding with black. Used exclusively for Meteor mode on ALV2Fan.
+/// Ref: ALV2FanController.cs:1121-1139 convertToFanGroupColor(cycleFill: true)
+fn expand_palette_cycle(ui: &[[u8; 3]], num_fans: usize, palette: usize) -> Vec<[u8; 3]> {
+    if ui.is_empty() {
+        return vec![[0, 0, 0]; num_fans * palette];
+    }
+    let mut out = vec![[0u8; 3]; num_fans * palette];
+    for fan in 0..num_fans {
+        for slot in 0..palette {
+            out[fan * palette + slot] = ui[slot % ui.len()];
         }
     }
     out
