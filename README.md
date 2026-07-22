@@ -82,7 +82,7 @@ at boot), so the per-user daemon creates and opens its own evdi nodes with no ro
 
 | Device | RGB | Tested |
 |--------|:---:|:------:|
-| Strimer Plus (wired) | Planned | - |
+| Strimer Plus (wired) | Yes | - |
 
 If you've tested a device that isn't marked as tested above, please [open an issue or PR](https://github.com/sgtaziz/lian-li-linux/issues) to update this table.
 
