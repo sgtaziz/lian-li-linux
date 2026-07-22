@@ -10,7 +10,7 @@ use lianli_shared::screen::{screen_info_for, ScreenInfo};
 use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
 use rusb::Device;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Instant;
@@ -171,6 +171,7 @@ impl ServiceManager {
         let mut new_targets = HashMap::new();
 
         if let Some(cfg) = &self.config {
+            let mut claimed: HashSet<usize> = HashSet::new();
             for (cfg_idx, device_cfg) in cfg.lcds.iter().enumerate() {
                 let asset = match self.media_assets.get(&cfg_idx) {
                     Some(asset_arc) => Arc::clone(asset_arc),
@@ -183,9 +184,38 @@ impl ServiceManager {
                 };
 
                 let matched = if let Some(serial) = &device_cfg.serial {
-                    candidates.iter().find(|c| &c.device_id == serial)
+                    // Exact match first
+                    let exact = candidates
+                        .iter()
+                        .enumerate()
+                        .find(|(idx, c)| !claimed.contains(idx) && &c.device_id == serial);
+                    exact.or_else(|| {
+                        // Alias fallback: wired AIO firmwares may alternate between
+                        // hardware serial and USB-topology ID across cold boot.
+                        // Only apply when there's one LCD config and one compatible AIO.
+                        if cfg.lcds.len() == 1 && serial.starts_with("hid:") {
+                            let mut compatible = candidates.iter().enumerate()
+                                .filter(|(idx, c)| !claimed.contains(idx) && is_wired_aio_lcd(c.family));
+                            let first = compatible.next();
+                            if first.is_some() && compatible.next().is_none() {
+                                let (idx, c) = first.unwrap();
+                                warn!(
+                                    "[devices] configured AIO LCD id '{}' unavailable; using compatible alias '{}'",
+                                    serial, c.device_id
+                                );
+                                return Some((idx, c));
+                            }
+                        }
+                        None
+                    }).map(|(idx, c)| { claimed.insert(idx); c })
                 } else if let Some(index) = device_cfg.index {
-                    candidates.get(index)
+                    candidates
+                        .get(index)
+                        .filter(|_| !claimed.contains(&index))
+                        .map(|c| {
+                            claimed.insert(index);
+                            c
+                        })
                 } else {
                     None
                 };
@@ -334,4 +364,12 @@ impl ServiceManager {
 
         self.targets = new_targets;
     }
+}
+
+/// Whether a device family is a wired AIO LCD that may benefit from alias matching.
+fn is_wired_aio_lcd(family: DeviceFamily) -> bool {
+    matches!(
+        family,
+        DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd
+    )
 }
