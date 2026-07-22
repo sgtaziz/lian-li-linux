@@ -32,6 +32,10 @@ pub struct RgbController {
     presets: Vec<lianli_shared::rgb::RgbPreset>,
     /// When true, OpenRGB has active control — suppress native config application.
     openrgb_active: bool,
+    /// Thermal alert override color (when Some, all devices show this color).
+    thermal_override: crate::thermal_alert::SharedThermalAlert,
+    /// Tracks whether thermal override was active last tick (for edge detection).
+    thermal_was_active: bool,
 }
 
 impl RgbController {
@@ -64,7 +68,59 @@ impl RgbController {
             config: None,
             presets: Vec::new(),
             openrgb_active: false,
+            thermal_override: crate::thermal_alert::new_shared(),
+            thermal_was_active: false,
         }
+    }
+
+    /// Set the shared thermal-alert override state.
+    pub fn set_thermal_override(
+        &mut self,
+        override_state: crate::thermal_alert::SharedThermalAlert,
+    ) {
+        self.thermal_override = override_state;
+    }
+
+    /// Check thermal override and apply/restore if state changed.
+    /// Returns true if override is currently active.
+    pub fn check_thermal_override(&mut self) -> bool {
+        let color = *self.thermal_override.lock();
+        let active = color.is_some();
+
+        if active != self.thermal_was_active {
+            match color {
+                Some(rgb) => {
+                    info!(
+                        "Applying thermal alert override: [{},{},{}]",
+                        rgb[0], rgb[1], rgb[2]
+                    );
+                    let alert_effect = RgbEffect {
+                        mode: RgbMode::Static,
+                        colors: vec![rgb],
+                        speed: 0,
+                        brightness: 4,
+                        direction: Default::default(),
+                        scope: Default::default(),
+                        disabled: false,
+                    };
+                    for (dev_id, dev) in &self.wired {
+                        for zone in 0..dev.zone_info().len() as u8 {
+                            if let Err(e) = dev.set_zone_effect(zone, &alert_effect) {
+                                warn!("Thermal override failed for {dev_id} zone {zone}: {e}");
+                            }
+                        }
+                    }
+                }
+                None => {
+                    info!("Thermal alert cleared — restoring RGB config");
+                    if let Some(ref config) = self.config.clone() {
+                        self.apply_config(config, &self.presets.clone());
+                    }
+                }
+            }
+            self.thermal_was_active = active;
+        }
+        active
     }
 
     /// Apply an RGB config. Called on config load/change.

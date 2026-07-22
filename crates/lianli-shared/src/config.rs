@@ -136,6 +136,54 @@ pub struct Ene6k77DeviceConfig {
     pub fan_quantities: HashMap<u8, u8>,
 }
 
+fn default_threshold() -> u8 {
+    80
+}
+
+fn default_cpu_alert_color() -> [u8; 3] {
+    [255, 0, 0]
+}
+
+fn default_gpu_alert_color() -> [u8; 3] {
+    [0, 0, 255]
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ThermalAlertSourceSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_threshold")]
+    pub threshold: u8,
+    #[serde(default = "default_cpu_alert_color")]
+    pub alert_color: [u8; 3],
+}
+
+impl Default for ThermalAlertSourceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            threshold: default_threshold(),
+            alert_color: default_cpu_alert_color(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ThermalAlertSettings {
+    #[serde(default)]
+    pub cpu: ThermalAlertSourceSettings,
+    #[serde(default = "default_gpu_settings")]
+    pub gpu: ThermalAlertSourceSettings,
+}
+
+fn default_gpu_settings() -> ThermalAlertSourceSettings {
+    ThermalAlertSourceSettings {
+        enabled: false,
+        threshold: 80,
+        alert_color: default_gpu_alert_color(),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     #[serde(default = "default_fps")]
@@ -158,6 +206,8 @@ pub struct AppConfig {
     /// Per-ENE 6K77 device configuration keyed by device serial.
     #[serde(default)]
     pub ene6k77: HashMap<String, Ene6k77DeviceConfig>,
+    #[serde(default)]
+    pub thermal_alert: ThermalAlertSettings,
 }
 
 impl Default for AppConfig {
@@ -171,6 +221,7 @@ impl Default for AppConfig {
             rgb: None,
             aio: HashMap::new(),
             ene6k77: HashMap::new(),
+            thermal_alert: ThermalAlertSettings::default(),
         }
     }
 }

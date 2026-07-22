@@ -97,6 +97,7 @@ pub struct Controllers {
     pub fan: Option<FanController>,
     pub aio: Option<AioController>,
     pub rgb: Option<Arc<Mutex<RgbController>>>,
+    pub thermal_alert: Option<crate::thermal_alert::ThermalAlertMonitor>,
     pub direct_color_buffer: Arc<Mutex<DirectColorBuffer>>,
     pub direct_color_writer: Option<JoinHandle<()>>,
 }
@@ -107,6 +108,7 @@ impl Controllers {
             fan: None,
             aio: None,
             rgb: None,
+            thermal_alert: None,
             direct_color_buffer: Arc::new(Mutex::new(DirectColorBuffer::new())),
             direct_color_writer: None,
         }
@@ -119,6 +121,9 @@ impl Controllers {
         }
         if let Some(aio) = self.aio.take() {
             aio.stop();
+        }
+        if let Some(mut ta) = self.thermal_alert.take() {
+            ta.stop();
         }
         if let Some(writer) = self.direct_color_writer.take() {
             let _ = writer.join();

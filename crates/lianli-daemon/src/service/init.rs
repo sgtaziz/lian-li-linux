@@ -383,6 +383,17 @@ impl ServiceManager {
 
         let mut controller = RgbController::new(wired_rgb, wireless);
 
+        // Start thermal alert monitor and share override state with RGB controller
+        let thermal_settings = self
+            .config
+            .as_ref()
+            .map(|c| c.thermal_alert.clone())
+            .unwrap_or_default();
+        let mut monitor = crate::thermal_alert::ThermalAlertMonitor::new(thermal_settings);
+        controller.set_thermal_override(monitor.shared_override());
+        monitor.start();
+        self.controllers.thermal_alert = Some(monitor);
+
         if let Some(ref cfg) = self.config {
             if let Some(ref rgb_cfg) = cfg.rgb {
                 let presets = self.ipc.state.lock().rgb_presets.clone();

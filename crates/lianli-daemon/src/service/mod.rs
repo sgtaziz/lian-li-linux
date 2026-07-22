@@ -225,7 +225,15 @@ impl ServiceManager {
         self.check_wired_hotplug();
         self.refresh_targets();
         self.process_pending_lcd_firmware();
+        self.check_thermal_alert();
         self.sync_ipc_telemetry();
+    }
+
+    /// Check thermal alert state and trigger RGB override/restore if changed.
+    fn check_thermal_alert(&self) {
+        if let Some(ref rgb) = self.controllers.rgb {
+            rgb.lock().check_thermal_override();
+        }
     }
 
     /// Run the daemon main loop. Returns `true` if the daemon should restart.
