@@ -30,7 +30,9 @@ pub enum RgbMode {
     Paint,           // 17
     PingPong,        // 18
     Stack,           // 19
-    CoverCycle,      // 20
+    StackMulti,      // 20 (ENE6K77 single-ring)
+    Neon,            // 21 (ENE6K77 single-ring)
+    CoverCycle,      // 22
     Wave,            // 21
     Racing,          // 22
     Lottery,         // 23
@@ -287,6 +289,8 @@ impl RgbMode {
             Self::Paint => "Paint",
             Self::PingPong => "Ping Pong",
             Self::Stack => "Stack",
+            Self::StackMulti => "Stack Multi",
+            Self::Neon => "Neon",
             Self::CoverCycle => "Cover Cycle",
             Self::Wave => "Wave",
             Self::Racing => "Racing",
@@ -344,6 +348,8 @@ impl RgbMode {
             "Paint" => Self::Paint,
             "Ping Pong" => Self::PingPong,
             "Stack" => Self::Stack,
+            "Stack Multi" => Self::StackMulti,
+            "Neon" => Self::Neon,
             "Cover Cycle" => Self::CoverCycle,
             "Wave" => Self::Wave,
             "Racing" => Self::Racing,
@@ -599,6 +605,8 @@ mod tests {
         RgbMode::Paint,
         RgbMode::PingPong,
         RgbMode::Stack,
+        RgbMode::StackMulti,
+        RgbMode::Neon,
         RgbMode::CoverCycle,
         RgbMode::Wave,
         RgbMode::Racing,

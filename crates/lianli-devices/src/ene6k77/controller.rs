@@ -367,17 +367,22 @@ impl Ene6k77Controller {
             }
         } else {
             // Single-ring models (SL Fan, SL V2, SL V2a, SL Redragon).
+            // Ref: SLFanController.cs:62-79
             match mode {
                 RgbMode::Off => 0,
                 RgbMode::Static => 1,
                 RgbMode::Breathing => 2,
-                RgbMode::ColorCycle => 35,
+                RgbMode::RainbowMorph => 4,
                 RgbMode::Rainbow => 5,
                 RgbMode::Runway => 28,
                 RgbMode::Meteor => 36,
+                RgbMode::ColorCycle => 35,
                 RgbMode::Staggered => 24,
                 RgbMode::Tide => 26,
                 RgbMode::Mixing => 30,
+                RgbMode::Stack => 32,
+                RgbMode::StackMulti => 33,
+                RgbMode::Neon => 34,
                 _ => 1,
             }
         }
@@ -433,6 +438,22 @@ impl Ene6k77Controller {
             bail!("ENE 6K77: expected {expected_len} bytes, got {n}");
         }
         Ok(buf[1..=expected_len].to_vec())
+    }
+
+    /// Enter merge-lighting mode (SLFan/SLRedragon only).
+    /// Ref: SLFanDevice.cs:169-172
+    pub fn start_merge(&self) -> Result<()> {
+        self.send_feature(&[REPORT_ID, 0x10, 0x33, 0x00, 0x01, 0x02, 0x03, 0x08])?;
+        thread::sleep(CMD_DELAY);
+        Ok(())
+    }
+
+    /// Exit merge-lighting mode (SLFan/SLRedragon only).
+    /// Ref: SLFanDevice.cs:174-177
+    pub fn stop_merge(&self) -> Result<()> {
+        self.send_feature(&[REPORT_ID, 0x10, 0x34, 0x00, 0x00, 0x00])?;
+        thread::sleep(CMD_DELAY);
+        Ok(())
     }
 }
 

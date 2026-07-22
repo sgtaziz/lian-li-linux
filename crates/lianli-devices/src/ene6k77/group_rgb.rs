@@ -37,18 +37,25 @@ impl RgbDevice for Ene6k77GroupDevice {
     }
 
     fn supported_modes(&self) -> Vec<RgbMode> {
-        vec![
+        let mut modes = vec![
             RgbMode::Off,
             RgbMode::Static,
             RgbMode::Breathing,
             RgbMode::ColorCycle,
             RgbMode::Rainbow,
+            RgbMode::RainbowMorph,
             RgbMode::Runway,
             RgbMode::Meteor,
             RgbMode::Staggered,
             RgbMode::Tide,
             RgbMode::Mixing,
-        ]
+        ];
+        if !self.controller.model.uses_double_port() {
+            // Single-ring modes (SLFan/SLV2/SLV2A/SLRedragon).
+            // Ref: SLFanController.cs:62-79
+            modes.extend([RgbMode::Stack, RgbMode::StackMulti, RgbMode::Neon]);
+        }
+        modes
     }
 
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
