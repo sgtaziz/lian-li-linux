@@ -17,23 +17,116 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-/// Used by `stream_h264_reader` to split the pipe byte stream into complete frames.
+/// Used by `stream_h264_reader` to split the pipe byte stream into complete
+/// access units (AUs).
+///
+/// C#'s `WMSQLibAV` (`WMSQLibAV.cs:230`) uses `avcodec_receive_packet()` which
+/// returns one complete AU per call — no re-splitting needed. Since Rust reads
+/// from a continuous pipe, we must detect AU boundaries ourselves.
+///
+/// Boundary policy (H.264 §7.4.1.2.3): if AUD NALs (type 9) are present, they
+/// alone delimit AUs. Otherwise, primary coded picture NALs (types 1 and 5)
+/// are the boundary markers. This is determined lazily from the first
+/// boundary-eligible NAL encountered.
 fn find_au_split(data: &[u8]) -> Option<usize> {
+    let mut split_on_aud: Option<bool> = None;
     let mut found_first = false;
     let mut i = 0;
-    while i + 4 < data.len() {
-        if data[i..i + 4] == [0, 0, 0, 1] {
-            let nal_type = data[i + 4] & 0x1F;
-            if matches!(nal_type, 1 | 5 | 9) {
-                if found_first {
-                    return Some(i);
-                }
-                found_first = true;
-            }
+    while i + 3 < data.len() {
+        let (sc_len, nal_type) = if data[i..].starts_with(&[0, 0, 0, 1]) {
+            (4, data[i + 4] & 0x1F)
+        } else if data[i..].starts_with(&[0, 0, 1]) {
+            (3, data[i + 3] & 0x1F)
+        } else {
+            i += 1;
+            continue;
+        };
+
+        if split_on_aud.is_none() && matches!(nal_type, 1 | 5 | 9) {
+            split_on_aud = Some(nal_type == 9);
         }
-        i += 1;
+
+        let is_boundary = match split_on_aud {
+            Some(true) => nal_type == 9,
+            Some(false) => matches!(nal_type, 1 | 5),
+            None => false,
+        };
+
+        if is_boundary {
+            if found_first {
+                return Some(i);
+            }
+            found_first = true;
+        }
+
+        i += sc_len + 1;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_au_split;
+
+    const SC4: &[u8] = &[0, 0, 0, 1];
+
+    fn nal(typ: u8, payload: &[u8]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(SC4);
+        v.push(typ);
+        v.extend_from_slice(payload);
+        v
+    }
+
+    #[test]
+    fn no_aud_splits_at_second_slice() {
+        // [SPS][PPS][IDR] [P] [P]
+        let mut buf = Vec::new();
+        buf.extend(nal(7, &[1, 2])); // SPS
+        buf.extend(nal(8, &[3, 4])); // PPS
+        buf.extend(nal(5, &[5, 6])); // IDR (boundary #1)
+        let p1_off = buf.len();
+        buf.extend(nal(1, &[7, 8])); // P-slice (boundary #2)
+        buf.extend(nal(1, &[9, 10])); // P-slice
+
+        let split = find_au_split(&buf).expect("should find a split");
+        assert_eq!(split, p1_off);
+        // Drained AU = [SPS PPS IDR] — the complete first AU
+    }
+
+    #[test]
+    fn aud_delimited_splits_at_next_aud() {
+        // [AUD][SPS][PPS][IDR] [AUD][P]
+        let mut buf = Vec::new();
+        buf.extend(nal(9, &[0x10])); // AUD (boundary #1)
+        buf.extend(nal(7, &[1, 2])); // SPS — NOT a boundary
+        buf.extend(nal(8, &[3, 4])); // PPS — NOT a boundary
+        buf.extend(nal(5, &[5, 6])); // IDR — NOT a boundary (AUD policy active)
+        let aud2_off = buf.len();
+        buf.extend(nal(9, &[0x10])); // AUD (boundary #2)
+        buf.extend(nal(1, &[7, 8])); // P-slice
+
+        let split = find_au_split(&buf).expect("should find a split");
+        assert_eq!(split, aud2_off);
+        // Drained AU = [AUD SPS PPS IDR] — complete, includes the IDR
+    }
+
+    #[test]
+    fn three_byte_start_code() {
+        let mut buf = Vec::new();
+        buf.extend(&[0, 0, 0, 1, 5, 1]); // 4-byte SC + IDR
+        let split_off = buf.len();
+        buf.extend(&[0, 0, 1, 1, 2]); // 3-byte SC + P-slice
+        let split = find_au_split(&buf).expect("should find a split");
+        assert_eq!(split, split_off);
+    }
+
+    #[test]
+    fn no_split_in_partial_buffer() {
+        // Only one slice NAL — not enough for a split
+        let buf = nal(5, &[1, 2, 3]);
+        assert!(find_au_split(&buf).is_none());
+    }
 }
 
 /// HydroShift LCD / Galahad2 LCD AIO controller.
