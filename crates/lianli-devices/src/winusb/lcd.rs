@@ -576,6 +576,28 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
         let mut lcd = WinUsbLcdDevice::new(ctx.device.clone(), screen, name)?;
         crate::traits::LcdDevice::initialize(&mut lcd)?;
         let firmware = lcd.firmware_str().map(|s| s.to_string());
+
+        // HydroShift II (0xA021/0xA034) also has pump+fan AIO via separate opcodes.
+        // Open a second USB handle for AIO commands.
+        let (fan, aio) = if matches!(ctx.pid, 0xA021 | 0xA034) {
+            match super::h2_aio::H2AioController::new(rusb::Device::clone(&ctx.device)) {
+                Ok(ctrl) => {
+                    let arc = std::sync::Arc::new(ctrl);
+                    (
+                        Some(Box::new(std::sync::Arc::clone(&arc))
+                            as Box<dyn crate::traits::FanDevice>),
+                        Some(Box::new(arc) as Box<dyn crate::traits::AioDevice>),
+                    )
+                }
+                Err(e) => {
+                    tracing::warn!("H2 AIO controller open failed (LCD-only mode): {e}");
+                    (None, None)
+                }
+            }
+        } else {
+            (None, None)
+        };
+
         Ok(crate::registry::OpenedDevice {
             id: ctx.device_id(),
             family,
@@ -583,10 +605,13 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
             transport_kind: lianli_shared::device_id::TransportKind::UsbBulk,
             model_name: name.to_string(),
             firmware,
-            fan: None,
+            fan: fan.map(|aio| {
+                let boxed: Box<dyn crate::traits::FanDevice> = aio;
+                boxed
+            }),
             lcd: Some(Box::new(lcd)),
             rgb: Vec::new(),
-            aio: None,
+            aio,
             shared_hid: None,
         })
     }

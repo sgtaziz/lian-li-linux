@@ -22,6 +22,29 @@ pub const CMD_STOP_PLAY: u8 = 0x7B;
 pub const CMD_REBOOT: u8 = 0x0B;
 pub const CMD_SWITCH_TO_DESKTOP: u8 = 0x96;
 
+// HydroShift II AIO opcodes ( WinUsbH2.cs )
+pub const CMD_GET_H2_PARAMS: u8 = 0xFA;
+pub const CMD_SYNC_PUMP_FAN: u8 = 0xFB;
+pub const CMD_PUSH_RGB_DATA: u8 = 0xFC;
+pub const CMD_SET_WTHEME_INDEX: u8 = 0xF9;
+
+/// CRC-16/CCITT (poly 0x1021, init 0, no final XOR, no reflection).
+/// Ref: Util.cs:136-145
+pub fn crc16_ccitt(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0;
+    for &byte in data {
+        crc ^= (byte as u16) << 8;
+        for _ in 0..8 {
+            if crc & 0x8000 != 0 {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    crc
+}
+
 /// Builds DES-CBC encrypted command headers for VID=0x1CBE LCD devices.
 ///
 /// All VID=0x1CBE devices (SLV3, TLV2, HydroShift II, Lancool 207, Universal Screen)
@@ -204,10 +227,62 @@ impl PacketBuilder {
     pub fn reboot_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_REBOOT, &[])
     }
+
+    /// Build a SyncPumpFan header (cmd 0xFB) with CRC16.
+    /// Ref: WinUsbH2.cs:1123-1201
+    pub fn sync_pump_fan_header_winusb(
+        &mut self,
+        pump_pwm: u16,
+        fan1: u8,
+        fan2: u8,
+        fan3: u8,
+    ) -> Vec<u8> {
+        let mut payload = [0u8; 492];
+        payload[0] = 0xFF;
+        payload[1] = 0x0F;
+        payload[2] = 0xA2;
+        payload[3] = 0x00;
+        payload[4] = (pump_pwm >> 8) as u8;
+        payload[5] = (pump_pwm & 0xFF) as u8;
+        payload[6] = fan1;
+        payload[7] = fan2;
+        payload[8] = fan3;
+        let crc = crc16_ccitt(&payload[..12]);
+        payload[12] = (crc >> 8) as u8;
+        payload[13] = (crc & 0xFF) as u8;
+        self.build_winusb(CMD_SYNC_PUMP_FAN, &payload)
+    }
+
+    /// Build a GetH2Params header (cmd 0xFA) — telemetry read.
+    pub fn get_h2_params_header_winusb(&mut self) -> Vec<u8> {
+        self.build_winusb(CMD_GET_H2_PARAMS, &[])
+    }
 }
 
 impl Default for PacketBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::crc16_ccitt;
+
+    #[test]
+    fn crc16_empty_is_zero() {
+        assert_eq!(crc16_ccitt(&[]), 0);
+    }
+
+    #[test]
+    fn crc16_single_byte_matches_table() {
+        // table[1] = 4129 = 0x1021 in the C# crcTable
+        assert_eq!(crc16_ccitt(&[0x01]), 0x1021);
+    }
+
+    #[test]
+    fn crc16_known_vector() {
+        // CRC-16/XMODEM of "123456789" = 0x31C3
+        assert_eq!(crc16_ccitt(b"123456789"), 0x31C3);
     }
 }
