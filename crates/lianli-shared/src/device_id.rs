@@ -556,12 +556,12 @@ impl DeviceFamily {
             | Self::Galahad2Trinity
             | Self::HydroShiftLcd
             | Self::Galahad2Lcd
-            | Self::StrimerPlus
-            | Self::UniversalScreenLighting => TransportKind::Hid,
+            | Self::StrimerPlus => TransportKind::Hid,
 
             // WinUSB-style bulk families (incl. RF dongles and desktop-mode
             // CH340 companions).
-            Self::WirelessTx
+            Self::UniversalScreenLighting
+            | Self::WirelessTx
             | Self::WirelessRx
             | Self::Slv3Lcd
             | Self::Tlv2Lcd
