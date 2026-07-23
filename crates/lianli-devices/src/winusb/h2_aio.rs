@@ -99,18 +99,19 @@ impl H2AioController {
         }
 
         Ok(H2Params {
-            // Layout verified on real hardware (PR #102):
-            // [8]=0x0A marker, [9]=fan_count, [10-12]=fan duty profile,
-            // [13]=coolant temp (whole °C), [14:16]/[16:18]/[18:20]=fan RPM BE u16
+            // Layout verified on real hardware (PR #102 spec + live test):
+            // [13]=coolant temp (whole °C)
+            // [14:16]=fan1 RPM, [16:18]=fan2 RPM, [18:20]=fan3 RPM (u16 BE)
+            // [20:22]=pump RPM (u16 BE)
             cpu_temp: 0,
             cpu_load: 0,
             gpu_temp: 0,
             gpu_load: 0,
-            pump_rpm: u16::from_be_bytes([buf[14], buf[15]]),
+            pump_rpm: u16::from_be_bytes([buf[20], buf[21]]),
             fan_rpm: [
+                u16::from_be_bytes([buf[14], buf[15]]),
                 u16::from_be_bytes([buf[16], buf[17]]),
                 u16::from_be_bytes([buf[18], buf[19]]),
-                u16::from_be_bytes([buf[20], buf[21]]),
             ],
             coolant_temp: buf[13],
         })
