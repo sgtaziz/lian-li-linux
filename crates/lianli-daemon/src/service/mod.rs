@@ -414,8 +414,15 @@ impl ServiceManager {
                     self.stream_target(asset);
                 }
                 DaemonEvent::ResyncWirelessRgb => {
-                    info!("Wireless RGB drift detected, re-applying config");
-                    self.apply_rgb_config();
+                    if let Some(ref rgb) = self.controllers.rgb {
+                        let rgb = rgb.lock();
+                        if rgb.is_openrgb_active() {
+                            rgb.resync_openrgb();
+                        } else {
+                            drop(rgb);
+                            self.apply_rgb_config();
+                        }
+                    }
                 }
                 DaemonEvent::RecreateMedia { target_index } => {
                     if let Some(asset) = self.media_assets.get(&target_index).cloned() {

@@ -36,6 +36,9 @@ pub struct RgbController {
     thermal_override: crate::thermal_alert::SharedThermalAlert,
     /// Tracks whether thermal override was active last tick (for edge detection).
     thermal_was_active: bool,
+    /// Cached last-applied OpenRGB direct colors per (device_id, zone).
+    /// Used to re-push state after fan PWM disrupts the device's RGB.
+    last_direct: HashMap<(String, u8), Vec<[u8; 3]>>,
 }
 
 impl RgbController {
@@ -70,6 +73,7 @@ impl RgbController {
             openrgb_active: false,
             thermal_override: crate::thermal_alert::new_shared(),
             thermal_was_active: false,
+            last_direct: HashMap::new(),
         }
     }
 
@@ -264,6 +268,8 @@ impl RgbController {
         zone: u8,
         colors: &[[u8; 3]],
     ) -> anyhow::Result<()> {
+        self.last_direct
+            .insert((device_id.to_string(), zone), colors.to_vec());
         if let Some(dev) = self.wired.get(device_id) {
             dev.set_direct_colors(zone, colors)?;
             return Ok(());
@@ -440,7 +446,22 @@ impl RgbController {
         anyhow::bail!("RGB device not found: {device_id}");
     }
 
-    /// Called when OpenRGB connects — suppress native config.
+    pub fn is_openrgb_active(&self) -> bool {
+        self.openrgb_active
+    }
+
+    /// Re-push the last-applied OpenRGB direct colors to all devices.
+    /// Used after fan PWM updates disrupt the device's RGB state.
+    pub fn resync_openrgb(&self) {
+        for ((device_id, zone), colors) in &self.last_direct {
+            if let Some(dev) = self.wired.get(device_id) {
+                if let Err(e) = dev.set_direct_colors(*zone, colors) {
+                    debug!("OpenRGB resync failed for {device_id} zone {zone}: {e}");
+                }
+            }
+        }
+    }
+
     pub fn set_openrgb_active(&mut self, active: bool) {
         if self.openrgb_active != active {
             self.openrgb_active = active;

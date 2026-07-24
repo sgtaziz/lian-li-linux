@@ -209,6 +209,8 @@ fn fan_control_thread(
         let tick_start = Instant::now();
         last_update = tick_start;
 
+        let mut wireless_pwm_changed = false;
+
         for (group_idx, group) in config.speeds.iter().enumerate() {
             let is_wireless = group
                 .device_id
@@ -277,6 +279,12 @@ fn fan_control_thread(
                     .and_then(|c| temp_ema.get(&c.effective_source()).copied()),
                 _ => None,
             });
+
+            let pwm_changed = fan_states
+                .get(&group_idx)
+                .map(|s| s.last_pwm != speeds)
+                .unwrap_or(true);
+
             fan_states
                 .entry(group_idx)
                 .and_modify(|s| s.update(speeds, group_temp))
@@ -315,10 +323,22 @@ fn fan_control_thread(
                     if let Err(err) = w.set_fan_speeds(group_idx as u8, &speeds) {
                         warn!("Failed to set fan speeds for wireless device {group_idx}: {err}");
                     }
+                    if pwm_changed {
+                        wireless_pwm_changed = true;
+                    }
                 }
             }
 
             thread::sleep(Duration::from_millis(5));
+        }
+
+        // Re-apply RGB immediately if wireless fan PWM changed, to prevent
+        // the ~1s rainbow flicker caused by RF fan packets interrupting the
+        // device's RGB stream.
+        if wireless_pwm_changed {
+            if let Some(ref tx) = daemon_tx {
+                tx.send(DaemonEvent::ResyncWirelessRgb).ok();
+            }
         }
 
         let tick_elapsed = tick_start.elapsed();
