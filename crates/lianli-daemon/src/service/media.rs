@@ -176,7 +176,7 @@ impl ServiceManager {
                 let asset = match self.media_assets.get(&cfg_idx) {
                     Some(asset_arc) => Arc::clone(asset_arc),
                     None => {
-                        if let Some(mut existing) = self.targets.remove(&cfg_idx) {
+                        if let Some(mut existing) = self.targets.lock().remove(&cfg_idx) {
                             existing.stop();
                         }
                         continue;
@@ -223,7 +223,7 @@ impl ServiceManager {
                 let candidate = match matched {
                     Some(c) => c,
                     None => {
-                        if let Some(mut existing) = self.targets.remove(&cfg_idx) {
+                        if let Some(mut existing) = self.targets.lock().remove(&cfg_idx) {
                             info!("[devices] LCD[{}] detached", device_cfg.device_id());
                             existing.stop();
                         }
@@ -232,7 +232,7 @@ impl ServiceManager {
                 };
 
                 let cfg_key = asset.config_key.clone();
-                if let Some(mut existing) = self.targets.remove(&cfg_idx) {
+                if let Some(mut existing) = self.targets.lock().remove(&cfg_idx) {
                     if existing.matches(&candidate.device_id, &cfg_key) {
                         new_targets.insert(cfg_idx, existing);
                         continue;
@@ -358,11 +358,12 @@ impl ServiceManager {
             }
         }
 
-        for (_, mut target) in self.targets.drain() {
+        let mut targets = self.targets.lock();
+        for (_, mut target) in targets.drain() {
             target.stop();
         }
 
-        self.targets = new_targets;
+        targets.extend(new_targets);
     }
 }
 

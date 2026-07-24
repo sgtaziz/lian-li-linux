@@ -32,13 +32,15 @@ pub(super) enum LcdBackend {
 impl LcdBackend {
     fn send_frame(
         &mut self,
-        wireless: &WirelessController,
+        wireless: Option<&WirelessController>,
         builder: &mut PacketBuilder,
         frame: &[u8],
     ) -> anyhow::Result<()> {
         match self {
             Self::Slv3(d) => {
-                wireless.ensure_video_mode()?;
+                if let Some(w) = wireless {
+                    w.ensure_video_mode()?;
+                }
                 d.send_frame(builder, frame)
             }
             Self::WinUsb(d) => d.send_frame(frame),
@@ -48,7 +50,7 @@ impl LcdBackend {
 
     fn send_frame_verified(
         &mut self,
-        wireless: &WirelessController,
+        wireless: Option<&WirelessController>,
         builder: &mut PacketBuilder,
         frame: &[u8],
     ) -> anyhow::Result<()> {
@@ -300,7 +302,7 @@ impl ActiveTarget {
 
     pub(super) fn send_frame(
         &mut self,
-        wireless: &WirelessController,
+        wireless: Option<&WirelessController>,
         builder: &mut PacketBuilder,
     ) -> Result<bool, SendError> {
         // H.264 / autonomous sources: kick off streaming on the first call,

@@ -87,7 +87,7 @@ pub struct ServiceManager {
     config_path: PathBuf,
     config: Option<AppConfig>,
     media_assets: HashMap<usize, Arc<lianli_media::MediaAsset>>,
-    targets: HashMap<usize, ActiveTarget>,
+    targets: Arc<Mutex<HashMap<usize, ActiveTarget>>>,
     wireless: WirelessController,
     packet_builder: PacketBuilder,
     /// Wired USB device registry (fan handles, HID backends, hot-plug caches).
@@ -118,7 +118,7 @@ impl ServiceManager {
             config_path,
             config: None,
             media_assets: HashMap::new(),
-            targets: HashMap::new(),
+            targets: Arc::new(Mutex::new(HashMap::new())),
             wireless: WirelessController::new(),
             packet_builder: PacketBuilder::new(),
             registry: DeviceRegistry::new(),
@@ -156,33 +156,42 @@ impl ServiceManager {
         let ready = self.aio_lcd_firmware.drain_due();
 
         for (device_id, enable_512) in ready {
-            let found = self
-                .targets
-                .values_mut()
-                .find(|t| t.device_identity == device_id);
-
-            if let Some(target) = found {
-                if let LcdBackend::HidLcd(ref hid) = target.lcd {
-                    let mut guard = hid.lock();
-                    match guard.try_read_firmware() {
-                        Ok(()) => {
-                            self.aio_lcd_firmware.record(
-                                &device_id,
-                                guard.firmware_version_str().map(|s| s.to_string()),
-                                guard.supports_c_command(),
-                            );
-                            guard.set_use_c_command(enable_512);
-                            info!("AIO LCD firmware read succeeded for {device_id}");
-                        }
-                        Err(e) => {
-                            warn!(
-                                "AIO LCD firmware read failed for {device_id}: {e:#}. \
-                                 Skipping firmware reads for 30 minutes."
-                            );
-                            self.aio_lcd_firmware.mark_failed(&device_id);
+            let mut firmware_result: Option<Result<(Option<String>, bool), anyhow::Error>> = None;
+            {
+                let mut targets = self.targets.lock();
+                if let Some(target) = targets
+                    .values_mut()
+                    .find(|t| t.device_identity == device_id)
+                {
+                    if let LcdBackend::HidLcd(ref hid) = target.lcd {
+                        let mut guard = hid.lock();
+                        match guard.try_read_firmware() {
+                            Ok(()) => {
+                                let fw = guard.firmware_version_str().map(|s| s.to_string());
+                                let supports = guard.supports_c_command();
+                                guard.set_use_c_command(enable_512);
+                                firmware_result = Some(Ok((fw, supports)));
+                            }
+                            Err(e) => {
+                                firmware_result = Some(Err(e));
+                            }
                         }
                     }
                 }
+            }
+            match firmware_result {
+                Some(Ok((fw, supports))) => {
+                    self.aio_lcd_firmware.record(&device_id, fw, supports);
+                    info!("AIO LCD firmware read succeeded for {device_id}");
+                }
+                Some(Err(e)) => {
+                    warn!(
+                        "AIO LCD firmware read failed for {device_id}: {e:#}. \
+                         Skipping firmware reads for 30 minutes."
+                    );
+                    self.aio_lcd_firmware.mark_failed(&device_id);
+                }
+                None => {}
             }
         }
     }
@@ -306,14 +315,59 @@ impl ServiceManager {
             }
         });
 
-        // Spawn a thread to regularily check for new known devices.
+        // Spawn a thread to regularly check for new known devices.
         let device_tx = tx.clone();
         thread::spawn(move || loop {
             thread::sleep(DEVICE_POLL_INTERVAL);
             if device_tx.send(DaemonEvent::DevicePoll).is_err() {
-                break; // Daemon thread has ended. Time for us to die as well
+                break;
             }
         });
+
+        // Spawn the dedicated LCD streaming thread.
+        // Frame pushing runs here so DevicePoll (USB enumeration, IPC sync)
+        // can't block video playback.
+        let (stream_tx, stream_rx) = std::sync::mpsc::channel::<lianli_shared::config::ConfigKey>();
+        let stream_targets = Arc::clone(&self.targets);
+        let stream_main_tx = tx.clone();
+        thread::spawn(move || {
+            let mut builder = PacketBuilder::new();
+            for config_key in stream_rx {
+                let mut targets = stream_targets.lock();
+                let id = targets
+                    .iter()
+                    .find(|(_, t)| t.asset.config_key == config_key)
+                    .map(|(id, _)| *id);
+                if let Some(id) = id {
+                    if let Some(target) = targets.get_mut(&id) {
+                        match target.send_frame(None, &mut builder) {
+                            Ok(true) => {
+                                target.consecutive_errors = 0;
+                            }
+                            Ok(false) => {}
+                            Err(runtime::SendError::Usb(err)) => {
+                                target.consecutive_errors += 1;
+                                if target.consecutive_errors >= 3 {
+                                    warn!("LCD[{id}] USB error (3/3): {err}");
+                                    targets.remove(&id);
+                                    stream_main_tx
+                                        .send(DaemonEvent::RecreateMedia { target_index: id })
+                                        .ok();
+                                }
+                            }
+                            Err(runtime::SendError::Other(err)) => {
+                                warn!("LCD[{id}] media error: {err}");
+                                targets.remove(&id);
+                                stream_main_tx
+                                    .send(DaemonEvent::RecreateMedia { target_index: id })
+                                    .ok();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         SysSensor::init();
 
         let shutdown_tx = tx.clone();
@@ -410,8 +464,7 @@ impl ServiceManager {
                     }
                 }
                 DaemonEvent::FrameFinished { asset } => {
-                    // which worker has a new image to send?
-                    self.stream_target(asset);
+                    let _ = stream_tx.send(asset.config_key.clone());
                 }
                 DaemonEvent::ResyncWirelessRgb => {
                     if let Some(ref rgb) = self.controllers.rgb {
@@ -426,7 +479,7 @@ impl ServiceManager {
                 }
                 DaemonEvent::RecreateMedia { target_index } => {
                     if let Some(asset) = self.media_assets.get(&target_index).cloned() {
-                        if let Some(target) = self.targets.get_mut(&target_index) {
+                        if let Some(target) = self.targets.lock().get_mut(&target_index) {
                             info!(
                                 "[devices] LCD[{}] recreating media after recovery",
                                 target.device_identity

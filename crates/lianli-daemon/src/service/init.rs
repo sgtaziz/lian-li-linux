@@ -516,6 +516,7 @@ impl ServiceManager {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn recover_wireless(&mut self) -> bool {
         if self.wireless.soft_reset() {
             return true;

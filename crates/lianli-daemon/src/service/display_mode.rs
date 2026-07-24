@@ -8,16 +8,20 @@ use tracing::{info, warn};
 impl ServiceManager {
     pub(super) fn handle_display_switch_to_desktop(&mut self, device_id: &str) {
         // Find and remove the active LCD target for this device
-        let target_idx = self.targets.iter().find_map(|(&idx, t)| {
-            if t.device_identity == *device_id {
-                Some(idx)
-            } else {
-                None
-            }
-        });
+        let target_idx = {
+            let targets = self.targets.lock();
+            targets.iter().find_map(|(&idx, t)| {
+                if t.device_identity == *device_id {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+        };
 
         if let Some(idx) = target_idx {
-            if let Some(mut target) = self.targets.remove(&idx) {
+            let removed = self.targets.lock().remove(&idx);
+            if let Some(mut target) = removed {
                 target.stop();
                 if let LcdBackend::WinUsb(ref mut lcd) = target.lcd {
                     match lcd.switch_to_desktop_mode() {

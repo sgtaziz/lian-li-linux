@@ -5,10 +5,11 @@ impl ServiceManager {
     pub(super) fn shutdown(&mut self) {
         self.desktop_displays.shutdown();
 
-        for target in self.targets.values_mut() {
+        let mut targets = self.targets.lock();
+        for target in targets.values_mut() {
             target.stop();
         }
-        self.targets.clear();
+        targets.clear();
 
         // Controllers (fan / AIO / RGB / direct-color writer)
         self.controllers.shutdown();

@@ -159,7 +159,7 @@ impl ServiceManager {
     /// Update IPC telemetry and device list.
     pub(super) fn sync_ipc_telemetry(&self) {
         let mut ipc_state = self.ipc.state.lock();
-        ipc_state.telemetry.streaming_active = !self.targets.is_empty();
+        ipc_state.telemetry.streaming_active = !self.targets.lock().is_empty();
 
         // OpenRGB server status
         let (enabled, _) = self
