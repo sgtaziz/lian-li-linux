@@ -190,10 +190,6 @@ fn handle_request(
             super::config::set_lcd_media(state, tx, device_id, config)
         }
         IpcRequest::SetFanConfig { config } => super::config::set_fan_config(state, tx, config),
-        IpcRequest::SetFanSpeed {
-            device_index,
-            fan_pwm,
-        } => super::config::set_fan_speed(state, tx, device_index, fan_pwm),
 
         IpcRequest::GetRgbCapabilities => super::rgb::capabilities(state),
         IpcRequest::SetRgbEffect {

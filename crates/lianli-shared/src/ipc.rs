@@ -20,10 +20,6 @@ pub enum IpcRequest {
         device_id: String,
         config: LcdConfig,
     },
-    SetFanSpeed {
-        device_index: u8,
-        fan_pwm: [u8; 4],
-    },
     SetFanConfig {
         config: FanConfig,
     },
