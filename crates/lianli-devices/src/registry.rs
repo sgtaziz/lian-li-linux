@@ -103,11 +103,8 @@ pub static REGISTRY: &[&dyn DeviceDriver] = &[
     &crate::galahad2_trinity::Galahad2TrinityDriver,
     &crate::hydroshift_lcd::HydroShiftLcdDriver,
     &crate::winusb::lcd::WinUsbLcdDriver,
-    // Universal Screen 8.8" LED ring (0x0416:0x8050). Runtime RGB uses the
-    // 0x11 chunked-LED protocol (confirmed against the decompiled
-    // `lcd207.LEDController.SetEffect`: 64-byte packets, cmd 0x11, offsets
-    // 0/20/40, 60 bytes RGB each → 60 LEDs). This is the stock runtime path,
-    // not firmware-only. Currently Static + Direct modes are supported.
+    // Universal Screen 8.8" LED ring (0x0416:0x8050). Runtime RGB via the
+    // 0x11 chunked-LED protocol (64-byte packets, 60 LEDs). Static + Direct.
     &crate::winusb::led::WinUsbLedDriver,
     &crate::strimer_plus::StrimerPlusDriver,
     &crate::winusb::wired_receiver::WiredReceiverDriver,
