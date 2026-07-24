@@ -52,6 +52,14 @@ pub fn set_fan_speed(
 ) -> IpcResponse {
     debug!("SetFanSpeed for device {device_index}: {fan_pwm:?}");
     let mut state = state.lock();
+
+    // Resolve device_index to a device_id from the live device list so the
+    // fan controller can route speeds to the correct wired or wireless device.
+    let resolved_id = state
+        .devices
+        .get(device_index as usize)
+        .map(|d| d.device_id.clone());
+
     let fans = state
         .config
         .get_or_insert_with(AppConfig::default)
@@ -68,6 +76,10 @@ pub fn set_fan_speed(
                 FanSpeed::Constant(128),
             ],
         });
+    }
+    // Populate device_id if missing so the fan controller can route to the correct device.
+    if fans.speeds[idx].device_id.is_none() {
+        fans.speeds[idx].device_id = resolved_id.clone();
     }
     fans.speeds[idx].speeds = [
         FanSpeed::Constant(fan_pwm[0]),
