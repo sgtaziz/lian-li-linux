@@ -323,23 +323,18 @@ impl ServiceManager {
                 break;
             }
         });
-
         // Spawn the dedicated LCD streaming thread.
-        // Frame pushing runs here so DevicePoll (USB enumeration, IPC sync)
-        // can't block video playback.
-        let (stream_tx, stream_rx) = std::sync::mpsc::channel::<lianli_shared::config::ConfigKey>();
+        // Polls all targets for new frames so DevicePoll / USB enumeration
+        // on the main loop can never block video playback.
         let stream_targets = Arc::clone(&self.targets);
         let stream_main_tx = tx.clone();
         thread::spawn(move || {
             let mut builder = PacketBuilder::new();
-            for config_key in stream_rx {
-                let mut targets = stream_targets.lock();
-                let id = targets
-                    .iter()
-                    .find(|(_, t)| t.asset.config_key == config_key)
-                    .map(|(id, _)| *id);
-                if let Some(id) = id {
-                    if let Some(target) = targets.get_mut(&id) {
+            loop {
+                let mut to_recreate = Vec::new();
+                {
+                    let mut targets = stream_targets.lock();
+                    for (&id, target) in targets.iter_mut() {
                         match target.send_frame(None, &mut builder) {
                             Ok(true) => {
                                 target.consecutive_errors = 0;
@@ -349,22 +344,25 @@ impl ServiceManager {
                                 target.consecutive_errors += 1;
                                 if target.consecutive_errors >= 3 {
                                     warn!("LCD[{id}] USB error (3/3): {err}");
-                                    targets.remove(&id);
-                                    stream_main_tx
-                                        .send(DaemonEvent::RecreateMedia { target_index: id })
-                                        .ok();
+                                    to_recreate.push(id);
                                 }
                             }
                             Err(runtime::SendError::Other(err)) => {
                                 warn!("LCD[{id}] media error: {err}");
-                                targets.remove(&id);
-                                stream_main_tx
-                                    .send(DaemonEvent::RecreateMedia { target_index: id })
-                                    .ok();
+                                to_recreate.push(id);
                             }
                         }
                     }
+                    for id in &to_recreate {
+                        targets.remove(id);
+                    }
                 }
+                for id in to_recreate {
+                    stream_main_tx
+                        .send(DaemonEvent::RecreateMedia { target_index: id })
+                        .ok();
+                }
+                thread::sleep(Duration::from_millis(1));
             }
         });
 
@@ -463,8 +461,8 @@ impl ServiceManager {
                         self.device_poll();
                     }
                 }
-                DaemonEvent::FrameFinished { asset } => {
-                    let _ = stream_tx.send(asset.config_key.clone());
+                DaemonEvent::FrameFinished { asset: _ } => {
+                    // Handled by the polling streaming thread — no action needed.
                 }
                 DaemonEvent::ResyncWirelessRgb => {
                     if let Some(ref rgb) = self.controllers.rgb {

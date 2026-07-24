@@ -12,6 +12,7 @@ members = [
     "crates/lianli-media",
     "crates/lianli-daemon",
     "crates/lianli-gui",
+    "crates/lianli-gui-vue/src-tauri",
 ]
 
 [workspace.dependencies]
