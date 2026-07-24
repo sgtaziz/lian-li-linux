@@ -11,8 +11,10 @@ members = [
     "crates/lianli-evdi",
     "crates/lianli-media",
     "crates/lianli-daemon",
-    "crates/lianli-gui",
-    "crates/lianli-gui-vue/src-tauri",
+    "crates/lianli-gui/src-tauri",
+]
+exclude = [
+    "crates/lianli-gui-old",
 ]
 
 [workspace.dependencies]

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a2a3c" />
+      <stop offset="100%" stop-color="#14141e" />
+    </linearGradient>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <g id="blade">
+      <path d="M 256 176
+               A 150 150 0 0 1 397 115
+               A 200 200 0 0 0 256 56
+               A 160 160 0 0 0 200 200
+               A 80 80 0 0 1 256 176 Z"
+            fill="#00d2ff"
+            opacity="0.9"/>
+    </g>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+
+  <circle cx="256" cy="256" r="216" fill="none" stroke="#00d2ff" stroke-width="12" opacity="0.3" filter="url(#glow)"/>
+
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#00d2ff" stroke-width="4" opacity="0.5" />
+
+  <use href="#blade" />
+  <use href="#blade" transform="rotate(120 256 256)" />
+  <use href="#blade" transform="rotate(240 256 256)" />
+
+  <circle cx="256" cy="256" r="88" fill="#14141e" stroke="#00d2ff" stroke-width="12" />
+
+  <polyline points="214,228 246,252 214,276" fill="none" stroke="#00ffcc" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="258" y1="284" x2="298" y2="284" stroke="#00ffcc" stroke-width="14" stroke-linecap="round" />
+
+</svg>

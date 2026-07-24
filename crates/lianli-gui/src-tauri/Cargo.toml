@@ -1,0 +1,33 @@
+[package]
+name = "lianli-gui"
+version.workspace = true
+edition.workspace = true
+description = "Tauri v2 + Vue 3 desktop GUI for Lian Li Linux"
+
+[lib]
+name = "lianli_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "lianli-gui"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+lianli-shared = { path = "../../lianli-shared" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-shell = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[features]
+# This feature is used for production builds where the frontend is bundled.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

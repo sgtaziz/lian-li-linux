@@ -1,0 +1,134 @@
+//! Build script: runs Tauri's codegen, then builds the Vue frontend with bun
+//! so a plain `cargo build` (or `cargo build -p lianli-gui-vue`) produces a
+//! runnable GUI without a separate frontend step.
+//!
+//! Behaviour:
+//! - Skips the frontend build when `LIANLI_NO_FRONTEND` is set (useful when the
+//!   `dist/` was produced out-of-band, e.g. by `tauri dev`).
+//! - Falls back gracefully if `bun` is not on PATH: prints a `cargo:warning`
+//!   and leaves the existing `dist/` (or the checked-in placeholder) in place.
+//! - Only re-runs `bun install` / `bun run build` when the frontend sources are
+//!   newer than the built `dist/`, so Rust-only edits don't pay the vite cost.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::SystemTime;
+
+fn main() {
+    // Tauri config validation + codegen (emits its own rerun-if-changed).
+    tauri_build::build();
+
+    if std::env::var("LIANLI_NO_FRONTEND").is_ok() {
+        return;
+    }
+
+    let frontend = frontend_dir();
+    declare_inputs(&frontend);
+
+    if !bun_available() {
+        if !frontend.join("dist/index.html").exists() {
+            println!(
+                "cargo:warning=bun not found on PATH and dist/ is missing; \
+                 install bun (https://bun.sh) or run the frontend build manually"
+            );
+        } else {
+            println!("cargo:warning=bun not found on PATH; using existing dist/ as-is");
+        }
+        return;
+    }
+
+    if needs_build(&frontend) {
+        if !frontend.join("node_modules").exists() {
+            run("bun", &["install", "--frozen-lockfile"], &frontend);
+        }
+        run("bun", &["run", "build"], &frontend);
+    }
+}
+
+/// Directory containing `package.json` (the crate root, one level up from
+/// `src-tauri/`).
+fn frontend_dir() -> PathBuf {
+    PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("..")
+}
+
+/// Tell cargo which inputs should re-trigger this script.
+fn declare_inputs(frontend: &Path) {
+    for f in [
+        "package.json",
+        "bun.lock",
+        "vite.config.ts",
+        "tsconfig.json",
+        "index.html",
+    ] {
+        println!("cargo:rerun-if-changed={}/{}", frontend.display(), f);
+    }
+    println!("cargo:rerun-if-changed={}/src", frontend.display());
+}
+
+fn bun_available() -> bool {
+    Command::new("bun")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Rebuild iff any tracked frontend input is newer than the newest `dist/`
+/// artifact (or `dist/` / `node_modules` is absent).
+fn needs_build(frontend: &Path) -> bool {
+    if !frontend.join("node_modules").exists() {
+        return true;
+    }
+    let dist = frontend.join("dist");
+    let newest_dist = newest_under(&dist);
+    if newest_dist == SystemTime::UNIX_EPOCH {
+        return true;
+    }
+    let mut newest_src = SystemTime::UNIX_EPOCH;
+    for f in [
+        "package.json",
+        "bun.lock",
+        "vite.config.ts",
+        "tsconfig.json",
+        "index.html",
+    ] {
+        newest_src = newest_src.max(mtime(&frontend.join(f)));
+    }
+    newest_src = newest_src.max(newest_under(&frontend.join("src")));
+    newest_src > newest_dist
+}
+
+fn run(cmd: &str, args: &[&str], dir: &Path) {
+    let status = Command::new(cmd).args(args).current_dir(dir).status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) => panic!("`{cmd} {}` exited with {s}", args.join(" ")),
+        Err(e) => panic!("failed to invoke `{cmd}`: {e}"),
+    }
+}
+
+fn mtime(path: &Path) -> SystemTime {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+/// Newest modified time among the files in `dir` (recursive).
+fn newest_under(dir: &Path) -> SystemTime {
+    let mut best = SystemTime::UNIX_EPOCH;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return best;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_dir() {
+            best = best.max(newest_under(&path));
+        } else if ft.is_file() {
+            best = best.max(mtime(&path));
+        }
+    }
+    best
+}
