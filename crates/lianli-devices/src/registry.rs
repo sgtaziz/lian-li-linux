@@ -103,10 +103,12 @@ pub static REGISTRY: &[&dyn DeviceDriver] = &[
     &crate::galahad2_trinity::Galahad2TrinityDriver,
     &crate::hydroshift_lcd::HydroShiftLcdDriver,
     &crate::winusb::lcd::WinUsbLcdDriver,
-    // WinUsbLedDriver removed: the 0x8050 LED companion endpoint speaks a
-    // DES-CBC encrypted protocol for firmware update only.
-    // Runtime RGB goes through the SLV3 SDK SetEffect path, not raw LED writes.
-    // The fabricated 0x11 protocol in winusb/led.rs does not match any stock path.
+    // Universal Screen 8.8" LED ring (0x0416:0x8050). Runtime RGB uses the
+    // 0x11 chunked-LED protocol (confirmed against the decompiled
+    // `lcd207.LEDController.SetEffect`: 64-byte packets, cmd 0x11, offsets
+    // 0/20/40, 60 bytes RGB each → 60 LEDs). This is the stock runtime path,
+    // not firmware-only. Currently Static + Direct modes are supported.
+    &crate::winusb::led::WinUsbLedDriver,
     &crate::strimer_plus::StrimerPlusDriver,
     &crate::winusb::wired_receiver::WiredReceiverDriver,
     &crate::winusb::hs2_oled_led::Hs2OledLedDriver,
