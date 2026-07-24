@@ -56,29 +56,13 @@ pub enum DaemonEvent {
     IpcUpdate, // Somebody changed the DaemonState in the mutex
     USBCheck,
     DevicePoll,
-    DisplaySwitch {
-        device_id: String,
-    }, // LCD→Desktop. Handled by main event loop.
-    DisplaySwitchToLcd {
-        device_id: String,
-        pid: u16,
-    }, // Desktop→LCD. Handled by main event loop.
-    Bind {
-        mac_address: String,
-    }, // MAC address pending wireless device bind. Handled by main event loop.
-    Unbind {
-        mac_address: String,
-    }, // MAC address pending wireless device unbind. Handled by main event loop.
-    SetEne6k77FanQuantity {
-        device_id: String,
-        quantity: u8,
-    },
-    FrameFinished {
-        asset: Arc<lianli_media::MediaAsset>,
-    }, // A device has calculated a new frame, let's update the display
-    RecreateMedia {
-        target_index: usize,
-    },
+    DisplaySwitch { device_id: String }, // LCD→Desktop. Handled by main event loop.
+    DisplaySwitchToLcd { device_id: String, pid: u16 }, // Desktop→LCD. Handled by main event loop.
+    Bind { mac_address: String }, // MAC address pending wireless device bind. Handled by main event loop.
+    Unbind { mac_address: String }, // MAC address pending wireless device unbind. Handled by main event loop.
+    SetEne6k77FanQuantity { device_id: String, quantity: u8 },
+    FrameFinished,
+    RecreateMedia { target_index: usize },
     ResyncWirelessRgb,
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
 }
@@ -454,14 +438,18 @@ impl ServiceManager {
                         } else {
                             self.start_aio_control();
                         }
-                        self.apply_rgb_config();
                         self.start_openrgb_server();
+                        if let Some(ref ta) = self.controllers.thermal_alert {
+                            if let Some(ref cfg) = self.config {
+                                ta.update_settings(cfg.thermal_alert.clone());
+                            }
+                        }
                         self.sync_ipc_state();
 
                         self.device_poll();
                     }
                 }
-                DaemonEvent::FrameFinished { asset: _ } => {
+                DaemonEvent::FrameFinished => {
                     // Handled by the polling streaming thread — no action needed.
                 }
                 DaemonEvent::ResyncWirelessRgb => {

@@ -152,6 +152,16 @@ impl RgbController {
         }
 
         for dev_cfg in &config.devices {
+            // MB sync: the motherboard controls RGB. Skip software effects
+            // entirely (sending them would kick the device out of sync) and
+            // just ensure the sync flag is set.
+            if dev_cfg.mb_rgb_sync {
+                if let Err(e) = self.set_mb_rgb_sync(&dev_cfg.device_id, true) {
+                    warn!("Failed to apply MB RGB sync to {}: {e}", dev_cfg.device_id);
+                }
+                continue;
+            }
+
             for zone_cfg in &dev_cfg.zones {
                 if let Err(e) =
                     self.set_effect(&dev_cfg.device_id, zone_cfg.zone_index, &zone_cfg.effect)
@@ -364,6 +374,7 @@ impl RgbController {
                 total_led_count: dev.total_led_count(),
                 supported_scopes: dev.supported_scopes(),
                 supports_direction: dev.supports_direction(),
+                supports_merge_lighting: dev.supports_merge_lighting(),
             });
         }
 
@@ -405,6 +416,7 @@ impl RgbController {
                 total_led_count: total_leds,
                 supported_scopes: vec![],
                 supports_direction: false,
+                supports_merge_lighting: false,
             });
         }
 

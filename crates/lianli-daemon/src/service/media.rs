@@ -97,8 +97,7 @@ impl ServiceManager {
                             ),
                             MediaType::Doublegauge | MediaType::Cooler => {}
                         }
-                        tx.send(DaemonEvent::FrameFinished { asset: asset_arc })
-                            .ok();
+                        tx.send(DaemonEvent::FrameFinished).ok();
                     }
                     Err(err) => warn!("Skipping LCD[{device_id}] media: {err}"),
                 }
@@ -244,7 +243,7 @@ impl ServiceManager {
                         existing.key = cfg_key;
                         new_targets.insert(cfg_idx, existing);
                         if let Some(ref tx) = self.tx {
-                            tx.send(DaemonEvent::FrameFinished { asset }).ok();
+                            tx.send(DaemonEvent::FrameFinished).ok();
                         }
                         continue;
                     } else {
@@ -345,7 +344,7 @@ impl ServiceManager {
                         );
                         new_targets.insert(cfg_idx, target);
                         if let Some(ref tx) = self.tx {
-                            tx.send(DaemonEvent::FrameFinished { asset }).ok();
+                            tx.send(DaemonEvent::FrameFinished).ok();
                         }
                     }
                     Err(err) => {

@@ -672,6 +672,9 @@ pub struct RgbDeviceCapabilities {
     /// Whether this device supports fan direction (swap LR/TB).
     #[serde(default)]
     pub supports_direction: bool,
+    /// Whether this device supports merge-lighting (cross-zone synchronized animation).
+    #[serde(default)]
+    pub supports_merge_lighting: bool,
 }
 
 #[cfg(test)]

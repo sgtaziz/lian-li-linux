@@ -103,11 +103,23 @@ fn run(
         let cpu_temp = cpu_source
             .as_ref()
             .map(|s| s.to_sensor_source())
-            .and_then(|s| read_temp(&s));
+            .and_then(|src| {
+                let div = sensors
+                    .iter()
+                    .find(|si| si.source == src)
+                    .map_or(1, |si| si.divider);
+                read_temp(&src, div)
+            });
         let gpu_temp = gpu_source
             .as_ref()
             .map(|s| s.to_sensor_source())
-            .and_then(|s| read_temp(&s));
+            .and_then(|src| {
+                let div = sensors
+                    .iter()
+                    .find(|si| si.source == src)
+                    .map_or(1, |si| si.divider);
+                read_temp(&src, div)
+            });
         // Evaluate trigger state
         cpu_triggered =
             cfg.cpu.enabled && cpu_temp.map_or(false, |t| t >= cfg.cpu.threshold as f32);
@@ -147,7 +159,7 @@ fn run(
     debug!("Thermal alert monitor stopped");
 }
 
-fn read_temp(source: &SensorSource) -> Option<f32> {
-    let resolved = resolve_sensor(source, 1)?;
+fn read_temp(source: &SensorSource, divider: usize) -> Option<f32> {
+    let resolved = resolve_sensor(source, divider)?;
     read_sensor_value(&resolved).ok()
 }

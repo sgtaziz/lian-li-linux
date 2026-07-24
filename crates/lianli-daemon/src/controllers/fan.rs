@@ -17,6 +17,8 @@ pub struct FanController {
     curves: HashMap<String, FanCurve>,
     wireless: Option<Arc<WirelessController>>,
     wired_devices: Arc<HashMap<String, Box<dyn FanDevice>>>,
+    rgb_drift_enabled: bool,
+    rgb_drift_interval: Duration,
     stop_flag: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     daemon_tx: Option<Sender<DaemonEvent>>,
@@ -29,6 +31,8 @@ impl FanController {
         wireless: Option<Arc<WirelessController>>,
         wired_devices: Arc<HashMap<String, Box<dyn FanDevice>>>,
         daemon_tx: Option<Sender<DaemonEvent>>,
+        rgb_drift_enabled: bool,
+        rgb_drift_interval: Duration,
     ) -> Self {
         let curves_map: HashMap<String, FanCurve> =
             curves.into_iter().map(|c| (c.name.clone(), c)).collect();
@@ -38,6 +42,8 @@ impl FanController {
             curves: curves_map,
             wireless,
             wired_devices,
+            rgb_drift_enabled,
+            rgb_drift_interval,
             stop_flag: Arc::new(AtomicBool::new(false)),
             thread: None,
             daemon_tx,
@@ -51,6 +57,8 @@ impl FanController {
         let wired = Arc::clone(&self.wired_devices);
         let stop_flag = Arc::clone(&self.stop_flag);
         let daemon_tx = self.daemon_tx.clone();
+        let rgb_drift_enabled = self.rgb_drift_enabled;
+        let rgb_drift_interval = self.rgb_drift_interval;
         let all_sensors = lianli_shared::sensors::enumerate_sensors();
 
         let thread = thread::spawn(move || {
@@ -62,6 +70,8 @@ impl FanController {
                 stop_flag,
                 daemon_tx,
                 &all_sensors,
+                rgb_drift_enabled,
+                rgb_drift_interval,
             );
         });
 
@@ -84,11 +94,14 @@ fn fan_control_thread(
     stop_flag: Arc<AtomicBool>,
     daemon_tx: Option<Sender<DaemonEvent>>,
     all_sensors: &[SensorInfo],
+    rgb_drift_enabled: bool,
+    rgb_drift_interval: Duration,
 ) {
     let update_interval = Duration::from_millis(config.update_interval_ms);
     let heartbeat_interval = Duration::from_secs(1);
     let mut last_update = Instant::now() - update_interval;
     let mut last_heartbeat = Instant::now() - heartbeat_interval;
+    let mut last_drift_check = Instant::now() - rgb_drift_interval;
 
     // Wait briefly for wireless discovery if we have wireless
     if let Some(ref w) = wireless {
@@ -112,6 +125,10 @@ fn fan_control_thread(
     if !wired.is_empty() {
         let wired_names: Vec<&str> = wired.keys().map(|s| s.as_str()).collect();
         info!("Wired fan devices: {}", wired_names.join(", "));
+    }
+
+    if let Some(ref tx) = daemon_tx {
+        let _ = tx.send(DaemonEvent::ResyncWirelessRgb);
     }
 
     if wireless
@@ -191,13 +208,24 @@ fn fan_control_thread(
                 if let Err(err) = w.send_master_clock() {
                     debug!("master clock send failed: {err}");
                 }
+            }
+            last_heartbeat = now;
+        }
+
+        // Wireless RGB drift re-sync — runs on its own cadence (configurable)
+        // and can be disabled entirely. Wireless devices only.
+        if rgb_drift_enabled
+            && wireless.is_some()
+            && now.duration_since(last_drift_check) >= rgb_drift_interval
+        {
+            if let Some(ref w) = wireless {
                 if w.rgb_drifted() {
                     if let Some(ref tx) = daemon_tx {
                         tx.send(DaemonEvent::ResyncWirelessRgb).ok();
                     }
                 }
             }
-            last_heartbeat = now;
+            last_drift_check = now;
         }
 
         let since_last = now.duration_since(last_update);

@@ -54,6 +54,8 @@ impl ServiceManager {
             wireless,
             wired_devices,
             self.tx.clone(),
+            cfg.rgb_drift_detection_enabled,
+            std::time::Duration::from_millis(cfg.rgb_drift_detection_interval_ms.max(100)),
         );
         controller.start();
         self.controllers.fan = Some(controller);

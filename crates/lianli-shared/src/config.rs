@@ -208,6 +208,20 @@ pub struct AppConfig {
     pub ene6k77: HashMap<String, Ene6k77DeviceConfig>,
     #[serde(default)]
     pub thermal_alert: ThermalAlertSettings,
+    /// Wireless RGB drift re-sync: re-applies saved RGB when a wireless
+    /// device's firmware resets its lighting. Wireless devices only.
+    #[serde(default = "default_true")]
+    pub rgb_drift_detection_enabled: bool,
+    #[serde(default = "default_drift_interval_ms")]
+    pub rgb_drift_detection_interval_ms: u64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_drift_interval_ms() -> u64 {
+    1000
 }
 
 impl Default for AppConfig {
@@ -222,6 +236,8 @@ impl Default for AppConfig {
             aio: HashMap::new(),
             ene6k77: HashMap::new(),
             thermal_alert: ThermalAlertSettings::default(),
+            rgb_drift_detection_enabled: default_true(),
+            rgb_drift_detection_interval_ms: default_drift_interval_ms(),
         }
     }
 }

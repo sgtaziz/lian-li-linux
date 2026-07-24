@@ -42,7 +42,7 @@ impl AsyncSensorRenderer {
         let frame_clone = Arc::clone(&current_frame);
         let stop_clone = Arc::clone(&stop_flag);
 
-        let asset_for_thread = Arc::clone(&baseasset);
+        let _asset_for_thread = Arc::clone(&baseasset);
         let tx_for_thread = tx.clone();
 
         let thread = thread::spawn(move || {
@@ -64,9 +64,7 @@ impl AsyncSensorRenderer {
                     }
                 }
                 if let Some(ref tx) = tx_for_thread {
-                    let event = DaemonEvent::FrameFinished {
-                        asset: Arc::clone(&asset_for_thread),
-                    };
+                    let event = DaemonEvent::FrameFinished;
                     if tx.send(event).is_err() {
                         break;
                     }
@@ -109,7 +107,7 @@ impl AsyncVideoPlayer {
 
         let tx_for_thread = tx.clone();
 
-        let asset_for_thread = Arc::clone(&asset);
+        let _asset_for_thread = Arc::clone(&asset);
 
         let min_dur = Duration::from_millis(10);
         let std_dur = Duration::from_millis(100);
@@ -131,9 +129,7 @@ impl AsyncVideoPlayer {
                 let mut frame_cnt = 0;
                 if let Some(ref tx) = tx_for_thread {
                     frame_cnt = frame_index.fetch_add(1, Ordering::SeqCst);
-                    let event = DaemonEvent::FrameFinished {
-                        asset: Arc::clone(&asset_for_thread),
-                    };
+                    let event = DaemonEvent::FrameFinished;
                     if tx.send(event).is_err() {
                         break;
                     }
@@ -196,7 +192,7 @@ impl AsyncCustomRenderer {
         let frame_clone = Arc::clone(&current_frame);
         let stop_clone = Arc::clone(&stop_flag);
 
-        let asset_for_thread = Arc::clone(&baseasset);
+        let _asset_for_thread = Arc::clone(&baseasset);
         let tx_for_thread = tx.clone();
 
         let thread = thread::spawn(move || {
@@ -217,9 +213,7 @@ impl AsyncCustomRenderer {
                     Ok(Some(new_frame)) => {
                         *frame_clone.lock() = new_frame;
                         if let Some(ref tx) = tx_for_thread {
-                            let event = DaemonEvent::FrameFinished {
-                                asset: Arc::clone(&asset_for_thread),
-                            };
+                            let event = DaemonEvent::FrameFinished;
                             if tx.send(event).is_err() {
                                 break;
                             }
