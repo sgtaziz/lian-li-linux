@@ -556,7 +556,6 @@ impl ServiceManager {
                 Ok(()) => {
                     let _ = self.wireless.send_rx_sequence();
                     self.auto_rebind_configured_wireless();
-                    self.device_poll();
                     info!("Wireless links active");
                 }
                 Err(err) => warn!("[wireless] polling start failed: {err}"),

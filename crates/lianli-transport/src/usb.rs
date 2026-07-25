@@ -9,7 +9,7 @@
 use crate::error::TransportError;
 use rusb::{Device, DeviceHandle, GlobalContext};
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Default OUT endpoint address (vendor-defined but consistent across the
 /// Lian Li USB-bulk fleet).
@@ -75,7 +75,8 @@ impl RusbBulk {
 
     /// Detach any kernel driver, set the active configuration, and claim
     /// interface 0 (plus any other vendor interfaces). Recovers from a busy
-    /// or transiently-broken state via USB reset + re-detach.
+    /// state by retrying with short delays rather than USB reset (which can
+    /// destabilise other devices on the same hub).
     pub fn detach_and_configure(&mut self, name: &str) -> Result<(), TransportError> {
         match self.handle.kernel_driver_active(0) {
             Ok(true) => {
@@ -89,25 +90,9 @@ impl RusbBulk {
 
         match self.handle.set_active_configuration(1) {
             Ok(()) | Err(rusb::Error::Busy) | Err(rusb::Error::NotFound) => {}
-            Err(rusb::Error::Io) => {
-                warn!("{name} configuration I/O error, attempting USB reset");
-                self.handle.reset()?;
-                info!("{name} USB reset successful, retrying");
-                std::thread::sleep(Duration::from_millis(500));
-                // Kernel driver may re-attach after reset
-                match self.handle.kernel_driver_active(0) {
-                    Ok(true) => {
-                        let _ = self.handle.detach_kernel_driver(0);
-                        debug!("Detached kernel driver from {name} after reset");
-                    }
-                    _ => {}
-                }
-                match self.handle.set_active_configuration(1) {
-                    Ok(()) | Err(rusb::Error::Busy) | Err(rusb::Error::NotFound) => {}
-                    Err(e) => return Err(e.into()),
-                }
+            Err(e) => {
+                debug!("{name} set_active_configuration: {e}, continuing");
             }
-            Err(e) => return Err(e.into()),
         }
 
         match self.handle.claim_interface(0) {
@@ -116,21 +101,28 @@ impl RusbBulk {
                 self.claimed.push(0);
             }
             Err(rusb::Error::Busy) => {
-                warn!("{name} interface busy, attempting USB reset");
-                self.handle.reset()?;
-                info!("{name} USB reset successful");
-                std::thread::sleep(Duration::from_millis(500));
-                // Kernel driver may re-attach after reset — detach again
-                match self.handle.kernel_driver_active(0) {
-                    Ok(true) => {
-                        self.handle.detach_kernel_driver(0)?;
-                        debug!("Detached kernel driver from {name} after reset");
+                warn!("{name} interface 0 busy, retrying...");
+                let mut claimed = false;
+                for attempt in 1..=5u32 {
+                    std::thread::sleep(Duration::from_millis(200));
+                    if let Ok(true) = self.handle.kernel_driver_active(0) {
+                        let _ = self.handle.detach_kernel_driver(0);
                     }
-                    Ok(false) => {}
-                    Err(rusb::Error::NotSupported) => {}
-                    Err(e) => return Err(e.into()),
+                    match self.handle.claim_interface(0) {
+                        Ok(()) => {
+                            claimed = true;
+                            break;
+                        }
+                        Err(rusb::Error::Busy) => {
+                            debug!("{name} interface 0 still busy (attempt {attempt}/5)");
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
                 }
-                self.handle.claim_interface(0)?;
+                if !claimed {
+                    return Err(rusb::Error::Busy.into());
+                }
                 let _ = self.handle.set_alternate_setting(0, 0);
                 self.claimed.push(0);
             }
