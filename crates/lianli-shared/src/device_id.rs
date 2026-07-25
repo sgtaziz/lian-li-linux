@@ -542,8 +542,9 @@ impl DeviceFamily {
             }
             Self::TlFlexLcd | Self::SlInfFlexLcd => DeviceCapabilities::LCD,
             Self::WiredReceiver => DeviceCapabilities::FAN.or(DeviceCapabilities::RGB),
-            Self::HydroShift2OledCurveLcd => DeviceCapabilities::LCD
-                .or(DeviceCapabilities::DISPLAY_MODE_SWITCH),
+            Self::HydroShift2OledCurveLcd => {
+                DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
+            }
             Self::HydroShift2OledCurveLed => DeviceCapabilities::PUMP
                 .or(DeviceCapabilities::AIO)
                 .or(DeviceCapabilities::RGB),

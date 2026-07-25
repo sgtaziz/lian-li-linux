@@ -193,7 +193,10 @@ pub(super) fn encoder_codec_args_file(
         }
     }
 
-    if !matches!(kind, EncoderKind::Vaapi | EncoderKind::Vulkan | EncoderKind::Qsv) {
+    if !matches!(
+        kind,
+        EncoderKind::Vaapi | EncoderKind::Vulkan | EncoderKind::Qsv
+    ) {
         args.extend(["-pix_fmt".into(), "yuv420p".into()]);
     }
 
@@ -252,7 +255,10 @@ pub(super) fn encoder_codec_args_live(
         }
     }
 
-    if !matches!(kind, EncoderKind::Vaapi | EncoderKind::Vulkan | EncoderKind::Qsv) {
+    if !matches!(
+        kind,
+        EncoderKind::Vaapi | EncoderKind::Vulkan | EncoderKind::Qsv
+    ) {
         args.extend(["-pix_fmt".into(), "yuv420p".into()]);
     }
 

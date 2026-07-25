@@ -1,3 +1,4 @@
+use super::parse_mac_str;
 use super::{DaemonEvent, ServiceManager};
 use crate::controllers::aio::AioController;
 use crate::controllers::fan::FanController;
@@ -174,8 +175,7 @@ impl ServiceManager {
             // layer in media.rs; opening them here would conflict and, for the
             // HS2 OLED, dispatch the wrong protocol. Skip them.
             if det.family == lianli_shared::device_id::DeviceFamily::TlLcd
-                || det.family
-                    == lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLcd
+                || det.family == lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLcd
             {
                 continue;
             }
@@ -502,6 +502,50 @@ impl ServiceManager {
         }
     }
 
+    fn auto_rebind_configured_wireless(&mut self) {
+        let Some(cfg) = self.config.as_ref() else {
+            return;
+        };
+
+        let mut configured_ids = std::collections::HashSet::new();
+
+        if let Some(fans) = &cfg.fans {
+            for group in &fans.speeds {
+                if let Some(device_id) = &group.device_id {
+                    configured_ids.insert(device_id.clone());
+                }
+            }
+        }
+
+        if let Some(rgb) = &cfg.rgb {
+            for device in &rgb.devices {
+                configured_ids.insert(device.device_id.clone());
+            }
+        }
+
+        configured_ids.extend(cfg.aio.keys().cloned());
+
+        for dev in self.wireless.unbound_devices() {
+            let device_id = format!("wireless:{}", dev.mac_str());
+            if !configured_ids.contains(&device_id) {
+                continue;
+            }
+
+            let Some(mac_str) = device_id.strip_prefix("wireless:") else {
+                continue;
+            };
+            let Some(mac) = parse_mac_str(mac_str) else {
+                warn!("Invalid configured wireless MAC: {mac_str}");
+                continue;
+            };
+
+            info!("Auto-rebinding configured wireless device {device_id}");
+            if let Err(err) = self.wireless.bind_device(&mac) {
+                warn!("Auto-rebind failed for {device_id}: {err}");
+            }
+        }
+    }
+
     pub(super) fn try_wireless(&mut self) {
         if !lianli_devices::wireless::tx_dongle_present() {
             debug!("[wireless] no TX/RX devices found, skipping wireless");
@@ -511,6 +555,8 @@ impl ServiceManager {
             Ok(()) => match self.wireless.start_polling() {
                 Ok(()) => {
                     let _ = self.wireless.send_rx_sequence();
+                    self.auto_rebind_configured_wireless();
+                    self.device_poll();
                     info!("Wireless links active");
                 }
                 Err(err) => warn!("[wireless] polling start failed: {err}"),

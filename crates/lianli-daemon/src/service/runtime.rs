@@ -132,9 +132,7 @@ impl ThreadedWinUsbSender {
                     }
                     LcdThreadMsg::StreamH264Reader(mut stdout, fps) => {
                         stop_clone.store(false, Ordering::Relaxed);
-                        if let Err(e) =
-                            device.stream_h264_reader(&mut stdout, &stop_clone, fps)
-                        {
+                        if let Err(e) = device.stream_h264_reader(&mut stdout, &stop_clone, fps) {
                             warn!("LCD[{index}] h264 live stream error: {e}");
                         }
                     }
