@@ -64,7 +64,6 @@ ffmpeg-next = { version = "8.1", default-features = false, features = ["codec", 
 # Template catalog
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 sha2 = "0.10"
-arboard = { version = "3.4", default-features = false, features = ["wayland-data-control"] }
 
 [profile.profiling]
 inherits = "release"
