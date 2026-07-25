@@ -86,9 +86,59 @@ impl LcdBackend {
             _ => anyhow::bail!("h264 streaming not supported on this backend"),
         }
     }
+
+    /// Create a restart-capable handle that can be moved into a render thread
+    /// to start a new h264 stream after encoder failure.
+    pub(super) fn stream_restarter(&self) -> Option<StreamRestarter> {
+        match self {
+            Self::HidLcd(lcd) => Some(StreamRestarter::HidLcd(Arc::clone(lcd))),
+            Self::WinUsb(sender) => Some(StreamRestarter::WinUsb(
+                sender.tx.clone(),
+                Arc::clone(&sender.h264_stop),
+            )),
+            Self::Slv3(_) => None,
+        }
+    }
 }
 
-enum LcdThreadMsg {
+/// Cloneable handle for restarting an h264 stream from inside a render thread.
+pub(super) enum StreamRestarter {
+    HidLcd(SharedHidLcd),
+    WinUsb(std::sync::mpsc::SyncSender<LcdThreadMsg>, Arc<AtomicBool>),
+}
+
+impl StreamRestarter {
+    /// Start a new h264 stream reading from the given stdout. The old stream
+    /// (if any) is signalled to stop first.
+    pub(super) fn start_stream(
+        &self,
+        stdout: ChildStdout,
+        stop: Arc<AtomicBool>,
+        fps: f32,
+    ) -> anyhow::Result<Option<JoinHandle<()>>> {
+        match self {
+            Self::HidLcd(lcd) => {
+                let lcd = Arc::clone(lcd);
+                let mut stdout = stdout;
+                let handle = thread::spawn(move || {
+                    let mut guard = lcd.lock();
+                    if let Err(e) = guard.stream_h264_reader(&mut stdout, &stop, fps) {
+                        warn!("HID h264 stream restart error: {e:#}");
+                    }
+                });
+                Ok(Some(handle))
+            }
+            Self::WinUsb(tx, h264_stop) => {
+                h264_stop.store(true, Ordering::Relaxed);
+                tx.send(LcdThreadMsg::StreamH264Reader(stdout, fps))
+                    .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
+                Ok(None)
+            }
+        }
+    }
+}
+
+pub(super) enum LcdThreadMsg {
     Frame(Vec<u8>),
     FrameVerified(Vec<u8>, std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     StreamH264 {

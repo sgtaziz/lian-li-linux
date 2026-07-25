@@ -42,6 +42,9 @@ pub(crate) fn find_au_split(data: &[u8]) -> Option<usize> {
     let mut i = 0;
     while i + 3 < data.len() {
         let (sc_len, nal_type) = if data[i..].starts_with(&[0, 0, 0, 1]) {
+            if i + 4 >= data.len() {
+                break;
+            }
             (4, data[i + 4] & 0x1F)
         } else if data[i..].starts_with(&[0, 0, 1]) {
             (3, data[i + 3] & 0x1F)

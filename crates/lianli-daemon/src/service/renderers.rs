@@ -1,4 +1,4 @@
-use super::runtime::LcdBackend;
+use super::runtime::{LcdBackend, StreamRestarter};
 use super::DaemonEvent;
 use lianli_media::sensor::FrameInfo;
 use lianli_media::video::LiveH264Encoder;
@@ -10,7 +10,89 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use tracing::warn;
+use tracing::{info, warn};
+
+// ── Encoder restart policy ───────────────────────────────────────────────────
+/// Don't restart if the encoder crashed within this period — likely systemic.
+const MIN_HEALTHY_UPTIME: Duration = Duration::from_secs(10);
+/// Max restart attempts before giving up.
+const MAX_RESTARTS: u32 = 3;
+/// Reset the restart counter after this long healthy streak.
+const HEALTHY_RESET: Duration = Duration::from_secs(300);
+
+/// Attempt to respawn the encoder and restart the h264 stream after a write
+/// failure. Returns `true` if the caller should continue the render loop.
+fn try_restart_encoder(
+    encoder: &Arc<Mutex<LiveH264Encoder>>,
+    restarter: &StreamRestarter,
+    stop: &Arc<AtomicBool>,
+    canvas_w: u32,
+    canvas_h: u32,
+    fps: f32,
+    rotation_deg: u16,
+    screen: &ScreenInfo,
+    restart_count: &mut u32,
+    started_at: &mut Instant,
+) -> bool {
+    if *restart_count >= MAX_RESTARTS {
+        warn!("h264 encoder exceeded max restarts ({MAX_RESTARTS}), giving up");
+        return false;
+    }
+
+    // Reset counter if the encoder was healthy for a long stretch.
+    if started_at.elapsed() > HEALTHY_RESET {
+        *restart_count = 0;
+    }
+
+    if started_at.elapsed() < MIN_HEALTHY_UPTIME {
+        warn!(
+            "h264 encoder only ran {:?} (< {MIN_HEALTHY_UPTIME:?}), not restarting",
+            started_at.elapsed()
+        );
+        return false;
+    }
+
+    *restart_count += 1;
+    let backoff_secs = 2u64.pow(restart_count.saturating_sub(1)).min(30);
+    info!(
+        "restarting h264 encoder (attempt {}/{MAX_RESTARTS}) after {backoff_secs}s backoff",
+        *restart_count
+    );
+
+    // Backoff sleep — interruptible by stop flag.
+    let mut remaining = Duration::from_secs(backoff_secs);
+    while remaining > Duration::ZERO {
+        if stop.load(Ordering::Relaxed) {
+            return false;
+        }
+        let step = remaining.min(Duration::from_millis(100));
+        thread::sleep(step);
+        remaining -= step;
+    }
+
+    let mut new_encoder =
+        match LiveH264Encoder::spawn(canvas_w, canvas_h, fps, rotation_deg, screen) {
+            Ok(enc) => enc,
+            Err(e) => {
+                warn!("h264 encoder respawn failed: {e}");
+                return false;
+            }
+        };
+
+    if let Some(stdout) = new_encoder.take_stdout() {
+        if let Err(e) = restarter.start_stream(stdout, Arc::clone(stop), fps) {
+            warn!("h264 stream restart failed: {e}");
+            return false;
+        }
+    }
+
+    // Replacing the old encoder drops it, closing ffmpeg's stdin → stdout EOFs
+    // → old stream thread exits naturally.
+    *encoder.lock() = new_encoder;
+    *started_at = Instant::now();
+    info!("h264 encoder restarted successfully");
+    true
+}
 
 pub(super) struct AsyncSensorRenderer {
     current_frame: Arc<Mutex<FrameInfo>>,
@@ -280,8 +362,15 @@ impl AsyncCustomH264Renderer {
         let frame_interval =
             Duration::from_secs_f32(1.0 / fps.max(1.0)).max(Duration::from_millis(16));
 
+        let restarter = lcd
+            .stream_restarter()
+            .ok_or_else(|| anyhow::anyhow!("h264 streaming not supported on this backend"))?;
+        let screen_clone = screen.clone();
+
         let thread = thread::spawn(move || {
             let mut next_deadline = Instant::now() + frame_interval;
+            let mut restart_count = 0u32;
+            let mut encoder_started_at = Instant::now();
             while !stop_clone.load(Ordering::Relaxed) {
                 let now = Instant::now();
                 if now < next_deadline {
@@ -303,7 +392,20 @@ impl AsyncCustomH264Renderer {
                     Ok(Some(Ok(()))) => {}
                     Ok(Some(Err(e))) => {
                         warn!("custom h264 encoder write failed: {e}");
-                        break;
+                        if !try_restart_encoder(
+                            &encoder_clone,
+                            &restarter,
+                            &stop_clone,
+                            canvas_w,
+                            canvas_h,
+                            fps,
+                            rotation_deg,
+                            &screen_clone,
+                            &mut restart_count,
+                            &mut encoder_started_at,
+                        ) {
+                            break;
+                        }
                     }
                     Ok(None) => {}
                     Err(err) => {
@@ -372,8 +474,15 @@ impl AsyncSensorH264Renderer {
             warn!("sensor h264 initial frame write failed: {e}");
         }
 
+        let restarter = lcd
+            .stream_restarter()
+            .ok_or_else(|| anyhow::anyhow!("h264 streaming not supported on this backend"))?;
+        let screen_clone = screen.clone();
+
         let thread = thread::spawn(move || {
             let mut next_deadline = Instant::now() + frame_interval;
+            let mut restart_count = 0u32;
+            let mut encoder_started_at = Instant::now();
             while !stop_clone.load(Ordering::Relaxed) {
                 let now = Instant::now();
                 if now < next_deadline {
@@ -392,7 +501,21 @@ impl AsyncSensorH264Renderer {
                         let mut enc = encoder_clone.lock();
                         if let Err(e) = enc.write_frame(rgba.as_raw()) {
                             warn!("sensor h264 encoder write failed: {e}");
-                            break;
+                            drop(enc);
+                            if !try_restart_encoder(
+                                &encoder_clone,
+                                &restarter,
+                                &stop_clone,
+                                canvas_w,
+                                canvas_h,
+                                fps,
+                                0,
+                                &screen_clone,
+                                &mut restart_count,
+                                &mut encoder_started_at,
+                            ) {
+                                break;
+                            }
                         }
                     }
                     Ok(None) => {}
