@@ -1,11 +1,11 @@
 use super::controller::WirelessController;
 use super::discovery::poll_and_discover;
 use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, RF_PWM_CMD, RF_SELECT, USB_CMD_SEND_RF};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use lianli_transport::usb::USB_TIMEOUT;
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::info;
 
 impl WirelessController {
     pub fn bind_device(&self, mac: &[u8; 6]) -> Result<()> {
@@ -59,11 +59,11 @@ impl WirelessController {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                warn!(
+                bail!(
                     "bind convergence for {:02x?} timed out after {attempts} attempt(s); observed={:?}",
-                    mac, observed
+                    mac,
+                    observed
                 );
-                return Ok(());
             }
         }
     }
