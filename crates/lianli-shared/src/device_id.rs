@@ -67,8 +67,12 @@ pub enum DeviceFamily {
     SlInfFlexLcd,
     /// Wired receiver controllers (P28 V2 0x43A8:0x0105, TL Flex 0x43A8:0x0101)
     WiredReceiver,
-    /// HydroShift II OLED Curve LCD (0x1CBE:0xA068)
-    HydroShift2OledCurve,
+    /// HydroShift II OLED Curve — LCD MCU (0x1CBE:0xA068). LCD-only endpoint;
+    /// speaks the DES-CBC encrypted 512-byte protocol. Owned by the LCD layer.
+    HydroShift2OledCurveLcd,
+    /// HydroShift II OLED Curve — LED MCU (0x0416:0x8051). Pump, coolant
+    /// sensor (AIO), and the 45-LED RGB ring; speaks 8/64-byte plain bulk.
+    HydroShift2OledCurveLed,
 }
 
 /// USB transport protocol a device uses on the wire.
@@ -485,14 +489,14 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
     },
     DeviceEntry {
         id: UsbId::new(0x1CBE, 0xA068),
-        family: DeviceFamily::HydroShift2OledCurve,
+        family: DeviceFamily::HydroShift2OledCurveLcd,
         name: "HydroShift II OLED Curve",
         hid_usage_page: None,
     },
     DeviceEntry {
         id: UsbId::new(0x0416, 0x8051),
-        family: DeviceFamily::HydroShift2OledCurve,
-        name: "HydroShift II OLED Curve LED MCU",
+        family: DeviceFamily::HydroShift2OledCurveLed,
+        name: "HydroShift II OLED Curve LED",
         hid_usage_page: None,
     },
 ];
@@ -538,11 +542,11 @@ impl DeviceFamily {
             }
             Self::TlFlexLcd | Self::SlInfFlexLcd => DeviceCapabilities::LCD,
             Self::WiredReceiver => DeviceCapabilities::FAN.or(DeviceCapabilities::RGB),
-            Self::HydroShift2OledCurve => DeviceCapabilities::LCD
-                .or(DeviceCapabilities::FAN)
-                .or(DeviceCapabilities::PUMP)
-                .or(DeviceCapabilities::AIO)
+            Self::HydroShift2OledCurveLcd => DeviceCapabilities::LCD
                 .or(DeviceCapabilities::DISPLAY_MODE_SWITCH),
+            Self::HydroShift2OledCurveLed => DeviceCapabilities::PUMP
+                .or(DeviceCapabilities::AIO)
+                .or(DeviceCapabilities::RGB),
 
             // Desktop-mode companions (CH340 firmware) — same physical device
             // as the WinUSB LCDs above, currently in display mode.
@@ -612,7 +616,8 @@ impl DeviceFamily {
             | Self::UniversalScreenDesktop
             | Self::Vision9p2Desktop
             | Self::WiredReceiver
-            | Self::HydroShift2OledCurve => TransportKind::UsbBulk,
+            | Self::HydroShift2OledCurveLcd
+            | Self::HydroShift2OledCurveLed => TransportKind::UsbBulk,
 
             // Pure wireless-discovered (no USB identity of their own).
             Self::Slv3Led

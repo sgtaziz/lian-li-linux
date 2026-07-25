@@ -470,7 +470,7 @@ impl ServiceManager {
                                 "[devices] LCD[{}] recreating media after recovery",
                                 target.device_identity
                             );
-                            target.swap_media(asset, self.tx.clone());
+                            target.swap_media(asset, target.custom_h264, self.tx.clone());
                         }
                     }
                 }

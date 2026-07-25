@@ -21,6 +21,7 @@ pub const CMD_QUERY_BLOCK: u8 = 0x7A;
 pub const CMD_STOP_PLAY: u8 = 0x7B;
 pub const CMD_REBOOT: u8 = 0x0B;
 pub const CMD_SWITCH_TO_DESKTOP: u8 = 0x96;
+pub const CMD_WARN_SWITCH: u8 = 0x2E;
 
 // HydroShift II AIO opcodes
 pub const CMD_GET_H2_PARAMS: u8 = 0xFA;
@@ -225,6 +226,10 @@ impl PacketBuilder {
 
     pub fn reboot_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_REBOOT, &[])
+    }
+
+    pub fn warn_switch_header_winusb(&mut self, is_open: bool) -> Vec<u8> {
+        self.build_winusb(CMD_WARN_SWITCH, &[if is_open { 1 } else { 0 }])
     }
 
     /// Build a SyncPumpFan header (cmd 0xFB) with CRC16.

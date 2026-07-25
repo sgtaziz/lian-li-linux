@@ -75,7 +75,7 @@ export const useDevicesStore = defineStore("devices", () => {
         fam === "HydroShiftLcd" ||
         fam === "Galahad2Lcd" ||
         fam === "HydroShift2Lcd" ||
-        fam === "HydroShift2OledCurve" ||
+        fam === "HydroShift2OledCurveLed" ||
         fam === "WirelessAio"
       );
     });

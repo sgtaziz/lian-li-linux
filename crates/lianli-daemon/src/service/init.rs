@@ -170,10 +170,13 @@ impl ServiceManager {
         };
 
         for det in usb_devs {
-            // TL LCD is opened by the LCD layer in media.rs; the LCD driver
-            // would conflict with the controller instance the LCD layer
-            // expects to own. Skip it here.
-            if det.family == lianli_shared::device_id::DeviceFamily::TlLcd {
+            // TL LCD and the HS2 OLED Curve LCD MCU are owned by the LCD
+            // layer in media.rs; opening them here would conflict and, for the
+            // HS2 OLED, dispatch the wrong protocol. Skip them.
+            if det.family == lianli_shared::device_id::DeviceFamily::TlLcd
+                || det.family
+                    == lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLcd
+            {
                 continue;
             }
             let Some(driver) = registry::driver_for_family(det.family) else {

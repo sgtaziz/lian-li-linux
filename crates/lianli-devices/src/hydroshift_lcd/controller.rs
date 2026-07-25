@@ -36,7 +36,7 @@ fn remap_fan_pwm_rgb(pwm: u8) -> u8 {
 /// alone delimit AUs. Otherwise, primary coded picture NALs (types 1 and 5)
 /// are the boundary markers. This is determined lazily from the first
 /// boundary-eligible NAL encountered.
-fn find_au_split(data: &[u8]) -> Option<usize> {
+pub(crate) fn find_au_split(data: &[u8]) -> Option<usize> {
     let mut split_on_aud: Option<bool> = None;
     let mut found_first = false;
     let mut i = 0;

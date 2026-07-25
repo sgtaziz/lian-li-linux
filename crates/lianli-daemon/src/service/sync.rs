@@ -109,6 +109,7 @@ impl ServiceManager {
                 lianli_shared::device_id::DeviceFamily::HydroShiftLcd
                     | lianli_shared::device_id::DeviceFamily::Galahad2Lcd
                     | lianli_shared::device_id::DeviceFamily::HydroShift2Lcd
+                    | lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLcd
             );
 
             let (firmware_version, supports_c_command) = self
@@ -343,7 +344,21 @@ impl ServiceManager {
 
         // Cache is refreshed every USB_ENUM_INTERVAL (30s) to avoid
         // USB bus contention from opening every device for serial reads.
-        devices.extend(self.registry.cached_usb_devices.clone());
+        // Drop entries already emitted from fan_device_info above so each
+        // physical endpoint surfaces exactly once.
+        let opened_ids: std::collections::HashSet<&str> = self
+            .registry
+            .fan_device_info
+            .iter()
+            .map(|d| d.device_id.as_str())
+            .collect();
+        devices.extend(
+            self.registry
+                .cached_usb_devices
+                .iter()
+                .filter(|d| !opened_ids.contains(d.device_id.as_str()))
+                .cloned(),
+        );
 
         ipc_state.devices = devices;
     }

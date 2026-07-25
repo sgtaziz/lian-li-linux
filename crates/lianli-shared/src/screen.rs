@@ -10,6 +10,10 @@ pub struct ScreenInfo {
     pub max_payload: usize,
     pub h264: bool,
     pub needs_keepalive: bool,
+    /// Push frames as PNG (opcode 0x66 overlay layer) instead of JPEG (0x65
+    /// background layer). Used by the HS2 OLED Curve, whose firmware renders
+    /// the PNG layer on the OLED panel.
+    pub png: bool,
 }
 
 impl ScreenInfo {
@@ -22,6 +26,7 @@ impl ScreenInfo {
         max_payload: 102_400 - 512,
         h264: false,
         needs_keepalive: false,
+        png: false,
     };
 
     pub const TLLCD: Self = Self {
@@ -32,6 +37,7 @@ impl ScreenInfo {
         max_payload: 65_535,
         h264: false,
         needs_keepalive: true,
+        png: false,
     };
 
     pub const AIO_LCD_480: Self = Self {
@@ -42,6 +48,7 @@ impl ScreenInfo {
         max_payload: 153_600,
         h264: true,
         needs_keepalive: false,
+        png: false,
     };
 
     pub const HYDROSHIFT2: Self = Self {
@@ -52,6 +59,19 @@ impl ScreenInfo {
         max_payload: 153_600,
         h264: true,
         needs_keepalive: false,
+        png: false,
+    };
+
+    /// HydroShift II OLED Curve (0x1CBE:0xA068) — 1080×2288 OLED panel.
+    pub const HYDROSHIFT2_OLED_CURVE: Self = Self {
+        width: 1080,
+        height: 2288,
+        max_fps: 30,
+        jpeg_quality: 95,
+        max_payload: 1_048_576,
+        h264: true,
+        needs_keepalive: false,
+        png: true,
     };
 
     pub const LANCOOL_207: Self = Self {
@@ -62,6 +82,7 @@ impl ScreenInfo {
         max_payload: 512_000,
         h264: false,
         needs_keepalive: false,
+        png: false,
     };
 
     pub const UNIVERSAL_SCREEN: Self = Self {
@@ -72,6 +93,7 @@ impl ScreenInfo {
         max_payload: 512_000,
         h264: true,
         needs_keepalive: false,
+        png: false,
     };
 
     pub const VISION_9P2: Self = Self {
@@ -82,6 +104,7 @@ impl ScreenInfo {
         max_payload: 512_000,
         h264: false,
         needs_keepalive: false,
+        png: false,
     };
 
     pub const FLEX_LCD: Self = Self {
@@ -92,6 +115,7 @@ impl ScreenInfo {
         max_payload: 153_600,
         h264: false,
         needs_keepalive: false,
+        png: false,
     };
 }
 
@@ -103,6 +127,7 @@ pub fn screen_info_for(family: DeviceFamily) -> Option<ScreenInfo> {
         DeviceFamily::TlLcd => Some(ScreenInfo::TLLCD),
         DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => Some(ScreenInfo::AIO_LCD_480),
         DeviceFamily::HydroShift2Lcd => Some(ScreenInfo::HYDROSHIFT2),
+        DeviceFamily::HydroShift2OledCurveLcd => Some(ScreenInfo::HYDROSHIFT2_OLED_CURVE),
         DeviceFamily::Lancool207 => Some(ScreenInfo::LANCOOL_207),
         DeviceFamily::UniversalScreen => Some(ScreenInfo::UNIVERSAL_SCREEN),
         DeviceFamily::Vision9p2 => Some(ScreenInfo::VISION_9P2),
@@ -129,6 +154,11 @@ pub fn screen_presets() -> &'static [ScreenPreset] {
             label: "AIO LCD / HydroShift 2 (480×480)",
             width: 480,
             height: 480,
+        },
+        ScreenPreset {
+            label: "HydroShift II OLED Curve (1080×2288)",
+            width: 1080,
+            height: 2288,
         },
         ScreenPreset {
             label: "Lancool 207 (1472×720)",

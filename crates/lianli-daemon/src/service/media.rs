@@ -114,6 +114,7 @@ impl ServiceManager {
             DeviceFamily::Slv3Lcd,
             DeviceFamily::Tlv2Lcd,
             DeviceFamily::HydroShift2Lcd,
+            DeviceFamily::HydroShift2OledCurveLcd,
             DeviceFamily::Lancool207,
             DeviceFamily::UniversalScreen,
             DeviceFamily::HydroShiftLcd,
@@ -233,13 +234,21 @@ impl ServiceManager {
                 let cfg_key = asset.config_key.clone();
                 if let Some(mut existing) = self.targets.lock().remove(&cfg_idx) {
                     if existing.matches(&candidate.device_id, &cfg_key) {
+                        // Media is unchanged, but the custom_h264 toggle may have
+                        // flipped — rebuild the frame source so the H.264 pipeline
+                        // engages/disengages without a daemon restart.
+                        existing.update_custom_h264(device_cfg.custom_h264(), self.tx.clone());
                         new_targets.insert(cfg_idx, existing);
                         continue;
                     } else if existing.device_identity == candidate.device_id {
                         // Same device, different config — reuse the USB transport,
                         // just swap the media asset. Reopening the device can leave
                         // some firmware in a bad state.
-                        existing.swap_media(Arc::clone(&asset), self.tx.clone());
+                        existing.swap_media(
+                            Arc::clone(&asset),
+                            device_cfg.custom_h264(),
+                            self.tx.clone(),
+                        );
                         existing.key = cfg_key;
                         new_targets.insert(cfg_idx, existing);
                         if let Some(ref tx) = self.tx {
@@ -257,6 +266,7 @@ impl ServiceManager {
                         Slv3LcdDevice::new(device).map(LcdBackend::Slv3)
                     }
                     DeviceFamily::HydroShift2Lcd
+                    | DeviceFamily::HydroShift2OledCurveLcd
                     | DeviceFamily::Lancool207
                     | DeviceFamily::UniversalScreen => {
                         let device = Device::clone(candidate.usb_device.as_ref().unwrap());

@@ -33,7 +33,8 @@ export const FAMILY_DISPLAY: Record<DeviceFamily, string> = {
   TlFlexLcd: "TL Flex LCD",
   SlInfFlexLcd: "SL Infinity Flex LCD",
   WiredReceiver: "Wired Controller",
-  HydroShift2OledCurve: "HydroShift II OLED Curve",
+  HydroShift2OledCurveLcd: "HydroShift II OLED Curve",
+  HydroShift2OledCurveLed: "HydroShift II OLED Curve LED",
 };
 
 // Families that should be hidden from the device list (the RF dongles).
@@ -77,7 +78,8 @@ const FAMILY_CAPS: Record<DeviceFamily, string[]> = {
   TlFlexLcd: ["lcd"],
   SlInfFlexLcd: ["lcd"],
   WiredReceiver: ["fan", "rgb"],
-  HydroShift2OledCurve: ["lcd", "fan", "pump", "aio", "display_mode_switch"],
+  HydroShift2OledCurveLcd: ["lcd", "display_mode_switch"],
+  HydroShift2OledCurveLed: ["pump", "aio", "rgb"],
   HydroShift2LcdDesktop: ["lcd", "desktop_mode", "display_mode_switch"],
   Lancool207Desktop: ["lcd", "desktop_mode", "display_mode_switch"],
   UniversalScreenDesktop: ["lcd", "desktop_mode", "display_mode_switch"],

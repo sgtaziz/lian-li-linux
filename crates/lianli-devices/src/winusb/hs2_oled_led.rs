@@ -5,7 +5,7 @@
 //!
 use crate::traits::{AioDevice, FanDevice, RgbDevice};
 use anyhow::{Context, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
@@ -21,6 +21,12 @@ const CMD_GET_TEMP: u8 = 0x60;
 const CMD_SET_PUMP: u8 = 0x61;
 const CMD_GET_PUMP: u8 = 0x62;
 const CMD_SET_MB_SYNC: u8 = 0x64;
+
+// RGB ring push (opcode 0x11). 45-LED ring sent as 3 chunks per frame in
+// 64-byte packets: chunk offsets 0/15/30 LEDs.
+const CMD_PUSH_RGB: u8 = 0x11;
+const RGB_LED_COUNT: usize = 45;
+const RGB_PACKET_SIZE: usize = 64;
 
 /// 22-segment pump RPM→PWM table (monotonically decreasing).
 const PUMP_DATA_POINTS: &[(u16, u16)] = &[
@@ -188,12 +194,53 @@ impl Hs2OledLedController {
         self.send_and_read(&tx)?;
         Ok(())
     }
+
+    /// Push one RGB frame to the 45-LED ring via opcode 0x11, sent as 3
+    /// chunks: offsets 0, 15, 30 LEDs (last chunk is 5 LEDs). Missing
+    /// trailing LEDs are padded black.
+    pub fn send_rgb_frame(&self, colors: &[[u8; 3]]) -> Result<()> {
+        let mut frame = [[0u8; 3]; RGB_LED_COUNT];
+        for (dst, src) in frame.iter_mut().zip(colors.iter().take(RGB_LED_COUNT)) {
+            *dst = *src;
+        }
+
+        let transport = self.transport.lock();
+        for chunk in 0..3usize {
+            let mut packet = [0u8; RGB_PACKET_SIZE];
+            packet[0] = CMD_PUSH_RGB;
+            packet[1] = (chunk * 15) as u8;
+            let count = if chunk == 2 { 15 } else { 45 };
+            for led in 0..(count / 3) {
+                let led_idx = chunk * 15 + led;
+                let off = 4 + led * 3;
+                packet[off] = frame[led_idx][0];
+                packet[off + 1] = frame[led_idx][1];
+                packet[off + 2] = frame[led_idx][2];
+            }
+            transport
+                .write(&packet, LCD_WRITE_TIMEOUT)
+                .with_context(|| format!("HS2 OLED LED: write RGB chunk {chunk}"))?;
+            let mut rx = [0u8; PACKET_SIZE];
+            let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+        }
+        Ok(())
+    }
+}
+
+fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {
+    let scale = (brightness.min(4) as f32) / 4.0;
+    [
+        (r as f32 * scale).round() as u8,
+        (g as f32 * scale).round() as u8,
+        (b as f32 * scale).round() as u8,
+    ]
 }
 
 impl FanDevice for Hs2OledLedController {
     fn set_fan_speed(&self, _slot: u8, _duty: u8) -> Result<()> {
-        // The OLED Curve has no separate fan channels — fan control is via
-        // the LCD MCU's SyncPumpFan opcode, not this LED MCU.
+        // No direct fan channels on the LED MCU; fans are motherboard-PWM
+        // synced. This impl exists only to expose pump control via
+        // `set_pump_speed` below.
         Ok(())
     }
 
@@ -238,22 +285,39 @@ impl RgbDevice for Hs2OledLedController {
     }
 
     fn supported_modes(&self) -> Vec<RgbMode> {
-        // The 19 RGB modes are pushed via the SLV3 SDK RFController path,
-        // not through this LED MCU endpoint directly. The LED MCU handles
-        // pump/motor/temp only.
-        vec![RgbMode::Off, RgbMode::Direct]
+        vec![RgbMode::Off, RgbMode::Static, RgbMode::Direct]
     }
 
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
-        vec![]
+        vec![RgbZoneInfo {
+            name: "Ring".to_string(),
+            led_count: RGB_LED_COUNT as u16,
+        }]
     }
 
-    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
-        vec![]
+    fn supports_direct(&self) -> bool {
+        true
     }
 
-    fn set_zone_effect(&self, _zone: u8, _effect: &RgbEffect) -> Result<()> {
-        Ok(())
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        if zone != 0 {
+            anyhow::bail!("HS2 OLED LED: zone {zone} out of range (only zone 0)");
+        }
+        let color = if effect.mode == RgbMode::Off || effect.disabled {
+            [0, 0, 0]
+        } else {
+            let base = effect.colors.first().copied().unwrap_or([255, 255, 255]);
+            scale_brightness(base, effect.brightness)
+        };
+        let frame = vec![color; RGB_LED_COUNT];
+        self.send_rgb_frame(&frame)
+    }
+
+    fn set_direct_colors(&self, zone: u8, colors: &[[u8; 3]]) -> Result<()> {
+        if zone != 0 {
+            anyhow::bail!("HS2 OLED LED: zone {zone} out of range (only zone 0)");
+        }
+        self.send_rgb_frame(colors)
     }
 }
 
@@ -261,7 +325,7 @@ pub struct Hs2OledLedDriver;
 
 impl crate::registry::DeviceDriver for Hs2OledLedDriver {
     fn family(&self) -> lianli_shared::device_id::DeviceFamily {
-        lianli_shared::device_id::DeviceFamily::HydroShift2OledCurve
+        lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLed
     }
 
     fn open(
@@ -273,11 +337,11 @@ impl crate::registry::DeviceDriver for Hs2OledLedDriver {
         let firmware = ctrl.read_firmware().ok();
         Ok(crate::registry::OpenedDevice {
             id: ctx.device_id(),
-            family: lianli_shared::device_id::DeviceFamily::HydroShift2OledCurve,
-            capabilities: lianli_shared::device_id::DeviceFamily::HydroShift2OledCurve
+            family: lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLed,
+            capabilities: lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLed
                 .capabilities(),
             transport_kind: lianli_shared::device_id::TransportKind::UsbBulk,
-            model_name: "HydroShift II OLED Curve".to_string(),
+            model_name: "HydroShift II OLED Curve LED".to_string(),
             firmware,
             fan: Some(Box::new(std::sync::Arc::clone(&ctrl))),
             lcd: None,

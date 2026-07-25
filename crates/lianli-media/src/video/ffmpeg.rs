@@ -43,10 +43,7 @@ pub fn cap_fps_to_source(path: &Path, target: f32) -> f32 {
 }
 
 fn hwaccel_args() -> Vec<String> {
-    if std::env::var("LIANLI_ENABLE_HW_VIDEO")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
+    if super::h264::hw_video_enabled() {
         vec!["-hwaccel".into(), "auto".into()]
     } else {
         Vec::new()

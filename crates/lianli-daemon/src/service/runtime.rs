@@ -79,6 +79,10 @@ impl LcdBackend {
                 });
                 Ok(Some(handle))
             }
+            Self::WinUsb(sender) => {
+                sender.stream_h264_reader(stdout, fps)?;
+                Ok(None)
+            }
             _ => anyhow::bail!("h264 streaming not supported on this backend"),
         }
     }
@@ -92,6 +96,7 @@ enum LcdThreadMsg {
         looping: bool,
         fps: f32,
     },
+    StreamH264Reader(std::process::ChildStdout, f32),
     SwitchDesktop(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     Stop,
 }
@@ -125,6 +130,14 @@ impl ThreadedWinUsbSender {
                             warn!("LCD[{index}] h264 stream error: {e}");
                         }
                     }
+                    LcdThreadMsg::StreamH264Reader(mut stdout, fps) => {
+                        stop_clone.store(false, Ordering::Relaxed);
+                        if let Err(e) =
+                            device.stream_h264_reader(&mut stdout, &stop_clone, fps)
+                        {
+                            warn!("LCD[{index}] h264 live stream error: {e}");
+                        }
+                    }
                     LcdThreadMsg::SwitchDesktop(reply) => {
                         let result = device.switch_to_desktop_mode();
                         let _ = reply.send(result);
@@ -146,6 +159,18 @@ impl ThreadedWinUsbSender {
         self.h264_stop.store(true, Ordering::Relaxed);
         self.tx
             .send(LcdThreadMsg::StreamH264 { path, looping, fps })
+            .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
+        Ok(())
+    }
+
+    fn stream_h264_reader(
+        &self,
+        stdout: std::process::ChildStdout,
+        fps: f32,
+    ) -> anyhow::Result<()> {
+        self.h264_stop.store(true, Ordering::Relaxed);
+        self.tx
+            .send(LcdThreadMsg::StreamH264Reader(stdout, fps))
             .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
         Ok(())
     }
@@ -290,12 +315,44 @@ impl ActiveTarget {
     }
 
     /// Replace the media asset without reopening the LCD transport.
-    pub(super) fn swap_media(&mut self, asset: Arc<MediaAsset>, tx: Option<Sender<DaemonEvent>>) {
+    pub(super) fn swap_media(
+        &mut self,
+        asset: Arc<MediaAsset>,
+        custom_h264: bool,
+        tx: Option<Sender<DaemonEvent>>,
+    ) {
         self.asset = Arc::clone(&asset);
-        self.media = make_frame_source(asset, tx, &self.lcd, &self.screen, self.custom_h264);
+        self.custom_h264 = custom_h264;
+        self.media = make_frame_source(asset, tx, &self.lcd, &self.screen, custom_h264);
         self.frame_counter = 0;
         info!(
             "[devices] LCD[{}] media swapped (keeping transport)",
+            self.index
+        );
+    }
+
+    /// Apply a `custom_h264` toggle change without reloading media or
+    /// reopening the transport. Rebuilds only the frame source so the live
+    /// H.264 pipeline engages/disengages immediately on save.
+    pub(super) fn update_custom_h264(
+        &mut self,
+        custom_h264: bool,
+        tx: Option<Sender<DaemonEvent>>,
+    ) {
+        if self.custom_h264 == custom_h264 {
+            return;
+        }
+        self.custom_h264 = custom_h264;
+        self.media = make_frame_source(
+            Arc::clone(&self.asset),
+            tx,
+            &self.lcd,
+            &self.screen,
+            custom_h264,
+        );
+        self.frame_counter = 0;
+        info!(
+            "[devices] LCD[{}] custom_h264 -> {custom_h264} (frame source rebuilt)",
             self.index
         );
     }
@@ -547,7 +604,7 @@ fn make_frame_source(
         MediaAssetKind::Sensor {
             asset: sensor_asset,
         } => {
-            if screen.h264 && matches!(lcd, LcdBackend::HidLcd(_)) {
+            if screen.h264 {
                 match AsyncSensorH264Renderer::new(Arc::clone(sensor_asset), lcd, screen) {
                     Ok(renderer) => {
                         info!("Sensor mode using live h264 pipeline");
@@ -579,7 +636,7 @@ fn make_frame_source(
         MediaAssetKind::Custom {
             asset: custom_asset,
         } => {
-            if custom_h264 && screen.h264 && matches!(lcd, LcdBackend::HidLcd(_)) {
+            if custom_h264 && screen.h264 {
                 match AsyncCustomH264Renderer::new(
                     Arc::clone(custom_asset),
                     lcd,

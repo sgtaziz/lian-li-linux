@@ -36,7 +36,8 @@ export type DeviceFamily =
   | "TlFlexLcd"
   | "SlInfFlexLcd"
   | "WiredReceiver"
-  | "HydroShift2OledCurve";
+  | "HydroShift2OledCurveLcd"
+  | "HydroShift2OledCurveLed";
 
 export type RGB = [number, number, number];
 export type RGBA = [number, number, number, number];

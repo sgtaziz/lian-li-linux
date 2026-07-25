@@ -36,7 +36,8 @@ pub(super) fn family_display_name(f: DeviceFamily) -> &'static str {
         DeviceFamily::TlFlexLcd => "TL Flex LCD",
         DeviceFamily::SlInfFlexLcd => "SL Infinity Flex LCD",
         DeviceFamily::WiredReceiver => "Wired Controller",
-        DeviceFamily::HydroShift2OledCurve => "HydroShift II OLED Curve",
+        DeviceFamily::HydroShift2OledCurveLcd => "HydroShift II OLED Curve",
+        DeviceFamily::HydroShift2OledCurveLed => "HydroShift II OLED Curve LED",
     }
 }
 

@@ -82,6 +82,7 @@ fn render_template_preview(template: &LcdTemplate, sensors: &[SensorInfo]) -> Re
         max_payload: 4 * 1024 * 1024,
         h264: false,
         needs_keepalive: false,
+        png: false,
     };
     let asset =
         CustomAsset::new(template, 0.0, &screen, sensors, false).context("CustomAsset::new")?;

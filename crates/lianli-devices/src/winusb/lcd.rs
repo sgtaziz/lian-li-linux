@@ -101,7 +101,8 @@ impl WinUsbLcdDevice {
         self.transport.release();
     }
 
-    /// Send a JPEG frame to the LCD.
+    /// Send a frame (PNG overlay layer for `screen.png` devices, else JPEG
+    /// background layer) to the LCD.
     pub fn send_frame(&mut self, frame: &[u8]) -> Result<()> {
         if frame.len() > self.screen.max_payload {
             bail!(
@@ -115,7 +116,11 @@ impl WinUsbLcdDevice {
             self.do_init()?;
         }
 
-        let header = self.builder.jpeg_header_winusb(frame.len());
+        let header = if self.screen.png {
+            self.builder.png_header_winusb(frame.len())
+        } else {
+            self.builder.jpeg_header_winusb(frame.len())
+        };
         let total = 512 + frame.len();
         let mut packet = vec![0u8; total];
         packet[..512].copy_from_slice(&header);
@@ -216,6 +221,60 @@ impl WinUsbLcdDevice {
         Ok(())
     }
 
+    /// Stream a live H.264 byte stream (e.g. ffmpeg stdout) in Access-Unit
+    /// frames via StartPlay (0x79). Runs until EOF or `stop` is set.
+    pub fn stream_h264_reader<R: std::io::Read>(
+        &mut self,
+        reader: &mut R,
+        stop: &std::sync::atomic::AtomicBool,
+        fps: f32,
+    ) -> Result<()> {
+        use std::sync::atomic::Ordering;
+
+        if !self.initialized {
+            self.do_init()?;
+        }
+
+        let frame_interval = std::time::Duration::from_secs_f32(1.0 / fps.max(1.0));
+        let mut read_buf = vec![0u8; 64 * 1024];
+        let mut accum: Vec<u8> = Vec::with_capacity(256 * 1024);
+        let mut next_deadline = std::time::Instant::now() + frame_interval;
+
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            let n = reader
+                .read(&mut read_buf)
+                .context("WinUSB LCD: read h264 stream")?;
+            if n == 0 {
+                break;
+            }
+            accum.extend_from_slice(&read_buf[..n]);
+            while let Some(split) = crate::hydroshift_lcd::find_au_split(&accum) {
+                let au: Vec<u8> = accum.drain(..split).collect();
+                if !au.is_empty() {
+                    self.send_h264_au(&au)?;
+                    let now = std::time::Instant::now();
+                    if now < next_deadline {
+                        std::thread::sleep(next_deadline - now);
+                    }
+                    next_deadline += frame_interval;
+                    if next_deadline < std::time::Instant::now() {
+                        next_deadline = std::time::Instant::now() + frame_interval;
+                    }
+                }
+            }
+        }
+
+        if !accum.is_empty() {
+            self.send_h264_au(&accum)?;
+        }
+        self.transport.read_flush();
+        self.initialized = false;
+        Ok(())
+    }
+
     fn send_h264_chunk(&mut self, data: &[u8], is_last: bool) -> Result<()> {
         let header = self.builder.start_play_header_winusb(data.len(), is_last);
         let mut packet = vec![0u8; 512 + data.len()];
@@ -244,6 +303,33 @@ impl WinUsbLcdDevice {
                 self.wait_buffer(2);
             }
         }
+        Ok(())
+    }
+
+    /// Lean per-frame send for live H.264 streaming via StartPlay (0x79).
+    /// Writes one packet and does a non-blocking ack drain. Unlike
+    /// `send_h264_chunk` it has no fixed sleep or buffer-wait (which are
+    /// tuned for large file chunks); pacing is driven by the caller's
+    /// frame_interval, matching the HID live path.
+    fn send_h264_au(&mut self, data: &[u8]) -> Result<()> {
+        let header = self.builder.start_play_header_winusb(data.len(), false);
+        let total = 512 + data.len();
+        let mut packet = vec![0u8; total];
+        packet[..512].copy_from_slice(&header);
+        packet[512..].copy_from_slice(data);
+        match self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
+            Ok(_) => self.note_write_success(),
+            Err(e) => {
+                warn!("H264 AU write failed: {e}");
+                self.try_recover()
+                    .with_context(|| format!("recovering from h264 AU write error: {e}"))?;
+                self.transport
+                    .write(&packet, LCD_WRITE_TIMEOUT)
+                    .context("h264 AU write after recovery")?;
+                self.note_write_success();
+            }
+        }
+        self.transport.read_flush();
         Ok(())
     }
 
@@ -326,6 +412,13 @@ impl WinUsbLcdDevice {
         }
         let stop_play = self.builder.stop_play_header_winusb();
         self.send_command(stop_play, "StopPlay");
+
+        // HS2 OLED renders the firmware thermal-warning overlay over pushed
+        // frames; disable it during init so user media shows cleanly.
+        if self.screen.png {
+            let warn = self.builder.warn_switch_header_winusb(false);
+            self.send_command(warn, "WarnSwitch");
+        }
 
         let sync = self.builder.sync_clock_header_winusb(2);
         self.send_command(sync, "SyncClock");
@@ -669,8 +762,8 @@ fn screen_for_pid(
             "SL Infinity Flex LCD",
         )),
         0xA068 => Some((
-            ScreenInfo::HYDROSHIFT2,
-            DeviceFamily::HydroShift2OledCurve,
+            ScreenInfo::HYDROSHIFT2_OLED_CURVE,
+            DeviceFamily::HydroShift2OledCurveLcd,
             "HydroShift II OLED Curve",
         )),
         _ => None,

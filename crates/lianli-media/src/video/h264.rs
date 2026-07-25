@@ -61,6 +61,7 @@ pub(super) enum EncoderKind {
     Nvenc,
     Amf,
     Vaapi,
+    Vulkan,
     Qsv,
     Libx264,
 }
@@ -71,6 +72,7 @@ impl EncoderKind {
             Self::Nvenc => "h264_nvenc",
             Self::Amf => "h264_amf",
             Self::Vaapi => "h264_vaapi",
+            Self::Vulkan => "h264_vulkan",
             Self::Qsv => "h264_qsv",
             Self::Libx264 => "libx264",
         }
@@ -78,8 +80,8 @@ impl EncoderKind {
 }
 
 pub(super) fn hw_video_enabled() -> bool {
-    std::env::var("LIANLI_ENABLE_HW_VIDEO")
-        .map(|v| v != "0" && !v.is_empty())
+    !std::env::var("LIANLI_DISABLE_HW_VIDEO")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
 
@@ -88,6 +90,7 @@ pub(super) fn encoder_chain() -> &'static [EncoderKind] {
         &[
             EncoderKind::Nvenc,
             EncoderKind::Amf,
+            EncoderKind::Vulkan,
             EncoderKind::Vaapi,
             EncoderKind::Qsv,
             EncoderKind::Libx264,
@@ -100,6 +103,12 @@ pub(super) fn encoder_chain() -> &'static [EncoderKind] {
 pub(super) fn hwaccel_input_args(kind: EncoderKind) -> Vec<String> {
     match kind {
         EncoderKind::Vaapi => vec!["-vaapi_device".into(), "/dev/dri/renderD128".into()],
+        EncoderKind::Vulkan => vec![
+            "-init_hw_device".into(),
+            "vulkan=vk".into(),
+            "-filter_hw_device".into(),
+            "vk".into(),
+        ],
         EncoderKind::Qsv => vec![
             "-init_hw_device".into(),
             "qsv=qsv".into(),
@@ -114,6 +123,13 @@ pub(super) fn hwaccel_input_args(kind: EncoderKind) -> Vec<String> {
 pub(super) fn finalize_vf(kind: EncoderKind, vf: &str) -> String {
     match kind {
         EncoderKind::Vaapi => {
+            if vf.is_empty() {
+                "format=nv12,hwupload".into()
+            } else {
+                format!("{vf},format=nv12,hwupload")
+            }
+        }
+        EncoderKind::Vulkan => {
             if vf.is_empty() {
                 "format=nv12,hwupload".into()
             } else {
@@ -165,6 +181,10 @@ pub(super) fn encoder_codec_args_file(
             args.extend(["-bf".into(), "0".into()]);
             args.extend(["-b:v".into(), bitrate_str.into()]);
         }
+        EncoderKind::Vulkan => {
+            args.extend(["-b:v".into(), bitrate_str.into()]);
+            args.extend(["-bf".into(), "0".into()]);
+        }
         EncoderKind::Qsv => {
             args.extend(["-preset".into(), "veryfast".into()]);
             args.extend(["-look_ahead".into(), "0".into()]);
@@ -173,7 +193,7 @@ pub(super) fn encoder_codec_args_file(
         }
     }
 
-    if !matches!(kind, EncoderKind::Vaapi | EncoderKind::Qsv) {
+    if !matches!(kind, EncoderKind::Vaapi | EncoderKind::Vulkan | EncoderKind::Qsv) {
         args.extend(["-pix_fmt".into(), "yuv420p".into()]);
     }
 
@@ -214,6 +234,10 @@ pub(super) fn encoder_codec_args_live(
             args.extend(["-rc_mode".into(), "VBR".into()]);
             args.extend(["-bf".into(), "0".into()]);
         }
+        EncoderKind::Vulkan => {
+            args.extend(["-b:v".into(), bitrate_str.into()]);
+            args.extend(["-bf".into(), "0".into()]);
+        }
         EncoderKind::Qsv => {
             args.extend(["-b:v".into(), bitrate_str.into()]);
             args.extend(["-preset".into(), "veryfast".into()]);
@@ -228,7 +252,7 @@ pub(super) fn encoder_codec_args_live(
         }
     }
 
-    if !matches!(kind, EncoderKind::Vaapi | EncoderKind::Qsv) {
+    if !matches!(kind, EncoderKind::Vaapi | EncoderKind::Vulkan | EncoderKind::Qsv) {
         args.extend(["-pix_fmt".into(), "yuv420p".into()]);
     }
 

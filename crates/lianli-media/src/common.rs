@@ -83,15 +83,50 @@ fn encode_compressed(
     tj_image: turbojpeg::Image<&[u8]>,
     screen: &ScreenInfo,
 ) -> Result<Vec<u8>, MediaError> {
-    let buf = turbojpeg::compress(
-        tj_image,
-        screen.jpeg_quality as i32,
-        turbojpeg::Subsamp::Sub2x2,
-    )
-    .map_err(|e| MediaError::ImageError(format!("turbojpeg encode: {e}")))?
-    .to_vec();
+    let buf = if screen.png {
+        encode_png_bytes(&tj_image)?
+    } else {
+        turbojpeg::compress(
+            tj_image,
+            screen.jpeg_quality as i32,
+            turbojpeg::Subsamp::Sub2x2,
+        )
+        .map_err(|e| MediaError::ImageError(format!("turbojpeg encode: {e}")))?
+        .to_vec()
+    };
     if buf.len() > screen.max_payload {
         return Err(MediaError::PayloadTooLarge { size: buf.len() });
+    }
+    Ok(buf)
+}
+
+fn encode_png_bytes(img: &turbojpeg::Image<&[u8]>) -> Result<Vec<u8>, MediaError> {
+    use image::{ImageFormat, RgbImage, RgbaImage};
+    use std::io::Cursor;
+
+    let w = img.width as u32;
+    let h = img.height as u32;
+    let mut buf = Vec::new();
+    match img.format {
+        turbojpeg::PixelFormat::RGB => {
+            let frame = RgbImage::from_raw(w, h, img.pixels.to_vec())
+                .ok_or_else(|| MediaError::ImageError("png rgb dimensions mismatch".into()))?;
+            image::DynamicImage::ImageRgb8(frame)
+                .write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+                .map_err(|e| MediaError::ImageError(format!("png encode: {e}")))?;
+        }
+        turbojpeg::PixelFormat::RGBA => {
+            let frame = RgbaImage::from_raw(w, h, img.pixels.to_vec())
+                .ok_or_else(|| MediaError::ImageError("png rgba dimensions mismatch".into()))?;
+            image::DynamicImage::ImageRgba8(frame)
+                .write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+                .map_err(|e| MediaError::ImageError(format!("png encode: {e}")))?;
+        }
+        _ => {
+            return Err(MediaError::ImageError(
+                "unsupported pixel format for png".into(),
+            ));
+        }
     }
     Ok(buf)
 }
