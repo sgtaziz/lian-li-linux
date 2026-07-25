@@ -42,6 +42,9 @@ jobs:
           libayatana-appindicator3-dev \
           librsvg2-dev
 
+    - name: Setup bun
+      uses: oven-sh/setup-bun@v2
+
     - name: Build
       run: cargo build --verbose
 
