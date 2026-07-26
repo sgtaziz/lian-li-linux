@@ -260,6 +260,13 @@ impl PacketBuilder {
     pub fn get_h2_params_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_GET_H2_PARAMS, &[])
     }
+
+    /// PushRgbData header (cmd 0xFC). Payload length is at offset 12, not 8.
+    pub fn push_rgb_data_header_winusb(&mut self, payload_len: usize) -> Vec<u8> {
+        let mut params = [0u8; 8];
+        params[4..8].copy_from_slice(&(payload_len as u32).to_be_bytes());
+        self.build_winusb(CMD_PUSH_RGB_DATA, &params)
+    }
 }
 
 impl Default for PacketBuilder {

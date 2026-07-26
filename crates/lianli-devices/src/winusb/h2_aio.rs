@@ -1,20 +1,23 @@
-//! HydroShift II AIO controller — pump + fan control via WinUSB bulk.
+//! HydroShift II AIO controller — pump + fan + RGB ring.
 //!
-//! Opens a separate USB handle to the same physical device as the LCD driver.
-//! Both handles can coexist on Linux (interface claims are reference-counted).
+//! Shares one USB handle (separate from the LCD streaming handle), opened
+//! via [`open_control_channel`].
 
 use crate::crypto::PacketBuilder;
-use crate::traits::{AioDevice, FanDevice};
+use crate::traits::{AioDevice, FanDevice, RgbDevice};
 use anyhow::{Context, Result};
 use lianli_shared::fan::duty_to_percent;
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info};
 
 const PUMP_MIN_RPM: u16 = 1600;
 const PUMP_MAX_RPM: u16 = 2500;
+const RING_LED_COUNT: usize = 24;
 
 /// Telemetry parsed from GetH2Params response.
 pub struct H2Params {
@@ -27,53 +30,59 @@ pub struct H2Params {
     pub coolant_temp: u8,
 }
 
-/// HydroShift II AIO controller (pump + fan via SyncPumpFan opcode).
+/// Open the shared control-plane handle for AIO + RGB commands, and run the
+/// wake preamble once.
+pub(super) fn open_control_channel(
+    device: Device<GlobalContext>,
+    label: &str,
+) -> Result<Arc<Mutex<RusbBulk>>> {
+    let mut transport =
+        RusbBulk::open_device(device).context("opening HydroShift II control channel")?;
+    transport
+        .detach_and_configure(label)
+        .context("configuring HydroShift II control channel")?;
+    info!("HydroShift II control channel opened");
+    let transport = Arc::new(Mutex::new(transport));
+    wake(&transport);
+    Ok(transport)
+}
+
+// After LCD play mode the device ignores control commands until this
+// StopPlay → StopClock → GetVer preamble re-arms the channel.
+fn wake(transport: &Arc<Mutex<RusbBulk>>) {
+    let mut builder = PacketBuilder::new();
+    let cmds = [
+        builder.stop_play_header_winusb(),
+        builder.stop_clock_header_winusb(),
+        builder.get_ver_header_winusb(),
+    ];
+    for cmd in &cmds {
+        let t = transport.lock();
+        let _ = t.write(cmd, LCD_WRITE_TIMEOUT);
+        let mut buf = [0u8; 512];
+        let _ = t.read(&mut buf, LCD_READ_TIMEOUT);
+        drop(t);
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    debug!("H2 control channel: wake preamble sent");
+}
+
+/// HydroShift II AIO controller (pump + fan + RGB ring via shared handle).
 pub struct H2AioController {
-    transport: Mutex<RusbBulk>,
+    transport: Arc<Mutex<RusbBulk>>,
     builder: Mutex<PacketBuilder>,
     last_fan_duties: Mutex<[u8; 3]>,
     last_pump_duty: Mutex<u8>,
 }
 
 impl H2AioController {
-    pub fn new(device: Device<GlobalContext>) -> Result<Self> {
-        let mut transport =
-            RusbBulk::open_device(device).context("opening HydroShift II AIO device")?;
-        transport
-            .detach_and_configure("HydroShift II AIO")
-            .context("configuring HydroShift II AIO device")?;
-        info!("HydroShift II AIO controller opened");
-        let ctrl = Self {
-            transport: Mutex::new(transport),
+    pub fn new(transport: Arc<Mutex<RusbBulk>>) -> Self {
+        Self {
+            transport,
             builder: Mutex::new(PacketBuilder::new()),
             last_fan_duties: Mutex::new([50, 50, 50]),
             last_pump_duty: Mutex::new(128),
-        };
-        // Wake preamble: after LCD play mode, the device silently ignores fan
-        // commands until StopPlay → StopClock → GetVer re-arms the command channel.
-        // Ref: PR #102 protocol doc (verified on real hardware)
-        ctrl.wake();
-        Ok(ctrl)
-    }
-
-    /// Send the wake preamble (StopPlay → StopClock → GetVer).
-    /// Required after LCD streaming to re-arm the fan command channel.
-    fn wake(&self) {
-        let cmds = [
-            self.builder.lock().stop_play_header_winusb(),
-            self.builder.lock().stop_clock_header_winusb(),
-            self.builder.lock().get_ver_header_winusb(),
-        ];
-        let mut transport = self.transport.lock();
-        for cmd in &cmds {
-            let _ = transport.write(cmd, LCD_WRITE_TIMEOUT);
-            let mut buf = [0u8; 512];
-            let _ = transport.read(&mut buf, LCD_READ_TIMEOUT);
-            drop(transport);
-            std::thread::sleep(Duration::from_millis(150));
-            transport = self.transport.lock();
         }
-        debug!("H2: wake preamble sent");
     }
 
     /// Read telemetry via GetH2Params (0xFA).
@@ -99,10 +108,7 @@ impl H2AioController {
         }
 
         Ok(H2Params {
-            // Layout verified on real hardware (PR #102 spec + live test):
-            // [13]=coolant temp (whole °C)
-            // [14:16]=fan1 RPM, [16:18]=fan2 RPM, [18:20]=fan3 RPM (u16 BE)
-            // [20:22]=pump RPM (u16 BE)
+            // [13]=coolant temp, [14:20]=fan RPM, [20:22]=pump RPM (u16 BE)
             cpu_temp: 0,
             cpu_load: 0,
             gpu_temp: 0,
@@ -135,7 +141,50 @@ impl H2AioController {
         Ok(())
     }
 
-    /// Convert pump RPM to raw PWM via the piecewise-linear curve.
+    /// Upload full-ring RGB frames via PushRgbData (0xFC); firmware loops
+    /// them at `interval_ms`.
+    pub fn send_rgb_frames(&self, frames: &[Vec<[u8; 3]>], interval_ms: u8) -> Result<()> {
+        if frames.is_empty() {
+            return Ok(());
+        }
+        let total_frames = frames.len();
+
+        let mut raw = Vec::with_capacity(total_frames * RING_LED_COUNT * 3);
+        for frame in frames {
+            for led in 0..RING_LED_COUNT {
+                let c = frame.get(led).copied().unwrap_or([0, 0, 0]);
+                raw.extend_from_slice(&c);
+            }
+        }
+
+        let compressed = crate::tinyuz::compress(&raw).context("compressing RGB data")?;
+
+        let mut payload = compressed;
+        payload.push((total_frames >> 8) as u8);
+        payload.push((total_frames & 0xFF) as u8);
+        payload.push(interval_ms);
+        payload.push(RING_LED_COUNT as u8);
+
+        let header = self.builder.lock().push_rgb_data_header_winusb(payload.len());
+        let mut packet = Vec::with_capacity(512 + payload.len());
+        packet.extend_from_slice(&header);
+        packet.extend_from_slice(&payload);
+
+        let transport = self.transport.lock();
+        transport
+            .write(&packet, LCD_WRITE_TIMEOUT)
+            .context("H2: PushRgbData write")?;
+        let mut buf = [0u8; 512];
+        let _ = transport.read(&mut buf, Duration::from_millis(100));
+        debug!(
+            "H2: PushRgbData {} frame(s), {} LEDs, {} bytes",
+            total_frames,
+            RING_LED_COUNT,
+            payload.len()
+        );
+        Ok(())
+    }
+
     fn rpm_to_pwm(rpm: u16) -> u16 {
         let rpm = rpm.clamp(PUMP_MIN_RPM, PUMP_MAX_RPM) as f32;
         let pwm = if rpm < 1720.0 {
@@ -154,12 +203,20 @@ impl H2AioController {
         pwm.round() as u16
     }
 
-    /// Map duty (0-255) → RPM (1600-2500) → PWM via curve.
     fn duty_to_pwm(duty: u8) -> u16 {
         let pct = (duty as f32 / 255.0).clamp(0.0, 1.0);
         let rpm = PUMP_MIN_RPM as f32 + pct * (PUMP_MAX_RPM - PUMP_MIN_RPM) as f32;
         Self::rpm_to_pwm(rpm.round() as u16)
     }
+}
+
+fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {
+    let scale = (brightness.min(4) as f32) / 4.0;
+    [
+        (r as f32 * scale).round() as u8,
+        (g as f32 * scale).round() as u8,
+        (b as f32 * scale).round() as u8,
+    ]
 }
 
 impl FanDevice for H2AioController {
@@ -215,5 +272,47 @@ impl AioDevice for H2AioController {
     fn read_coolant_temp(&self) -> Result<f32> {
         let params = self.get_h2_params()?;
         Ok(params.coolant_temp as f32)
+    }
+}
+
+impl RgbDevice for H2AioController {
+    fn device_name(&self) -> String {
+        "HydroShift II LCD RGB Ring".to_string()
+    }
+
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![RgbMode::Off, RgbMode::Static, RgbMode::Direct]
+    }
+
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        vec![RgbZoneInfo {
+            name: "Ring".to_string(),
+            led_count: RING_LED_COUNT as u16,
+        }]
+    }
+
+    fn supports_direct(&self) -> bool {
+        true
+    }
+
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        if zone != 0 {
+            anyhow::bail!("H2 RGB: zone {zone} out of range (only zone 0)");
+        }
+        let color = if effect.mode == RgbMode::Off || effect.disabled {
+            [0, 0, 0]
+        } else {
+            let base = effect.colors.first().copied().unwrap_or([255, 255, 255]);
+            scale_brightness(base, effect.brightness)
+        };
+        let frame = vec![color; RING_LED_COUNT];
+        self.send_rgb_frames(&[frame], 100)
+    }
+
+    fn set_direct_colors(&self, zone: u8, colors: &[[u8; 3]]) -> Result<()> {
+        if zone != 0 {
+            anyhow::bail!("H2 RGB: zone {zone} out of range (only zone 0)");
+        }
+        self.send_rgb_frames(&[colors.to_vec()], 100)
     }
 }

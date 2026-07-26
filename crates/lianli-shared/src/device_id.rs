@@ -536,6 +536,7 @@ impl DeviceFamily {
                 .or(DeviceCapabilities::FAN)
                 .or(DeviceCapabilities::PUMP)
                 .or(DeviceCapabilities::AIO)
+                .or(DeviceCapabilities::RGB)
                 .or(DeviceCapabilities::DISPLAY_MODE_SWITCH),
             Self::Lancool207 | Self::UniversalScreen | Self::Vision9p2 => {
                 DeviceCapabilities::LCD.or(DeviceCapabilities::DISPLAY_MODE_SWITCH)
