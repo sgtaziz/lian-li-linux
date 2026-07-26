@@ -24,5 +24,6 @@ parking_lot = { workspace = true }
 rusb = { workspace = true }
 notify = { workspace = true }
 image = { workspace = true }
+turbojpeg = { workspace = true }
 signal-hook = "0.3"
 libc = { workspace = true }

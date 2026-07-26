@@ -1,7 +1,7 @@
 use super::ensure_ffmpeg_initialized;
 use super::DesktopDisplayHandle;
 use anyhow::{bail, Context, Result};
-use lianli_devices::turzx::{self, Mode as TurzxMode, TurzxDisplay, FMT_H264};
+use lianli_devices::turzx::{self, Mode as TurzxMode, TurzxDisplay, FMT_H264, FMT_MJPEG};
 use lianli_evdi::{EvdiBuffer, EvdiHandle, Event as EvdiEvent};
 use lianli_media::video::H264Encoder;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,6 +9,9 @@ use std::sync::Arc;
 use std::thread::{self};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
+
+/// PIDs known to have buggy H264 implementations — forced to JPEG.
+const JPEG_FORCE_PIDS: &[u16] = &[0xAD11]; // Lancool 207
 
 pub(super) fn spawn_worker(pid: u16) -> Result<DesktopDisplayHandle> {
     ensure_ffmpeg_initialized();
@@ -41,6 +44,12 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
     );
     debug!("TURZX {pid:04x} caps: {caps:?}");
 
+    let use_jpeg = JPEG_FORCE_PIDS.contains(&pid);
+    let fmt = if use_jpeg { FMT_MJPEG } else { FMT_H264 };
+    if use_jpeg {
+        info!("TURZX {pid:04x} using JPEG mode (forced for this device)");
+    }
+
     let mut evdi = EvdiHandle::open_or_add().context("evdi open_or_add")?;
     let lib_version = EvdiHandle::lib_version();
     info!(
@@ -50,9 +59,6 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
     let sku_area_limit = (caps.max_w as u32).saturating_mul(caps.max_h as u32).max(1);
 
     // Pre-register a buffer at the device's preferred mode BEFORE evdi_connect.
-    // Some evdi/compositor combinations won't complete a mode-set commit until
-    // they see a registered buffer of a compatible size — without this the
-    // kernel fires vblank events but never our mode_changed callback.
     let preferred = turzx::pick_mode(&caps).context("device advertises no modes")?;
     let preferred_resolved = ResolvedMode {
         width: preferred.width as u32,
@@ -68,9 +74,6 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
         evdi.register_buffer(buf);
     }
 
-    // Pixel-per-second hint for evdi_connect2 — mirror DisplayLinkManager.
-    // 1920×480@60Hz peak = ~55 Mpx/s; 80M gives headroom without tripping
-    // USB 2.0 HS limits.
     let pixel_per_sec_limit = 80_000_000u32;
     evdi.connect_with_rate(&edid, sku_area_limit, pixel_per_sec_limit)
         .context("evdi_connect2")?;
@@ -125,10 +128,12 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                         EvdiBuffer::new(1, resolved.width as i32, resolved.height as i32);
                     evdi.register_buffer(&mut new_buf);
                     buffer = Some(new_buf);
-                    encoder = Some(
-                        H264Encoder::new(resolved.width, resolved.height, resolved.refresh_hz)
-                            .context("building H264Encoder")?,
-                    );
+                    if !use_jpeg {
+                        encoder = Some(
+                            H264Encoder::new(resolved.width, resolved.height, resolved.refresh_hz)
+                                .context("building H264Encoder")?,
+                        );
+                    }
                     display
                         .start_streaming(
                             TurzxMode {
@@ -136,7 +141,7 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                                 height: resolved.height as u16,
                                 refresh_hz: resolved.refresh_hz as u8,
                             },
-                            FMT_H264,
+                            fmt,
                         )
                         .context("TURZX start_streaming")?;
                     streaming = true;
@@ -151,7 +156,6 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                 EvdiEvent::DpmsChanged(mode) => {
                     debug!("TURZX {pid:04x} DPMS changed: {mode}");
                     if mode != 0 && streaming {
-                        // Non-zero DPMS modes = display off/suspend. Power off the panel.
                         if let Err(e) = display.send_power_off() {
                             warn!("TURZX {pid:04x} power_off (DPMS) failed: {e:#}");
                         }
@@ -164,7 +168,7 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                                     height: m.height as u16,
                                     refresh_hz: m.refresh_hz as u8,
                                 },
-                                FMT_H264,
+                                fmt,
                             ) {
                                 warn!("TURZX {pid:04x} DPMS resume failed: {e:#}");
                             } else {
@@ -183,7 +187,7 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
             continue;
         }
 
-        let (Some(buf), Some(enc)) = (buffer.as_mut(), encoder.as_mut()) else {
+        let Some(buf) = buffer.as_mut() else {
             continue;
         };
 
@@ -192,42 +196,79 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
             let t0 = Instant::now();
             let _rects = evdi.grab_pixels();
             let t1 = Instant::now();
-            match enc.encode(buf.pixels()) {
-                Ok(packet) if !packet.is_empty() => {
-                    let t2 = Instant::now();
-                    let packet_len = packet.len() as u64;
-                    if let Err(e) = display.send_stream_a(&packet) {
-                        if is_device_gone(&e) {
-                            info!("TURZX {pid:04x} disconnected mid-stream, stopping worker");
-                            break;
-                        }
-                        warn!("TURZX {pid:04x} send_stream_a failed: {e:#}");
+
+            let encode_and_send = if use_jpeg {
+                let m = current_mode.unwrap();
+                let tj_image = turbojpeg::Image {
+                    pixels: buf.pixels(),
+                    width: m.width as usize,
+                    height: m.height as usize,
+                    pitch: m.width as usize * 4,
+                    format: turbojpeg::PixelFormat::BGRX,
+                };
+                match turbojpeg::compress(tj_image, 90, turbojpeg::Subsamp::Sub2x2) {
+                    Ok(jpeg) => {
+                        let jpeg = jpeg.to_vec();
+                        let t2 = Instant::now();
+                        let packet_len = jpeg.len() as u64;
+                        let send_result = display.send_jpeg_frame(&jpeg);
+                        let t3 = Instant::now();
+                        Some((packet_len, t2, t3, send_result))
                     }
-                    let t3 = Instant::now();
-                    grab_us += (t1 - t0).as_micros() as u64;
-                    encode_us += (t2 - t1).as_micros() as u64;
-                    send_us += (t3 - t2).as_micros() as u64;
-                    timing_frames += 1;
-                    timing_bytes += packet_len;
-                    if timing_frames >= 60 {
-                        let n = timing_frames as u64;
-                        debug!(
-                            "TURZX {pid:04x} timings over {} frames: grab {:.2}ms enc {:.2}ms send {:.2}ms, avg packet {} B",
-                            n,
-                            grab_us as f64 / n as f64 / 1000.0,
-                            encode_us as f64 / n as f64 / 1000.0,
-                            send_us as f64 / n as f64 / 1000.0,
-                            timing_bytes / n,
-                        );
-                        grab_us = 0;
-                        encode_us = 0;
-                        send_us = 0;
-                        timing_frames = 0;
-                        timing_bytes = 0;
+                    Err(e) => {
+                        warn!("TURZX {pid:04x} JPEG encode failed: {e:#}");
+                        None
                     }
                 }
-                Ok(_) => {}
-                Err(e) => warn!("TURZX {pid:04x} H.264 encode failed: {e:#}"),
+            } else {
+                let Some(enc) = encoder.as_mut() else {
+                    continue;
+                };
+                match enc.encode(buf.pixels()) {
+                    Ok(packet) if !packet.is_empty() => {
+                        let t2 = Instant::now();
+                        let packet_len = packet.len() as u64;
+                        let send_result = display.send_stream_a(&packet);
+                        let t3 = Instant::now();
+                        Some((packet_len, t2, t3, send_result))
+                    }
+                    Ok(_) => None,
+                    Err(e) => {
+                        warn!("TURZX {pid:04x} H.264 encode failed: {e:#}");
+                        None
+                    }
+                }
+            };
+
+            if let Some((packet_len, t2, t3, send_result)) = encode_and_send {
+                if let Err(e) = &send_result {
+                    if is_device_gone(e) {
+                        info!("TURZX {pid:04x} disconnected mid-stream, stopping worker");
+                        break;
+                    }
+                    warn!("TURZX {pid:04x} send failed: {e:#}");
+                }
+                grab_us += (t1 - t0).as_micros() as u64;
+                encode_us += (t2 - t1).as_micros() as u64;
+                send_us += (t3 - t2).as_micros() as u64;
+                timing_frames += 1;
+                timing_bytes += packet_len;
+                if timing_frames >= 60 {
+                    let n = timing_frames as u64;
+                    debug!(
+                        "TURZX {pid:04x} timings over {} frames: grab {:.2}ms enc {:.2}ms send {:.2}ms, avg packet {} B",
+                        n,
+                        grab_us as f64 / n as f64 / 1000.0,
+                        encode_us as f64 / n as f64 / 1000.0,
+                        send_us as f64 / n as f64 / 1000.0,
+                        timing_bytes / n,
+                    );
+                    grab_us = 0;
+                    encode_us = 0;
+                    send_us = 0;
+                    timing_frames = 0;
+                    timing_bytes = 0;
+                }
             }
         }
 
