@@ -380,6 +380,8 @@ impl ServiceManager {
 fn is_wired_aio_lcd(family: DeviceFamily) -> bool {
     matches!(
         family,
-        DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd
+        DeviceFamily::HydroShiftLcd
+            | DeviceFamily::Galahad2Lcd
+            | DeviceFamily::HydroShift2OledCurveLcd
     )
 }

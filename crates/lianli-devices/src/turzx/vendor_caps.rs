@@ -37,9 +37,9 @@ pub fn parse_vendor_desc(buf: &[u8]) -> Result<VendorCaps> {
     if buf[1] != 0x5F {
         bail!("vendor descriptor magic {:#04x} (want 0x5F)", buf[1]);
     }
-    if buf[2] != 0x01 || buf[3] != 0x00 {
+    if !(buf[2] == 0x01 || buf[2] == 0x02) {
         bail!(
-            "vendor descriptor version {:02x}{:02x} (want 01 00)",
+            "vendor descriptor version {:02x}{:02x} (unsupported)",
             buf[2],
             buf[3]
         );
