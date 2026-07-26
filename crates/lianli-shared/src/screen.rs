@@ -108,12 +108,12 @@ impl ScreenInfo {
     };
 
     pub const FLEX_LCD: Self = Self {
-        width: 480,
-        height: 480,
-        max_fps: 30,
-        jpeg_quality: 90,
-        max_payload: 153_600,
-        h264: false,
+        width: 400,
+        height: 400,
+        max_fps: 24,
+        jpeg_quality: 95,
+        max_payload: 512_000,
+        h264: true,
         needs_keepalive: false,
         png: false,
     };
