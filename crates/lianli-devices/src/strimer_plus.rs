@@ -18,11 +18,65 @@ const REPORT_ID: u8 = 0xE0;
 const CMD_DELAY: Duration = Duration::from_millis(40);
 
 const PORT_COUNT: u8 = 12;
+const PORTS_PER_CHANNEL: u8 = 6;
 const MAX_LEDS_PER_PORT: u16 = 27;
+
+/// 6-color rainbow palette injected for Rainbow / RainbowMorph / BulletStack /
+/// Twinkle modes.
+const DEFAULT_COLORS: [[u8; 3]; 6] = [
+    [255, 0, 0],   // Red
+    [255, 105, 0], // Orange
+    [255, 215, 0], // Gold
+    [0, 255, 0],   // Green
+    [0, 0, 255],   // Blue
+    [170, 0, 255], // Purple
+];
+
+/// Mode bytes that span an entire channel ("Complete" modes).
+/// When the base port of a channel uses one of these, only that port needs
+/// to be enabled — the firmware drives all ports of the channel as one strip.
+const COMPLETE_MODE_BYTES: &[u8] = &[
+    33, // ShockWave
+    34, // Ripple
+    35, // Voice
+    36, // BulletStack
+    37, // Drizzling
+    38, // FadeOut
+    39, // ColorTransfer
+    40, // CrossOver
+    41, // Twinkle
+    42, // Contest
+    43, // Parallel
+];
+
+fn is_complete_mode_byte(mode: u8) -> bool {
+    COMPLETE_MODE_BYTES.contains(&mode)
+}
+
+/// Normalize colors for a given mode:
+/// - Rainbow / RainbowMorph / BulletStack / Twinkle → 6-color rainbow palette
+/// - Static / Breathing → replicate first color ×27
+/// - All others → pass through as-is
+fn normalize_colors(mode: RgbMode, colors: &[[u8; 3]]) -> Vec<[u8; 3]> {
+    match mode {
+        RgbMode::Rainbow | RgbMode::RainbowMorph | RgbMode::BulletStack | RgbMode::Twinkle => {
+            DEFAULT_COLORS.to_vec()
+        }
+        RgbMode::Static | RgbMode::Breathing => {
+            let first = colors.first().copied().unwrap_or([255, 255, 255]);
+            vec![first; MAX_LEDS_PER_PORT as usize]
+        }
+        _ => colors.to_vec(),
+    }
+}
 
 pub struct StrimerPlusController {
     device: Arc<Mutex<RusbHid>>,
     firmware: Mutex<Option<String>>,
+    /// Tracked mode byte per port, for channel-wide enable bitmap logic.
+    port_modes: Mutex<[u8; PORT_COUNT as usize]>,
+    /// Detected port count on channel 2 (4 or 6, or 6 if unknown).
+    channel2_port_count: Mutex<u8>,
 }
 
 impl StrimerPlusController {
@@ -30,8 +84,11 @@ impl StrimerPlusController {
         let ctrl = Self {
             device,
             firmware: Mutex::new(None),
+            port_modes: Mutex::new([1u8; PORT_COUNT as usize]),
+            channel2_port_count: Mutex::new(PORTS_PER_CHANNEL),
         };
         ctrl.read_firmware().ok();
+        ctrl.read_channel2_port_count().ok();
         Ok(ctrl)
     }
 
@@ -42,18 +99,50 @@ impl StrimerPlusController {
     fn read_firmware(&self) -> Result<()> {
         self.send_feature(&[REPORT_ID, 0x50, 0x00])?;
         let data = self.read_input(5)?;
-        let fw = format!(
-            "v{}.{} (cust={:#04x} proj={:#04x} major={:#04x} minor={:#04x})",
-            ((data[4] >> 4) as u16 + 1) / 10,
-            ((data[4] & 0x0F) as i16 - 3).max(0) as u16,
-            data[0],
-            data[1],
-            data[2],
-            data[3]
-        );
+
+        // Validity check: CustomerID=0xE0, ProjectID=0x52, MajorID=0xFF, MinorID=0x40
+        let valid = data[0] == 0xE0 && data[1] == 0x52 && data[2] == 0xFF && data[3] == 0x40;
+
+        let fw = if valid {
+            // Version formula:
+            //   hi = (FineTune >> 4) & 0xF
+            //   lo = FineTune & 0xF
+            //   if lo > 9 → invalid
+            //   n = 10 * (hi + 1) + (lo - 3)
+            //   major = n / 10, minor = n % 10
+            let fine_tune = data[4];
+            let hi = (fine_tune >> 4) & 0x0F;
+            let lo = fine_tune & 0x0F;
+            if lo > 9 {
+                format!("v0.0 (invalid fine-tune {fine_tune:#04x})")
+            } else {
+                let n = 10 * (hi as u32 + 1) + (lo as u32 - 3);
+                format!("v{}.{}", n / 10, n % 10)
+            }
+        } else {
+            format!(
+                "v0.0 (unrecognized: cust={:#04x} proj={:#04x} major={:#04x} minor={:#04x})",
+                data[0], data[1], data[2], data[3]
+            )
+        };
         info!("Strimer Plus firmware: {fw}");
         *self.firmware.lock() = Some(fw);
         Ok(())
+    }
+
+    /// Query how many ports are physically connected on channel 2.
+    /// Returns 4 or 6. Falls back to 6 on error.
+    fn read_channel2_port_count(&self) -> Result<u8> {
+        self.send_feature(&[REPORT_ID, 0x50, 0x01])?;
+        let data = self.read_input(1)?;
+        let count = data[0];
+        if count == 4 || count == 6 {
+            *self.channel2_port_count.lock() = count;
+            debug!("Strimer Plus channel 2 port count: {count}");
+            Ok(count)
+        } else {
+            bail!("unexpected channel 2 port count: {count}");
+        }
     }
 
     fn set_effect_setting(
@@ -95,6 +184,30 @@ impl StrimerPlusController {
             buf.push(c[1]); // G
         }
         self.send_output(&buf)
+    }
+
+    /// Build the port-enable bitmap for a given channel, based on the tracked
+    /// mode of the channel's base port. Complete modes enable only the base
+    /// Complete modes enable only the base port; Individual modes enable all.
+    fn channel_enable_bitmap(&self, channel: u8) -> u16 {
+        let base = channel * PORTS_PER_CHANNEL;
+        let count = if channel == 1 {
+            *self.channel2_port_count.lock()
+        } else {
+            PORTS_PER_CHANNEL
+        };
+        let modes = self.port_modes.lock();
+        let mut bitmap = 0u16;
+        if is_complete_mode_byte(modes[base as usize]) {
+            // Complete mode: only base port
+            bitmap |= 1 << base;
+        } else {
+            // Individual mode: all ports of this channel
+            for p in 0..count {
+                bitmap |= 1 << (base + p);
+            }
+        }
+        bitmap
     }
 
     fn send_feature(&self, data: &[u8]) -> Result<()> {
@@ -218,7 +331,9 @@ impl RgbDevice for StrimerPlusController {
     }
 
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
-        (0..PORT_COUNT)
+        let ch2_count = *self.channel2_port_count.lock();
+        let total_ports = PORTS_PER_CHANNEL + ch2_count;
+        (0..total_ports)
             .map(|port| RgbZoneInfo {
                 name: format!("Port {}", port + 1),
                 led_count: MAX_LEDS_PER_PORT,
@@ -227,12 +342,15 @@ impl RgbDevice for StrimerPlusController {
     }
 
     fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
-        vec![vec![]; PORT_COUNT as usize]
+        let ch2_count = *self.channel2_port_count.lock();
+        let total_ports = PORTS_PER_CHANNEL + ch2_count;
+        vec![vec![]; total_ports as usize]
     }
 
     fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
-        if zone >= PORT_COUNT {
-            bail!("Port {zone} out of range (0-{})", PORT_COUNT - 1);
+        let total_ports = PORTS_PER_CHANNEL + *self.channel2_port_count.lock();
+        if zone >= total_ports {
+            bail!("Port {zone} out of range (0-{})", total_ports - 1);
         }
         let mode = self.map_mode(effect.mode);
         let speed = Self::map_speed(effect.speed);
@@ -242,24 +360,25 @@ impl RgbDevice for StrimerPlusController {
         };
         let brightness = Self::map_brightness(effect.brightness);
 
+        // Track the mode for channel bitmap logic.
+        self.port_modes.lock()[zone as usize] = mode;
+
         self.set_effect_setting(zone, mode, speed, dir, brightness)?;
 
-        // Push color data
-        if !effect.colors.is_empty() {
-            let colors: Vec<[u8; 3]> =
-                if matches!(effect.mode, RgbMode::Static | RgbMode::Breathing) {
-                    // Replicate first color ×27 for static/breathing
-                    vec![effect.colors[0]; MAX_LEDS_PER_PORT as usize]
-                } else {
-                    effect.colors.iter().map(|c| [c[0], c[1], c[2]]).collect()
-                };
+        // Push normalized color data.
+        let input_colors: Vec<[u8; 3]> = effect.colors.iter().map(|c| [c[0], c[1], c[2]]).collect();
+        let colors = normalize_colors(effect.mode, &input_colors);
+        if !colors.is_empty() {
             self.set_color_setting(zone, &colors)?;
         }
 
-        // Enable the effect
-        self.set_effect_enable(zone)?;
+        // Build channel-aware enable bitmap. The bitmap covers both channels:
+        // each channel's enable set is derived from its base port's tracked mode.
+        let bitmap = self.channel_enable_bitmap(0) | self.channel_enable_bitmap(1);
+        self.set_effect_enable_multi(bitmap)?;
+
         debug!(
-            "Strimer Plus port {zone}: mode={mode} speed={speed} dir={dir} brightness={brightness}"
+            "Strimer Plus port {zone}: mode={mode} speed={speed} dir={dir} brightness={brightness} bitmap={bitmap:#06x}"
         );
         Ok(())
     }
@@ -281,9 +400,10 @@ impl RgbDevice for StrimerPlusController {
     }
 
     fn start_merge_lighting(&self) -> Result<()> {
-        // Enable all 12 ports at once (bitmap 0x0FFF)
-        self.set_effect_enable_multi(0x0FFF)?;
-        debug!("Strimer Plus merge lighting started");
+        // Enable all connected ports at once
+        let bitmap = self.channel_enable_bitmap(0) | self.channel_enable_bitmap(1);
+        self.set_effect_enable_multi(bitmap)?;
+        debug!("Strimer Plus merge lighting started (bitmap={bitmap:#06x})");
         Ok(())
     }
 
