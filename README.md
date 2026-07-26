@@ -9,6 +9,19 @@
   Fan speed control, RGB/LED effects, LCD streaming, and sensor gauges for all Lian Li devices.
 </p>
 
+### AI Disclaimer
+
+Generative AI was used during development in two areas:
+
+- **Reverse engineering.** AI assisted with analyzing USB packet captures and vendor
+  software to understand device communication protocols — decoding packet structures,
+  identifying encryption and compression schemes, cross-referencing control opcodes, and translating findings to Rust.
+- **Frontend UI.** AI helped scaffold the Vue/TypeScript frontend for the Tauri GUI, including
+  component layout, styling, and state wiring.
+
+All AI output is reviewed personally before being committed. Protocols for devices I
+own were validated against real hardware, others rely on community testing and feedback. Bug reports are welcome.
+
 ---
 
 ## Supported Devices
@@ -23,8 +36,7 @@
 | Galahad II Trinity AIO | Yes | Yes | - | Yes | Yes |
 | HydroShift LCD AIO | Yes | Yes | 480x480 | Yes | Yes |
 | Galahad II LCD / Vision AIO | Yes | Yes | 480x480 | Yes | Yes |
-
-\* Galahad II LCD / Vision uses the same driver as HydroShift LCD AIO.
+| Strimer Plus (wired) | - | Yes | - | - | - |
 
 ### Wireless (via TX/RX dongle)
 
@@ -45,17 +57,20 @@ Both V1 (VID 0x0416) and V2 (VID 0x1A86) wireless dongles are supported. Binding
 
 > **Note:** Wireless devices with LCDs still need to be plugged in via USB to control the LCD. LCD cannot be controlled through wireless dongle alone.
 
-### USB (Standalone LCD)
+### USB
 
-| Device | LCD | Tested | Notes |
-|--------|:---:|:------:|-------|
-| HydroShift II LCD Circle | 480x480 | Yes | |
-| HydroShift II LCD Square | 480x480 | Yes | |
-| Lancool 207 Digital | 1472x720 | Yes | |
-| Universal Screen 8.8" | 1920x480 | Yes | |
-| Universal Screen 8.8" LED Ring | - | Yes | RGB control supported |
-
-Devices stuck in desktop/display mode are detected and can be switched back to LCD mode via the GUI.
+| Device | Fan Control | RGB | LCD | Pump | Tested |
+|--------|:-----------:|:---:|:---:|:----:|:------:|
+| HydroShift II LCD Circle | Yes | Yes | 480x480 | Yes | Yes |
+| HydroShift II LCD Square | Yes | Yes | 480x480 | Yes | - |
+| Lancool 207 Digital | - | - | 720x1472 | - | Yes |
+| Universal Screen 8.8" | - | - | 480x1920 | - | Yes |
+| Universal Screen 8.8" LED Ring | - | Yes | - | - | Yes |
+| Vision 9.2" | - | - | 464x1920 | - | - |
+| TL Flex LCD | - | - | 480x480 | - | - |
+| SL Infinity Flex LCD | - | - | 480x480 | - | - |
+| P28 V2 / TL Flex Controller | Yes | Yes | - | - | - |
+| HydroShift II OLED Curve | - | Yes | 1080x2288 | Yes | - |
 
 ### Desktop Mode (Virtual Display)
 
@@ -78,12 +93,6 @@ Lancool 207, Universal Screen 8.8") won't get attached as virtual displays until
 active user write access to it (and a `modules-load.d` drop-in that auto-loads the `evdi` module
 at boot), so the per-user daemon creates and opens its own evdi nodes with no root setup step.
 
-### Other
-
-| Device | RGB | Tested |
-|--------|:---:|:------:|
-| Strimer Plus (wired) | Yes | - |
-
 If you've tested a device that isn't marked as tested above, please [open an issue or PR](https://github.com/sgtaziz/lian-li-linux/issues) to update this table.
 
 ## Architecture
@@ -95,7 +104,7 @@ lianli-daemon          User service - fan control loop + LCD streaming
   lianli-media         Image/video/GIF encoding, sensor gauge rendering
   lianli-shared        IPC types, config schema, device IDs
 
-lianli-gui             Slint desktop app - connects to daemon via Unix socket
+lianli-gui             Tauri desktop app (Rust + Vue) - connects to daemon via Unix socket
 ```
 
 The daemon runs as a user systemd service. USB access is granted via udev rules (no root required).
@@ -122,38 +131,51 @@ git clone --recurse-submodules https://github.com/sgtaziz/lian-li-linux.git && c
 > If you already cloned without `--recurse-submodules`, run: `git submodule update --init --recursive`
 
 2) Install dependencies:
-- **Rust** (stable, 1.75+)
+- **Rust** (stable)
+- **bun** (for the Vue frontend — the Tauri build script invokes it automatically)
 - **ffmpeg** and **ffprobe** in `PATH` (for video/GIF decoding)
 - **System libraries:**
 
 ```bash
 # Arch
-sudo pacman -S hidapi libusb ffmpeg fontconfig mesa libxkbcommon wayland libx11 libinput libdrm clang cmake pkg-config nasm
-yay -S evdi-dkms         # AUR - bundles both libevdi (required) and the DKMS kernel module
+sudo pacman -S libusb ffmpeg fontconfig mesa libxkbcommon wayland libx11 libinput libdrm \
+  libjpeg-turbo clang cmake pkg-config nasm \
+  webkit2gtk-4.1 gtk3 glib2 libsoup3 libayatana-appindicator librsvg
+yay -S evdi-dkms bun         # AUR — evdi-dkms bundles libevdi + DKMS module
 
 # Ubuntu / Debian
-sudo apt install libhidapi-dev libusb-1.0-0-dev libudev-dev libfontconfig-dev \
+sudo apt install libusb-1.0-0-dev libudev-dev libfontconfig-dev \
   libxkbcommon-dev libwayland-dev libx11-dev libinput-dev libdrm-dev \
   libgl-dev libegl-dev clang cmake pkg-config ffmpeg nasm \
   libavcodec-dev libavformat-dev libswscale-dev libavutil-dev \
-  libevdi0-dev              # required to build/link the daemon
+  libevdi0-dev \
+  libwebkit2gtk-4.1-dev libglib2.0-dev libgtk-3-dev libsoup-3.0-dev \
+  libayatana-appindicator3-dev librsvg2-dev
 sudo apt install evdi-dkms  # optional, only needed at runtime for desktop-mode devices
+# bun: install from https://bun.sh (not in apt)
 
 # Fedora
-sudo dnf install hidapi-devel libusb1-devel fontconfig-devel \
+sudo dnf install libusb1-devel fontconfig-devel \
   libxkbcommon-devel wayland-devel libX11-devel libinput-devel libdrm-devel \
   mesa-libGL-devel mesa-libEGL-devel clang cmake pkg-config ffmpeg \
-  ffmpeg-devel nasm
+  ffmpeg-devel nasm \
+  webkit2gtk4.1-devel gtk3-devel glib2-devel libsoup3-devel \
+  libappindicator-gtk3-devel librsvg2-devel
 # evdi is not packaged in Fedora repos — build libevdi from source to link the daemon:
 #   https://github.com/DisplayLink/evdi  (evdi-dkms is only needed at runtime)
 # You can also download https://github.com/displaylink-rpm/displaylink-rpm
 # Make sure to install replace ffmpeg-free with ffmpeg if ffmpeg-free is installed
+# bun: install from https://bun.sh (not in dnf)
 ```
 
 3) Build:
 ```bash
 cargo build --release
 ```
+
+The GUI crate's build script runs `bun install` + `bun run build` automatically when the frontend
+sources are newer than the built `dist/`. Set `LIANLI_NO_FRONTEND=1` to skip it if you built the
+frontend out-of-band.
 
 Binaries: `target/release/lianli-daemon` and `target/release/lianli-gui`
 
@@ -198,43 +220,9 @@ cp packaging/desktop/com.sgtaziz.lianlilinux.desktop ~/.local/share/applications
 update-desktop-database ~/.local/share/applications/
 ```
 
-### With Docker
-
-```bash
-./docker/build.sh
-```
-
-The script builds the image (matching your UID/GID), mounts a cargo cache, and runs `cargo build --release`. Artifacts land in `target/release/` on the host. Then follow steps 4-6 from "From Source" above.
-
 ## Configuration
 
-The daemon reads `~/.config/lianli/config.json`. The GUI edits this file via the daemon's IPC socket.
-
-### LCD Streaming
-
-Each LCD entry specifies a target device (by serial), media type, and orientation:
-
-| Type | Description |
-|------|-------------|
-| `image` | Static image (JPEG, PNG, BMP, GIF) |
-| `video` | Video file (decoded frame-by-frame via ffmpeg) |
-| `gif` | Animated GIF |
-| `color` | Solid RGB color |
-| `sensor` | Live sensor gauge (CPU temp, GPU temp, etc.) |
-
-### Fan Curves
-
-Fan curves map a temperature source (any shell command) to a speed percentage.
-Points are linearly interpolated; temperatures outside the curve range clamp to the nearest point's speed.
-
-### Fan Speed Modes
-
-| Mode | Description |
-|------|-------------|
-| `0` | Off (0% PWM) |
-| `"curve-name"` | Follow a named fan curve |
-| `1-255` | Constant PWM duty (1=0.4%, 128=50%, 255=100%) |
-| `"__mb_sync__"` | Mirror motherboard PWM signal (hardware passthrough) |
+The daemon reads `~/.config/lianli/config.json`. The GUI edits this file via the daemon's IPC socket. LCD targets, fan curves, and speed modes are all configured through the GUI.
 
 ## Troubleshooting
 
@@ -247,6 +235,8 @@ sudo udevadm test /sys/bus/usb/devices/<your-device>
 journalctl --user -u lianli-daemon -f
 ```
 
+The daemon talks to devices via libusb directly (not hidapi), so it needs `MODE="0666"` on the USB device node — confirm the udev rules from step 4 are installed and re-triggered.
+
 **GUI says "Daemon offline":**
 ```bash
 # Verify daemon is running
@@ -255,6 +245,10 @@ systemctl --user status lianli-daemon
 # Check socket exists
 ls -la $XDG_RUNTIME_DIR/lianli-daemon.sock
 ```
+
+**GUI won't launch (blank window / webview errors):**
+
+The Tauri GUI depends on WebKit2GTK. Ensure `webkit2gtk-4.1` is installed and your GPU drivers support it. On Wayland with NVIDIA, `WEBKIT_DISABLE_COMPOSITING_MODE=1` may help as a workaround.
 
 **Permission denied on USB device:**
 ```bash

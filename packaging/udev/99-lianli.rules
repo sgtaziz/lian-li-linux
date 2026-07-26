@@ -1,6 +1,10 @@
 # Lian Li USB device permissions
 # Install to: /etc/udev/rules.d/99-lianli.rules
 # Reload with: sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Device access is via rusb (libusb) directly — the daemon claims the USB
+# interface and detaches the kernel driver as needed. No hidraw rules are
+# required.
 
 # Wireless TX dongle
 SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="8040", MODE="0666"
@@ -67,7 +71,7 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a019", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="43a8", ATTR{idProduct}=="0101", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="43a8", ATTR{idProduct}=="0105", MODE="0666"
 
-# HydroShift II OLED Curve
+# HydroShift II OLED Curve (LCD MCU + LED MCU)
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a068", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="8051", MODE="0666"
 
@@ -80,93 +84,6 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad21", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad22", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad23", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad26", MODE="0666"
-
-# --- Force usbhid to bind HID devices the kernel may not claim automatically ---
-# Some devices have HID interfaces that usbhid doesn't recognise, so no
-# /dev/hidraw node is created. Registering VID:PID via new_id fixes this.
-
-# TL Fan controller
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7372", RUN+="/bin/sh -c 'echo 0416 7372 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# UNI FAN TL LCD
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="04fc", ATTR{idProduct}=="7393", RUN+="/bin/sh -c 'echo 04fc 7393 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# Galahad II Trinity AIO
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7371", RUN+="/bin/sh -c 'echo 0416 7371 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7373", RUN+="/bin/sh -c 'echo 0416 7373 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# HydroShift LCD AIO
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7398", RUN+="/bin/sh -c 'echo 0416 7398 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7399", RUN+="/bin/sh -c 'echo 0416 7399 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="739a", RUN+="/bin/sh -c 'echo 0416 739a > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# Galahad II LCD / Vision AIO
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7391", RUN+="/bin/sh -c 'echo 0416 7391 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="7395", RUN+="/bin/sh -c 'echo 0416 7395 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# Strimer Plus LED strip
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a200", RUN+="/bin/sh -c 'echo 0cf2 a200 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# ENE 6K77 SL/AL fan controllers
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a100", RUN+="/bin/sh -c 'echo 0cf2 a100 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a101", RUN+="/bin/sh -c 'echo 0cf2 a101 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a102", RUN+="/bin/sh -c 'echo 0cf2 a102 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a103", RUN+="/bin/sh -c 'echo 0cf2 a103 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a104", RUN+="/bin/sh -c 'echo 0cf2 a104 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a105", RUN+="/bin/sh -c 'echo 0cf2 a105 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a106", RUN+="/bin/sh -c 'echo 0cf2 a106 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# Desktop-mode LCD devices (CH340, VID=0x1A86)
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="acd1", RUN+="/bin/sh -c 'echo 1a86 acd1 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ace1", RUN+="/bin/sh -c 'echo 1a86 ace1 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad11", RUN+="/bin/sh -c 'echo 1a86 ad11 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad20", RUN+="/bin/sh -c 'echo 1a86 ad20 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad21", RUN+="/bin/sh -c 'echo 1a86 ad21 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad22", RUN+="/bin/sh -c 'echo 1a86 ad22 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="ad23", RUN+="/bin/sh -c 'echo 1a86 ad23 > /sys/bus/usb/drivers/usbhid/new_id 2>/dev/null || true'"
-
-# --- hidraw permissions for HID devices accessed via hidapi ---
-# (hidraw nodes need ATTRS with S, matching parent USB device attributes)
-
-# TL Fan controller
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7372", MODE="0666"
-
-# UNI FAN TL LCD
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04fc", ATTRS{idProduct}=="7393", MODE="0666"
-
-# Galahad II Trinity AIO
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7371", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7373", MODE="0666"
-
-# HydroShift LCD AIO
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7398", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7399", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="739a", MODE="0666"
-
-# Galahad II LCD / Vision AIO
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7391", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="7395", MODE="0666"
-
-# Strimer Plus LED strip
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a200", MODE="0666"
-
-# ENE 6K77 SL/AL fan controllers
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a100", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a101", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a102", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a103", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a104", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a105", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0cf2", ATTRS{idProduct}=="a106", MODE="0666"
-
-# Desktop-mode LCD devices (CH340, VID=0x1A86) — for display mode switching via hidapi
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="acd1", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ace1", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad11", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad20", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad21", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad22", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad23", MODE="0666"
 
 # --- EVDI virtual display (for desktop-mode LCDs) ---
 ACTION=="add", SUBSYSTEM=="module", KERNEL=="evdi", \

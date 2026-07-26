@@ -2570,6 +2570,7 @@ dependencies = [
  "signal-hook",
  "tracing",
  "tracing-subscriber",
+ "turbojpeg",
 ]
 
 [[package]]
