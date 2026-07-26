@@ -677,7 +677,8 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
                 "HydroShift II Control",
             ) {
                 Ok(transport) => {
-                    let ctrl = std::sync::Arc::new(super::h2_aio::H2AioController::new(transport));
+                    let ctrl =
+                        std::sync::Arc::new(super::h2_aio::H2AioController::new(transport, ctx.pid));
                     (
                         Some(Box::new(std::sync::Arc::clone(&ctrl))
                             as Box<dyn crate::traits::FanDevice>),

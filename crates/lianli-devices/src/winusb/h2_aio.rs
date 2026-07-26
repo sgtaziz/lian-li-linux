@@ -16,7 +16,8 @@ use std::time::Duration;
 use tracing::{debug, info};
 
 const PUMP_MIN_RPM: u16 = 1600;
-const PUMP_MAX_RPM: u16 = 2500;
+const PUMP_MAX_RPM_CIRCLE: u16 = 2500;
+const PUMP_MAX_RPM_SQUARE: u16 = 3200;
 const RING_LED_COUNT: usize = 24;
 
 /// Telemetry parsed from GetH2Params response.
@@ -73,15 +74,17 @@ pub struct H2AioController {
     builder: Mutex<PacketBuilder>,
     last_fan_duties: Mutex<[u8; 3]>,
     last_pump_duty: Mutex<u8>,
+    is_square: bool,
 }
 
 impl H2AioController {
-    pub fn new(transport: Arc<Mutex<RusbBulk>>) -> Self {
+    pub fn new(transport: Arc<Mutex<RusbBulk>>, pid: u16) -> Self {
         Self {
             transport,
             builder: Mutex::new(PacketBuilder::new()),
             last_fan_duties: Mutex::new([50, 50, 50]),
             last_pump_duty: Mutex::new(128),
+            is_square: pid == 0xA034,
         }
     }
 
@@ -188,28 +191,56 @@ impl H2AioController {
         Ok(())
     }
 
-    fn rpm_to_pwm(rpm: u16) -> u16 {
-        let rpm = rpm.clamp(PUMP_MIN_RPM, PUMP_MAX_RPM) as f32;
-        let pwm = if rpm < 1720.0 {
-            1500.0 - (rpm - 1600.0) * 1.625
-        } else if rpm < 1870.0 {
-            1300.0 - (rpm - 1720.0) * 2.0
-        } else if rpm < 2000.0 {
-            1000.0 - (rpm - 1870.0) * 1.23
-        } else if rpm < 2300.0 {
-            840.0 - (rpm - 2000.0) * 2.0
-        } else if rpm < 2400.0 {
-            240.0 - (rpm - 2300.0) * 1.8
+    fn pump_max_rpm(&self) -> u16 {
+        if self.is_square {
+            PUMP_MAX_RPM_SQUARE
         } else {
-            60.0 - (rpm - 2400.0) * 0.5
+            PUMP_MAX_RPM_CIRCLE
+        }
+    }
+
+    fn rpm_to_pwm(&self, rpm: u16) -> u16 {
+        let rpm = rpm.clamp(PUMP_MIN_RPM, self.pump_max_rpm()) as f32;
+        let pwm = if self.is_square {
+            if rpm <= 1800.0 {
+                1590.0 - (rpm - 1600.0) * 0.95
+            } else if rpm <= 2000.0 {
+                1400.0 - (rpm - 1800.0)
+            } else if rpm <= 2200.0 {
+                1200.0 - (rpm - 2000.0)
+            } else if rpm <= 2400.0 {
+                1000.0 - (rpm - 2200.0)
+            } else if rpm <= 2600.0 {
+                800.0 - (rpm - 2400.0)
+            } else if rpm <= 2800.0 {
+                580.0 - (rpm - 2600.0) * 1.11
+            } else if rpm <= 3000.0 {
+                330.0 - (rpm - 2800.0) * 1.2
+            } else {
+                90.0 - (rpm - 3000.0) * 0.45
+            }
+        } else {
+            if rpm < 1720.0 {
+                1500.0 - (rpm - 1600.0) * 1.625
+            } else if rpm < 1870.0 {
+                1300.0 - (rpm - 1720.0) * 2.0
+            } else if rpm < 2000.0 {
+                1000.0 - (rpm - 1870.0) * 1.23
+            } else if rpm < 2300.0 {
+                840.0 - (rpm - 2000.0) * 2.0
+            } else if rpm < 2400.0 {
+                240.0 - (rpm - 2300.0) * 1.8
+            } else {
+                60.0 - (rpm - 2400.0) * 0.5
+            }
         };
         pwm.round() as u16
     }
 
-    fn duty_to_pwm(duty: u8) -> u16 {
+    fn duty_to_pwm(&self, duty: u8) -> u16 {
         let pct = (duty as f32 / 255.0).clamp(0.0, 1.0);
-        let rpm = PUMP_MIN_RPM as f32 + pct * (PUMP_MAX_RPM - PUMP_MIN_RPM) as f32;
-        Self::rpm_to_pwm(rpm.round() as u16)
+        let rpm = PUMP_MIN_RPM as f32 + pct * (self.pump_max_rpm() - PUMP_MIN_RPM) as f32;
+        self.rpm_to_pwm(rpm.round() as u16)
     }
 }
 
@@ -227,7 +258,7 @@ impl FanDevice for H2AioController {
         let mut duties = *self.last_fan_duties.lock();
         duties[slot as usize % 3] = duty_to_percent(duty);
         *self.last_fan_duties.lock() = duties;
-        let pump_pwm = Self::duty_to_pwm(*self.last_pump_duty.lock());
+        let pump_pwm = self.duty_to_pwm(*self.last_pump_duty.lock());
         self.sync_pump_fan(pump_pwm, duties)
     }
 
@@ -237,7 +268,7 @@ impl FanDevice for H2AioController {
             fan_duties[i] = duty_to_percent(d);
         }
         *self.last_fan_duties.lock() = fan_duties;
-        let pump_pwm = Self::duty_to_pwm(*self.last_pump_duty.lock());
+        let pump_pwm = self.duty_to_pwm(*self.last_pump_duty.lock());
         self.sync_pump_fan(pump_pwm, fan_duties)
     }
 
@@ -260,7 +291,7 @@ impl FanDevice for H2AioController {
 
     fn set_pump_speed(&self, duty: u8) -> Result<()> {
         *self.last_pump_duty.lock() = duty;
-        let pump_pwm = Self::duty_to_pwm(duty);
+        let pump_pwm = self.duty_to_pwm(duty);
         let fans = *self.last_fan_duties.lock();
         self.sync_pump_fan(pump_pwm, fans)
     }
