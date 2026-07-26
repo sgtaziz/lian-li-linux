@@ -412,7 +412,7 @@ impl RgbController {
                 supported_modes: vec![RgbMode::Static, RgbMode::Direct],
                 zones,
                 supports_direct: true,
-                supports_mb_rgb_sync: false,
+                supports_mb_rgb_sync: state.fan_type.supports_mb_rgb_sync(),
                 total_led_count: total_leds,
                 supported_scopes: vec![],
                 supports_direction: false,
@@ -435,6 +435,21 @@ impl RgbController {
             );
             return Ok(());
         }
+
+        if let (Some(ref wireless), Some(state)) =
+            (&self.wireless, self.wireless_state.get(device_id))
+        {
+            if !state.fan_type.supports_mb_rgb_sync() {
+                anyhow::bail!("Device {device_id} does not support MB RGB sync");
+            }
+            wireless.set_mb_rgb_sync(&state.mac, enabled)?;
+            info!(
+                "MB RGB sync {}: {device_id}",
+                if enabled { "enabled" } else { "disabled" }
+            );
+            return Ok(());
+        }
+
         anyhow::bail!("RGB device not found: {device_id}");
     }
 

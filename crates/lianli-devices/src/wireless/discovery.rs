@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use parking_lot::Mutex;
 use std::fmt;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info};
@@ -190,11 +190,24 @@ pub(super) fn poll_and_discover(
     rx: &Arc<Mutex<RusbBulk>>,
     discovered_devices: &Arc<Mutex<Vec<DiscoveredDevice>>>,
     mobo_pwm: &Arc<AtomicU16>,
+    fg_sync: &Arc<AtomicBool>,
     master_mac: &Arc<Mutex<[u8; 6]>>,
 ) -> Result<()> {
     let mut cmd = vec![0u8; 64];
     cmd[0] = USB_CMD_SEND_RF;
     cmd[1] = 0x01;
+
+    if fg_sync.load(Ordering::Relaxed) {
+        let rpm = discovered_devices
+            .lock()
+            .iter()
+            .flat_map(|d| d.fan_rpms.iter())
+            .copied()
+            .find(|&r| r > 0)
+            .unwrap_or(0);
+        cmd[2] = (rpm >> 8) as u8;
+        cmd[3] = (rpm & 0xFF) as u8;
+    }
 
     with_transport_recovery(rx, &RX_IDS, "RX", |handle| {
         handle.read_flush();

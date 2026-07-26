@@ -4,8 +4,8 @@
 //! TX+RX pattern. Key per-PID differences:
 //!   - LED count: P28 = 9/fan, TL Flex = 26/fan
 //!   - PWM floor: P28 = 8% (zero→1), TL Flex = 11% (zero→5)
-//!   - RGB transport: P28 streams via 0x11, TL Flex flash-saves via 0x18+0x19
-//!
+//!   - RGB transport: P28 streams raw via 0x11, TL Flex flash-saves
+//!     tinyuz-compressed via 0x18 + 0x19
 
 use crate::traits::{FanDevice, RgbDevice};
 use anyhow::{Context, Result};
@@ -19,9 +19,14 @@ const PACKET_SIZE: usize = 64;
 
 // LEDCmdType opcodes
 const CMD_GET_VER: u8 = 0x10;
+const CMD_STREAM_RGB: u8 = 0x11;
 const CMD_GET_INFO: u8 = 0x12;
 const CMD_SET_FANS_PWM: u8 = 0x13;
 const CMD_PING: u8 = 0x16;
+const CMD_SEND_LIGHT_PACKAGE: u8 = 0x18;
+const CMD_APPLY_LIGHTING: u8 = 0x19;
+
+const RGB_LED_CHUNK: usize = 20;
 
 /// Per-PID parameters.
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +35,7 @@ pub struct ReceiverParams {
     pub pwm_floor: u8,
     pub pwm_zero: u8,
     pub name: &'static str,
+    pub compresses_rgb: bool,
 }
 
 impl ReceiverParams {
@@ -40,12 +46,14 @@ impl ReceiverParams {
                 pwm_floor: 8,
                 pwm_zero: 1,
                 name: "P28 V2 Controller",
+                compresses_rgb: false,
             }),
             0x0101 => Some(Self {
                 leds_per_fan: 26,
                 pwm_floor: 11,
                 pwm_zero: 5,
                 name: "TL Flex Controller",
+                compresses_rgb: true,
             }),
             _ => None,
         }
@@ -66,6 +74,7 @@ pub struct WiredReceiverController {
     fan_count: Mutex<u8>,
     #[allow(dead_code)]
     firmware: Mutex<Option<String>>,
+    led_buffer: Mutex<Vec<[u8; 3]>>,
 }
 
 impl WiredReceiverController {
@@ -86,15 +95,22 @@ impl WiredReceiverController {
             params,
             fan_count: Mutex::new(4),
             firmware: Mutex::new(None),
+            led_buffer: Mutex::new(Vec::new()),
         };
 
-        // Read initial status
         if let Ok(status) = ctrl.get_info() {
             *ctrl.fan_count.lock() = status.fan_count.max(1).min(4);
             info!("{}: {} fans detected", params.name, status.fan_count);
         }
 
+        let total = ctrl.total_leds();
+        *ctrl.led_buffer.lock() = vec![[0, 0, 0]; total];
+
         Ok(ctrl)
+    }
+
+    fn total_leds(&self) -> usize {
+        *self.fan_count.lock() as usize * self.params.leds_per_fan as usize
     }
 
     pub fn params(&self) -> ReceiverParams {
@@ -175,11 +191,129 @@ impl WiredReceiverController {
         Ok(())
     }
 
+    /// Enable/disable motherboard PWM sync. Sentinels all four fan ports
+    /// to value 6, which the firmware interprets as "follow MB PWM header."
+    pub fn set_mb_sync(&self, enabled: bool) -> Result<()> {
+        let mut tx = [0u8; PACKET_SIZE];
+        tx[0] = CMD_SET_FANS_PWM;
+        if enabled {
+            tx[1] = 6;
+            tx[2] = 6;
+            tx[3] = 6;
+            tx[4] = 6;
+        } else {
+            return Ok(());
+        }
+        let rx = self.send_and_read(&tx)?;
+        if rx[0] != CMD_SET_FANS_PWM || rx[1] != 0 {
+            warn!("MB sync unexpected response: [{}, {}]", rx[0], rx[1]);
+        }
+        debug!("{}: MB PWM sync = {enabled}", self.params.name);
+        Ok(())
+    }
+
     /// Ping (0x16) — keepalive.
     pub fn ping(&self) -> Result<()> {
         let mut tx = [0u8; PACKET_SIZE];
         tx[0] = CMD_PING;
         self.send_and_read(&tx)?;
+        Ok(())
+    }
+
+    /// Send a full RGB frame (all fans' LEDs) using the per-PID transport.
+    pub fn send_rgb_frame(&self, colors: &[[u8; 3]]) -> Result<()> {
+        let mut raw = Vec::with_capacity(colors.len() * 3);
+        for c in colors {
+            raw.extend_from_slice(c);
+        }
+        if self.params.compresses_rgb {
+            self.send_rgb_flash_save(&raw, colors.len())?;
+        } else {
+            self.send_rgb_stream(&raw)?;
+        }
+        Ok(())
+    }
+
+    /// P28 V2: stream raw RGB via 0x11 in 20-LED chunks.
+    fn send_rgb_stream(&self, raw: &[u8]) -> Result<()> {
+        let total_leds = raw.len() / 3;
+        let transport = self.transport.lock();
+        let mut offset = 0usize;
+        while offset < total_leds {
+            let count = (total_leds - offset).min(RGB_LED_CHUNK);
+            let is_last = offset + count >= total_leds;
+
+            let mut pkt = [0u8; PACKET_SIZE];
+            pkt[0] = CMD_STREAM_RGB;
+            pkt[1] = offset as u8;
+            pkt[2] = count as u8;
+            pkt[3] = if is_last { 2 } else { 0 };
+
+            let boff = offset * 3;
+            let blen = count * 3;
+            pkt[4..4 + blen].copy_from_slice(&raw[boff..boff + blen]);
+
+            transport.write(&pkt, LCD_WRITE_TIMEOUT)?;
+            if is_last {
+                let mut rx = [0u8; PACKET_SIZE];
+                let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+            }
+            offset += count;
+        }
+        debug!("{}: streamed {total_leds} LEDs via 0x11", self.params.name);
+        Ok(())
+    }
+
+    /// TL Flex: tinyuz-compress, upload via 0x18, commit via 0x19.
+    fn send_rgb_flash_save(&self, raw: &[u8], led_total: usize) -> Result<()> {
+        let compressed = crate::tinyuz::compress(raw).context("compressing RGB data")?;
+
+        let mut hdr = [0u8; PACKET_SIZE];
+        hdr[0] = CMD_SEND_LIGHT_PACKAGE;
+        hdr[1] = 0x00;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u32;
+        hdr[16..20].copy_from_slice(&ts.to_be_bytes());
+        hdr[22..26].copy_from_slice(&(compressed.len() as u32).to_be_bytes());
+        hdr[27] = 0; // total_frame hi (1 frame)
+        hdr[28] = 1; // total_frame lo
+        hdr[29] = led_total as u8;
+        hdr[34] = 0; // interval hi
+        hdr[35] = 20; // interval lo
+
+        let transport = self.transport.lock();
+        transport.write(&hdr, LCD_WRITE_TIMEOUT)?;
+        let mut rx = [0u8; PACKET_SIZE];
+        let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+
+        let mut offset = 0usize;
+        let mut idx = 1u8;
+        while offset < compressed.len() {
+            let mut pkt = [0u8; PACKET_SIZE];
+            pkt[0] = CMD_SEND_LIGHT_PACKAGE;
+            pkt[1] = idx;
+            let chunk = (compressed.len() - offset).min(60);
+            pkt[4..4 + chunk].copy_from_slice(&compressed[offset..offset + chunk]);
+            transport.write(&pkt, LCD_WRITE_TIMEOUT)?;
+            let mut rx = [0u8; PACKET_SIZE];
+            let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+            offset += 60;
+            idx += 1;
+        }
+
+        let mut apply = [0u8; PACKET_SIZE];
+        apply[0] = CMD_APPLY_LIGHTING;
+        transport.write(&apply, LCD_WRITE_TIMEOUT)?;
+        let mut rx = [0u8; PACKET_SIZE];
+        let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+
+        debug!(
+            "{}: flash-saved {led_total} LEDs ({} compressed bytes) via 0x18+0x19",
+            self.params.name,
+            compressed.len()
+        );
         Ok(())
     }
 }
@@ -212,6 +346,14 @@ impl FanDevice for WiredReceiverController {
         // zero duty maps to pwm_zero sentinel, not actual 0
         self.params.pwm_zero
     }
+
+    fn supports_mb_sync(&self) -> bool {
+        true
+    }
+
+    fn set_mb_rpm_sync(&self, _port: u8, sync: bool) -> Result<()> {
+        self.set_mb_sync(sync)
+    }
 }
 
 impl RgbDevice for WiredReceiverController {
@@ -220,8 +362,6 @@ impl RgbDevice for WiredReceiverController {
     }
 
     fn supported_modes(&self) -> Vec<RgbMode> {
-        // Lighting effects are host-rendered and streamed/flash-saved.
-        // Direct mode lets the daemon push per-LED frames.
         vec![RgbMode::Off, RgbMode::Static, RgbMode::Direct]
     }
 
@@ -235,29 +375,57 @@ impl RgbDevice for WiredReceiverController {
             .collect()
     }
 
+    fn supports_direct(&self) -> bool {
+        true
+    }
+
     fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
         let count = *self.fan_count.lock() as usize;
         vec![vec![]; count]
     }
 
-    fn set_zone_effect(&self, _zone: u8, effect: &RgbEffect) -> Result<()> {
-        // For now, only Off and Static are supported at the driver level.
-        // Full effect streaming (0x11 for P28, 0x18+0x19 for TL Flex) requires
-        // the daemon-side effect renderer + tinyuz compression.
-        match effect.mode {
-            RgbMode::Off => {
-                let duties = [0u8; 4];
-                self.set_fans_pwm(duties)?;
-            }
-            _ => {
-                debug!(
-                    "{}: RGB mode {:?} not yet supported at driver level (use Direct)",
-                    self.params.name, effect.mode
-                );
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        let color = if effect.mode == RgbMode::Off || effect.disabled {
+            [0, 0, 0]
+        } else {
+            let base = effect.colors.first().copied().unwrap_or([255, 255, 255]);
+            scale_brightness(base, effect.brightness)
+        };
+
+        let leds_per_fan = self.params.leds_per_fan as usize;
+        let mut buf = self.led_buffer.lock();
+        let start = (zone as usize).min(buf.len() / leds_per_fan.max(1)) * leds_per_fan;
+        let end = (start + leds_per_fan).min(buf.len());
+        for led in &mut buf[start..end] {
+            *led = color;
+        }
+        let frame = buf.clone();
+        drop(buf);
+        self.send_rgb_frame(&frame)
+    }
+
+    fn set_direct_colors(&self, zone: u8, colors: &[[u8; 3]]) -> Result<()> {
+        let leds_per_fan = self.params.leds_per_fan as usize;
+        let mut buf = self.led_buffer.lock();
+        let start = (zone as usize).min(buf.len() / leds_per_fan.max(1)) * leds_per_fan;
+        for (i, &c) in colors.iter().enumerate().take(leds_per_fan) {
+            if start + i < buf.len() {
+                buf[start + i] = c;
             }
         }
-        Ok(())
+        let frame = buf.clone();
+        drop(buf);
+        self.send_rgb_frame(&frame)
     }
+}
+
+fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {
+    let scale = (brightness.min(4) as f32) / 4.0;
+    [
+        (r as f32 * scale).round() as u8,
+        (g as f32 * scale).round() as u8,
+        (b as f32 * scale).round() as u8,
+    ]
 }
 
 pub struct WiredReceiverDriver;

@@ -196,6 +196,17 @@ fn fan_control_thread(
         }
     }
 
+    // Enable FgSync on the wireless dongle when any wireless group uses MB sync.
+    // This makes the RX GetDev poll include fan RPM so the dongle can measure
+    // motherboard PWM duty from the FG signal.
+    if let Some(ref wireless) = wireless {
+        let any_wireless_mb_sync = config.speeds.iter().any(|g| {
+            g.device_id.as_ref().map_or(false, |id| id.starts_with("wireless:"))
+                && g.speeds.iter().any(|s| s.is_mb_sync())
+        });
+        wireless.set_fg_sync(any_wireless_mb_sync);
+    }
+
     while !stop_flag.load(Ordering::Relaxed) {
         let now = Instant::now();
 

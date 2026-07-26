@@ -27,6 +27,7 @@ pub struct WirelessController {
     /// Motherboard PWM duty cycle (0-255) extracted from RX GetDev response bytes [2:3].
     /// 0xFFFF means unavailable/not yet read.
     pub(super) mobo_pwm: Arc<AtomicU16>,
+    pub(super) fg_sync: Arc<AtomicBool>,
     pub(super) tx_failures: Arc<AtomicU32>,
     pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
 }
@@ -43,6 +44,7 @@ impl Clone for WirelessController {
             master_channel: Arc::clone(&self.master_channel),
             discovered_devices: Arc::clone(&self.discovered_devices),
             mobo_pwm: Arc::clone(&self.mobo_pwm),
+            fg_sync: Arc::clone(&self.fg_sync),
             tx_failures: Arc::clone(&self.tx_failures),
             desired_effects: Arc::clone(&self.desired_effects),
         }
@@ -61,6 +63,7 @@ impl WirelessController {
             master_channel: Arc::new(Mutex::new(8)),
             discovered_devices: Arc::new(Mutex::new(Vec::new())),
             mobo_pwm: Arc::new(AtomicU16::new(0xFFFF)),
+            fg_sync: Arc::new(AtomicBool::new(false)),
             tx_failures: Arc::new(AtomicU32::new(0)),
             desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
@@ -190,6 +193,7 @@ impl WirelessController {
         let stop_flag = self.poll_stop.clone();
         let discovered_devices = Arc::clone(&self.discovered_devices);
         let mobo_pwm = Arc::clone(&self.mobo_pwm);
+        let fg_sync = Arc::clone(&self.fg_sync);
         let master_mac = Arc::clone(&self.master_mac);
 
         let discovery_done = Arc::new(AtomicBool::new(false));
@@ -203,7 +207,7 @@ impl WirelessController {
             const MAX_RESETS: u32 = 3;
             while !stop_flag.load(Ordering::SeqCst) {
                 if let Err(err) =
-                    poll_and_discover(&rx, &discovered_devices, &mobo_pwm, &master_mac)
+                    poll_and_discover(&rx, &discovered_devices, &mobo_pwm, &fg_sync, &master_mac)
                 {
                     consecutive_errors += 1;
                     consecutive_successes = 0;
@@ -471,6 +475,13 @@ impl WirelessController {
             0xFFFF => None,
             v => Some(v as u8),
         }
+    }
+
+    /// Enable/disable FgSync mode. When enabled, the GetDev polling command
+    /// includes the current fan RPM so the RX dongle can measure motherboard
+    /// PWM duty from the FG signal.
+    pub fn set_fg_sync(&self, enabled: bool) {
+        self.fg_sync.store(enabled, Ordering::Relaxed);
     }
 
     /// Send a 240-byte RF packet as 4× 64-byte USB chunks.

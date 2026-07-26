@@ -7,6 +7,7 @@ mod controller;
 mod discovery;
 mod fan_speed;
 mod fan_type;
+mod mb_sync;
 mod rgb;
 mod transport;
 
@@ -45,6 +46,7 @@ const RF_PWM_CMD: u8 = 0x10;
 const RF_AIO_SWITCH_WIRELESS: u8 = 0x19;
 const RF_SET_RGB: u8 = 0x20;
 const RF_AIO_PARAMS: u8 = 0x21;
+const RF_MB_LIGHT_SYNC: u8 = 0x27;
 
 const RF_DATA_SIZE: usize = 240;
 const RF_CHUNK_SIZE: usize = 60;

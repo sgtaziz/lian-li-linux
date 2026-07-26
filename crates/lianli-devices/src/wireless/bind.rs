@@ -41,6 +41,7 @@ impl WirelessController {
                 rx,
                 &self.discovered_devices,
                 &self.mobo_pwm,
+                &self.fg_sync,
                 &self.master_mac,
             );
 
