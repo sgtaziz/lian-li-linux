@@ -165,7 +165,10 @@ impl H2AioController {
         payload.push(interval_ms);
         payload.push(RING_LED_COUNT as u8);
 
-        let header = self.builder.lock().push_rgb_data_header_winusb(payload.len());
+        let header = self
+            .builder
+            .lock()
+            .push_rgb_data_header_winusb(payload.len());
         let mut packet = Vec::with_capacity(512 + payload.len());
         packet.extend_from_slice(&header);
         packet.extend_from_slice(&payload);
