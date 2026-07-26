@@ -117,7 +117,7 @@ impl Hs2OledLedController {
         Ok(fw)
     }
 
-    /// GetTemperlate (0x60) — read two temperature sensors.
+    /// GetTemperlate (0x60) — returns (coolant_temp, mb_sync_flag).
     pub fn read_temps(&self) -> Result<(u8, u8)> {
         let rx = self.send_and_read(&[CMD_GET_TEMP, 0, 0, 0, 0, 0, 0, 0])?;
         Ok((rx[1], rx[2]))
