@@ -18,8 +18,6 @@ use rusb::{Device, GlobalContext};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
-const RESET_COOLDOWN: Duration = Duration::from_secs(5);
-
 /// Generic WinUSB LCD device.
 ///
 /// Handles DES-CBC encrypted command headers + raw JPEG payload for any
@@ -28,14 +26,14 @@ pub struct WinUsbLcdDevice {
     transport: RusbBulk,
     builder: PacketBuilder,
     screen: ScreenInfo,
-    name: String,
+    _name: String,
     bus: u8,
     address: u8,
     serial: String,
     initialized: bool,
     last_read_ok: bool,
     consecutive_failures: u32,
-    last_reset: Option<Instant>,
+
     device_gone: bool,
     firmware: Option<String>,
 }
@@ -68,14 +66,14 @@ impl WinUsbLcdDevice {
             transport,
             builder: PacketBuilder::new(),
             screen,
-            name: name.to_string(),
+            _name: name.to_string(),
             bus,
             address,
             serial,
             initialized: false,
             last_read_ok: false,
             consecutive_failures: 0,
-            last_reset: None,
+
             device_gone: false,
             firmware: None,
         })
@@ -511,48 +509,27 @@ impl WinUsbLcdDevice {
 
         self.consecutive_failures += 1;
 
-        if self.consecutive_failures <= 2 {
+        // Soft recovery only: try clearing endpoint stalls. USB reset is too
+        // destructive on composite devices — it can take down sibling interfaces
+        // (TURZX, LED MCU, etc.) on the same physical device.
+        if self.consecutive_failures <= 3 {
             match self.transport.clear_halt(EP_OUT) {
                 Ok(()) => {
                     debug!("recovered EP_OUT stall via clear_halt");
                     return Ok(());
                 }
-                Err(e) => warn!("clear_halt(EP_OUT) failed: {e}"),
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("not found") || msg.contains("No such device") {
+                        self.device_gone = true;
+                    }
+                    warn!("clear_halt(EP_OUT) failed: {e}");
+                }
             }
         }
 
-        let now = Instant::now();
-        if let Some(last) = self.last_reset {
-            let since = now.saturating_duration_since(last);
-            if since < RESET_COOLDOWN {
-                bail!(
-                    "USB reset on cooldown ({:.1}s remaining)",
-                    (RESET_COOLDOWN - since).as_secs_f32()
-                );
-            }
-        }
-        self.last_reset = Some(now);
-
-        match self.transport.reset() {
-            Ok(()) => {
-                std::thread::sleep(Duration::from_millis(300));
-                if let Err(e) = self.transport.detach_and_configure(&self.name) {
-                    warn!("post-reset detach_and_configure failed: {e}");
-                    bail!("recovery failed: {e}");
-                }
-                self.initialized = false;
-                info!("USB reset + reconfigure succeeded");
-                Ok(())
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("not found") || msg.contains("No such device") {
-                    self.device_gone = true;
-                    bail!("device disappeared during reset: {e}");
-                }
-                bail!("USB reset failed: {e}");
-            }
-        }
+        self.device_gone = true;
+        bail!("device unresponsive after clear_halt attempts; re-discovery required");
     }
 
     fn read_response(&mut self, context: &str, timeout: Duration) -> Option<[u8; 512]> {
@@ -677,8 +654,9 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
                 "HydroShift II Control",
             ) {
                 Ok(transport) => {
-                    let ctrl =
-                        std::sync::Arc::new(super::h2_aio::H2AioController::new(transport, ctx.pid));
+                    let ctrl = std::sync::Arc::new(super::h2_aio::H2AioController::new(
+                        transport, ctx.pid,
+                    ));
                     (
                         Some(Box::new(std::sync::Arc::clone(&ctrl))
                             as Box<dyn crate::traits::FanDevice>),

@@ -34,10 +34,6 @@ impl TurzxDisplay {
     pub fn open(pid: u16) -> Result<Self> {
         let mut transport =
             RusbBulk::open(VID, pid).with_context(|| format!("opening {VID:04x}:{pid:04x}"))?;
-        if let Err(e) = transport.reset() {
-            warn!("TURZX {VID:04x}:{pid:04x} reset failed (continuing): {e}");
-        }
-        std::thread::sleep(Duration::from_millis(300));
         transport
             .detach_and_configure(&format!("turzx-{pid:04x}"))
             .context("claiming interface 0")?;

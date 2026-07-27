@@ -90,10 +90,10 @@ pub(super) fn encoder_chain() -> &'static [EncoderKind] {
         &[
             EncoderKind::Nvenc,
             EncoderKind::Amf,
-            EncoderKind::Vulkan,
             EncoderKind::Vaapi,
-            EncoderKind::Qsv,
             EncoderKind::Libx264,
+            EncoderKind::Vulkan,
+            EncoderKind::Qsv,
         ]
     } else {
         &[EncoderKind::Libx264]

@@ -207,14 +207,10 @@ impl RusbHid {
     }
 
     /// Perform a USB port reset on the device (USBDEVFS_RESET ioctl).
-    ///
-    /// Detaches kernel drivers from all HID interfaces before the reset and
-    /// reattaches them afterwards so the kernel re-enumerates the device and
-    /// creates fresh hidraw nodes.
+    /// Used during device binding/unbinding to force kernel re-enumeration.
     pub fn reset_usb_device(device: &Device<GlobalContext>) -> Result<(), TransportError> {
         let handle = device.open()?;
 
-        // Collect HID interfaces to detach/reattach kernel drivers.
         let mut hid_ifaces: Vec<u8> = Vec::new();
         if let Ok(config) = device.active_config_descriptor() {
             for iface in config.interfaces() {
@@ -226,14 +222,9 @@ impl RusbHid {
             }
         }
 
-        // Detach kernel drivers before reset.
         for &iface in &hid_ifaces {
-            match handle.kernel_driver_active(iface) {
-                Ok(true) => {
-                    let _ = handle.detach_kernel_driver(iface);
-                    debug!("reset_usb_device: detached kernel driver from interface {iface}");
-                }
-                _ => {}
+            if let Ok(true) = handle.kernel_driver_active(iface) {
+                let _ = handle.detach_kernel_driver(iface);
             }
         }
 
@@ -241,10 +232,8 @@ impl RusbHid {
             .reset()
             .map_err(|e| TransportError::Other(format!("USB device reset failed: {e}")))?;
 
-        // Reattach kernel drivers so the kernel re-enumerates HID descriptors.
         for &iface in &hid_ifaces {
             let _ = handle.attach_kernel_driver(iface);
-            debug!("reset_usb_device: reattached kernel driver on interface {iface}");
         }
 
         Ok(())
