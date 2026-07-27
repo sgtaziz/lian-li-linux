@@ -201,7 +201,9 @@ fn fan_control_thread(
     // motherboard PWM duty from the FG signal.
     if let Some(ref wireless) = wireless {
         let any_wireless_mb_sync = config.speeds.iter().any(|g| {
-            g.device_id.as_ref().map_or(false, |id| id.starts_with("wireless:"))
+            g.device_id
+                .as_ref()
+                .map_or(false, |id| id.starts_with("wireless:"))
                 && g.speeds.iter().any(|s| s.is_mb_sync())
         });
         wireless.set_fg_sync(any_wireless_mb_sync);

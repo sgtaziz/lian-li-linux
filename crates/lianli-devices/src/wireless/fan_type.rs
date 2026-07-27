@@ -89,8 +89,14 @@ impl WirelessFanType {
     pub fn supports_mb_rgb_sync(self) -> bool {
         matches!(
             self,
-            Self::Slv3Led | Self::Slv3Lcd | Self::Tlv2Lcd | Self::Tlv2Led
-                | Self::SlInf | Self::Clv1 | Self::WaterBlock | Self::WaterBlock2
+            Self::Slv3Led
+                | Self::Slv3Lcd
+                | Self::Tlv2Lcd
+                | Self::Tlv2Led
+                | Self::SlInf
+                | Self::Clv1
+                | Self::WaterBlock
+                | Self::WaterBlock2
         )
     }
 

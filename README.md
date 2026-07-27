@@ -64,12 +64,10 @@ Both V1 (VID 0x0416) and V2 (VID 0x1A86) wireless dongles are supported. Binding
 | HydroShift II LCD Circle | Yes | Yes | 480x480 | Yes | Yes |
 | HydroShift II LCD Square | Yes | Yes | 480x480 | Yes | - |
 | Lancool 207 Digital | - | - | 720x1472 | - | Yes |
-| Universal Screen 8.8" | - | - | 480x1920 | - | Yes |
-| Universal Screen 8.8" LED Ring | - | Yes | - | - | Yes |
+| Universal Screen 8.8" | - | Yes | 480x1920 | - | Yes |
 | Vision 9.2" | - | - | 464x1920 | - | - |
-| TL Flex LCD | - | - | 480x480 | - | - |
-| SL Infinity Flex LCD | - | - | 480x480 | - | - |
-| P28 V2 / TL Flex Controller | Yes | Yes | - | - | - |
+| TL Flex LCD | Yes | Yes | 400x400 | - | - |
+| SL Infinity Flex LCD | Yes | Yes | 400x400 | - | - |
 | HydroShift II OLED Curve | - | Yes | 1080x2288 | Yes | - |
 
 ### Desktop Mode (Virtual Display)

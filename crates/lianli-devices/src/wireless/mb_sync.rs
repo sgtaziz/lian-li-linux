@@ -32,7 +32,11 @@ impl WirelessController {
 
         let seq = {
             let s = device.cmd_seq.wrapping_add(1);
-            if s == 0 { 1 } else { s }
+            if s == 0 {
+                1
+            } else {
+                s
+            }
         };
 
         let mut rf_data = vec![0u8; RF_DATA_SIZE];
