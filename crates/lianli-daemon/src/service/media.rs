@@ -120,6 +120,7 @@ impl ServiceManager {
             DeviceFamily::HydroShift2Lcd,
             DeviceFamily::Lancool207,
             DeviceFamily::UniversalScreen,
+            DeviceFamily::Vision92,
             DeviceFamily::HydroShiftLcd,
             DeviceFamily::Galahad2Lcd,
             DeviceFamily::TlLcd,
@@ -243,6 +244,11 @@ impl ServiceManager {
                     DeviceFamily::UniversalScreen => {
                         let device = Device::clone(candidate.usb_device.as_ref().unwrap());
                         lianli_devices::universal_screen::open(device)
+                            .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
+                    }
+                    DeviceFamily::Vision92 => {
+                        let device = Device::clone(candidate.usb_device.as_ref().unwrap());
+                        lianli_devices::vision92::open(device)
                             .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
                     }
                     DeviceFamily::HydroShiftLcd

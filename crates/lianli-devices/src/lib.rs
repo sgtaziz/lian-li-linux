@@ -15,6 +15,7 @@ pub mod traits;
 pub mod turzx;
 pub mod universal_screen;
 pub mod universal_screen_lighting;
+pub mod vision92;
 pub mod winusb_lcd;
 pub mod winusb_led;
 pub mod wireless;

@@ -37,6 +37,8 @@ pub enum DeviceFamily {
     Lancool207,
     /// Universal Screen 8.8" — WinUSB 1920x480
     UniversalScreen,
+    /// O11 Vision-M 9.2" LCD kit — WinUSB 1920x462
+    Vision92,
     /// HydroShift II LCD in desktop mode (CH340, 0x1A86:0xAD20)
     HydroShift2LcdDesktop,
     /// Lancool 207 in desktop mode (CH340, 0x1A86:0xACD1 / 0xAD11)
@@ -264,6 +266,12 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         name: "Universal Screen 8.8\"",
         hid_usage_page: None,
     },
+    DeviceEntry {
+        id: UsbId::new(0x1CBE, 0xA092),
+        family: DeviceFamily::Vision92,
+        name: "O11 Vision-M 9.2\" LCD",
+        hid_usage_page: None,
+    },
     // Desktop-mode variants (CH340, VID=0x1A86) — same physical device as 0x1CBE LCD
     DeviceEntry {
         id: UsbId::new(0x1A86, 0xAD20),
@@ -321,6 +329,7 @@ impl DeviceFamily {
                 | Self::HydroShift2Lcd
                 | Self::Lancool207
                 | Self::UniversalScreen
+                | Self::Vision92
         )
     }
 
@@ -414,6 +423,7 @@ pub fn uses_usb_bulk(family: DeviceFamily) -> bool {
             | DeviceFamily::HydroShift2Lcd
             | DeviceFamily::Lancool207
             | DeviceFamily::UniversalScreen
+            | DeviceFamily::Vision92
             | DeviceFamily::UniversalScreenLighting
     )
 }

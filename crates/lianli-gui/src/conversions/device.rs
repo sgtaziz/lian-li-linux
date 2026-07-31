@@ -21,6 +21,7 @@ pub(super) fn family_display_name(f: DeviceFamily) -> &'static str {
         DeviceFamily::HydroShift2Lcd => "HydroShift II LCD Circle",
         DeviceFamily::Lancool207 => "Lancool 207 Digital",
         DeviceFamily::UniversalScreen => "Universal Screen 8.8\"",
+        DeviceFamily::Vision92 => "O11 Vision-M 9.2\" LCD",
         DeviceFamily::HydroShift2LcdDesktop => "HydroShift II LCD (Desktop Mode)",
         DeviceFamily::Lancool207Desktop => "Lancool 207 Digital (Desktop Mode)",
         DeviceFamily::UniversalScreenDesktop => "Universal Screen 8.8\" (Desktop Mode)",

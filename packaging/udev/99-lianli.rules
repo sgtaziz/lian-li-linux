@@ -56,6 +56,8 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a034", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a065", MODE="0666"
 # Universal Screen 8.8"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a088", MODE="0666"
+# O11 Vision-M 9.2" LCD kit
+SUBSYSTEM=="usb", ATTR{idVendor}=="1cbe", ATTR{idProduct}=="a092", MODE="0666"
 
 # Desktop-mode LCD devices (CH340, VID=0x1A86)
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="acd1", MODE="0666"

@@ -83,6 +83,34 @@ impl ScreenInfo {
         h264: true,
         needs_keepalive: false,
     };
+
+    /// O11 Vision-M 9.2" LCD kit. Panel is native portrait 462x1920,
+    /// mounted landscape (marketing spec is 1920x462).
+    pub const VISION_92: Self = Self {
+        width: 462,
+        height: 1920,
+        max_fps: 30,
+        jpeg_quality: 95,
+        max_payload: 512_000,
+        h264: false,
+        needs_keepalive: false,
+    };
+}
+
+/// Resolve the 9.2" Vision-M screen config.
+///
+/// The panel accepts and ACKs H.264 chunks but never renders them, so JPEG is
+/// the default. `LIANLI_VISION92_H264=1` opts back in, mirroring
+/// `LIANLI_LANCOOL207_H264`, for anyone wanting to investigate further.
+pub fn vision92_screen() -> ScreenInfo {
+    let mut s = ScreenInfo::VISION_92;
+    if std::env::var("LIANLI_VISION92_H264")
+        .map(|v| v != "0" && !v.is_empty())
+        .unwrap_or(false)
+    {
+        s.h264 = true;
+    }
+    s
 }
 
 fn lancool207_h264_enabled() -> bool {
@@ -105,6 +133,7 @@ pub fn screen_info_for(family: DeviceFamily) -> Option<ScreenInfo> {
             ScreenInfo::LANCOOL_207
         }),
         DeviceFamily::UniversalScreen => Some(ScreenInfo::UNIVERSAL_SCREEN),
+        DeviceFamily::Vision92 => Some(vision92_screen()),
         _ => None,
     }
 }
@@ -136,6 +165,11 @@ pub fn screen_presets() -> &'static [ScreenPreset] {
         ScreenPreset {
             label: "Universal Screen 8.8\" (480×1920)",
             width: 480,
+            height: 1920,
+        },
+        ScreenPreset {
+            label: "O11 Vision-M 9.2\" (462×1920)",
+            width: 462,
             height: 1920,
         },
     ]
