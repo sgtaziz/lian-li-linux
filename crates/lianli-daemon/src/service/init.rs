@@ -303,6 +303,7 @@ impl ServiceManager {
                     firmware_version: opened.firmware.clone(),
                     supports_c_command: false,
                     port_index: None,
+                    wireless_group_mac: None,
                 });
             }
             fan_devices.insert(base_id.clone(), fan_ctrl);

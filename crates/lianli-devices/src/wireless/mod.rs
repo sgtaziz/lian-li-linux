@@ -11,11 +11,13 @@ mod fan_type;
 mod mb_sync;
 mod rgb;
 mod transport;
+mod v2_hid;
 
 pub use aio::pump_rpm_to_timer;
 pub use controller::WirelessController;
 pub use discovery::DiscoveredDevice;
 pub use fan_type::WirelessFanType;
+pub use v2_hid::{query_v2_hid_macs, share_parent, V2HidEntry, V2_HID_PID, V2_HID_VID};
 
 use once_cell::sync::Lazy;
 

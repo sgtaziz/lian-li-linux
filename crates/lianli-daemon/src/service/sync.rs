@@ -90,6 +90,13 @@ impl ServiceManager {
     }
 
     fn build_usb_device_cache(&mut self, usb_devices: Vec<lianli_devices::detect::DetectedDevice>) {
+        let v2_hid_entries = lianli_devices::wireless::query_v2_hid_macs();
+        let known_wireless_macs: HashSet<[u8; 6]> =
+            self.wireless.devices().iter().map(|d| d.mac).collect();
+        if !v2_hid_entries.is_empty() {
+            debug!("V2 HID MAC map: {} entr(y/ies)", v2_hid_entries.len());
+        }
+
         let mut cached = Vec::new();
         for det in usb_devices {
             if matches!(
@@ -121,6 +128,22 @@ impl ServiceManager {
             } else {
                 None
             };
+
+            let wireless_group_mac =
+                if matches!(det.family, DeviceFamily::Slv3Lcd | DeviceFamily::Tlv2Lcd) {
+                    match det.device.port_numbers() {
+                        Ok(ports) => find_wireless_group_mac(
+                            &v2_hid_entries,
+                            &known_wireless_macs,
+                            det.bus,
+                            &ports,
+                        ),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+
             cached.push(DeviceInfo {
                 device_id: device_id.clone(),
                 family: det.family,
@@ -146,6 +169,7 @@ impl ServiceManager {
                 firmware_version,
                 supports_c_command,
                 port_index,
+                wireless_group_mac,
             });
         }
 
@@ -244,6 +268,7 @@ impl ServiceManager {
                 firmware_version: None,
                 supports_c_command: false,
                 port_index: None,
+                wireless_group_mac: None,
             });
 
             // Update RPM telemetry keyed by device_id
@@ -312,6 +337,7 @@ impl ServiceManager {
                 firmware_version: None,
                 supports_c_command: false,
                 port_index: None,
+                wireless_group_mac: None,
             });
         }
 
@@ -366,4 +392,26 @@ impl ServiceManager {
 
         ipc_state.devices = devices;
     }
+}
+
+/// Check if a wired device at `bus`:`ports` shares a USB parent hub with
+/// any V2 dongle HID entry. If so, and the MAC corresponds to a discovered
+/// wireless device, return the associated wireless group MAC.
+fn find_wireless_group_mac(
+    v2_hid_entries: &[lianli_devices::wireless::V2HidEntry],
+    known_wireless_macs: &HashSet<[u8; 6]>,
+    bus: u8,
+    ports: &[u8],
+) -> Option<String> {
+    for entry in v2_hid_entries {
+        if lianli_devices::wireless::share_parent(entry.bus, &entry.port_numbers, bus, ports)
+            && known_wireless_macs.contains(&entry.mac)
+        {
+            return Some(format!(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
+            ));
+        }
+    }
+    None
 }

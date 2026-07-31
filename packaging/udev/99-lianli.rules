@@ -14,6 +14,8 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="0416", ATTR{idProduct}=="8041", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="e304", MODE="0666"
 # Wireless RX dongle V2 (CH340)
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="e305", MODE="0666"
+# Wireless V2 dongle HID interface (wired-LCD MAC pairing)
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="2107", MODE="0666"
 
 # Strimer Plus LED strip
 SUBSYSTEM=="usb", ATTR{idVendor}=="0cf2", ATTR{idProduct}=="a200", MODE="0666"
