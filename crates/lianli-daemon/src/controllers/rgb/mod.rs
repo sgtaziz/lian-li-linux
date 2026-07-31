@@ -416,7 +416,7 @@ impl RgbController {
                 total_led_count: total_leds,
                 supported_scopes: vec![],
                 supports_direction: false,
-                supports_merge_lighting: false,
+                supports_merge_lighting: !state.fan_type.is_rgb_only(),
             });
         }
 

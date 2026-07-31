@@ -231,6 +231,27 @@ fn handle_request(
         IpcRequest::BindAllWireless => super::wireless::bind_all(tx),
         IpcRequest::UnbindAllWireless => super::wireless::unbind_all(tx),
         IpcRequest::GetChannel => super::wireless::get_channel(state),
+        IpcRequest::SetMergeLightingConfig { config } => {
+            let mut state = state.lock();
+            if let Some(ref mut app_config) = state.config {
+                app_config
+                    .rgb
+                    .get_or_insert_with(Default::default)
+                    .merge_lighting = Some(config);
+                super::persist_and_notify(&mut state, &tx, "SetMergeLightingConfig")
+            } else {
+                IpcResponse::error("no config loaded")
+            }
+        }
+        IpcRequest::GetMergeLightingConfig => {
+            let state = state.lock();
+            let merge = state
+                .config
+                .as_ref()
+                .and_then(|c| c.rgb.as_ref())
+                .and_then(|r| r.merge_lighting.as_ref());
+            IpcResponse::ok(serde_json::json!({ "config": merge }))
+        }
 
         IpcRequest::SetEne6k77FanQuantity {
             device_id,

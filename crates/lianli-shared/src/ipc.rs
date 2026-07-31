@@ -137,6 +137,10 @@ pub enum IpcRequest {
     BindAllWireless,
     UnbindAllWireless,
     GetChannel,
+    SetMergeLightingConfig {
+        config: crate::rgb::MergeLightingConfig,
+    },
+    GetMergeLightingConfig,
 }
 
 /// Responses from daemon to GUI.

@@ -627,6 +627,8 @@ pub struct RgbAppConfig {
     /// Per-device RGB settings.
     #[serde(default)]
     pub devices: Vec<RgbDeviceConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_lighting: Option<MergeLightingConfig>,
 }
 
 fn default_true() -> bool {
@@ -644,6 +646,7 @@ impl Default for RgbAppConfig {
             openrgb_server: false,
             openrgb_port: default_openrgb_port(),
             devices: Vec::new(),
+            merge_lighting: None,
         }
     }
 }
@@ -694,6 +697,16 @@ pub struct RgbDeviceCapabilities {
     /// Whether this device supports merge-lighting (cross-zone synchronized animation).
     #[serde(default)]
     pub supports_merge_lighting: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MergeLightingConfig {
+    pub device_order: Vec<String>,
+    #[serde(default)]
+    pub directions: Vec<RgbDirection>,
+    pub effect: RgbEffect,
+    #[serde(default)]
+    pub disabled_devices: Vec<String>,
 }
 
 #[cfg(test)]
