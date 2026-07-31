@@ -407,7 +407,7 @@ fn draw_rounded_border(
     let y0 = y as i32;
     let x1 = (x + w).round() as i32;
     let y1 = (y + h).round() as i32;
-    let r = radius.clamp(0.0, (w.min(h) * 0.5).floor());
+    let r = radius.clamp(0.0, ((w.min(h) - 1.0) / 2.0).floor().max(0.0));
     let inner_x0 = x + r;
     let inner_y0 = y + r;
     let inner_x1 = x + w - 1.0 - r;

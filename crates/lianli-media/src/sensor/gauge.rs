@@ -24,7 +24,7 @@ pub(super) fn draw_gauge(image: &mut RgbImage, width: u32, height: u32, params: 
     } = params;
     let cx = (width as f32 - 1.0) / 2.0;
     let cy = (height as f32 - 1.0) / 2.0;
-    let max_radius = (width.min(height) as f32 / 2.0) - 4.0;
+    let max_radius = ((width.min(height) as f32 / 2.0) - 4.0).max(20.0);
     let outer = outer_radius.clamp(20.0, max_radius);
     let inner = (outer - thickness.clamp(5.0, outer - 5.0)).max(outer * 0.1);
     let start = (start_angle % 360.0 + 360.0) % 360.0;

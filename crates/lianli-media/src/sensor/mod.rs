@@ -167,7 +167,7 @@ impl SensorAsset {
         };
 
         let update_interval = Duration::from_millis(update_interval_ms.clamp(100, 10_000));
-        let max_radius = (rw.min(rh) as f32 / 2.0) - 6.0;
+        let max_radius = ((rw.min(rh) as f32 / 2.0) - 6.0).max(20.0);
         let gauge_outer_radius = descriptor.gauge_outer_radius.clamp(20.0, max_radius);
         let gauge_thickness = descriptor
             .gauge_thickness
