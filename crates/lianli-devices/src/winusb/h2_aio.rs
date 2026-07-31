@@ -1,7 +1,6 @@
 //! HydroShift II AIO controller — pump + fan + RGB ring.
 //!
-//! Shares one USB handle (separate from the LCD streaming handle), opened
-//! via [`open_control_channel`].
+//! Shares the LCD device's USB handle via `Arc<Mutex<RusbBulk>>`.
 
 use crate::crypto::PacketBuilder;
 use crate::traits::{AioDevice, FanDevice, RgbDevice};
@@ -10,10 +9,9 @@ use lianli_shared::fan::duty_to_percent;
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
-use rusb::{Device, GlobalContext};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::debug;
 
 const PUMP_MIN_RPM: u16 = 1600;
 const PUMP_MAX_RPM_CIRCLE: u16 = 2500;
@@ -31,25 +29,8 @@ pub struct H2Params {
     pub coolant_temp: u8,
 }
 
-/// Open the shared control-plane handle for AIO + RGB commands, and run the
-/// wake preamble once.
-pub(super) fn open_control_channel(
-    device: Device<GlobalContext>,
-    label: &str,
-) -> Result<Arc<Mutex<RusbBulk>>> {
-    let mut transport =
-        RusbBulk::open_device(device).context("opening HydroShift II control channel")?;
-    transport
-        .detach_and_configure(label)
-        .context("configuring HydroShift II control channel")?;
-    info!("HydroShift II control channel opened");
-    let transport = Arc::new(Mutex::new(transport));
-    wake(&transport);
-    Ok(transport)
-}
-
-// After LCD play mode the device ignores control commands until this
-// StopPlay → StopClock → GetVer preamble re-arms the channel.
+/// After LCD play mode the device ignores control commands until this
+/// StopPlay → StopClock → GetVer preamble re-arms the channel.
 fn wake(transport: &Arc<Mutex<RusbBulk>>) {
     let mut builder = PacketBuilder::new();
     let cmds = [
@@ -79,13 +60,16 @@ pub struct H2AioController {
 
 impl H2AioController {
     pub fn new(transport: Arc<Mutex<RusbBulk>>, pid: u16) -> Self {
-        Self {
-            transport,
+        let ctrl = Self {
+            transport: Arc::clone(&transport),
             builder: Mutex::new(PacketBuilder::new()),
             last_fan_duties: Mutex::new([50, 50, 50]),
             last_pump_duty: Mutex::new(128),
             is_square: pid == 0xA034,
-        }
+        };
+        wake(&transport);
+        tracing::info!("HydroShift II control channel opened (shared transport)");
+        ctrl
     }
 
     /// Read telemetry via GetH2Params (0xFA).
