@@ -137,7 +137,10 @@ fn apply_pwm_constraints(pwm: &mut [u8; 4], device: &DiscoveredDevice) {
             *val = min_pwm;
         }
 
-        if device.fan_type == WirelessFanType::Clv1 {
+        if matches!(
+            device.fan_type,
+            WirelessFanType::Clv1 | WirelessFanType::ClV2 { .. }
+        ) {
             match *val {
                 153 | 154 => *val = 152,
                 155 => *val = 156,

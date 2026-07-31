@@ -184,12 +184,14 @@ impl ServiceManager {
             use lianli_shared::device_id::DeviceFamily;
 
             let family = match dev.fan_type {
-                WirelessFanType::Slv3Led => DeviceFamily::Slv3Led,
+                WirelessFanType::Slv3Led | WirelessFanType::SlV4 => DeviceFamily::Slv3Led,
                 WirelessFanType::Slv3Lcd => DeviceFamily::Slv3Lcd,
                 WirelessFanType::Tlv2Lcd => DeviceFamily::Tlv2Lcd,
-                WirelessFanType::Tlv2Led => DeviceFamily::Tlv2Led,
-                WirelessFanType::SlInf => DeviceFamily::SlInf,
-                WirelessFanType::Clv1 => DeviceFamily::Clv1,
+                WirelessFanType::Tlv2Led | WirelessFanType::TlV3 { .. } => DeviceFamily::Tlv2Led,
+                WirelessFanType::SlInf | WirelessFanType::SlInfV3 { .. } => DeviceFamily::SlInf,
+                WirelessFanType::Clv1 | WirelessFanType::ClV2 { .. } | WirelessFanType::P28V2 => {
+                    DeviceFamily::Clv1
+                }
                 WirelessFanType::WaterBlock | WirelessFanType::WaterBlock2 => {
                     DeviceFamily::WirelessAio
                 }
@@ -267,12 +269,14 @@ impl ServiceManager {
             use lianli_shared::device_id::DeviceFamily;
 
             let family = match dev.fan_type {
-                WirelessFanType::Slv3Led => DeviceFamily::Slv3Led,
+                WirelessFanType::Slv3Led | WirelessFanType::SlV4 => DeviceFamily::Slv3Led,
                 WirelessFanType::Slv3Lcd => DeviceFamily::Slv3Lcd,
                 WirelessFanType::Tlv2Lcd => DeviceFamily::Tlv2Lcd,
-                WirelessFanType::Tlv2Led => DeviceFamily::Tlv2Led,
-                WirelessFanType::SlInf => DeviceFamily::SlInf,
-                WirelessFanType::Clv1 => DeviceFamily::Clv1,
+                WirelessFanType::Tlv2Led | WirelessFanType::TlV3 { .. } => DeviceFamily::Tlv2Led,
+                WirelessFanType::SlInf | WirelessFanType::SlInfV3 { .. } => DeviceFamily::SlInf,
+                WirelessFanType::Clv1 | WirelessFanType::ClV2 { .. } | WirelessFanType::P28V2 => {
+                    DeviceFamily::Clv1
+                }
                 WirelessFanType::WaterBlock | WirelessFanType::WaterBlock2 => {
                     DeviceFamily::WirelessAio
                 }
