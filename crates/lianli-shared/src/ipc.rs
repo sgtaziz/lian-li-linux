@@ -127,6 +127,16 @@ pub enum IpcRequest {
     },
     Subscribe,
     Ping,
+    RebootWirelessLcd {
+        device_id: String,
+    },
+    DisableLc217Wifi {
+        device_id: String,
+        disable: bool,
+    },
+    BindAllWireless,
+    UnbindAllWireless,
+    GetChannel,
 }
 
 /// Responses from daemon to GUI.

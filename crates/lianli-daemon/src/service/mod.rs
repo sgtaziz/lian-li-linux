@@ -64,6 +64,10 @@ pub enum DaemonEvent {
     FrameFinished,
     RecreateMedia { target_index: usize },
     ResyncWirelessRgb,
+    RebootWirelessLcd { mac: [u8; 6] },
+    DisableLc217Wifi { mac: [u8; 6], disable: bool },
+    BindAll,
+    UnbindAll,
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
 }
 
@@ -473,6 +477,32 @@ impl ServiceManager {
                             target.swap_media(asset, target.custom_h264, self.tx.clone());
                         }
                     }
+                }
+                DaemonEvent::RebootWirelessLcd { mac } => {
+                    if let Err(e) = self.wireless.reboot_lcd_group(&mac) {
+                        warn!("Failed to reboot wireless LCD: {e}");
+                    }
+                }
+                DaemonEvent::DisableLc217Wifi { mac, disable } => {
+                    if let Err(e) = self.wireless.close_217_wifi(&mac, disable) {
+                        warn!("Failed to toggle LC217 wifi: {e}");
+                    }
+                }
+                DaemonEvent::BindAll => {
+                    for dev in self.wireless.unbound_devices() {
+                        if let Err(e) = self.wireless.bind_device(&dev.mac) {
+                            warn!("Failed to bind {}: {e}", dev.mac_str());
+                        }
+                    }
+                    self.device_poll();
+                }
+                DaemonEvent::UnbindAll => {
+                    for dev in self.wireless.devices() {
+                        if let Err(e) = self.wireless.unbind_device(&dev.mac) {
+                            warn!("Failed to unbind {}: {e}", dev.mac_str());
+                        }
+                    }
+                    self.device_poll();
                 }
             }
         }

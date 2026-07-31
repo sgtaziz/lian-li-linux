@@ -224,6 +224,13 @@ fn handle_request(
 
         IpcRequest::BindWirelessDevice { mac } => super::wireless::bind(tx, mac),
         IpcRequest::UnbindWirelessDevice { mac } => super::wireless::unbind(tx, mac),
+        IpcRequest::RebootWirelessLcd { device_id } => super::wireless::reboot_lcd(tx, device_id),
+        IpcRequest::DisableLc217Wifi { device_id, disable } => {
+            super::wireless::disable_lc217_wifi(tx, device_id, disable)
+        }
+        IpcRequest::BindAllWireless => super::wireless::bind_all(tx),
+        IpcRequest::UnbindAllWireless => super::wireless::unbind_all(tx),
+        IpcRequest::GetChannel => super::wireless::get_channel(state),
 
         IpcRequest::SetEne6k77FanQuantity {
             device_id,
