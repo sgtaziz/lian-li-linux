@@ -3,6 +3,7 @@
 pub mod adapters;
 mod aio;
 mod bind;
+mod clock_sync;
 mod controller;
 mod convergence;
 mod discovery;
@@ -14,6 +15,7 @@ mod transport;
 mod v2_hid;
 
 pub use aio::pump_rpm_to_timer;
+pub use clock_sync::{build_payload, SensorSnapshot};
 pub use controller::WirelessController;
 pub use discovery::DiscoveredDevice;
 pub use fan_type::WirelessFanType;
@@ -46,6 +48,7 @@ const USB_CMD_GET_MAC: u8 = 0x11;
 
 const RF_SELECT: u8 = 0x12;
 const RF_PWM_CMD: u8 = 0x10;
+const RF_CLOCK_SYNC: u8 = 0x14;
 const RF_AIO_SWITCH_WIRELESS: u8 = 0x19;
 const RF_SET_RGB: u8 = 0x20;
 const RF_AIO_PARAMS: u8 = 0x21;

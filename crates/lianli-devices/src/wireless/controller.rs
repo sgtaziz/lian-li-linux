@@ -338,17 +338,16 @@ impl WirelessController {
     /// Broadcast a "master clock" sync packet (RF sub-command 0x14) carrying
     /// 220 bytes of CPU/GPU info. This must be sent once per second; missing
     /// it appears to put the fan firmware into an autonomous fallback that
-    /// occasionally spikes RPM. We send all-zero info bytes — the firmware
-    /// only seems to need the heartbeat itself.
-    pub fn send_master_clock(&self) -> Result<()> {
+    /// occasionally spikes RPM.
+    pub fn send_master_clock(&self, payload: &[u8; 220]) -> Result<()> {
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
 
         let mut rf_data = vec![0u8; RF_DATA_SIZE];
         rf_data[0] = RF_SELECT;
-        rf_data[1] = 0x14;
+        rf_data[1] = super::RF_CLOCK_SYNC;
         rf_data[8..14].copy_from_slice(&master_mac);
-        // rf_data[14..234] = cpuInfoParam (220 bytes, leave zero)
+        rf_data[14..234].copy_from_slice(payload);
 
         self.tx_recover(|handle| {
             for chunk_idx in 0..RF_CHUNKS as u8 {

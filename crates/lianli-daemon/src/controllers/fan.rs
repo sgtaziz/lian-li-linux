@@ -1,9 +1,9 @@
 use crate::service::DaemonEvent;
 use anyhow::{Context, Result};
 use lianli_devices::traits::FanDevice;
-use lianli_devices::wireless::WirelessController;
+use lianli_devices::wireless::{build_payload, SensorSnapshot, WirelessController};
 use lianli_shared::fan::{interpolate_curve, FanConfig, FanCurve, FanSpeed};
-use lianli_shared::sensors::{self, ResolvedSensor, SensorInfo, SensorSource};
+use lianli_shared::sensors::{self, picker, ResolvedSensor, SensorInfo, SensorSource};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -149,6 +149,10 @@ fn fan_control_thread(
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
     let mut fan_states: HashMap<usize, FanState> = HashMap::new();
 
+    // Auto-detect CPU/GPU temp sensors for the wireless LCD clock-sync payload.
+    let cpu_temp_source = picker::find_default_cpu_temp(all_sensors);
+    let gpu_temp_source = picker::find_default_gpu_temp(all_sensors);
+
     let mut mb_sync_init: HashMap<String, HashMap<u8, bool>> = HashMap::new();
     for group in config.speeds.iter() {
         let is_mb_sync = group.speeds.iter().any(|s| s.is_mb_sync());
@@ -218,7 +222,23 @@ fn fan_control_thread(
         // spikes RPM. This must be sent every second.
         if now.duration_since(last_heartbeat) >= heartbeat_interval {
             if let Some(ref w) = wireless {
-                if let Err(err) = w.send_master_clock() {
+                let cpu_temp = cpu_temp_source
+                    .as_ref()
+                    .and_then(|s| resolve_and_read(s, &mut sensor_cache, all_sensors))
+                    .map(|v| v as u8)
+                    .unwrap_or(0);
+                let gpu_temp = gpu_temp_source
+                    .as_ref()
+                    .and_then(|s| resolve_and_read(s, &mut sensor_cache, all_sensors))
+                    .map(|v| v as u8)
+                    .unwrap_or(0);
+                let snap = SensorSnapshot {
+                    cpu_temp,
+                    gpu_temp,
+                    ..Default::default()
+                };
+                let payload = build_payload(&snap);
+                if let Err(err) = w.send_master_clock(&payload) {
                     debug!("master clock send failed: {err}");
                 }
             }
@@ -597,4 +617,27 @@ fn smoothed_temperature(
     ema.get(source)
         .copied()
         .context("no valid temperature readings yet")
+}
+
+fn resolve_and_read(
+    source: &SensorSource,
+    cache: &mut HashMap<SensorSource, ResolvedSensor>,
+    all_sensors: &[SensorInfo],
+) -> Option<f32> {
+    let resolved = cache.get(source).cloned().or_else(|| {
+        let divider = all_sensors
+            .iter()
+            .find(|s| s.source == *source)
+            .map_or(1, |s| s.divider);
+        let r = sensors::resolve_sensor(source, divider)?;
+        cache.insert(source.clone(), r.clone());
+        Some(r)
+    })?;
+    match sensors::read_sensor_value(&resolved) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            cache.remove(source);
+            None
+        }
+    }
 }
