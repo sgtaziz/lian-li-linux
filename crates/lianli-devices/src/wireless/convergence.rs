@@ -18,7 +18,7 @@ use tracing::{debug, info, warn};
 const INITIAL_RETRIES: u32 = 10;
 
 /// Convergence loop tick interval. Commands are re-sent on each tick until
-/// acknowledged. 90 retries × 100 ms = 9 s hard timeout.
+/// acknowledged. 10 retries × 100 ms = 1 s hard timeout.
 const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How a pending command is acknowledged. Different RF command types use

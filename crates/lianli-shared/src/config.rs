@@ -207,6 +207,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub ene6k77: HashMap<String, Ene6k77DeviceConfig>,
     #[serde(default)]
+    pub wireless_groups: HashMap<String, WirelessGroupConfig>,
+    #[serde(default)]
     pub thermal_alert: ThermalAlertSettings,
     /// Wireless RGB drift re-sync: re-applies saved RGB when a wireless
     /// device's firmware resets its lighting. Wireless devices only.
@@ -214,6 +216,18 @@ pub struct AppConfig {
     pub rgb_drift_detection_enabled: bool,
     #[serde(default = "default_drift_interval_ms")]
     pub rgb_drift_detection_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WirelessGroupConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mb_rgb_sync: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mb_pwm_sync: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_palette: Option<Vec<[u8; 3]>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_fan_lcd_enable: Option<u8>,
 }
 
 fn default_true() -> bool {
@@ -235,6 +249,7 @@ impl Default for AppConfig {
             rgb: None,
             aio: HashMap::new(),
             ene6k77: HashMap::new(),
+            wireless_groups: HashMap::new(),
             thermal_alert: ThermalAlertSettings::default(),
             rgb_drift_detection_enabled: default_true(),
             rgb_drift_detection_interval_ms: default_drift_interval_ms(),

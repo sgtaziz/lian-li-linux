@@ -35,6 +35,9 @@ pub struct DiscoveredDevice {
     /// device-default if the firmware resets idle; compare against the desired
     /// effect_index to detect that and re-send the RGB packet.
     pub effect_index: [u8; 4],
+    /// Status flags decoded from `fans_speed[0]` bitfield.
+    pub is_sync_mb_light: bool,
+    pub is_pwm_line_on: bool,
 }
 
 impl DiscoveredDevice {
@@ -139,11 +142,15 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
     let mut fan_types = [0u8; 4];
     fan_types.copy_from_slice(&data[24..28]);
 
+    let status_byte = data[28];
+    let is_sync_mb_light = (status_byte & 0x40) != 0;
+    let is_pwm_line_on = (status_byte & 0x20) != 0;
+
     let fan_rpms = [
-        u16::from_be_bytes([data[28], data[29]]),
-        u16::from_be_bytes([data[30], data[31]]),
-        u16::from_be_bytes([data[32], data[33]]),
-        u16::from_be_bytes([data[34], data[35]]),
+        u16::from_be_bytes([data[28] & 0x0F, data[29]]),
+        u16::from_be_bytes([data[30] & 0x0F, data[31]]),
+        u16::from_be_bytes([data[32] & 0x0F, data[33]]),
+        u16::from_be_bytes([data[34] & 0x0F, data[35]]),
     ];
 
     let mut current_pwm = [0u8; 4];
@@ -190,6 +197,8 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
         list_index,
         coolant_temp_c,
         effect_index,
+        is_sync_mb_light,
+        is_pwm_line_on,
     })
 }
 
