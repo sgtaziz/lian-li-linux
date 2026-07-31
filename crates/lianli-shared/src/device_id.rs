@@ -482,9 +482,39 @@ pub static KNOWN_DEVICES: &[DeviceEntry] = &[
         hid_usage_page: None,
     },
     DeviceEntry {
+        id: UsbId::new(0x43A8, 0x0102),
+        family: DeviceFamily::WiredReceiver,
+        name: "TL Flex LCD Controller",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x43A8, 0x0103),
+        family: DeviceFamily::WiredReceiver,
+        name: "SL-INF Flex Controller",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x43A8, 0x0104),
+        family: DeviceFamily::WiredReceiver,
+        name: "SL-INF Flex LCD Controller",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
         id: UsbId::new(0x43A8, 0x0105),
         family: DeviceFamily::WiredReceiver,
         name: "P28 V2 Controller",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x43A8, 0x0106),
+        family: DeviceFamily::WiredReceiver,
+        name: "SL V4 Controller",
+        hid_usage_page: None,
+    },
+    DeviceEntry {
+        id: UsbId::new(0x43A8, 0x0107),
+        family: DeviceFamily::WiredReceiver,
+        name: "CL V2 Controller",
         hid_usage_page: None,
     },
     DeviceEntry {
