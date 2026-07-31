@@ -256,8 +256,7 @@ impl ServiceManager {
                 has_pump_control: is_aio,
                 fan_count: Some(fan_count),
                 per_fan_control: Some(!is_rgb_only),
-                mb_sync_support: dev.fan_type.supports_hw_mobo_sync()
-                    || self.wireless.motherboard_pwm().is_some(),
+                mb_sync_support: dev.fan_type.supports_hw_mobo_sync(),
                 rgb_zone_count: Some(rgb_zone_count),
                 screen_width: None,
                 screen_height: None,

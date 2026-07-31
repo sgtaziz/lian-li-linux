@@ -115,6 +115,7 @@ pub enum IpcRequest {
         quantity: u8,
     },
     ListSensors,
+    ListPwmHeaders,
     GetLcdTemplates,
     SetLcdTemplates {
         templates: Vec<LcdTemplate>,

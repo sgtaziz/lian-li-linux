@@ -34,6 +34,23 @@ pub fn list_sensors(state: &SharedState) -> IpcResponse {
     IpcResponse::ok(&sensors)
 }
 
+pub fn list_pwm_headers() -> IpcResponse {
+    let headers = lianli_shared::sensors::enumerate_pwm_headers();
+    let result: Vec<serde_json::Value> = headers
+        .iter()
+        .map(|h| {
+            let pct = lianli_shared::sensors::read_pwm_header(&h.id)
+                .map(|v| (v as f32 / 255.0 * 100.0).round() as u8)
+                .unwrap_or(0);
+            serde_json::json!({
+                "id": h.id,
+                "label": format!("{} ({}%)", h.label, pct),
+            })
+        })
+        .collect();
+    IpcResponse::ok(&result)
+}
+
 pub fn list_devices(state: &SharedState) -> IpcResponse {
     let ipc_state = state.lock();
     IpcResponse::ok(&ipc_state.devices)

@@ -176,6 +176,7 @@ fn handle_request(
     match request {
         IpcRequest::Ping => super::system::ping(),
         IpcRequest::ListSensors => super::system::list_sensors(state),
+        IpcRequest::ListPwmHeaders => super::system::list_pwm_headers(),
         IpcRequest::ListDevices => super::system::list_devices(state),
         IpcRequest::GetConfig => super::system::get_config(state),
         IpcRequest::GetTelemetry => super::system::get_telemetry(state),

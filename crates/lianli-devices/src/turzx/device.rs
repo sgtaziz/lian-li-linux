@@ -159,17 +159,9 @@ impl TurzxDisplay {
 }
 
 fn write_full(transport: &RusbBulk, data: &[u8]) -> Result<()> {
-    let mut offset = 0usize;
-    while offset < data.len() {
-        let n = transport
-            .write(&data[offset..], STREAM_WRITE_TIMEOUT)
-            .with_context(|| format!("usb bulk write at offset {offset}/{}", data.len()))?;
-        if n == 0 {
-            bail!("zero-byte USB write at offset {offset}/{}", data.len());
-        }
-        offset += n;
-    }
-    Ok(())
+    transport
+        .write_full(data, STREAM_WRITE_TIMEOUT)
+        .with_context(|| format!("usb bulk write {} bytes", data.len()))
 }
 
 fn fnv1a_u32(input: &[u8]) -> u32 {

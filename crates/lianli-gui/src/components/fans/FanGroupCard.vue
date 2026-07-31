@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
-import type { DeviceInfo, FanGroup, FanSpeed } from "@/types";
+import type { DeviceInfo, FanGroup, FanSpeed, PwmHeader } from "@/types";
+import { MB_SYNC_KEY, MB_SYNC_PREFIX } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { FAMILY_DISPLAY } from "@/constants";
@@ -10,6 +11,7 @@ const props = defineProps<{
   device: DeviceInfo;
   group: FanGroup;
   curveNames: string[];
+  pwmHeaders: PwmHeader[];
 }>();
 
 const config = useConfigStore();
@@ -70,6 +72,12 @@ const modeOptions = computed(() => {
   return opts;
 });
 
+// PWM header options for the MB Sync source dropdown.
+const pwmHeaderOptions = computed(() => {
+  if (!props.pwmHeaders.length) return [];
+  return props.pwmHeaders.map((h) => ({ label: h.label, value: h.id }));
+});
+
 function modeOf(slot: number): string {
   // MB Sync is port-wide: if any slot is MB Sync, every fan on the port is —
   // even when the stored config only marks one slot (e.g. loaded from disk or
@@ -84,7 +92,8 @@ function modeOf(slot: number): string {
 function onMode(slot: number, value: string) {
   if (value === "__mb_sync__") {
     // Port-wide: every fan on this port becomes MB Sync.
-    setAllSlots("__mb_sync__");
+    // Preserve any existing PWM source, default to bare __mb_sync__.
+    setAllSlots(MB_SYNC_KEY);
     return;
   }
   const decoded = decodeMode(value);
@@ -98,6 +107,23 @@ function onMode(slot: number, value: string) {
   } else {
     setSpeed(slot, decoded);
   }
+}
+
+// ── PWM source selection (MB Sync) ──────────────────────────────────────────
+// Returns the header id from the first slot that has one, or empty string.
+const currentPwmSource = computed(() => {
+  for (const s of props.group.speeds) {
+    if (typeof s === "string" && s.startsWith(MB_SYNC_PREFIX)) {
+      return s.slice(MB_SYNC_PREFIX.length);
+    }
+  }
+  return "";
+});
+
+function onPwmSource(headerId: string | null) {
+  if (!headerId) return;
+  const value = `${MB_SYNC_PREFIX}${headerId}`;
+  setAllSlots(value);
 }
 
 function pwmOf(slot: number): number {
@@ -143,6 +169,18 @@ function setPwm(slot: number, v: number) {
         </div>
       </div>
     </div>
+
+    <!-- PWM source picker: only for devices without hardware MB sync (e.g. wireless) -->
+    <div v-if="groupIsMbSync() && !device.mb_sync_support && pwmHeaderOptions.length" class="pwm-source-row">
+      <label class="muted">PWM source</label>
+      <n-select
+        size="small"
+        :value="currentPwmSource"
+        :options="pwmHeaderOptions"
+        placeholder="Select motherboard PWM header"
+        @update:value="onPwmSource"
+      />
+    </div>
   </div>
 </template>
 
@@ -187,5 +225,10 @@ function setPwm(slot: number, v: number) {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
   text-align: right;
+}
+.pwm-source-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 </style>

@@ -175,6 +175,30 @@ impl RusbBulk {
         Ok(n)
     }
 
+    /// Write all data, handling short writes by continuing from the offset
+    /// where the previous transfer left off. Each sub-transfer uses the same
+    /// timeout, so the total worst-case is `timeout * number_of_chunks`.
+    pub fn write_full(&self, data: &[u8], timeout: Duration) -> Result<(), TransportError> {
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let n = if self.ep_out_interrupt {
+                self.handle
+                    .write_interrupt(self.ep_out, &data[offset..], timeout)?
+            } else {
+                self.handle
+                    .write_bulk(self.ep_out, &data[offset..], timeout)?
+            };
+            if n == 0 {
+                return Err(TransportError::Write(format!(
+                    "zero-length USB write at offset {offset}/{}",
+                    data.len()
+                )));
+            }
+            offset += n;
+        }
+        Ok(())
+    }
+
     pub fn read(&self, buf: &mut [u8], timeout: Duration) -> Result<usize, TransportError> {
         if self.ep_in_interrupt {
             Ok(self.handle.read_interrupt(self.ep_in, buf, timeout)?)

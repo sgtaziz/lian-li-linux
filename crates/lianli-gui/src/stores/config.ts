@@ -9,6 +9,7 @@ import type {
   SensorInfo,
   LcdConfig,
   FanCurve,
+  PwmHeader,
 } from "@/types";
 
 function defaultConfig(): AppConfig {
@@ -48,6 +49,7 @@ export const useConfigStore = defineStore("config", () => {
   const sensors = ref<SensorInfo[]>([]);
   const templates = ref<LcdTemplate[]>([]);
   const presets = ref<RgbPreset[]>([]);
+  const pwmHeaders = ref<PwmHeader[]>([]);
 
   function markDirty() {
     dirty.value = true;
@@ -61,18 +63,20 @@ export const useConfigStore = defineStore("config", () => {
   }
 
   async function load() {
-    const [cfg, caps, sens, tpls, pres] = await Promise.all([
+    const [cfg, caps, sens, tpls, pres, pwm] = await Promise.all([
       ipc.request<AppConfig | null>("GetConfig").catch(() => null),
       ipc.request<RgbDeviceCapabilities[]>("GetRgbCapabilities").catch(() => []),
       ipc.request<SensorInfo[]>("ListSensors").catch(() => []),
       ipc.request<LcdTemplate[]>("GetLcdTemplates").catch(() => []),
       ipc.request<RgbPreset[]>("ListRgbPresets").catch(() => []),
+      ipc.request<PwmHeader[]>("ListPwmHeaders").catch(() => []),
     ]);
     if (cfg) replace(cfg);
     rgbCaps.value = caps ?? [];
     sensors.value = sens ?? [];
     templates.value = tpls ?? [];
     presets.value = pres ?? [];
+    pwmHeaders.value = pwm ?? [];
     loaded.value = true;
   }
 
@@ -162,6 +166,7 @@ export const useConfigStore = defineStore("config", () => {
     sensors,
     templates,
     presets,
+    pwmHeaders,
     rgb,
     fans,
     thermalAlert,

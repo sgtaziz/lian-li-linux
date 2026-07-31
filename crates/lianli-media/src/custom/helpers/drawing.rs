@@ -176,7 +176,7 @@ pub fn fill_rounded_rect(
     if color[3] == 0 || w == 0 || h == 0 {
         return;
     }
-    let max_r = (w.min(h) as f32 / 2.0).floor();
+    let max_r = (((w.min(h) as f32) - 1.0) / 2.0).floor().max(0.0);
     let r = radius.clamp(0.0, max_r);
     if r <= 0.5 {
         draw_filled_rect_mut(img, Rect::at(x, y).of_size(w, h), color);
@@ -224,7 +224,7 @@ pub fn fill_rect_clipped_rounded(
     if color[3] == 0 || rect_w == 0 || rect_h == 0 || clip_w == 0 || clip_h == 0 {
         return;
     }
-    let max_r = (clip_w.min(clip_h) as f32 / 2.0).floor();
+    let max_r = (((clip_w.min(clip_h) as f32) - 1.0) / 2.0).floor().max(0.0);
     let r = clip_radius.clamp(0.0, max_r);
     let (iw, ih) = (img.width() as i32, img.height() as i32);
     let x0 = rect_x.max(clip_x).max(0);

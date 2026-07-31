@@ -152,8 +152,10 @@ impl ServiceManager {
     }
 
     /// Initialize all wired USB devices (fan + RGB + LCD + AIO) via the
-    /// [`registry`] dispatch table. One call per detected device; no family-
-    /// specific branching in the daemon.
+    /// [`registry`] dispatch table. Each device is opened on its own thread
+    /// with a timeout so that one unresponsive controller cannot block the
+    /// rest of the daemon. Devices that time out are skipped and will be
+    /// retried by the hotplug poller.
     pub(super) fn init_wired_devices(&mut self) {
         let mut fan_devices: HashMap<String, Box<dyn FanDevice>> = HashMap::new();
         let mut wired_rgb: HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>> =
@@ -170,10 +172,21 @@ impl ServiceManager {
             }
         };
 
-        for det in usb_devs {
-            // TL LCD and the HS2 OLED Curve LCD MCU are owned by the LCD
-            // layer in media.rs; opening them here would conflict and, for the
-            // HS2 OLED, dispatch the wrong protocol. Skip them.
+        const OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+        // Spawn each device open on its own thread so a single hung
+        // controller can't stall the rest of initialization.
+        let mut pending: Vec<(
+            String,
+            &str,
+            DeviceFamily,
+            u16,
+            u16,
+            Option<String>,
+            std::sync::mpsc::Receiver<anyhow::Result<registry::OpenedDevice>>,
+        )> = Vec::new();
+
+        for det in &usb_devs {
             if det.family == lianli_shared::device_id::DeviceFamily::TlLcd
                 || det.family == lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLcd
             {
@@ -192,32 +205,61 @@ impl ServiceManager {
                 serial: det.serial.clone(),
                 hid_usage_page: det.hid_usage_page,
             };
-            let base_id = Self::rusb_device_id(&det);
-            match driver.open(&ctx) {
-                Ok(mut opened) => {
-                    // Cache the HID backend so the LCD layer can reuse it
-                    // when it later opens an LCD controller for the same
-                    // physical device.
+            let base_id = Self::rusb_device_id(det);
+            let name = det.name;
+            let family = det.family;
+            let vid = det.vid;
+            let pid = det.pid;
+            let serial = det.serial.clone();
+
+            let (tx, rx) =
+                std::sync::mpsc::sync_channel::<anyhow::Result<registry::OpenedDevice>>(1);
+            let label = format!("{name} ({vid:04x}:{pid:04x})");
+            std::thread::Builder::new()
+                .name(format!("dev-open-{base_id}"))
+                .spawn(move || {
+                    let _ = tx.send(driver.open(&ctx));
+                })
+                .ok();
+
+            pending.push((base_id, name, family, vid, pid, serial, rx));
+            debug!("Spawned open thread for {label}");
+        }
+
+        // Collect results using a single global deadline so that N hung
+        // devices waste at most OPEN_TIMEOUT total, not N × OPEN_TIMEOUT.
+        let deadline = std::time::Instant::now() + OPEN_TIMEOUT;
+        for (base_id, name, family, vid, pid, serial, rx) in pending {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                warn!("Skipped {name} ({vid:04x}:{pid:04x}) — global open deadline exceeded");
+                continue;
+            }
+            match rx.recv_timeout(remaining) {
+                Ok(Ok(mut opened)) => {
                     let shared_hid = opened.shared_hid.take();
                     if let Some(backend) = shared_hid {
                         self.registry.hid_backends.insert(base_id.clone(), backend);
                     }
                     self.register_opened_device(
                         base_id,
-                        det.name,
-                        det.family,
-                        det.vid,
-                        det.pid,
-                        det.serial.as_deref(),
+                        name,
+                        family,
+                        vid,
+                        pid,
+                        serial.as_deref(),
                         opened,
                         &mut fan_devices,
                         &mut wired_rgb,
                     );
                 }
-                Err(e) => warn!(
-                    "Failed to open {} ({:04x}:{:04x}): {e}",
-                    det.name, det.vid, det.pid
+                Ok(Err(e)) => warn!("Failed to open {name} ({vid:04x}:{pid:04x}): {e}"),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => warn!(
+                    "Timeout opening {name} ({vid:04x}:{pid:04x}) — skipping; will retry on hotplug"
                 ),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    warn!("Open thread for {name} ({vid:04x}:{pid:04x}) panicked — skipping")
+                }
             }
         }
 

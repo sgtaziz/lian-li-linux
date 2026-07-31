@@ -429,3 +429,8 @@ export type PendingActionKind = "bind" | "unbind" | "switch" | "fan-quantity";
 
 export const MB_SYNC_KEY = "__mb_sync__";
 export const MB_SYNC_PREFIX = "__mb_sync__:";
+
+export interface PwmHeader {
+  id: string;
+  label: string;
+}

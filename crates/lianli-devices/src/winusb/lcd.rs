@@ -340,8 +340,10 @@ impl WinUsbLcdDevice {
     }
 
     /// Lean per-frame send for live H.264 streaming via StartPlay (0x79).
-    /// Writes one packet with full short-write handling and does a quick
-    /// ack drain. Periodically checks device buffer level for backpressure.
+    /// Writes one packet with full short-write handling and does a
+    /// non-blocking ack drain. Buffer backpressure is handled by
+    /// `tx_write_full` — if the device can't accept data, the write
+    /// times out and `try_recover` kicks in.
     fn send_h264_au(&mut self, data: &[u8]) -> Result<()> {
         let header = self.builder.start_play_header_winusb(data.len(), false);
         let total = 512 + data.len();
@@ -359,12 +361,7 @@ impl WinUsbLcdDevice {
                 self.note_write_success();
             }
         }
-        let resp = self.read_response("h264 au", Duration::from_millis(50));
-        if let Some(buf) = resp {
-            if buf[8] > 3 {
-                self.wait_buffer(2);
-            }
-        }
+        self.tx_read_flush();
         Ok(())
     }
 

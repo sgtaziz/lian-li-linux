@@ -228,6 +228,7 @@ function onHysteresisPwm(v: number | null) {
           :device="ag.device"
           :group="ag.group"
           :curve-names="curves.map((c) => c.name)"
+          :pwm-headers="config.pwmHeaders"
         />
       </div>
       <div v-else class="empty muted">No fan devices detected.</div>
