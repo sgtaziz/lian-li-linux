@@ -211,11 +211,7 @@ impl Ene6k77Firmware {
 impl std::fmt::Display for Ene6k77Firmware {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (major, minor) = self.version();
-        write!(
-            f,
-            "v{major}.{minor} (cust={:#04x} proj={:#04x} major={:#04x} minor={:#04x})",
-            self.customer_id, self.project_id, self.major_id, self.minor_id
-        )
+        write!(f, "v{major}.{minor}")
     }
 }
 
