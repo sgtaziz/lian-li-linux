@@ -13,7 +13,7 @@ use crate::crypto::PacketBuilder;
 use crate::traits::LcdDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
-use lianli_transport::usb::{RusbBulk, EP_OUT, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
+use lianli_transport::usb::{RusbBulk, EP_IN, EP_OUT, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
 use std::sync::Arc;
@@ -37,6 +37,7 @@ pub struct WinUsbLcdDevice {
     initialized: bool,
     last_read_ok: bool,
     consecutive_failures: u32,
+    h264_chunk_size: usize,
 
     device_gone: bool,
     firmware: Option<String>,
@@ -77,6 +78,7 @@ impl WinUsbLcdDevice {
             initialized: false,
             last_read_ok: false,
             consecutive_failures: 0,
+            h264_chunk_size: 202_752,
 
             device_gone: false,
             firmware: None,
@@ -106,12 +108,12 @@ impl WinUsbLcdDevice {
     pub fn transport_release(&self) {}
 
     #[inline]
-    fn tx_write(
+    fn tx_write_full(
         &self,
         data: &[u8],
         timeout: Duration,
-    ) -> std::result::Result<usize, lianli_transport::TransportError> {
-        self.transport.lock().write(data, timeout)
+    ) -> std::result::Result<(), lianli_transport::TransportError> {
+        self.transport.lock().write_full(data, timeout)
     }
 
     #[inline]
@@ -158,13 +160,13 @@ impl WinUsbLcdDevice {
         packet[..512].copy_from_slice(&header);
         packet[512..total].copy_from_slice(frame);
 
-        match self.tx_write(&packet, LCD_WRITE_TIMEOUT) {
+        match self.tx_write_full(&packet, LCD_WRITE_TIMEOUT) {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("Frame write failed: {e}");
                 self.try_recover()
                     .with_context(|| format!("recovering from frame write error: {e}"))?;
-                self.tx_write(&packet, LCD_WRITE_TIMEOUT)
+                self.tx_write_full(&packet, LCD_WRITE_TIMEOUT)
                     .context("writing LCD frame after recovery")?;
                 self.note_write_success();
             }
@@ -200,7 +202,8 @@ impl WinUsbLcdDevice {
         Ok(())
     }
 
-    const H264_CHUNK_SIZE: usize = 202_752;
+    #[allow(dead_code)]
+    const DEFAULT_H264_CHUNK_SIZE: usize = 202_752;
 
     /// Stream a raw H264 file in chunks via StartPlay (0x79).
     /// Loops the file if `looping` is true. Runs until `stop` is set.
@@ -220,7 +223,7 @@ impl WinUsbLcdDevice {
         }
 
         let mut file = std::fs::File::open(path).context("opening h264 file")?;
-        let mut file_buf = vec![0u8; Self::H264_CHUNK_SIZE];
+        let mut file_buf = vec![0u8; self.h264_chunk_size];
         let interval = chunk_interval(fps);
         let mut next_deadline = std::time::Instant::now() + interval;
 
@@ -312,13 +315,13 @@ impl WinUsbLcdDevice {
         packet[..512].copy_from_slice(&header);
         packet[512..512 + data.len()].copy_from_slice(data);
 
-        match self.tx_write(&packet, LCD_WRITE_TIMEOUT) {
+        match self.tx_write_full(&packet, LCD_WRITE_TIMEOUT) {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("H264 chunk write failed: {e}");
                 self.try_recover()
                     .with_context(|| format!("recovering from h264 write error: {e}"))?;
-                self.tx_write(&packet, LCD_WRITE_TIMEOUT)
+                self.tx_write_full(&packet, LCD_WRITE_TIMEOUT)
                     .context("h264 chunk write after recovery")?;
                 self.note_write_success();
             }
@@ -337,35 +340,38 @@ impl WinUsbLcdDevice {
     }
 
     /// Lean per-frame send for live H.264 streaming via StartPlay (0x79).
-    /// Writes one packet and does a non-blocking ack drain. Unlike
-    /// `send_h264_chunk` it has no fixed sleep or buffer-wait (which are
-    /// tuned for large file chunks); pacing is driven by the caller's
-    /// frame_interval, matching the HID live path.
+    /// Writes one packet with full short-write handling and does a quick
+    /// ack drain. Periodically checks device buffer level for backpressure.
     fn send_h264_au(&mut self, data: &[u8]) -> Result<()> {
         let header = self.builder.start_play_header_winusb(data.len(), false);
         let total = 512 + data.len();
         let mut packet = vec![0u8; total];
         packet[..512].copy_from_slice(&header);
         packet[512..].copy_from_slice(data);
-        match self.tx_write(&packet, LCD_WRITE_TIMEOUT) {
+        match self.tx_write_full(&packet, LCD_WRITE_TIMEOUT) {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("H264 AU write failed: {e}");
                 self.try_recover()
                     .with_context(|| format!("recovering from h264 AU write error: {e}"))?;
-                self.tx_write(&packet, LCD_WRITE_TIMEOUT)
+                self.tx_write_full(&packet, LCD_WRITE_TIMEOUT)
                     .context("h264 AU write after recovery")?;
                 self.note_write_success();
             }
         }
-        self.tx_read_flush();
+        let resp = self.read_response("h264 au", Duration::from_millis(50));
+        if let Some(buf) = resp {
+            if buf[8] > 3 {
+                self.wait_buffer(2);
+            }
+        }
         Ok(())
     }
 
     /// Set LCD brightness (0-100).
     pub fn set_brightness_val(&mut self, brightness: u8) -> Result<()> {
         let header = self.builder.brightness_header_winusb(brightness);
-        self.tx_write(&header, LCD_WRITE_TIMEOUT)
+        self.tx_write_full(&header, LCD_WRITE_TIMEOUT)
             .context("setting brightness")?;
         self.read_response("brightness", LCD_READ_TIMEOUT);
         debug!("Set brightness to {}", brightness.min(100));
@@ -375,7 +381,7 @@ impl WinUsbLcdDevice {
     /// Set LCD rotation (0=0°, 1=90°, 2=180°, 3=270°).
     pub fn set_rotation_val(&mut self, rotation: u8) -> Result<()> {
         let header = self.builder.rotation_header_winusb(rotation);
-        self.tx_write(&header, LCD_WRITE_TIMEOUT)
+        self.tx_write_full(&header, LCD_WRITE_TIMEOUT)
             .context("setting rotation")?;
         self.read_response("rotation", LCD_READ_TIMEOUT);
         debug!("Set rotation to {}", rotation);
@@ -385,7 +391,7 @@ impl WinUsbLcdDevice {
     /// Set frame rate.
     pub fn set_frame_rate(&mut self, fps: u8) -> Result<()> {
         let header = self.builder.frame_rate_header_winusb(fps);
-        self.tx_write(&header, LCD_WRITE_TIMEOUT)
+        self.tx_write_full(&header, LCD_WRITE_TIMEOUT)
             .context("setting frame rate")?;
         self.read_response("frame rate", LCD_READ_TIMEOUT);
         debug!("Set frame rate to {fps}");
@@ -416,10 +422,12 @@ impl WinUsbLcdDevice {
             "Initializing LCD ({}x{}, quality {})",
             self.screen.width, self.screen.height, self.screen.jpeg_quality
         );
+        self.device_gone = false;
+        self.consecutive_failures = 0;
         self.tx_read_flush();
 
         let ver = self.builder.get_ver_header_winusb();
-        match self.tx_write(&ver, LCD_WRITE_TIMEOUT) {
+        match self.tx_write_full(&ver, LCD_WRITE_TIMEOUT) {
             Ok(_) => self.note_write_success(),
             Err(e) => warn!("GetVer write failed: {e}"),
         }
@@ -438,6 +446,18 @@ impl WinUsbLcdDevice {
         }
         let stop_play = self.builder.stop_play_header_winusb();
         self.send_command(stop_play, "StopPlay");
+
+        let query_block = self.builder.query_block_header_winusb();
+        self.send_command(query_block, "QueryBlock");
+        if let Some(resp) = self.read_response("QueryBlock", LCD_READ_TIMEOUT) {
+            if resp.len() >= 12 {
+                let size = u32::from_be_bytes([resp[8], resp[9], resp[10], resp[11]]) as usize;
+                if size > 0 {
+                    self.h264_chunk_size = size;
+                    debug!("H264 chunk size from device: {size}");
+                }
+            }
+        }
 
         // HS2 OLED renders the firmware thermal-warning overlay over pushed
         // frames; disable it during init so user media shows cleanly.
@@ -476,7 +496,7 @@ impl WinUsbLcdDevice {
             let mut packet = vec![0u8; 512 + png_buf.len()];
             packet[..512].copy_from_slice(&header);
             packet[512..].copy_from_slice(&png_buf);
-            if let Err(e) = self.tx_write(&packet, LCD_WRITE_TIMEOUT) {
+            if let Err(e) = self.tx_write_full(&packet, LCD_WRITE_TIMEOUT) {
                 warn!("ClearPngLayer failed: {e}");
             } else {
                 self.read_response("ClearPngLayer", LCD_READ_TIMEOUT);
@@ -500,7 +520,7 @@ impl WinUsbLcdDevice {
         let mut packet = vec![0u8; 512 + jpg_buf.len()];
         packet[..512].copy_from_slice(&header);
         packet[512..].copy_from_slice(&jpg_buf);
-        if let Err(e) = self.tx_write(&packet, LCD_WRITE_TIMEOUT) {
+        if let Err(e) = self.tx_write_full(&packet, LCD_WRITE_TIMEOUT) {
             warn!("ClearJpgLayer failed: {e}");
         } else {
             self.read_response("ClearJpgLayer", Duration::from_millis(200));
@@ -508,7 +528,7 @@ impl WinUsbLcdDevice {
     }
 
     fn send_command(&mut self, header: Vec<u8>, label: &str) {
-        match self.tx_write(&header, LCD_WRITE_TIMEOUT) {
+        match self.tx_write_full(&header, LCD_WRITE_TIMEOUT) {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("{label} write failed: {e}");
@@ -516,7 +536,7 @@ impl WinUsbLcdDevice {
                     warn!("{label} recovery skipped: {rec_err}");
                     return;
                 }
-                if let Err(e2) = self.tx_write(&header, LCD_WRITE_TIMEOUT) {
+                if let Err(e2) = self.tx_write_full(&header, LCD_WRITE_TIMEOUT) {
                     warn!("{label} write retry failed: {e2}");
                     return;
                 }
@@ -537,22 +557,17 @@ impl WinUsbLcdDevice {
 
         self.consecutive_failures += 1;
 
-        // Soft recovery only: try clearing endpoint stalls. USB reset is too
-        // destructive on composite devices — it can take down sibling interfaces
-        // (TURZX, LED MCU, etc.) on the same physical device.
+        // Soft recovery only: try clearing endpoint stalls on both directions.
+        // A brief delay lets the firmware drain internal buffers before we retry.
+        // USB reset is too destructive on composite devices — it can take down
+        // sibling interfaces (TURZX, LED MCU, etc.) on the same physical device.
         if self.consecutive_failures <= 3 {
-            match self.tx_clear_halt(EP_OUT) {
-                Ok(()) => {
-                    debug!("recovered EP_OUT stall via clear_halt");
-                    return Ok(());
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    if msg.contains("not found") || msg.contains("No such device") {
-                        self.device_gone = true;
-                    }
-                    warn!("clear_halt(EP_OUT) failed: {e}");
-                }
+            std::thread::sleep(Duration::from_millis(10));
+            let out_ok = self.tx_clear_halt(EP_OUT).is_ok();
+            let _ = self.tx_clear_halt(EP_IN);
+            if out_ok {
+                debug!("recovered EP_OUT stall via clear_halt");
+                return Ok(());
             }
         }
 
@@ -588,7 +603,7 @@ impl WinUsbLcdDevice {
     /// Query device buffer level. Returns None on communication failure.
     fn query_block(&mut self) -> Option<u8> {
         let header = self.builder.query_block_header_winusb();
-        self.tx_write(&header, LCD_WRITE_TIMEOUT).ok()?;
+        self.tx_write_full(&header, LCD_WRITE_TIMEOUT).ok()?;
         let resp = self.read_response("QueryBlock", Duration::from_millis(200))?;
         Some(resp[8])
     }

@@ -185,8 +185,11 @@ impl PacketBuilder {
     }
 
     pub fn start_play_header_winusb(&mut self, chunk_len: usize, is_last: bool) -> Vec<u8> {
+        let play_tick = self.start_time.elapsed().as_millis() as u32;
         let mut params = (chunk_len as u32).to_be_bytes().to_vec();
         params.push(if is_last { 1 } else { 0 });
+        params.push(0);
+        params.extend_from_slice(&play_tick.to_be_bytes());
         self.build_winusb(CMD_START_PLAY, &params)
     }
 
@@ -275,9 +278,23 @@ impl Default for PacketBuilder {
     }
 }
 
+const LGBL_KEY: &[u8; 8] = b"lgbm9lgb";
+
+pub fn decrypt_lgbl(input: &[u8]) -> Vec<u8> {
+    input
+        .iter()
+        .enumerate()
+        .map(|(i, &b)| b ^ LGBL_KEY[i % 8])
+        .collect()
+}
+
+pub fn is_lgbl(data: &[u8]) -> bool {
+    data.len() >= 4 && &data[..4] == b"lgbl"
+}
+
 #[cfg(test)]
 mod tests {
-    use super::crc16_ccitt;
+    use super::{crc16_ccitt, decrypt_lgbl, is_lgbl};
 
     #[test]
     fn crc16_empty_is_zero() {
@@ -294,5 +311,31 @@ mod tests {
     fn crc16_known_vector() {
         // CRC-16/XMODEM of "123456789" = 0x31C3
         assert_eq!(crc16_ccitt(b"123456789"), 0x31C3);
+    }
+
+    #[test]
+    fn lgbl_decrypt_round_trip() {
+        let original = b"Hello, World!";
+        let encrypted: Vec<u8> = original
+            .iter()
+            .enumerate()
+            .map(|(i, &b)| b ^ b"lgbm9lgb"[i % 8])
+            .collect();
+        let decrypted = decrypt_lgbl(&encrypted);
+        assert_eq!(&decrypted[..], original);
+    }
+
+    #[test]
+    fn lgbl_detection() {
+        assert!(is_lgbl(b"lgbl\x00\x01"));
+        assert!(!is_lgbl(b"other"));
+        assert!(!is_lgbl(b"lg"));
+    }
+
+    #[test]
+    fn lgbl_magic_xors_to_h264_start_code() {
+        let encrypted = b"lgbl";
+        let decrypted = decrypt_lgbl(encrypted);
+        assert_eq!(&decrypted[..4], &[0x00, 0x00, 0x00, 0x01]);
     }
 }
