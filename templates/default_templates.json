@@ -141,6 +141,22 @@
           "sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
         }
       ]
+    },
+    {
+      "id": "perfmon-92",
+      "name": "Perfmon 9.2",
+      "description": "Six-gauge landscape system monitor: CPU/GPU temp and load, RAM, NVMe.",
+      "author": "k1nch0",
+      "min_daemon_version": "0.3.4",
+      "folder": "perfmon-92",
+      "template_file": "template.json",
+      "template_sha256": "9ec4e2b19efaf5f3d4c315b5f07a52d45a380f9da2646a46f4bb25b1cf622052",
+      "preview": "preview.png",
+      "preview_sha256": "2b57833503a17791b50916e99053325d07cb1cfb2464c040232a499f166c0e26",
+      "base_width": 1920,
+      "base_height": 462,
+      "rotated": false,
+      "files": []
     }
   ]
 }

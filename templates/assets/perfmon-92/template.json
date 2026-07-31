@@ -1,0 +1,796 @@
+{
+  "id": "perfmon-92",
+  "name": "Perfmon 9.2",
+  "base_width": 1920,
+  "base_height": 462,
+  "rotated": false,
+  "background": {
+    "type": "color",
+    "rgb": [
+      12,
+      15,
+      22,
+      255
+    ]
+  },
+  "widgets": [
+    {
+      "id": "label-b0",
+      "x": 160,
+      "y": 62,
+      "width": 300,
+      "height": 46,
+      "kind": {
+        "type": "label",
+        "text": "CPU TEMP",
+        "font": {
+          "path": null
+        },
+        "font_size": 34,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-b0",
+      "x": 160,
+      "y": 280,
+      "width": 300,
+      "height": 300,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 60,
+            "color": [
+              0,
+              200,
+              90
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "value-b0",
+      "x": 160,
+      "y": 268,
+      "width": 240,
+      "height": 130,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 92,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "unit-b0",
+      "x": 160,
+      "y": 350,
+      "width": 120,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "\u00b0C",
+        "font": {
+          "path": null
+        },
+        "font_size": 30,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-b1",
+      "x": 480,
+      "y": 62,
+      "width": 300,
+      "height": 46,
+      "kind": {
+        "type": "label",
+        "text": "CPU LOAD",
+        "font": {
+          "path": null
+        },
+        "font_size": 34,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-b1",
+      "x": 480,
+      "y": 280,
+      "width": 300,
+      "height": 300,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 50,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "value-b1",
+      "x": 480,
+      "y": 268,
+      "width": 240,
+      "height": 130,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 92,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "unit-b1",
+      "x": 480,
+      "y": 350,
+      "width": 120,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": null
+        },
+        "font_size": 30,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-b2",
+      "x": 800,
+      "y": 62,
+      "width": 300,
+      "height": 46,
+      "kind": {
+        "type": "label",
+        "text": "GPU TEMP",
+        "font": {
+          "path": null
+        },
+        "font_size": 34,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-b2",
+      "x": 800,
+      "y": 280,
+      "width": 300,
+      "height": 300,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 60,
+            "color": [
+              0,
+              200,
+              90
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "value-b2",
+      "x": 800,
+      "y": 268,
+      "width": 240,
+      "height": 130,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 92,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "unit-b2",
+      "x": 800,
+      "y": 350,
+      "width": 120,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "\u00b0C",
+        "font": {
+          "path": null
+        },
+        "font_size": 30,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-b3",
+      "x": 1120,
+      "y": 62,
+      "width": 300,
+      "height": 46,
+      "kind": {
+        "type": "label",
+        "text": "GPU LOAD",
+        "font": {
+          "path": null
+        },
+        "font_size": 34,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-b3",
+      "x": 1120,
+      "y": 280,
+      "width": 300,
+      "height": 300,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 50,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "value-b3",
+      "x": 1120,
+      "y": 268,
+      "width": 240,
+      "height": 130,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 92,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "unit-b3",
+      "x": 1120,
+      "y": 350,
+      "width": 120,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": null
+        },
+        "font_size": 30,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-b4",
+      "x": 1440,
+      "y": 62,
+      "width": 300,
+      "height": 46,
+      "kind": {
+        "type": "label",
+        "text": "RAM",
+        "font": {
+          "path": null
+        },
+        "font_size": 34,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-b4",
+      "x": 1440,
+      "y": 280,
+      "width": 300,
+      "height": 300,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "mem_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 50,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "value-b4",
+      "x": 1440,
+      "y": 268,
+      "width": 240,
+      "height": 130,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "mem_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 92,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "unit-b4",
+      "x": 1440,
+      "y": 350,
+      "width": 120,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": null
+        },
+        "font_size": 30,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "label-b5",
+      "x": 1760,
+      "y": 62,
+      "width": 300,
+      "height": 46,
+      "kind": {
+        "type": "label",
+        "text": "NVME",
+        "font": {
+          "path": null
+        },
+        "font_size": 34,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gauge-b5",
+      "x": 1760,
+      "y": 280,
+      "width": 300,
+      "height": 300,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "hwmon",
+          "name": "nvme",
+          "label": "Composite",
+          "device_path": ""
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 60,
+            "color": [
+              0,
+              200,
+              90
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      }
+    },
+    {
+      "id": "value-b5",
+      "x": 1760,
+      "y": 268,
+      "width": 240,
+      "height": 130,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "nvme",
+          "label": "Composite",
+          "device_path": ""
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 92,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "unit-b5",
+      "x": 1760,
+      "y": 350,
+      "width": 120,
+      "height": 40,
+      "kind": {
+        "type": "label",
+        "text": "\u00b0C",
+        "font": {
+          "path": null
+        },
+        "font_size": 30,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    }
+  ]
+}
