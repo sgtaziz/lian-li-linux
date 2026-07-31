@@ -22,7 +22,11 @@ const hasFan = computed(() => props.device.has_fan ?? false);
 
 const pumpRpm = computed(() => {
   const rpms = devices.fanRpms(props.device.device_id);
-  return rpms.length > 0 ? rpms[rpms.length - 1] : null;
+  return rpms.length > 0 ? rpms[Math.min(fanCount.value, rpms.length - 1)] : null;
+});
+const fanRpms = computed(() => {
+  const rpms = devices.fanRpms(props.device.device_id);
+  return rpms.slice(0, fanCount.value);
 });
 const coolant = computed(() => devices.coolantTemp(props.device.device_id));
 
@@ -56,7 +60,7 @@ function onPumpMode(value: string) {
 function onFanMode(slot: number, value: string) {
   const next = [...aio.value.fan_speeds] as FanSpeed[];
   next[slot] = decodeMode(value, next[slot]);
-  aio.value.fan_speeds = next as [FanSpeed, FanSpeed, FanSpeed, FanSpeed];
+  aio.value.fan_speeds = next;
   config.markDirty();
 }
 function decodeMode(value: string, current: FanSpeed): FanSpeed {
@@ -82,7 +86,7 @@ function fanPwm(slot: number): number {
 function setFanPwm(slot: number, v: number) {
   const next = [...aio.value.fan_speeds] as FanSpeed[];
   next[slot] = v;
-  aio.value.fan_speeds = next as [FanSpeed, FanSpeed, FanSpeed, FanSpeed];
+  aio.value.fan_speeds = next;
   config.markDirty();
 }
 
@@ -129,6 +133,7 @@ const mac = computed(() =>
         <div class="muted mono">{{ mac }}</div>
       </div>
       <div class="telemetry">
+        <span v-for="(rpm, i) in fanRpms" :key="'fan' + i">Fan {{ i + 1 }} {{ rpm }} RPM</span>
         <span v-if="pumpRpm !== null">Pump {{ pumpRpm }} RPM</span>
         <span v-if="coolant !== null">Coolant {{ coolant.toFixed(1) }}°C</span>
       </div>
