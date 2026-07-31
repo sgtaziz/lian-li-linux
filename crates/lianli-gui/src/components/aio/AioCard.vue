@@ -6,7 +6,6 @@ import { useDevicesStore } from "@/stores/devices";
 import { useFansStore } from "@/stores/fans";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
-import { FAMILY_DISPLAY } from "@/constants";
 import { enumerateSensorsAsOptions, optionForConfig, decodeOption } from "@/stores/sensorOptions";
 
 const props = defineProps<{ device: DeviceInfo }>();
@@ -18,6 +17,8 @@ const fans = useFansStore();
 const aio = computed<AioConfig>(() => config.aioConfigFor(props.device.device_id));
 const pumpRange = computed(() => props.device.pump_rpm_range ?? [0, 4200]);
 const fanCount = computed(() => props.device.fan_count ?? 0);
+const hasPump = computed(() => props.device.has_pump ?? false);
+const hasFan = computed(() => props.device.has_fan ?? false);
 
 const pumpRpm = computed(() => devices.fanRpms(props.device.device_id)[0] ?? null);
 const coolant = computed(() => devices.coolantTemp(props.device.device_id));
@@ -121,7 +122,7 @@ const mac = computed(() =>
   <div class="card aio">
     <div class="head">
       <div>
-        <div class="name">{{ FAMILY_DISPLAY[device.family] }} — {{ device.name }}</div>
+        <div class="name">{{ device.name }}</div>
         <div class="muted mono">{{ mac }}</div>
       </div>
       <div class="telemetry">
@@ -134,7 +135,7 @@ const mac = computed(() =>
       <!-- Pump -->
       <div class="field">
         <label class="muted">Pump speed</label>
-        <n-select size="small" :value="pumpMode" :options="speedOptions" @update:value="onPumpMode" />
+        <n-select size="small" :value="pumpMode" :options="speedOptions" :disabled="!hasPump" @update:value="onPumpMode" />
         <LabeledSlider
           v-if="pumpMode === 'constant'"
           :model-value="pumpPwm()"
@@ -142,6 +143,7 @@ const mac = computed(() =>
           :max="255"
           @update:model-value="setPumpPwm"
         />
+        <span v-if="!hasPump" class="note">Control channel unavailable</span>
       </div>
 
       <!-- Attached fans -->
@@ -151,6 +153,7 @@ const mac = computed(() =>
           size="small"
           :value="speedMode(aio.fan_speeds[slot - 1])"
           :options="speedOptions"
+          :disabled="!hasFan"
           @update:value="(v: string) => onFanMode(slot - 1, v)"
         />
         <LabeledSlider
@@ -160,6 +163,7 @@ const mac = computed(() =>
           :max="255"
           @update:model-value="(v: number) => setFanPwm(slot - 1, v)"
         />
+        <span v-if="!hasFan && slot === 1" class="note">Control channel unavailable</span>
       </div>
 
       <!-- Display sensors -->
@@ -216,6 +220,10 @@ const mac = computed(() =>
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+.note {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
 }
 .head {
   display: flex;
