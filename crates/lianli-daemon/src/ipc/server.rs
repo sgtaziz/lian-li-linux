@@ -258,6 +258,16 @@ fn handle_request(
             device_id,
             quantity,
         } => super::fan::set_ene6k77_fan_quantity(tx, device_id, quantity),
+        IpcRequest::SetLcdBrightness {
+            device_id,
+            brightness,
+        } => {
+            let _ = tx.send(DaemonEvent::SetLcdBrightness {
+                device_id,
+                brightness,
+            });
+            IpcResponse::ok(serde_json::json!({ "applied": true }))
+        }
 
         IpcRequest::GetLcdTemplates => super::templates::get(state),
         IpcRequest::SetLcdTemplates { templates } => super::templates::set(state, tx, templates),

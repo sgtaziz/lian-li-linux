@@ -43,6 +43,8 @@ pub struct LcdConfig {
     pub custom_h264: Option<bool>,
     #[serde(default)]
     pub aio_512_frame: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<u8>,
 }
 
 impl LcdConfig {

@@ -127,6 +127,10 @@ pub enum IpcRequest {
         height: u32,
     },
     Ping,
+    SetLcdBrightness {
+        device_id: String,
+        brightness: u8,
+    },
     RebootWirelessLcd {
         device_id: String,
     },

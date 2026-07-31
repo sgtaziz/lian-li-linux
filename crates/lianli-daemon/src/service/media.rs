@@ -353,6 +353,17 @@ impl ServiceManager {
                             self.tx.clone(),
                         );
                         new_targets.insert(cfg_idx, target);
+                        if let Some(brightness) = device_cfg.brightness {
+                            if let Some(t) = new_targets.get_mut(&cfg_idx) {
+                                if let Err(e) = t.lcd.set_brightness(
+                                    Some(&self.wireless),
+                                    &mut self.packet_builder,
+                                    brightness,
+                                ) {
+                                    warn!("Failed to apply LCD brightness for LCD[{cfg_idx}]: {e}");
+                                }
+                            }
+                        }
                         if let Some(ref tx) = self.tx {
                             tx.send(DaemonEvent::FrameFinished).ok();
                         }

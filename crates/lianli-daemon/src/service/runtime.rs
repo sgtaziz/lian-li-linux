@@ -61,6 +61,24 @@ impl LcdBackend {
         }
     }
 
+    pub(super) fn set_brightness(
+        &mut self,
+        wireless: Option<&WirelessController>,
+        builder: &mut PacketBuilder,
+        brightness: u8,
+    ) -> anyhow::Result<()> {
+        match self {
+            Self::Slv3(d) => {
+                if let Some(w) = wireless {
+                    w.ensure_video_mode()?;
+                }
+                d.set_brightness(builder, brightness).map_err(Into::into)
+            }
+            Self::WinUsb(sender) => sender.set_brightness(brightness),
+            Self::HidLcd(d) => d.lock().set_brightness(brightness).map_err(Into::into),
+        }
+    }
+
     pub(super) fn start_h264_stream(
         &self,
         stdout: ChildStdout,
@@ -148,6 +166,7 @@ pub(super) enum LcdThreadMsg {
     },
     StreamH264Reader(std::process::ChildStdout, f32),
     SwitchDesktop(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
+    SetBrightness(u8),
     Stop,
 }
 
@@ -191,6 +210,11 @@ impl ThreadedWinUsbSender {
                         let _ = reply.send(result);
                         break;
                     }
+                    LcdThreadMsg::SetBrightness(val) => {
+                        if let Err(e) = device.set_brightness_val(val) {
+                            warn!("LCD[{index}] set_brightness error: {e}");
+                        }
+                    }
                     LcdThreadMsg::Stop => break,
                 }
             }
@@ -221,6 +245,19 @@ impl ThreadedWinUsbSender {
             .send(LcdThreadMsg::StreamH264Reader(stdout, fps))
             .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
         Ok(())
+    }
+
+    fn set_brightness(&self, brightness: u8) -> anyhow::Result<()> {
+        match self.tx.try_send(LcdThreadMsg::SetBrightness(brightness)) {
+            Ok(()) => Ok(()),
+            Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                warn!("LCD sender busy, brightness command dropped");
+                Ok(())
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                anyhow::bail!("LCD sender thread exited")
+            }
+        }
     }
 
     fn send_frame(&self, frame: &[u8]) -> anyhow::Result<()> {

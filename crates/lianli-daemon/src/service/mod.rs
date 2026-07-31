@@ -66,6 +66,7 @@ pub enum DaemonEvent {
     ResyncWirelessRgb,
     RebootWirelessLcd { mac: [u8; 6] },
     DisableLc217Wifi { mac: [u8; 6], disable: bool },
+    SetLcdBrightness { device_id: String, brightness: u8 },
     BindAll,
     UnbindAll,
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
@@ -503,6 +504,24 @@ impl ServiceManager {
                         }
                     }
                     self.device_poll();
+                }
+                DaemonEvent::SetLcdBrightness {
+                    device_id,
+                    brightness,
+                } => {
+                    let mut targets = self.targets.lock();
+                    if let Some((_, target)) = targets
+                        .iter_mut()
+                        .find(|(_, t)| t.device_identity == device_id)
+                    {
+                        if let Err(e) = target.lcd.set_brightness(
+                            Some(&self.wireless),
+                            &mut self.packet_builder,
+                            brightness,
+                        ) {
+                            warn!("Failed to set LCD brightness for {device_id}: {e}");
+                        }
+                    }
                 }
             }
         }

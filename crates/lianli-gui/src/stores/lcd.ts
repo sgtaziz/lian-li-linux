@@ -28,6 +28,10 @@ export const useLcdStore = defineStore("lcd", () => {
     await ipc.request("SetLcdTemplates", { templates });
   }
 
+  async function setBrightness(deviceId: string, brightness: number) {
+    await ipc.request("SetLcdBrightness", { device_id: deviceId, brightness });
+  }
+
   /**
    * Request a JPEG preview render from the daemon (debounced 200ms) so the
    * editor canvas updates live without flooding the daemon on every property
@@ -56,6 +60,7 @@ export const useLcdStore = defineStore("lcd", () => {
     switchDisplayMode,
     setLcdMedia,
     setTemplates,
+    setBrightness,
     renderPreview,
   };
 });

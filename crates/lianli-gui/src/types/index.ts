@@ -188,6 +188,7 @@ export interface LcdConfig {
   smooth_edges?: boolean | null;
   custom_h264?: boolean | null;
   aio_512_frame?: boolean | null;
+  brightness?: number | null;
 }
 
 // ─── Fans ────────────────────────────────────────────────────────────────────

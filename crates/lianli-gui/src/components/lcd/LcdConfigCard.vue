@@ -12,6 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import SensorGaugeEditor from "@/components/lcd/SensorGaugeEditor.vue";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import OrientationPicker from "@/components/common/OrientationPicker.vue";
+import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { enumerateSensorsAsOptions, optionForConfig, decodeOption } from "@/stores/sensorOptions";
 import { screenSupportsH264 } from "@/constants/screen";
 
@@ -325,6 +326,17 @@ function onOrientation(v: number) {
   props.entry.orientation = v;
   config.markDirty();
 }
+
+const brightness = computed({
+  get: () => props.entry.brightness ?? 100,
+  set: (v: number) => {
+    props.entry.brightness = v;
+    config.markDirty();
+    if (selectedDeviceId.value) {
+      void lcd.setBrightness(selectedDeviceId.value, v);
+    }
+  },
+});
 </script>
 
 <script lang="ts">
@@ -437,6 +449,17 @@ function onOrientation(v: number) {
     <div class="field">
       <label class="muted">Orientation</label>
       <OrientationPicker :model-value="entry.orientation" @update:model-value="onOrientation" />
+    </div>
+
+    <div class="field">
+      <label class="muted">Brightness</label>
+      <LabeledSlider
+        :model-value="brightness"
+        :min="0"
+        :max="100"
+        suffix="%"
+        @update:model-value="(v: number) => brightness = v"
+      />
     </div>
   </div>
 </template>
