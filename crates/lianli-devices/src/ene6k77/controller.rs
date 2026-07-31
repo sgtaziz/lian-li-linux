@@ -609,7 +609,11 @@ impl FanDevice for Ene6k77Controller {
 fn expand_per_led(ui: &[[u8; 3]], num_fans: usize, leds_per_fan: usize) -> Vec<[u8; 3]> {
     let mut out = vec![[0u8; 3]; num_fans * leds_per_fan];
     for fan in 0..num_fans {
-        let c = ui.get(fan).copied().unwrap_or([0, 0, 0]);
+        let c = ui
+            .get(fan)
+            .copied()
+            .or_else(|| ui.first().copied())
+            .unwrap_or([0, 0, 0]);
         for led in 0..leds_per_fan {
             out[fan * leds_per_fan + led] = c;
         }
