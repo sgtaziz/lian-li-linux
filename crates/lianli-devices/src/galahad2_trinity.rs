@@ -163,6 +163,13 @@ impl Galahad2TrinityController {
             bail!("Galahad2 Trinity: handshake response too short ({n} bytes)");
         }
 
+        if buf[1] != CMD_HANDSHAKE {
+            bail!(
+                "Galahad2 Trinity: handshake response mismatch (expected 0x{CMD_HANDSHAKE:02x}, got 0x{:02x})",
+                buf[1]
+            );
+        }
+
         let data = &buf[HEADER_LEN..];
         let hs = Galahad2Handshake {
             fan_rpm: u16::from_be_bytes([data[0], data[1]]),

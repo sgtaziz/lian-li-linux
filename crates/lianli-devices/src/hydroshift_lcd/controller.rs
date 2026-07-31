@@ -286,7 +286,8 @@ impl HydroShiftLcdController {
     }
 
     pub fn send_jpeg(&self, jpeg_data: &[u8]) -> Result<()> {
-        self.send_chunked(CMD_SEND_JPEG, jpeg_data)
+        let (report_id, pkt_size, max_payload) = (REPORT_ID_B, B_PACKET_SIZE, B_MAX_PAYLOAD);
+        self.send_chunked_with(CMD_SEND_JPEG, jpeg_data, report_id, pkt_size, max_payload)
     }
 
     pub fn send_h264_frame(&self, frame: &[u8]) -> Result<()> {
@@ -611,6 +612,49 @@ impl HydroShiftLcdController {
         Ok(())
     }
 
+    fn send_chunked_with(
+        &self,
+        cmd: u8,
+        data: &[u8],
+        report_id: u8,
+        pkt_size: usize,
+        max_payload: usize,
+    ) -> Result<()> {
+        let total_size = data.len();
+        let mut offset = 0;
+        let mut packet_num: u32 = 0;
+        let mut dev = self.device.lock();
+
+        loop {
+            let remaining = total_size.saturating_sub(offset);
+            let chunk_len = remaining.min(max_payload);
+
+            let pkt = build_lcd_packet(
+                report_id,
+                pkt_size,
+                cmd,
+                total_size as u32,
+                packet_num,
+                if chunk_len > 0 {
+                    &data[offset..offset + chunk_len]
+                } else {
+                    &[]
+                },
+            );
+
+            dev.write(&pkt).context("AIO LCD: write LCD command")?;
+            offset += chunk_len;
+            packet_num += 1;
+
+            if offset >= total_size {
+                break;
+            }
+        }
+
+        self.read_ack(&mut dev, "send_chunked_with", ACK_TIMEOUT_MS);
+        Ok(())
+    }
+
     fn read_ack(&self, dev: &mut RusbHid, label: &str, timeout_ms: i32) {
         let mut buf = [0u8; 512];
         if let Err(e) = dev.read_timeout(&mut buf, timeout_ms) {
@@ -682,6 +726,15 @@ impl FanDevice for HydroShiftLcdController {
             self.variant.name(),
             envelope.max_rpm
         );
+        Ok(())
+    }
+
+    fn set_mb_rpm_sync(&self, _port: u8, sync: bool) -> Result<()> {
+        let source: u8 = if sync { 0x01 } else { 0x00 };
+        let envelope = self.variant.pump_envelope();
+        let pwm = envelope.min_pwm();
+        self.write_a_command(CMD_SET_PUMP_PWM, &[source, pwm])?;
+        debug!("Set pump MB sync={sync} (variant={})", self.variant.name());
         Ok(())
     }
 }

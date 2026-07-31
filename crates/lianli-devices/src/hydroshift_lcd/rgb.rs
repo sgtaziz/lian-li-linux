@@ -102,25 +102,37 @@ impl RgbDevice for AioLcdRgbController {
     }
 
     fn supported_modes(&self) -> Vec<RgbMode> {
-        vec![
-            RgbMode::Off,
-            RgbMode::Static,
-            RgbMode::Rainbow,
-            RgbMode::RainbowMorph,
-            RgbMode::Breathing,
-            RgbMode::Runway,
-            RgbMode::Meteor,
-            RgbMode::TickerTape,
-            RgbMode::Fluctuation,
-            RgbMode::Transmit,
-            RgbMode::ColorfulStarryNight,
-            RgbMode::StaticStarryNight,
-            RgbMode::Voice,
-            RgbMode::BigBang,
-            RgbMode::Burst,
-            RgbMode::ColorsMorph,
-            RgbMode::Bounce,
-        ]
+        if matches!(self.variant, super::AioLcdVariant::Galahad2Vision) {
+            vec![
+                RgbMode::Off,
+                RgbMode::Static,
+                RgbMode::Rainbow,
+                RgbMode::RainbowMorph,
+                RgbMode::Breathing,
+                RgbMode::Runway,
+                RgbMode::Meteor,
+            ]
+        } else {
+            vec![
+                RgbMode::Off,
+                RgbMode::Static,
+                RgbMode::Rainbow,
+                RgbMode::RainbowMorph,
+                RgbMode::Breathing,
+                RgbMode::Runway,
+                RgbMode::Meteor,
+                RgbMode::TickerTape,
+                RgbMode::Fluctuation,
+                RgbMode::Transmit,
+                RgbMode::ColorfulStarryNight,
+                RgbMode::StaticStarryNight,
+                RgbMode::Voice,
+                RgbMode::BigBang,
+                RgbMode::Burst,
+                RgbMode::ColorsMorph,
+                RgbMode::Bounce,
+            ]
+        }
     }
 
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
