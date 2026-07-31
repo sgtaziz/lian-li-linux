@@ -15,7 +15,7 @@ export const FAMILY_DISPLAY: Record<DeviceFamily, string> = {
   Tlv2Led: "UNI FAN TL Wireless",
   SlInf: "UNI FAN SL-INF Wireless",
   Clv1: "UNI FAN CL Wireless",
-  HydroShift2Lcd: "HydroShift II LCD Circle",
+  HydroShift2Lcd: "HydroShift II LCD",
   Lancool207: "Lancool 207 Digital",
   UniversalScreen: 'Universal Screen 8.8"',
   HydroShift2LcdDesktop: "HydroShift II LCD (Desktop Mode)",
