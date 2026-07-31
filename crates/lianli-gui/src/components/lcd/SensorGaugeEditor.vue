@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
+import { useDialog } from "naive-ui";
 import { Plus, Trash2 } from "lucide-vue-next";
 import type { SensorDescriptor, SensorRange } from "@/types";
 import { useConfigStore } from "@/stores/config";
@@ -8,6 +9,7 @@ import ColorPicker from "@/components/rgb/ColorPicker.vue";
 
 const props = defineProps<{ sensor: SensorDescriptor }>();
 const config = useConfigStore();
+const dialog = useDialog();
 const { load: loadFonts, fontOptions } = useFonts();
 
 onMounted(() => void loadFonts());
@@ -32,7 +34,15 @@ function addRange() {
   patch({ gauge_ranges: next });
 }
 function removeRange(i: number) {
-  patch({ gauge_ranges: ranges.value.filter((_, idx) => idx !== i) });
+  dialog.error({
+    title: "Remove range?",
+    content: `Range ${i + 1} will be removed.`,
+    positiveText: "Remove",
+    negativeText: "Cancel",
+    onPositiveClick: () => {
+      patch({ gauge_ranges: ranges.value.filter((_, idx) => idx !== i) });
+    },
+  });
 }
 </script>
 

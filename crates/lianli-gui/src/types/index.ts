@@ -215,7 +215,7 @@ export interface FanCurve {
 
 export interface FanGroup {
   device_id?: string | null;
-  speeds: [FanSpeed, FanSpeed, FanSpeed, FanSpeed];
+  speeds: FanSpeed[];
 }
 
 export interface FanConfig {
@@ -294,7 +294,7 @@ export interface RgbPreset {
 // ─── AIO ──────────────────────────────────────────────────────────────────────
 export interface AioConfig {
   pump_target_rpm: FanSpeed;
-  fan_speeds: [FanSpeed, FanSpeed, FanSpeed, FanSpeed];
+  fan_speeds: FanSpeed[];
   theme_index: number;
   brightness: number;
   rotation: number;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useDialog } from "naive-ui";
 import { FolderOpen, Trash2 } from "lucide-vue-next";
 import type { DeviceInfo, LcdConfig, MediaType, SensorDescriptor } from "@/types";
 import { useConfigStore } from "@/stores/config";
@@ -23,6 +24,7 @@ const config = useConfigStore();
 const devices = useDevicesStore();
 const lcd = useLcdStore();
 const ipc = useIpc();
+const dialog = useDialog();
 
 const lcdDevices = computed(() => devices.lcdDevices);
 
@@ -271,14 +273,22 @@ async function duplicateTemplate() {
 async function deleteTemplate() {
   const id = props.entry.template_id;
   if (!id) return;
-  config.templates = config.templates.filter((t) => t.id !== id);
-  for (const e of config.config.lcds) {
-    if (e.template_id === id) e.template_id = null;
-  }
-  await lcd.setTemplates(config.templates);
-  await config.load();
-  config.markDirty();
-  renderPreview();
+  dialog.error({
+    title: "Delete template?",
+    content: "This template will be permanently deleted and removed from all LCD entries.",
+    positiveText: "Delete",
+    negativeText: "Cancel",
+    onPositiveClick: async () => {
+      config.templates = config.templates.filter((t) => t.id !== id);
+      for (const e of config.config.lcds) {
+        if (e.template_id === id) e.template_id = null;
+      }
+      await lcd.setTemplates(config.templates);
+      await config.load();
+      config.markDirty();
+      renderPreview();
+    },
+  });
 }
 
 /** "Edit" opens the editor on this entry's currently-selected template. */
@@ -290,8 +300,16 @@ async function openBrowser() {
 }
 
 function removeEntry() {
-  config.config.lcds.splice(props.index, 1);
-  config.markDirty();
+  dialog.error({
+    title: "Remove LCD entry?",
+    content: `LCD ${props.index + 1} will be removed from the configuration.`,
+    positiveText: "Remove",
+    negativeText: "Cancel",
+    onPositiveClick: () => {
+      config.config.lcds.splice(props.index, 1);
+      config.markDirty();
+    },
+  });
 }
 
 // FPS / update interval / orientation

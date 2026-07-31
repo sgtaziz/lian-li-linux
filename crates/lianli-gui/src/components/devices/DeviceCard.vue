@@ -93,7 +93,6 @@ async function onSwitchDisplay() {
   devices.pending.set(d.value.device_id, "switch");
   try {
     await lcd.switchDisplayMode(d.value.device_id);
-    await devices.applyPoll !== undefined; // no-op
   } finally {
     await refreshSoon();
   }

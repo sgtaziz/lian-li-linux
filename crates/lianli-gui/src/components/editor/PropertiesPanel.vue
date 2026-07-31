@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useDialog } from "naive-ui";
 import { FolderOpen, Plus, Trash2 } from "lucide-vue-next";
 import type { Widget, RGBA, RGB, SensorSourceConfig, SensorRange, GradientStop } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -14,6 +15,8 @@ const emit = defineEmits<{
   patchCommon: [id: string, key: string, value: any];
   patchKind: [id: string, key: string, value: any];
 }>();
+
+const dialog = useDialog();
 
 const w = computed(() => props.widget);
 
@@ -215,8 +218,16 @@ function addListItem(key: string) {
   emit("patchKind", current.value.id, key, arr);
 }
 function removeListItem(key: string, index: number) {
-  const arr = ((current.value.kind as any)[key] as unknown[]).filter((_, i) => i !== index);
-  emit("patchKind", current.value.id, key, arr);
+  dialog.error({
+    title: "Remove item?",
+    content: `Item ${index + 1} will be removed.`,
+    positiveText: "Remove",
+    negativeText: "Cancel",
+    onPositiveClick: () => {
+      const arr = ((current.value.kind as any)[key] as unknown[]).filter((_, i) => i !== index);
+      emit("patchKind", current.value.id, key, arr);
+    },
+  });
 }
 
 async function browsePath(key: string) {

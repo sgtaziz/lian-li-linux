@@ -287,10 +287,6 @@ fn handle_request(
         IpcRequest::ApplyRgbPreset { name, device_id } => {
             super::presets::apply(state, tx, name, device_id)
         }
-
-        IpcRequest::Subscribe => {
-            IpcResponse::error("Subscribe not yet implemented; use polling via GetTelemetry")
-        }
     }
 }
 

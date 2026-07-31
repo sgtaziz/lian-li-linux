@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useDialog } from "naive-ui";
 import { Plus, Trash2 } from "lucide-vue-next";
 import type { RgbDeviceCapabilities, RgbZoneConfig, RgbEffect, RGB } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
@@ -18,6 +19,7 @@ const props = defineProps<{
 
 const rgb = useRgbStore();
 const config = useConfigStore();
+const dialog = useDialog();
 
 const expanded = ref(true);
 
@@ -54,13 +56,19 @@ const showDirection = computed(() => props.cap.supports_direction);
 // ── Effect mutation helpers ──────────────────────────────────────────────────
 // RGB effects are NOT applied live — they only update the config mirror and
 // take effect when the user saves (SetConfig re-applies all RGB on the daemon).
+
+const propagateChoice = ref<"ask" | "yes" | "no">("ask");
+
+function propagateToZones() {
+  const devCfg = config.rgbDeviceConfig(props.deviceId);
+  for (let i = 1; i < devCfg.zones.length; i++) {
+    devCfg.zones[i].effect = JSON.parse(JSON.stringify(effect.value));
+  }
+}
+
 function patchEffect(p: Partial<RgbEffect>) {
   Object.assign(effect.value, p);
 
-  // Port-wide propagation (mirrors Slint's send_rgb_effect): animated modes
-  // set on zone 0 propagate to all zones. Only Off/Static/Direct with scope
-  // All are per-fan (each fan can differ). All other mode/scope combos are
-  // treated as port-wide animations that need every zone synced.
   if (props.zoneIndex === 0) {
     const isPerFan =
       (effect.value.mode === "Off" ||
@@ -68,9 +76,22 @@ function patchEffect(p: Partial<RgbEffect>) {
         effect.value.mode === "Direct") &&
       effect.value.scope === "All";
     if (!isPerFan) {
-      const devCfg = config.rgbDeviceConfig(props.deviceId);
-      for (let i = 1; i < devCfg.zones.length; i++) {
-        devCfg.zones[i].effect = JSON.parse(JSON.stringify(effect.value));
+      if (propagateChoice.value === "yes") {
+        propagateToZones();
+      } else if (propagateChoice.value === "ask") {
+        dialog.warning({
+          title: "Apply to all zones?",
+          content: "Animated effects on zone 0 propagate to all zones on this device.",
+          positiveText: "Apply to all",
+          negativeText: "Zone 0 only",
+          onPositiveClick: () => {
+            propagateChoice.value = "yes";
+            propagateToZones();
+          },
+          onNegativeClick: () => {
+            propagateChoice.value = "no";
+          },
+        });
       }
     }
   }
@@ -100,8 +121,16 @@ function addColor() {
 }
 function removeColor(index: number) {
   if (effect.value.colors.length <= 1) return;
-  const next = effect.value.colors.filter((_, i) => i !== index);
-  patchEffect({ colors: next });
+  dialog.error({
+    title: "Remove color?",
+    content: `Color ${index + 1} will be removed from the palette.`,
+    positiveText: "Remove",
+    negativeText: "Cancel",
+    onPositiveClick: () => {
+      const next = effect.value.colors.filter((_, i) => i !== index);
+      patchEffect({ colors: next });
+    },
+  });
 }
 
 function onDirection(value: any) {
@@ -154,10 +183,18 @@ function fillAll() {
 }
 
 function clearAll() {
-  ledColors.value = Array.from({ length: ledCount.value }, () => [0, 0, 0]);
-  config.rgbDeviceConfig(props.deviceId).active_preset = null;
-  config.markDirty();
-  void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
+  dialog.error({
+    title: "Clear all LEDs?",
+    content: "All direct LED colors on this zone will be set to black.",
+    positiveText: "Clear",
+    negativeText: "Cancel",
+    onPositiveClick: () => {
+      ledColors.value = Array.from({ length: ledCount.value }, () => [0, 0, 0]);
+      config.rgbDeviceConfig(props.deviceId).active_preset = null;
+      config.markDirty();
+      void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
+    },
+  });
 }
 
 const zoneLabel = computed(

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useDialog } from "naive-ui";
 import { ChevronDown, ChevronRight, Save, Trash2 } from "lucide-vue-next";
 import type { RgbDeviceCapabilities } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
@@ -12,6 +13,7 @@ const props = defineProps<{ cap: RgbDeviceCapabilities }>();
 const rgb = useRgbStore();
 const config = useConfigStore();
 const devices = useDevicesStore();
+const dialog = useDialog();
 
 const devConfig = computed(() => config.rgbDeviceConfig(props.cap.device_id));
 const device = computed(() => devices.byId(props.cap.device_id));
@@ -66,17 +68,6 @@ const mbSync = computed({
   },
 });
 
-// ── Merge lighting (new feature) ────────────────────────────────────────────
-const supportsMerge = computed(
-  () => props.cap.supports_merge_lighting ?? false,
-);
-const mergeEnabled = ref(false);
-function onMerge(v: boolean) {
-  mergeEnabled.value = v;
-  // No dedicated IPC; merge is a zone-0 propagation handled client-side.
-  if (v) applyToAllZones();
-}
-
 function zoneAt(i: number) {
   return devConfig.value.zones[i];
 }
@@ -109,7 +100,13 @@ async function applyPreset(name: string) {
   await config.load();
 }
 async function deletePreset(name: string) {
-  await rgb.deletePreset(name, props.cap.device_id);
+  dialog.error({
+    title: "Delete preset?",
+    content: `"${name}" will be permanently deleted.`,
+    positiveText: "Delete",
+    negativeText: "Cancel",
+    onPositiveClick: () => void rgb.deletePreset(name, props.cap.device_id),
+  });
 }
 
 const activePreset = computed({
@@ -142,18 +139,6 @@ const summary = computed(() =>
 
       <!-- When MB sync is active, hide zone config — the motherboard controls RGB -->
       <template v-if="!mbSync">
-        <!-- Merge lighting (new feature) -->
-        <div v-if="supportsMerge" class="merge card-inset">
-          <div class="merge-head">
-            <n-checkbox v-model:checked="mergeEnabled" @update:checked="onMerge">
-              Merge Lighting
-            </n-checkbox>
-          </div>
-          <p class="hint">
-            Synchronizes lighting effects across all groups/fans as a single continuous animation.
-          </p>
-        </div>
-
         <div class="zones">
           <RgbZoneEditor
             v-for="(z, i) in devConfig.zones"
@@ -238,9 +223,6 @@ const summary = computed(() =>
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-3);
-}
-.merge-head {
-  margin-bottom: var(--space-1);
 }
 .zones {
   display: flex;

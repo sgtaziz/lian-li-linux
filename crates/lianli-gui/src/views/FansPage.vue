@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useDialog } from "naive-ui";
 import { Plus, X } from "lucide-vue-next";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
@@ -10,6 +11,7 @@ import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
+const dialog = useDialog();
 
 const selectedCurve = ref(0);
 
@@ -36,7 +38,7 @@ const assignmentGroups = computed(() => {
     }
     let group = fanCfg.value.speeds.find((g) => g.device_id === dev.device_id);
     if (!group) {
-      group = { device_id: dev.device_id, speeds: [128, 128, 128, 128] };
+      group = { device_id: dev.device_id, speeds: new Array(dev.fan_count ?? 1).fill(128) };
       fanCfg.value.speeds.push(group);
     }
     result.push({ device: dev, group });
@@ -68,13 +70,20 @@ function addCurve() {
 }
 
 function removeCurve(idx: number) {
-  curves.value.splice(idx, 1);
-  // Keep the selection pointing at the same curve after a deletion.
-  if (selectedCurve.value > idx) selectedCurve.value -= 1;
-  if (selectedCurve.value >= curves.value.length) {
-    selectedCurve.value = Math.max(0, curves.value.length - 1);
-  }
-  config.markDirty();
+  dialog.error({
+    title: "Delete curve?",
+    content: `"${curves.value[idx]?.name ?? "Curve"}" will be permanently deleted.`,
+    positiveText: "Delete",
+    negativeText: "Cancel",
+    onPositiveClick: () => {
+      curves.value.splice(idx, 1);
+      if (selectedCurve.value > idx) selectedCurve.value -= 1;
+      if (selectedCurve.value >= curves.value.length) {
+        selectedCurve.value = Math.max(0, curves.value.length - 1);
+      }
+      config.markDirty();
+    },
+  });
 }
 
 function renameCurve(name: string) {

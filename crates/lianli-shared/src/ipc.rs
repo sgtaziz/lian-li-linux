@@ -126,7 +126,6 @@ pub enum IpcRequest {
         width: u32,
         height: u32,
     },
-    Subscribe,
     Ping,
     RebootWirelessLcd {
         device_id: String,
