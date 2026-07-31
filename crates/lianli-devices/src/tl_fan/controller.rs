@@ -26,6 +26,8 @@ pub(super) const CMD_SET_FAN_GROUP: u8 = 0xAD;
 pub(super) const CMD_SET_FAN_GROUP_LIGHT: u8 = 0xB0;
 pub(super) const CMD_SET_FAN_DIRECTION: u8 = 0xAE;
 pub(super) const CMD_SET_PORT_DIRECTION: u8 = 0xAF;
+pub(super) const CMD_TEST_LIGHT: u8 = 0xB3;
+pub(super) const CMD_BLINK_PORT: u8 = 0xB4;
 
 /// TL Fan controller.
 ///
@@ -419,6 +421,16 @@ impl TlFanController {
     pub fn set_port_direction(&self, port: u8, swap: bool) -> Result<()> {
         self.send_command_quiet(CMD_SET_PORT_DIRECTION, &[port << 4, swap as u8])?;
         debug!("Set port {port} direction swap={swap}");
+        Ok(())
+    }
+
+    pub fn test_port_light(&self, port: u8) -> Result<()> {
+        self.send_command_quiet(CMD_TEST_LIGHT, &[0x03, port & 3, 0])?;
+        Ok(())
+    }
+
+    pub fn blink_port(&self, port: u8) -> Result<()> {
+        self.send_command_quiet(CMD_BLINK_PORT, &[port & 3])?;
         Ok(())
     }
 

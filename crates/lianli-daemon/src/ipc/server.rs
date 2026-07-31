@@ -268,6 +268,17 @@ fn handle_request(
             });
             IpcResponse::ok(serde_json::json!({ "applied": true }))
         }
+        IpcRequest::PingDevice { device_id, zone } => {
+            let rgb = state.lock();
+            if let Some(ref controller) = rgb.rgb_controller {
+                match controller.lock().ping(&device_id, zone) {
+                    Ok(()) => IpcResponse::ok(serde_json::json!({ "pinged": true })),
+                    Err(e) => IpcResponse::error(format!("{e}")),
+                }
+            } else {
+                IpcResponse::error("RGB controller not initialized")
+            }
+        }
 
         IpcRequest::GetLcdTemplates => super::templates::get(state),
         IpcRequest::SetLcdTemplates { templates } => super::templates::set(state, tx, templates),

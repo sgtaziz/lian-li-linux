@@ -275,6 +275,10 @@ pub trait RgbDevice: Send + Sync {
     fn stop_merge_lighting(&self) -> Result<()> {
         anyhow::bail!("Merge lighting not supported by this device")
     }
+
+    fn ping(&self, _zone: u8) -> Result<()> {
+        anyhow::bail!("Ping not supported by this device")
+    }
 }
 
 /// Blanket forwarding impl so any `Arc<T>` can be used as an `RgbDevice`
@@ -327,5 +331,8 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn stop_merge_lighting(&self) -> Result<()> {
         (**self).stop_merge_lighting()
+    }
+    fn ping(&self, zone: u8) -> Result<()> {
+        (**self).ping(zone)
     }
 }

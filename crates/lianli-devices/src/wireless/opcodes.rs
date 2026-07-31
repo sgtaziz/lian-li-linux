@@ -1,6 +1,8 @@
 use super::controller::WirelessController;
 use super::convergence::AckSignal;
-use super::{RF_217_CLOSE_WIFI, RF_DATA_SIZE, RF_REBOOT_LCD, RF_SELECT, RF_SEND_PIC};
+use super::{
+    RF_217_CLOSE_WIFI, RF_DATA_SIZE, RF_REBOOT_LCD, RF_SELECT, RF_SELECTED_GROUP, RF_SEND_PIC,
+};
 use anyhow::{bail, Context, Result};
 use lianli_transport::usb::USB_TIMEOUT;
 use std::time::Duration;
@@ -10,6 +12,34 @@ const PIC_CHUNK_SIZE: usize = 220;
 const PIC_TERMINATOR: u8 = 0xFF;
 
 impl WirelessController {
+    pub fn selected_group(&self, mac: &[u8; 6]) -> Result<()> {
+        let device = self
+            .device_by_mac(mac)
+            .context("device not found for selected group")?;
+        let master_mac = *self.master_mac.lock();
+        let master_ch = *self.master_channel.lock();
+        let target_cmd_seq = self.bump_target_cmd_seq(mac, device.cmd_seq);
+
+        let mut rf_data = vec![0u8; RF_DATA_SIZE];
+        rf_data[0] = RF_SELECT;
+        rf_data[1] = RF_SELECTED_GROUP;
+        rf_data[2..8].copy_from_slice(&device.mac);
+        rf_data[8..14].copy_from_slice(&master_mac);
+        rf_data[14] = device.rx_type;
+        rf_data[15] = master_ch;
+        rf_data[17] = target_cmd_seq;
+
+        self.enqueue_rf_command(
+            &device,
+            rf_data,
+            AckSignal::CmdSeq(target_cmd_seq),
+            "selected group".to_string(),
+        );
+
+        debug!("Selected group: {}", device.mac_str());
+        Ok(())
+    }
+
     pub fn reboot_lcd_group(&self, mac: &[u8; 6]) -> Result<()> {
         let device = self
             .device_by_mac(mac)

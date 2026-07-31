@@ -6,6 +6,7 @@ import type { RgbDeviceCapabilities } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
+import { useIpc } from "@/composables/useIpc";
 import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
 
 const props = defineProps<{ cap: RgbDeviceCapabilities }>();
@@ -14,6 +15,11 @@ const rgb = useRgbStore();
 const config = useConfigStore();
 const devices = useDevicesStore();
 const dialog = useDialog();
+const ipc = useIpc();
+
+async function ping() {
+  await ipc.request("PingDevice", { device_id: props.cap.device_id, zone: 0 });
+}
 
 const devConfig = computed(() => config.rgbDeviceConfig(props.cap.device_id));
 const device = computed(() => devices.byId(props.cap.device_id));
@@ -130,6 +136,7 @@ const summary = computed(() =>
         <span class="name">{{ cap.device_name }}</span>
         <span class="muted">{{ summary }}</span>
       </div>
+      <n-button size="tiny" quaternary @click.stop="ping">Ping</n-button>
     </div>
 
     <div v-if="expanded" class="body">

@@ -189,4 +189,8 @@ impl RgbDevice for TlFanPortDevice {
         debug!("Set MB RGB sync (all ports): enabled={enabled}");
         Ok(())
     }
+
+    fn ping(&self, _zone: u8) -> Result<()> {
+        self.controller.test_port_light(self.port)
+    }
 }

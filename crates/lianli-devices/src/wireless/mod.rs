@@ -49,6 +49,7 @@ const USB_CMD_GET_MAC: u8 = 0x11;
 
 const RF_SELECT: u8 = 0x12;
 const RF_PWM_CMD: u8 = 0x10;
+const RF_SELECTED_GROUP: u8 = 0x12;
 const RF_CLOCK_SYNC: u8 = 0x14;
 const RF_REBOOT_LCD: u8 = 0x16;
 const RF_AIO_SWITCH_WIRELESS: u8 = 0x19;

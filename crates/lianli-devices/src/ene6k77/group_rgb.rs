@@ -205,4 +205,48 @@ impl RgbDevice for Ene6k77GroupDevice {
             _ => self.controller.set_merge_order([0, 1, 2, 3]),
         }
     }
+
+    fn ping(&self, _zone: u8) -> Result<()> {
+        let g = self.group & 0x0F;
+        match self.controller.model {
+            Ene6k77Model::SlFan
+            | Ene6k77Model::SlRedragon
+            | Ene6k77Model::SlV2Fan
+            | Ene6k77Model::SlV2aFan => {
+                self.controller
+                    .send_feature(&[REPORT_ID, 0x10 | g, 0x11, 0xFF, 0x00, 0x02])?;
+            }
+            Ene6k77Model::AlFan => {
+                self.controller.send_feature(&[
+                    REPORT_ID,
+                    0x10 | ((g * 2) & 0xF),
+                    0x34,
+                    0xFF,
+                    0x00,
+                    0x02,
+                ])?;
+            }
+            Ene6k77Model::SlInfinity => {
+                self.controller.send_feature(&[
+                    REPORT_ID,
+                    0x10 | ((g * 2) & 0xF),
+                    0x3E,
+                    0x00,
+                    0x00,
+                    0x02,
+                ])?;
+            }
+            Ene6k77Model::AlV2Fan => {
+                self.controller.send_feature(&[
+                    REPORT_ID,
+                    0x10 | ((g * 2) & 0xF),
+                    0x36,
+                    0x00,
+                    0x00,
+                    0x02,
+                ])?;
+            }
+        }
+        Ok(())
+    }
 }

@@ -131,6 +131,10 @@ pub enum IpcRequest {
         device_id: String,
         brightness: u8,
     },
+    PingDevice {
+        device_id: String,
+        zone: u8,
+    },
     RebootWirelessLcd {
         device_id: String,
     },

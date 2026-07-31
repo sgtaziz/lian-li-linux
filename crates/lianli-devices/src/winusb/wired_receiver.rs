@@ -658,6 +658,10 @@ impl RgbDevice for WiredReceiverController {
         drop(buf);
         self.send_rgb_frame(&frame)
     }
+
+    fn ping(&self, _zone: u8) -> Result<()> {
+        self.selected_group()
+    }
 }
 
 fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {

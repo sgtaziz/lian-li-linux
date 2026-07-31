@@ -477,6 +477,20 @@ impl RgbController {
         self.openrgb_active
     }
 
+    pub fn ping(&self, device_id: &str, zone: u8) -> anyhow::Result<()> {
+        if let Some(dev) = self.wired.get(device_id) {
+            dev.ping(zone)?;
+            return Ok(());
+        }
+        if let (Some(ref wireless), Some(state)) =
+            (&self.wireless, self.wireless_state.get(device_id))
+        {
+            wireless.selected_group(&state.mac)?;
+            return Ok(());
+        }
+        anyhow::bail!("RGB device not found: {device_id}");
+    }
+
     /// Re-push the last-applied OpenRGB direct colors to all devices.
     /// Used after fan PWM updates disrupt the device's RGB state.
     pub fn resync_openrgb(&self) {
