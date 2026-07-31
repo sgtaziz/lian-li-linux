@@ -31,8 +31,14 @@ const CMD_GET_PRODUCT_INFO: u8 = 61;
 const CMD_READ_SERIAL: u8 = 62;
 const CMD_WRITE_SERIAL: u8 = 63;
 const CMD_LCD_CONTROL: u8 = 64;
-const CMD_WRITE_JPG: u8 = 65;
-const CMD_WRITE_SYNC_JPG: u8 = 70;
+const CMD_WRITE_JPG: u8 = 0x41;
+#[allow(dead_code)]
+const CMD_WRITE_AVI: u8 = 0x45;
+#[allow(dead_code)]
+const CMD_WRITE_BOOT_AVI: u8 = 0x47;
+#[allow(dead_code)]
+const CMD_WRITE_BOOT_JPG: u8 = 0x48;
+const CMD_WRITE_SYNC_JPG: u8 = 0x46;
 
 /// LCD control mode.
 #[derive(Debug, Clone, Copy)]
@@ -280,6 +286,12 @@ impl TlLcdDevice {
             if read_response {
                 dev.read_timeout(&mut ack_buf, READ_TIMEOUT_MS)
                     .context("TLLCD: read packet ack")?;
+                if ack_buf.len() > 1 && ack_buf[1] != cmd {
+                    anyhow::bail!(
+                        "TLLCD: ack mismatch (expected 0x{cmd:02x}, got 0x{:02x})",
+                        ack_buf[1]
+                    );
+                }
             }
 
             offset += chunk_len;
@@ -459,27 +471,33 @@ fn payload_length(pkt: &[u8]) -> usize {
 /// hasn't been claimed by us yet.
 fn looks_like_unique_serial(s: &str) -> bool {
     let s = s.trim();
-    if let Some(hex) = s.strip_prefix("lcd-") {
-        hex.len() >= 16 && hex.chars().all(|c| c.is_ascii_hexdigit())
-    } else {
-        false
-    }
+    s.len() == 36
+        && s.as_bytes()[8] == b'-'
+        && s.as_bytes()[13] == b'-'
+        && s.as_bytes()[18] == b'-'
+        && s.as_bytes()[23] == b'-'
 }
 
-/// Build a UUID-like serial fitting in 32 ASCII bytes.
 fn generate_unique_serial() -> String {
+    if let Ok(bytes) = std::fs::read("/proc/sys/kernel/random/uuid") {
+        let s = String::from_utf8_lossy(&bytes).trim().to_string();
+        if looks_like_unique_serial(&s) {
+            return s;
+        }
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let mut entropy: u64 = nanos as u64;
-    if let Ok(bytes) = std::fs::read("/proc/sys/kernel/random/uuid") {
-        for b in bytes.iter().take(32) {
-            entropy = entropy.wrapping_mul(1099511628211).wrapping_add(*b as u64);
-        }
-    }
-    format!("lcd-{:016x}{:08x}", entropy, nanos as u32)
+    format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        nanos as u32,
+        (nanos >> 16) as u16,
+        (nanos >> 32) as u16,
+        (nanos >> 48) as u16,
+        nanos as u64 & 0xFFFFFFFFFFFF
+    )
 }
 
 /// Driver entry point for the TL LCD fan.

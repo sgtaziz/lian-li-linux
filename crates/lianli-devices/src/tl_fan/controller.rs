@@ -530,7 +530,7 @@ impl FanDevice for TlFanController {
     }
 
     fn per_fan_control(&self) -> bool {
-        false
+        true
     }
 
     fn supports_mb_sync(&self) -> bool {
