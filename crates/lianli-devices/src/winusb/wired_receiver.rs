@@ -63,6 +63,7 @@ impl ReceiverParams {
 /// Status response from GetInfo (0x12).
 pub struct ReceiverStatus {
     pub fan_count: u8,
+    pub is_inf_right_attach: bool,
     pub fan_rpm: [u16; 4],
     pub fan_pwm: [u8; 4],
     pub firmware: Option<String>,
@@ -72,6 +73,9 @@ pub struct WiredReceiverController {
     transport: Mutex<RusbBulk>,
     params: ReceiverParams,
     fan_count: Mutex<u8>,
+    /// True when this receiver chains right-to-left (SL-INF daisy-chain with
+    /// `fan_num >= 10`). Per-fan PWM/RGB ordering must be reversed on send.
+    is_inf_right_attach: Mutex<bool>,
     #[allow(dead_code)]
     firmware: Mutex<Option<String>>,
     led_buffer: Mutex<Vec<[u8; 3]>>,
@@ -94,13 +98,24 @@ impl WiredReceiverController {
             transport: Mutex::new(transport),
             params,
             fan_count: Mutex::new(4),
+            is_inf_right_attach: Mutex::new(false),
             firmware: Mutex::new(None),
             led_buffer: Mutex::new(Vec::new()),
         };
 
         if let Ok(status) = ctrl.get_info() {
             *ctrl.fan_count.lock() = status.fan_count.max(1).min(4);
-            info!("{}: {} fans detected", params.name, status.fan_count);
+            *ctrl.is_inf_right_attach.lock() = status.is_inf_right_attach;
+            info!(
+                "{}: {} fans detected{}",
+                params.name,
+                status.fan_count,
+                if status.is_inf_right_attach {
+                    " (SL-INF right-attach)"
+                } else {
+                    ""
+                }
+            );
         }
 
         let total = ctrl.total_leds();
@@ -137,7 +152,13 @@ impl WiredReceiverController {
         tx[0] = CMD_GET_INFO;
         let rx = self.send_and_read(&tx)?;
 
-        let fan_count = rx[20].min(4);
+        // fan_num >= 10 flags SL-INF right-attach; actual count is fan_num - 10.
+        let raw_fan_count = rx[20];
+        let (fan_count, is_inf_right_attach) = if raw_fan_count >= 10 {
+            (raw_fan_count.saturating_sub(10).min(4), true)
+        } else {
+            (raw_fan_count.min(4), false)
+        };
         let mut fan_rpm = [0u16; 4];
         for i in 0..4 {
             let off = 29 + i * 2;
@@ -147,6 +168,7 @@ impl WiredReceiverController {
 
         Ok(ReceiverStatus {
             fan_count,
+            is_inf_right_attach,
             fan_rpm,
             fan_pwm,
             firmware: None,
@@ -170,6 +192,12 @@ impl WiredReceiverController {
 
     /// SetFansPWM (0x13) with per-device PWM floor.
     pub fn set_fans_pwm(&self, duties: [u8; 4]) -> Result<()> {
+        let fan_count = *self.fan_count.lock() as usize;
+        let right_attach = *self.is_inf_right_attach.lock();
+        let mut duties = duties;
+        if right_attach {
+            reverse_fan_slots(&mut duties, fan_count);
+        }
         let mut tx = [0u8; PACKET_SIZE];
         tx[0] = CMD_SET_FANS_PWM;
         for i in 0..4 {
@@ -222,12 +250,39 @@ impl WiredReceiverController {
 
     /// Send a full RGB frame (all fans' LEDs) using the per-PID transport.
     pub fn send_rgb_frame(&self, colors: &[[u8; 3]]) -> Result<()> {
-        let mut raw = Vec::with_capacity(colors.len() * 3);
-        for c in colors {
+        self.send_rgb_frame_ext(colors, 0, 1, 0, 20, false)
+    }
+
+    /// Send a full RGB frame with explicit flash-save parameters (TL Flex).
+    pub fn send_rgb_frame_ext(
+        &self,
+        colors: &[[u8; 3]],
+        effect_index: u32,
+        total_frame: u16,
+        total_sub_frame: u16,
+        interval_ms: u16,
+        is_outer_match_max: bool,
+    ) -> Result<()> {
+        let right_attach = *self.is_inf_right_attach.lock();
+        let ordered = if right_attach {
+            reverse_per_fan_chunks(colors, self.params.leds_per_fan as usize)
+        } else {
+            colors.to_vec()
+        };
+        let mut raw = Vec::with_capacity(ordered.len() * 3);
+        for c in &ordered {
             raw.extend_from_slice(c);
         }
         if self.params.compresses_rgb {
-            self.send_rgb_flash_save(&raw, colors.len())?;
+            self.send_rgb_flash_save(
+                &raw,
+                ordered.len(),
+                effect_index,
+                total_frame,
+                total_sub_frame,
+                interval_ms,
+                is_outer_match_max,
+            )?;
         } else {
             self.send_rgb_stream(&raw)?;
         }
@@ -265,23 +320,30 @@ impl WiredReceiverController {
     }
 
     /// TL Flex: tinyuz-compress, upload via 0x18, commit via 0x19.
-    fn send_rgb_flash_save(&self, raw: &[u8], led_total: usize) -> Result<()> {
+    fn send_rgb_flash_save(
+        &self,
+        raw: &[u8],
+        led_total: usize,
+        effect_index: u32,
+        total_frame: u16,
+        total_sub_frame: u16,
+        interval_ms: u16,
+        is_outer_match_max: bool,
+    ) -> Result<()> {
         let compressed = crate::tinyuz::compress(raw).context("compressing RGB data")?;
 
         let mut hdr = [0u8; PACKET_SIZE];
         hdr[0] = CMD_SEND_LIGHT_PACKAGE;
         hdr[1] = 0x00;
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u32;
-        hdr[16..20].copy_from_slice(&ts.to_be_bytes());
+        hdr[16..20].copy_from_slice(&effect_index.to_be_bytes());
         hdr[22..26].copy_from_slice(&(compressed.len() as u32).to_be_bytes());
-        hdr[27] = 0; // total_frame hi (1 frame)
-        hdr[28] = 1; // total_frame lo
+        hdr[26] = 0;
+        hdr[27..29].copy_from_slice(&total_frame.to_be_bytes());
         hdr[29] = led_total as u8;
-        hdr[34] = 0; // interval hi
-        hdr[35] = 20; // interval lo
+        hdr[34..36].copy_from_slice(&interval_ms.to_be_bytes());
+        hdr[36] = ((interval_ms as u32) * 100 % 100) as u8;
+        hdr[39] = if is_outer_match_max { 1 } else { 0 };
+        hdr[40..42].copy_from_slice(&total_sub_frame.to_be_bytes());
 
         let transport = self.transport.lock();
         transport.write(&hdr, LCD_WRITE_TIMEOUT)?;
@@ -310,9 +372,10 @@ impl WiredReceiverController {
         let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
 
         debug!(
-            "{}: flash-saved {led_total} LEDs ({} compressed bytes) via 0x18+0x19",
+            "{}: flash-saved {led_total} LEDs ({} compressed bytes, idx={:#010x}, frames={total_frame}, interval={interval_ms}ms) via 0x18+0x19",
             self.params.name,
-            compressed.len()
+            compressed.len(),
+            effect_index,
         );
         Ok(())
     }
@@ -420,12 +483,42 @@ impl RgbDevice for WiredReceiverController {
 }
 
 fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {
-    let scale = (brightness.min(4) as f32) / 4.0;
+    let scale = (lianli_shared::rgb::brightness_scale(brightness) as f32) / 4.0;
     [
         (r as f32 * scale).round() as u8,
         (g as f32 * scale).round() as u8,
         (b as f32 * scale).round() as u8,
     ]
+}
+
+/// Reverse per-fan slot ordering for SL-INF right-attach daisy-chains.
+fn reverse_fan_slots<T: Copy>(slots: &mut [T; 4], fan_count: usize) {
+    let n = fan_count.min(4);
+    if n > 1 {
+        slots[..n].reverse();
+    }
+}
+
+/// Reverse the per-fan chunk order in a flat LED color buffer for SL-INF
+/// right-attach daisy-chains (chain wires right-to-left).
+fn reverse_per_fan_chunks(colors: &[[u8; 3]], leds_per_fan: usize) -> Vec<[u8; 3]> {
+    if leds_per_fan == 0 {
+        return colors.to_vec();
+    }
+    let total = colors.len();
+    let fan_count = total.div_ceil(leds_per_fan);
+    if fan_count <= 1 {
+        return colors.to_vec();
+    }
+    let mut out = Vec::with_capacity(total);
+    for fan_idx in (0..fan_count).rev() {
+        let start = fan_idx * leds_per_fan;
+        let end = (start + leds_per_fan).min(total);
+        if start < end {
+            out.extend_from_slice(&colors[start..end]);
+        }
+    }
+    out
 }
 
 pub struct WiredReceiverDriver;

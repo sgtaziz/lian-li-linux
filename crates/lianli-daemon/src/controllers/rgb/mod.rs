@@ -629,6 +629,7 @@ fn effect_index_from_frames(frames: &[Vec<[u8; 3]>]) -> [u8; 4] {
 fn render_zone_color(effect: &RgbEffect, led_count: usize) -> Vec<[u8; 3]> {
     let color = match effect.mode {
         RgbMode::Off => [0, 0, 0],
+        _ if lianli_shared::rgb::is_brightness_off(effect.brightness) => [0, 0, 0],
         _ => {
             let base = effect.colors.first().copied().unwrap_or([255, 255, 255]);
             let scale = (effect.brightness as f32 / 4.0).clamp(0.0, 1.0);

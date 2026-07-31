@@ -1,20 +1,19 @@
 use super::controller::WirelessController;
+use super::convergence::AckSignal;
 use super::discovery::DiscoveredDevice;
 use super::fan_type::WirelessFanType;
-use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, RF_PWM_CMD, RF_SELECT, USB_CMD_SEND_RF};
+use super::{RF_DATA_SIZE, RF_PWM_CMD, RF_SELECT};
 use anyhow::{Context, Result};
-use lianli_transport::usb::USB_TIMEOUT;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tracing::debug;
 
 // Wireless fans can revert to hardware-default speed if PWM traffic goes quiet.
 // Keep sending steady-state targets periodically even when the reported PWM
 // already matches the requested value.
-const PWM_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(1);
+const PWM_KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn pwm_last_sent() -> &'static Mutex<HashMap<[u8; 6], Instant>> {
     static LAST_SENT: OnceLock<Mutex<HashMap<[u8; 6], Instant>>> = OnceLock::new();
@@ -51,7 +50,7 @@ impl WirelessController {
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
             ))?;
 
-        let seq_index = devices
+        let slot_index = devices
             .iter()
             .filter(|d| d.master_mac == master_mac && d.device_type != 0xFF)
             .position(|d| d.mac == *mac)
@@ -62,6 +61,9 @@ impl WirelessController {
 
         let mut pwm = *fan_pwm;
         apply_pwm_constraints(&mut pwm, &device);
+        if device.is_inf_right_attach {
+            reverse_fan_order(&mut pwm, device.fan_count as usize);
+        }
 
         let needs_send = pwm
             .iter()
@@ -85,28 +87,10 @@ impl WirelessController {
         rf_data[8..14].copy_from_slice(&master_mac);
         rf_data[14] = device.rx_type;
         rf_data[15] = master_ch;
-        rf_data[16] = seq_index;
+        rf_data[16] = slot_index;
         rf_data[17..21].copy_from_slice(&pwm);
 
-        self.tx_recover(|handle| {
-            for chunk_idx in 0..RF_CHUNKS as u8 {
-                let mut packet = vec![0u8; 64];
-                packet[0] = USB_CMD_SEND_RF;
-                packet[1] = chunk_idx;
-                packet[2] = device.channel;
-                packet[3] = device.rx_type;
-
-                let start = chunk_idx as usize * RF_CHUNK_SIZE;
-                let end = start + RF_CHUNK_SIZE;
-                packet[4..64].copy_from_slice(&rf_data[start..end]);
-
-                handle
-                    .write(&packet, USB_TIMEOUT)
-                    .context("sending fan speed RF packet")?;
-                thread::sleep(Duration::from_millis(1));
-            }
-            Ok(())
-        })?;
+        self.enqueue_rf_command(&device, rf_data, AckSignal::Pwm(pwm), "fan PWM");
 
         pwm_last_sent().lock().insert(*mac, Instant::now());
 
@@ -160,5 +144,14 @@ fn apply_pwm_constraints(pwm: &mut [u8; 4], device: &DiscoveredDevice) {
                 _ => {}
             }
         }
+    }
+}
+
+/// Reverse per-fan slot ordering for SL-INF right-attach daisy-chains.
+/// Slot 0 (leftmost in user space) becomes the rightmost slot on the wire.
+fn reverse_fan_order<T: Copy>(slots: &mut [T; 4], fan_count: usize) {
+    let n = fan_count.min(4);
+    if n > 1 {
+        slots[..n].reverse();
     }
 }

@@ -20,7 +20,10 @@ const fanCount = computed(() => props.device.fan_count ?? 0);
 const hasPump = computed(() => props.device.has_pump ?? false);
 const hasFan = computed(() => props.device.has_fan ?? false);
 
-const pumpRpm = computed(() => devices.fanRpms(props.device.device_id)[0] ?? null);
+const pumpRpm = computed(() => {
+  const rpms = devices.fanRpms(props.device.device_id);
+  return rpms.length > 0 ? rpms[rpms.length - 1] : null;
+});
 const coolant = computed(() => devices.coolantTemp(props.device.device_id));
 
 const pumpMode = computed(() => speedMode(aio.value.pump_target_rpm));

@@ -284,6 +284,9 @@ impl StrimerPlusController {
     }
 
     fn map_brightness(brightness: u8) -> u8 {
+        if lianli_shared::rgb::is_brightness_off(brightness) {
+            return 255;
+        }
         match brightness {
             0 => 4,
             1 => 3,

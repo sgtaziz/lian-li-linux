@@ -326,7 +326,7 @@ impl TlFanController {
         payload[0] = 0x00;
         payload[1] = group;
         payload[2] = mode_byte;
-        payload[3] = effect.brightness.min(4);
+        payload[3] = lianli_shared::rgb::brightness_scale(effect.brightness);
         payload[4] = effect.speed.min(4);
 
         let color_count = effect.colors.len().min(4);
@@ -381,7 +381,7 @@ impl TlFanController {
         payload[0] = (port << 4) | (sync as u8);
         payload[1] = (port << 4) | (fan_index & 0x0F);
         payload[2] = mode_byte;
-        payload[3] = effect.brightness.min(4);
+        payload[3] = lianli_shared::rgb::brightness_scale(effect.brightness);
         payload[4] = effect.speed.min(4);
 
         let color_count = effect.colors.len().min(4);

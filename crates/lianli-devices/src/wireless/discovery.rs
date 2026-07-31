@@ -19,6 +19,10 @@ pub struct DiscoveredDevice {
     pub rx_type: u8,
     pub device_type: u8,
     pub fan_count: u8,
+    /// True when the bind group chains right-to-left (SL-INF daisy-chain
+    /// with `fan_num >= 10` reported). Per-fan PWM/RGB ordering must be
+    /// reversed before sending.
+    pub is_inf_right_attach: bool,
     pub fan_types: [u8; 4],
     pub fan_rpms: [u16; 4],
     pub current_pwm: [u8; 4],
@@ -124,7 +128,13 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
 
     let channel = data[12];
     let rx_type = data[13];
-    let fan_count = data[19].min(4);
+    // fan_num >= 10 flags SL-INF right-attach (chains right-to-left).
+    let raw_fan_count = data[19];
+    let (fan_count, is_inf_right_attach) = if raw_fan_count >= 10 {
+        (raw_fan_count.saturating_sub(10).min(4), true)
+    } else {
+        (raw_fan_count.min(4), false)
+    };
 
     let mut fan_types = [0u8; 4];
     fan_types.copy_from_slice(&data[24..28]);
@@ -171,6 +181,7 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
         rx_type,
         device_type,
         fan_count,
+        is_inf_right_attach,
         fan_types,
         fan_rpms,
         current_pwm,

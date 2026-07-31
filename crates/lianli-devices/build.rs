@@ -32,9 +32,13 @@ fn main() {
         build.file(src);
     }
 
+    // Decompressor (used for round-trip validation tests)
+    build.file(tinyuz.join("decompress/tuz_dec.c"));
+
     build.compile("tinyuz");
 
     // Re-run if vendor sources change
     println!("cargo:rerun-if-changed=../../vendor/tuz_wrapper.cpp");
     println!("cargo:rerun-if-changed=../../vendor/tinyuz/compress/");
+    println!("cargo:rerun-if-changed=../../vendor/tinyuz/decompress/");
 }

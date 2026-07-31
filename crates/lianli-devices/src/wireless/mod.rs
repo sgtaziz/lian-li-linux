@@ -4,6 +4,7 @@ pub mod adapters;
 mod aio;
 mod bind;
 mod controller;
+mod convergence;
 mod discovery;
 mod fan_speed;
 mod fan_type;

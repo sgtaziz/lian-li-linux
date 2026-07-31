@@ -553,6 +553,25 @@ fn default_brightness() -> u8 {
     4
 }
 
+/// Sentinel brightness value indicating the LEDs should be fully off. Distinct
+/// from `0` (Lowest) because the firmware uses a dedicated off byte
+/// (ENE6K77: `0x08`, Strimer: `0xFF`).
+pub const BRIGHTNESS_OFF: u8 = 255;
+
+pub fn is_brightness_off(brightness: u8) -> bool {
+    brightness == BRIGHTNESS_OFF
+}
+
+/// Clamp a brightness value to the 0-4 firmware scale. The `Off` sentinel
+/// collapses to 0 for devices without a dedicated off byte.
+pub fn brightness_scale(brightness: u8) -> u8 {
+    if is_brightness_off(brightness) {
+        0
+    } else {
+        brightness.min(4)
+    }
+}
+
 impl Default for RgbEffect {
     fn default() -> Self {
         Self {

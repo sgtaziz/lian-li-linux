@@ -108,11 +108,12 @@ impl Slv3LcdDevice {
     /// Set LCD brightness (0-100). Uses legacy DES path opcode 0x0E.
     pub fn set_brightness(&mut self, builder: &mut PacketBuilder, brightness: u8) -> Result<()> {
         self.send_init(builder)?;
-        let header = builder.brightness_header(brightness);
+        let mapped = slv3_brightness_lut(brightness);
+        let header = builder.brightness_header(mapped);
         self.transport.write(&header, LCD_WRITE_TIMEOUT)?;
         let mut buf = [0u8; 511];
         let _ = self.transport.read(&mut buf, USB_TIMEOUT);
-        debug!("SLV3/TLV2 LCD brightness: {brightness}");
+        debug!("SLV3/TLV2 LCD brightness: {brightness} -> {mapped}");
         Ok(())
     }
 
@@ -151,5 +152,55 @@ impl Slv3LcdDevice {
         let mut buf = [0u8; 511];
         let _ = self.transport.read(&mut buf, USB_TIMEOUT);
         Ok(())
+    }
+}
+
+/// Brightness LUT for SLV3/TLV2 wireless LCD firmware. Maps 0–100 percent to
+/// the expected byte via 5 anchor points with linear interpolation.
+fn slv3_brightness_lut(value: u8) -> u8 {
+    const ANCHORS: &[(u8, u8)] = &[(0, 0), (25, 10), (50, 30), (75, 40), (100, 100)];
+    let v = value.min(100);
+    if let Ok(idx) = ANCHORS.binary_search_by_key(&v, |&(in_v, _)| in_v) {
+        return ANCHORS[idx].1;
+    }
+    let pos = ANCHORS
+        .iter()
+        .position(|&(in_v, _)| in_v > v)
+        .unwrap_or(ANCHORS.len());
+    let (lo_in, lo_out) = ANCHORS[pos - 1];
+    let (hi_in, hi_out) = ANCHORS[pos];
+    let span = (hi_in - lo_in) as u32;
+    if span == 0 {
+        return lo_out;
+    }
+    let num = (v - lo_in) as u32;
+    let step_lo = (hi_out as u32).saturating_sub(lo_out as u32);
+    lo_out.saturating_add(((num * step_lo + span / 2) / span) as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slv3_brightness_lut;
+
+    #[test]
+    fn lut_anchors_match_vendor() {
+        assert_eq!(slv3_brightness_lut(0), 0);
+        assert_eq!(slv3_brightness_lut(25), 10);
+        assert_eq!(slv3_brightness_lut(50), 30);
+        assert_eq!(slv3_brightness_lut(75), 40);
+        assert_eq!(slv3_brightness_lut(100), 100);
+    }
+
+    #[test]
+    fn lut_interpolates_linearly() {
+        // Between 25 -> 10 and 50 -> 30: midpoint ~37 -> 20
+        assert_eq!(slv3_brightness_lut(37), 20);
+        // Between 50 -> 30 and 75 -> 40: midpoint ~62 -> 35
+        assert_eq!(slv3_brightness_lut(62), 35);
+    }
+
+    #[test]
+    fn lut_clamps_above_100() {
+        assert_eq!(slv3_brightness_lut(200), 100);
     }
 }

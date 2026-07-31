@@ -1,16 +1,14 @@
 use super::controller::WirelessController;
-use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, RF_MB_LIGHT_SYNC, RF_SELECT, USB_CMD_SEND_RF};
+use super::convergence::AckSignal;
+use super::{RF_DATA_SIZE, RF_MB_LIGHT_SYNC, RF_SELECT};
 use anyhow::{Context, Result};
-use lianli_transport::usb::USB_TIMEOUT;
-use std::thread;
-use std::time::Duration;
 use tracing::debug;
 
 impl WirelessController {
     /// Enable/disable motherboard ARGB sync for a wireless-bound device.
     /// When enabled, the device reads from its physical ARGB header instead
-    /// of playing host-pushed effects. Sent as a burst of identical RF packets
-    /// for reliability (one-shot, no continuous re-stream needed).
+    /// of playing host-pushed effects. Convergence-tracked: the loop re-sends
+    /// up to 10 times then force-acks.
     pub fn set_mb_rgb_sync(&self, mac: &[u8; 6], enabled: bool) -> Result<()> {
         let devices = self.discovered_devices.lock();
         let master_mac = *self.master_mac.lock();
@@ -30,14 +28,7 @@ impl WirelessController {
             .unwrap_or(0);
         drop(devices);
 
-        let seq = {
-            let s = device.cmd_seq.wrapping_add(1);
-            if s == 0 {
-                1
-            } else {
-                s
-            }
-        };
+        let target_cmd_seq = self.bump_target_cmd_seq(mac, device.cmd_seq);
 
         let mut rf_data = vec![0u8; RF_DATA_SIZE];
         rf_data[0] = RF_SELECT;
@@ -47,33 +38,21 @@ impl WirelessController {
         rf_data[14] = device.rx_type;
         rf_data[15] = master_ch;
         rf_data[16] = slave_index;
-        rf_data[17] = seq;
+        rf_data[17] = target_cmd_seq;
         rf_data[20] = if enabled { 1 } else { 0 };
 
-        self.tx_recover(|handle| {
-            for repeat in 0..10u8 {
-                for chunk_idx in 0..RF_CHUNKS as u8 {
-                    let mut packet = [0u8; 64];
-                    packet[0] = USB_CMD_SEND_RF;
-                    packet[1] = chunk_idx;
-                    packet[2] = device.channel;
-                    packet[3] = device.rx_type;
-                    let start = chunk_idx as usize * RF_CHUNK_SIZE;
-                    packet[4..].copy_from_slice(&rf_data[start..start + RF_CHUNK_SIZE]);
-                    handle.write(&packet, USB_TIMEOUT)?;
-                    thread::sleep(Duration::from_millis(1));
-                }
-                if repeat < 9 {
-                    thread::sleep(Duration::from_millis(300));
-                }
-            }
-            Ok(())
-        })?;
+        self.enqueue_rf_command(
+            &device,
+            rf_data,
+            AckSignal::CmdSeq(target_cmd_seq),
+            format!("MB RGB sync {}", if enabled { "on" } else { "off" }),
+        );
 
         debug!(
-            "MB RGB sync {}: {}",
+            "MB RGB sync {}: {} (target_cmd_seq={})",
             if enabled { "enabled" } else { "disabled" },
             device.mac_str(),
+            target_cmd_seq,
         );
         Ok(())
     }

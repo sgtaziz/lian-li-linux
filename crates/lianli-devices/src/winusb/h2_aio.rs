@@ -229,7 +229,7 @@ impl H2AioController {
 }
 
 fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {
-    let scale = (brightness.min(4) as f32) / 4.0;
+    let scale = (lianli_shared::rgb::brightness_scale(brightness) as f32) / 4.0;
     [
         (r as f32 * scale).round() as u8,
         (g as f32 * scale).round() as u8,

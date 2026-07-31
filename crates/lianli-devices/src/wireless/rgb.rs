@@ -86,6 +86,13 @@ impl WirelessController {
 
         let master_mac = *self.master_mac.lock();
 
+        let raw_payload = if device.is_inf_right_attach {
+            reverse_per_fan_chunks(raw_rgb, led_num as usize, device.fan_count as usize)
+        } else {
+            raw_rgb.to_vec()
+        };
+        let raw_rgb = raw_payload.as_slice();
+
         let compressed = crate::tinyuz::compress(raw_rgb).context("failed to compress RGB data")?;
 
         const LZO_RF_VALID_LEN: usize = 220;
@@ -158,4 +165,29 @@ impl WirelessController {
         );
         Ok(())
     }
+}
+
+/// Reverse the per-fan chunk order in a flat RGB byte buffer. SL-INF
+/// daisy-chains wire right-to-left, so fan 0 in user space must land on
+/// the highest fan index on the wire.
+fn reverse_per_fan_chunks(raw_rgb: &[u8], leds_per_fan: usize, fan_count: usize) -> Vec<u8> {
+    if leds_per_fan == 0 || fan_count <= 1 {
+        return raw_rgb.to_vec();
+    }
+    let bytes_per_fan = leds_per_fan * 3;
+    let mut out = Vec::with_capacity(raw_rgb.len());
+    let total_chunks = raw_rgb.len().div_ceil(bytes_per_fan);
+    for fan_idx in (0..fan_count).rev() {
+        let start = fan_idx * bytes_per_fan;
+        let end = (start + bytes_per_fan).min(raw_rgb.len());
+        if start < end {
+            out.extend_from_slice(&raw_rgb[start..end]);
+        }
+    }
+    // Append any trailing bytes beyond the last complete fan slot unchanged.
+    let consumed = fan_count.min(total_chunks) * bytes_per_fan;
+    if consumed < raw_rgb.len() {
+        out.extend_from_slice(&raw_rgb[consumed..]);
+    }
+    out
 }

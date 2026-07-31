@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 /// PIDs known to have buggy H264 implementations — forced to JPEG.
-const JPEG_FORCE_PIDS: &[u16] = &[0xAD11]; // Lancool 207
+/// Both rev1 (0xACD1) and rev2 (0xAD11) Lancool 207 share the silicon bug.
+const JPEG_FORCE_PIDS: &[u16] = &[0xACD1, 0xAD11];
 
 pub(super) fn spawn_worker(pid: u16) -> Result<DesktopDisplayHandle> {
     ensure_ffmpeg_initialized();

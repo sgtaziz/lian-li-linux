@@ -7,7 +7,7 @@ import { useConfigStore } from "@/stores/config";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LedStrip from "@/components/rgb/LedStrip.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
-import { RGB_DIRECTIONS, RGB_SCOPES, modeLabel } from "@/constants";
+import { RGB_DIRECTIONS, RGB_SCOPES, RGB_BRIGHTNESS, modeLabel } from "@/constants";
 
 const props = defineProps<{
   deviceId: string;
@@ -115,8 +115,7 @@ function onSpeed(value: number) {
 }
 function onBrightness(value: number) {
   patchEffect({ brightness: value });
-}
-function onSwapLr(v: boolean) {
+}function onSwapLr(v: boolean) {
   props.zone.swap_lr = v;
   config.markDirty();
 }
@@ -229,13 +228,15 @@ const zoneLabel = computed(
           :max="4"
           @update:model-value="onSpeed"
         />
-        <LabeledSlider
-          label="Brightness"
-          :model-value="effect.brightness"
-          :min="0"
-          :max="4"
-          @update:model-value="onBrightness"
-        />
+        <div class="field">
+          <label class="muted">Brightness</label>
+          <n-select
+            size="small"
+            :value="effect.brightness"
+            :options="RGB_BRIGHTNESS"
+            @update:value="onBrightness"
+          />
+        </div>
       </div>
 
       <div v-if="showDirection" class="two-col">

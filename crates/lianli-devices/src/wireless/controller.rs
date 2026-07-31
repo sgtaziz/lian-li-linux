@@ -1,3 +1,4 @@
+use super::convergence::{PendingQueue, TargetSeqMap};
 use super::discovery::{poll_and_discover, DiscoveredDevice};
 use super::transport::{open_any, with_transport_recovery};
 use super::{
@@ -30,6 +31,11 @@ pub struct WirelessController {
     pub(super) fg_sync: Arc<AtomicBool>,
     pub(super) tx_failures: Arc<AtomicU32>,
     pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
+    /// Pending commands awaiting device ack, drained by the convergence loop.
+    pub(super) pending_commands: Option<PendingQueue>,
+    /// Per-device target `cmd_seq`; incremented per state-changing command.
+    pub(super) target_cmd_seqs: Option<TargetSeqMap>,
+    pub(super) convergence_thread: Option<JoinHandle<()>>,
 }
 
 impl Clone for WirelessController {
@@ -47,12 +53,17 @@ impl Clone for WirelessController {
             fg_sync: Arc::clone(&self.fg_sync),
             tx_failures: Arc::clone(&self.tx_failures),
             desired_effects: Arc::clone(&self.desired_effects),
+            pending_commands: self.pending_commands.clone(),
+            target_cmd_seqs: self.target_cmd_seqs.clone(),
+            convergence_thread: None,
         }
     }
 }
 
 impl WirelessController {
     pub fn new() -> Self {
+        let pending_commands: PendingQueue = Arc::new(Mutex::new(Default::default()));
+        let target_cmd_seqs: TargetSeqMap = Arc::new(Mutex::new(Default::default()));
         Self {
             tx: None,
             rx: None,
@@ -66,6 +77,9 @@ impl WirelessController {
             fg_sync: Arc::new(AtomicBool::new(false)),
             tx_failures: Arc::new(AtomicU32::new(0)),
             desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            pending_commands: Some(pending_commands),
+            target_cmd_seqs: Some(target_cmd_seqs),
+            convergence_thread: None,
         }
     }
 
@@ -271,6 +285,21 @@ impl WirelessController {
             }
             thread::sleep(Duration::from_millis(50));
         }
+
+        if let (Some(queue), Some(target_seqs)) =
+            (self.pending_commands.clone(), self.target_cmd_seqs.clone())
+        {
+            let conv_stop = self.poll_stop.clone();
+            let discovered = Arc::clone(&self.discovered_devices);
+            self.convergence_thread = Some(Self::spawn_convergence_loop(
+                Arc::clone(&tx),
+                queue,
+                target_seqs,
+                discovered,
+                conv_stop,
+            ));
+        }
+
         Ok(())
     }
 
@@ -510,7 +539,7 @@ impl WirelessController {
         Ok(())
     }
 
-    pub(super) fn next_seq_index(&self, device: &DiscoveredDevice) -> u8 {
+    pub(super) fn next_slot_index(&self, device: &DiscoveredDevice) -> u8 {
         let devices = self.discovered_devices.lock();
         let master_mac = *self.master_mac.lock();
         devices

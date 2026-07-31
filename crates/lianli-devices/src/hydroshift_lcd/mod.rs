@@ -16,7 +16,6 @@ mod controller;
 mod protocol;
 mod rgb;
 
-pub(crate) use controller::find_au_split;
 pub use controller::HydroShiftLcdController;
 pub use rgb::AioLcdRgbController;
 
@@ -80,9 +79,8 @@ impl AioLcdVariant {
     pub fn pump_envelope(&self) -> lianli_shared::aio::PumpEnvelope {
         use lianli_shared::aio::PumpEnvelope;
         match self {
-            Self::HydroShiftLcd | Self::Galahad2Lcd | Self::Galahad2Vision => {
-                PumpEnvelope::HYDROSHIFT_LCD
-            }
+            Self::HydroShiftLcd | Self::Galahad2Lcd => PumpEnvelope::HYDROSHIFT_LCD,
+            Self::Galahad2Vision => PumpEnvelope::GALAHAD2_VISION,
             Self::HydroShiftLcdRgb => PumpEnvelope::HYDROSHIFT_LCD_RGB,
             Self::HydroShiftLcdTl => PumpEnvelope::HYDROSHIFT_LCD_TL,
         }

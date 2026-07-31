@@ -265,7 +265,7 @@ impl Galahad2TrinityController {
         let mut payload = [0u8; 19];
         payload[0] = scope_byte;
         payload[1] = mode_byte;
-        payload[2] = effect.brightness.min(4);
+        payload[2] = lianli_shared::rgb::brightness_scale(effect.brightness);
         payload[3] = effect.speed.min(4);
 
         for (i, color) in effect.colors.iter().take(4).enumerate() {
@@ -317,7 +317,7 @@ impl Galahad2TrinityController {
 
         let mut payload = [0u8; 20];
         payload[0] = mode_byte;
-        payload[1] = effect.brightness.min(4);
+        payload[1] = lianli_shared::rgb::brightness_scale(effect.brightness);
         payload[2] = effect.speed.min(4);
 
         for (i, color) in effect.colors.iter().take(4).enumerate() {

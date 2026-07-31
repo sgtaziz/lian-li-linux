@@ -200,3 +200,14 @@ export const RGB_SCOPES: { value: import("@/types").RgbScope; label: string }[] 
   { value: "Inner", label: "Inner" },
   { value: "Outer", label: "Outer" },
 ];
+
+export const BRIGHTNESS_OFF = 255;
+
+export const RGB_BRIGHTNESS: { value: number; label: string }[] = [
+  { value: BRIGHTNESS_OFF, label: "Off" },
+  { value: 0, label: "Lowest" },
+  { value: 1, label: "Lower" },
+  { value: 2, label: "Normal" },
+  { value: 3, label: "Higher" },
+  { value: 4, label: "Highest" },
+];

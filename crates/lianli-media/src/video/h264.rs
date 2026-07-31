@@ -250,8 +250,9 @@ pub(super) fn encoder_codec_args_live(
         EncoderKind::Libx264 => {
             args.extend(["-preset".into(), "ultrafast".into()]);
             args.extend(["-tune".into(), "zerolatency".into()]);
-            args.extend(["-crf".into(), "23".into()]);
+            args.extend(["-b:v".into(), bitrate_str.into()]);
             args.extend(["-x264-params".into(), "bframes=0".into()]);
+            args.extend(["-threads".into(), "4".into()]);
         }
     }
 

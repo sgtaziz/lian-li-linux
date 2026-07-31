@@ -69,11 +69,48 @@ impl PumpEnvelope {
 
     // ── HydroShift LCD / Galahad2 LCD ──
 
-    /// HydroShift LCD base (PID 0x7398) / Galahad2 LCD (0x7391) / Vision (0x7395).
+    /// HydroShift LCD base (PID 0x7398) / Galahad2 LCD (0x7391).
     pub const HYDROSHIFT_LCD: Self = Self {
         min_rpm: 2200,
         max_rpm: 3800,
         rpm_to_pwm: &[(2200, 50), (2600, 60), (3000, 70), (3400, 85), (3800, 100)],
+    };
+
+    /// Galahad2 Vision (PID 0x7395). 29-point RPM→PWM phase table.
+    pub const GALAHAD2_VISION: Self = Self {
+        min_rpm: 800,
+        max_rpm: 3600,
+        rpm_to_pwm: &[
+            (800, 20),
+            (900, 23),
+            (1000, 25),
+            (1100, 27),
+            (1200, 30),
+            (1300, 31),
+            (1400, 34),
+            (1500, 36),
+            (1600, 39),
+            (1700, 41),
+            (1800, 44),
+            (1900, 47),
+            (2000, 49),
+            (2100, 52),
+            (2200, 55),
+            (2300, 58),
+            (2400, 60),
+            (2500, 64),
+            (2600, 67),
+            (2700, 70),
+            (2800, 73),
+            (2900, 77),
+            (3000, 80),
+            (3100, 83),
+            (3200, 87),
+            (3300, 90),
+            (3400, 94),
+            (3500, 98),
+            (3600, 100),
+        ],
     };
 
     /// HydroShift LCD RGB (PID 0x7399).
@@ -131,6 +168,23 @@ mod pump_envelope_tests {
         // RGB min PWM is 1%; base min PWM is 50%.
         assert_eq!(PumpEnvelope::HYDROSHIFT_LCD_RGB.min_pwm(), 1);
         assert_eq!(PumpEnvelope::HYDROSHIFT_LCD.min_pwm(), 50);
+    }
+
+    #[test]
+    fn vision_envelope_anchors_match_vendor() {
+        let env = PumpEnvelope::GALAHAD2_VISION;
+        assert_eq!(env.min_rpm, 800);
+        assert_eq!(env.max_rpm, 3600);
+        assert_eq!(env.min_pwm(), 20);
+        assert_eq!(env.rpm_to_pwm(800), 20);
+        assert_eq!(env.rpm_to_pwm(3600), 100);
+    }
+
+    #[test]
+    fn vision_envelope_clamps_outside_range() {
+        let env = PumpEnvelope::GALAHAD2_VISION;
+        assert_eq!(env.rpm_to_pwm(100), 20);
+        assert_eq!(env.rpm_to_pwm(5000), 100);
     }
 }
 

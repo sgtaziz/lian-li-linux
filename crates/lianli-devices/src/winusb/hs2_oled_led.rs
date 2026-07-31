@@ -22,8 +22,8 @@ const CMD_SET_PUMP: u8 = 0x61;
 const CMD_GET_PUMP: u8 = 0x62;
 const CMD_SET_MB_SYNC: u8 = 0x64;
 
-// RGB ring push (opcode 0x11). 45-LED ring sent as 3 chunks per frame in
-// 64-byte packets: chunk offsets 0/15/30 LEDs.
+// RGB ring push (opcode 0x11). 45-LED ring sent as 3 chunks of 15 LEDs each
+// in 64-byte packets: chunk offsets 0/15/30 LEDs.
 const CMD_PUSH_RGB: u8 = 0x11;
 const RGB_LED_COUNT: usize = 45;
 const RGB_PACKET_SIZE: usize = 64;
@@ -196,8 +196,7 @@ impl Hs2OledLedController {
     }
 
     /// Push one RGB frame to the 45-LED ring via opcode 0x11, sent as 3
-    /// chunks: offsets 0, 15, 30 LEDs (last chunk is 5 LEDs). Missing
-    /// trailing LEDs are padded black.
+    /// equal chunks of 15 LEDs each (offsets 0, 15, 30).
     pub fn send_rgb_frame(&self, colors: &[[u8; 3]]) -> Result<()> {
         let mut frame = [[0u8; 3]; RGB_LED_COUNT];
         for (dst, src) in frame.iter_mut().zip(colors.iter().take(RGB_LED_COUNT)) {
@@ -205,13 +204,15 @@ impl Hs2OledLedController {
         }
 
         let transport = self.transport.lock();
+        let per_chunk = (RGB_LED_COUNT + 2) / 3;
         for chunk in 0..3usize {
+            let start = chunk * per_chunk;
+            let this_count = (RGB_LED_COUNT - start).min(per_chunk);
             let mut packet = [0u8; RGB_PACKET_SIZE];
             packet[0] = CMD_PUSH_RGB;
-            packet[1] = (chunk * 15) as u8;
-            let count = if chunk == 2 { 15 } else { 45 };
-            for led in 0..(count / 3) {
-                let led_idx = chunk * 15 + led;
+            packet[1] = start as u8;
+            for led in 0..this_count {
+                let led_idx = start + led;
                 let off = 4 + led * 3;
                 packet[off] = frame[led_idx][0];
                 packet[off + 1] = frame[led_idx][1];
@@ -228,7 +229,7 @@ impl Hs2OledLedController {
 }
 
 fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {
-    let scale = (brightness.min(4) as f32) / 4.0;
+    let scale = (lianli_shared::rgb::brightness_scale(brightness) as f32) / 4.0;
     [
         (r as f32 * scale).round() as u8,
         (g as f32 * scale).round() as u8,
