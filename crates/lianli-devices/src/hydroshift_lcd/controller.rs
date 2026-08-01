@@ -14,7 +14,8 @@ use parking_lot::Mutex;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 /// Remap fan PWM for HydroShift LCD RGB variant: Map(10..100 → 12..95).
@@ -154,6 +155,7 @@ pub struct HydroShiftLcdController {
     firmware_string: Option<String>,
     firmware_version: Option<(u32, u32)>,
     last_recovery_attempt: Option<Instant>,
+    drain_stop: Arc<AtomicBool>,
 }
 
 impl HydroShiftLcdController {
@@ -172,6 +174,7 @@ impl HydroShiftLcdController {
             firmware_string: None,
             firmware_version: None,
             last_recovery_attempt: None,
+            drain_stop: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -179,7 +182,9 @@ impl HydroShiftLcdController {
         if self.initialized {
             return Ok(());
         }
-        info!("Initializing {}", self.variant.name());
+        let name = self.variant.name();
+        info!("Initializing {name} — waiting 10s for device to settle");
+        thread::sleep(Duration::from_secs(10));
 
         match self.handshake() {
             Ok(hs) => {
@@ -191,7 +196,41 @@ impl HydroShiftLcdController {
             Err(e) => warn!("  Handshake failed: {e:#}"),
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        if self.firmware_version.is_none() {
+            for attempt in 1..=30u32 {
+                match self.read_firmware_internal(INIT_READ_TIMEOUT_MS) {
+                    Ok(fw) => {
+                        self.firmware_version = parse_firmware_version(&fw);
+                        self.firmware_string = Some(fw.clone());
+                        info!("AIO LCD firmware for {name}: {fw}");
+                        break;
+                    }
+                    Err(e) => {
+                        if attempt % 5 == 0 {
+                            warn!("Firmware read attempt {attempt}/30 failed: {e:#}");
+                        }
+                        thread::sleep(Duration::from_secs(2));
+                    }
+                }
+            }
+        }
+
+        let device = Arc::clone(&self.device);
+        let stop = Arc::clone(&self.drain_stop);
+        thread::spawn(move || {
+            let mut buf = [0u8; B_PACKET_SIZE];
+            while !stop.load(Ordering::Relaxed) {
+                let mut dev = device.lock();
+                let n = dev.read_timeout(&mut buf, 20).unwrap_or(0);
+                drop(dev);
+                if n > 0 {
+                    debug!("drain: discarded {n} stale bytes (cmd={:#04x})", buf[1]);
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+
+        thread::sleep(Duration::from_secs(2));
 
         if let Err(e) = self.apply_lcd_settings() {
             warn!("  apply_lcd_settings failed: {e:#}");
@@ -392,10 +431,14 @@ impl HydroShiftLcdController {
                 return false;
             }
             if n > A_HEADER_LEN && buf[1] == CMD_RESET_DEVICE {
-                match buf[A_HEADER_LEN] {
-                    1 => return true,
-                    2 => continue,
-                    _ => {}
+                if buf[A_HEADER_LEN] == 1 {
+                    return true;
+                } else {
+                    warn!(
+                        "AIO LCD: reset device returned byte {} (expected 1)",
+                        buf[A_HEADER_LEN]
+                    );
+                    return false;
                 }
             }
         }
@@ -405,10 +448,7 @@ impl HydroShiftLcdController {
 
     pub fn check_and_recover_lcd(&mut self) -> Result<crate::traits::RecoveryAction> {
         use crate::traits::RecoveryAction;
-        if !self.use_c_command {
-            return Ok(RecoveryAction::NoChange);
-        }
-        const RECOVERY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15);
+        const RECOVERY_COOLDOWN: Duration = Duration::from_secs(2);
         if self
             .last_recovery_attempt
             .map(|t| t.elapsed() < RECOVERY_COOLDOWN)
@@ -656,7 +696,7 @@ impl HydroShiftLcdController {
     }
 
     fn read_ack(&self, dev: &mut RusbHid, label: &str, timeout_ms: i32) {
-        let mut buf = [0u8; 512];
+        let mut buf = [0u8; B_PACKET_SIZE];
         if let Err(e) = dev.read_timeout(&mut buf, timeout_ms) {
             debug!("AIO LCD: {label} ack: {e:#}");
         }
@@ -754,6 +794,12 @@ impl AioDevice for HydroShiftLcdController {
             Some(_) => bail!("Coolant temperature sensor reports invalid"),
             None => bail!("No handshake data available"),
         }
+    }
+}
+
+impl Drop for HydroShiftLcdController {
+    fn drop(&mut self) {
+        self.drain_stop.store(true, Ordering::Relaxed);
     }
 }
 
