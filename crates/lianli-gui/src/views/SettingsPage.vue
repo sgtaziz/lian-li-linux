@@ -153,7 +153,7 @@ function onDefaultFps(v: number | null) {
         <n-input-number v-model:value="openrgbPort" :min="1" :max="65535" size="small" />
       </div>
       <p class="hint" v-if="openrgbEnabled">
-        The server binds to a TCP port without authentication.
+        The server binds to a TCP port without authentication. While enabled, the daemon will not apply its own RGB effects.
       </p>
     </section>
 

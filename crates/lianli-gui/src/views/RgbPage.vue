@@ -63,7 +63,7 @@ const rgbCaps = computed(() => config.rgbCaps);
         </div>
         <p class="hint" v-if="openrgbEnabled">
           The OpenRGB SDK server binds to a TCP port without authentication. Any local process
-          can control your RGB devices.
+          can control your RGB devices. While enabled, the daemon will not apply its own RGB effects.
         </p>
       </div>
     </section>

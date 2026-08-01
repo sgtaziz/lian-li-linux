@@ -34,6 +34,7 @@ pub struct RgbController {
     presets: Vec<lianli_shared::rgb::RgbPreset>,
     /// When true, OpenRGB has active control — suppress native config application.
     openrgb_active: bool,
+    openrgb_server_enabled: bool,
     /// Thermal alert override color (when Some, all devices show this color).
     thermal_override: crate::thermal_alert::SharedThermalAlert,
     /// Tracks whether thermal override was active last tick (for edge detection).
@@ -75,6 +76,7 @@ impl RgbController {
             config: None,
             presets: Vec::new(),
             openrgb_active: false,
+            openrgb_server_enabled: false,
             thermal_override: crate::thermal_alert::new_shared(),
             thermal_was_active: false,
             thermal_last_color: None,
@@ -98,6 +100,9 @@ impl RgbController {
     /// Check thermal override and apply/restore if state changed.
     /// Returns true if override is currently active.
     pub fn check_thermal_override(&mut self) -> bool {
+        if self.is_openrgb_controlled() {
+            return false;
+        }
         let color = *self.thermal_override.lock();
         let active = color.is_some();
         let changed = color != self.thermal_last_color;
@@ -164,19 +169,15 @@ impl RgbController {
     ) {
         self.config = Some(config.clone());
         self.presets = presets.to_vec();
+        self.openrgb_server_enabled = config.openrgb_server;
 
         if !config.enabled {
             info!("RGB control disabled in config");
             return;
         }
 
-        if config.openrgb_server {
-            debug!("Skipping native RGB config — OpenRGB server is enabled");
-            return;
-        }
-
-        if self.openrgb_active {
-            debug!("Skipping native RGB config — OpenRGB has active control");
+        if self.is_openrgb_controlled() {
+            debug!("Skipping native RGB config — OpenRGB has control");
             return;
         }
 
@@ -549,26 +550,20 @@ impl RgbController {
         }
     }
 
+    fn is_openrgb_controlled(&self) -> bool {
+        self.openrgb_active || self.openrgb_server_enabled
+    }
+
     pub fn set_openrgb_active(&mut self, active: bool) {
         if self.openrgb_active != active {
             self.openrgb_active = active;
             if active {
-                info!("OpenRGB took control — suppressing native RGB config");
-            } else {
-                info!("OpenRGB released control");
-                // Only restore native config if the OpenRGB server is disabled;
-                // when the server is enabled, leave LEDs as-is so OpenRGB state persists.
-                let server_enabled = self
-                    .config
-                    .as_ref()
-                    .map(|c| c.openrgb_server)
-                    .unwrap_or(false);
-                if !server_enabled {
-                    info!("Restoring native RGB config");
-                    if let Some(config) = self.config.clone() {
-                        let presets = self.presets.clone();
-                        self.apply_config(&config, &presets);
-                    }
+                info!("OpenRGB client connected — suppressing native RGB");
+            } else if !self.openrgb_server_enabled {
+                info!("OpenRGB client disconnected — restoring native RGB");
+                if let Some(config) = self.config.clone() {
+                    let presets = self.presets.clone();
+                    self.apply_config(&config, &presets);
                 }
             }
         }
