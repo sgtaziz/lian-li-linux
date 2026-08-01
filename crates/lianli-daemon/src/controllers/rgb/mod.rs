@@ -482,6 +482,23 @@ impl RgbController {
             dev.ping(zone)?;
             return Ok(());
         }
+        let matched: Vec<_> = self
+            .wired
+            .iter()
+            .filter(|(id, _)| id.starts_with(device_id))
+            .collect();
+        if !matched.is_empty() {
+            let mut last_err = None;
+            for (_, dev) in &matched {
+                if let Err(e) = dev.ping(zone) {
+                    last_err = Some(e);
+                }
+            }
+            return match last_err {
+                Some(e) => Err(e),
+                None => Ok(()),
+            };
+        }
         if let (Some(ref wireless), Some(state)) =
             (&self.wireless, self.wireless_state.get(device_id))
         {

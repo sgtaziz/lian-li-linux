@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Monitor, Fan, Droplet, Palette, Loader2 } from "lucide-vue-next";
+import { useDialog } from "naive-ui";
+import { Monitor, Fan, Droplet, Palette, Loader2, Locate } from "lucide-vue-next";
 import type { DeviceInfo } from "@/types";
 import { useDevicesStore } from "@/stores/devices";
 import { useFansStore } from "@/stores/fans";
 import { useLcdStore } from "@/stores/lcd";
 import { useAioStore } from "@/stores/aio";
 import { useConfigStore } from "@/stores/config";
+import { useIpc } from "@/composables/useIpc";
 import {
   FAMILY_DISPLAY,
   familyHasLcd,
@@ -24,6 +26,8 @@ const fans = useFansStore();
 const lcd = useLcdStore();
 const aio = useAioStore();
 const config = useConfigStore();
+const dialog = useDialog();
+const ipc = useIpc();
 
 const d = computed(() => props.device);
 const familyName = computed(() => FAMILY_DISPLAY[d.value.family] ?? d.value.family);
@@ -128,13 +132,30 @@ async function refreshSoon() {
 function badgeClass(kind: string) {
   return `badge-${kind}`;
 }
+
+async function ping() {
+  try {
+    await ipc.request("PingDevice", { device_id: d.value.device_id, zone: 0 });
+  } catch (e) {
+    dialog.error({
+      title: "Ping failed",
+      content: String(e),
+      positiveText: "OK",
+    });
+  }
+}
 </script>
 
 <template>
   <div class="card device-card">
     <div class="head">
-      <div class="name">{{ d.name }}</div>
-      <div class="family">{{ familyName }}</div>
+      <div class="head-text">
+        <div class="name">{{ d.name }}</div>
+        <div class="family">{{ familyName }}</div>
+      </div>
+      <button class="ping-btn" title="Identify device" @click="ping">
+        <Locate :size="15" />
+      </button>
     </div>
 
     <div class="badges">
@@ -239,6 +260,15 @@ function badgeClass(kind: string) {
   flex-direction: column;
   gap: var(--space-2);
 }
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.head-text {
+  display: flex;
+  flex-direction: column;
+}
 .head .name {
   font-weight: 600;
   font-size: var(--font-size-lg);
@@ -246,6 +276,24 @@ function badgeClass(kind: string) {
 .head .family {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
+}
+.ping-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.ping-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 .badges {
   display: flex;

@@ -149,6 +149,18 @@ pub enum IpcRequest {
         config: crate::rgb::MergeLightingConfig,
     },
     GetMergeLightingConfig,
+    SaveDeviceProfile {
+        name: String,
+        device_id: String,
+    },
+    DeleteDeviceProfile {
+        name: String,
+    },
+    ListDeviceProfiles,
+    ApplyDeviceProfile {
+        name: String,
+        device_id: String,
+    },
 }
 
 /// Responses from daemon to GUI.

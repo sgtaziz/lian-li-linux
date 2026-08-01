@@ -6,6 +6,7 @@ pub mod fonts;
 pub mod id;
 pub mod ipc;
 pub mod media;
+pub mod profile;
 pub mod rgb;
 pub mod screen;
 pub mod sensors;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useDialog } from "naive-ui";
-import { ChevronDown, ChevronRight, Save, Trash2 } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, Save, Trash2, Locate } from "lucide-vue-next";
 import type { RgbDeviceCapabilities } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
 import { useConfigStore } from "@/stores/config";
@@ -18,7 +18,15 @@ const dialog = useDialog();
 const ipc = useIpc();
 
 async function ping() {
-  await ipc.request("PingDevice", { device_id: props.cap.device_id, zone: 0 });
+  try {
+    await ipc.request("PingDevice", { device_id: props.cap.device_id, zone: 0 });
+  } catch (e) {
+    dialog.error({
+      title: "Ping failed",
+      content: String(e),
+      positiveText: "OK",
+    });
+  }
 }
 
 const devConfig = computed(() => config.rgbDeviceConfig(props.cap.device_id));
@@ -136,7 +144,9 @@ const summary = computed(() =>
         <span class="name">{{ cap.device_name }}</span>
         <span class="muted">{{ summary }}</span>
       </div>
-      <n-button size="tiny" quaternary @click.stop="ping">Ping</n-button>
+      <button class="ping-btn" title="Identify device" @click.stop="ping">
+        <Locate :size="14" />
+      </button>
     </div>
 
     <div v-if="expanded" class="body">
@@ -216,6 +226,24 @@ const summary = computed(() =>
 }
 .name {
   font-weight: 600;
+}
+.ping-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.ping-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 .body {
   display: flex;

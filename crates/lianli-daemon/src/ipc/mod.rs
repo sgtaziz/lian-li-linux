@@ -18,6 +18,7 @@ pub mod config;
 pub mod fan;
 pub mod lcd;
 pub mod presets;
+pub mod profiles;
 pub mod rgb;
 pub mod system;
 pub mod templates;

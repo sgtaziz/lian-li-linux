@@ -308,6 +308,14 @@ fn handle_request(
         IpcRequest::ApplyRgbPreset { name, device_id } => {
             super::presets::apply(state, tx, name, device_id)
         }
+        IpcRequest::SaveDeviceProfile { name, device_id } => {
+            super::profiles::save(state, tx, name, device_id)
+        }
+        IpcRequest::DeleteDeviceProfile { name } => super::profiles::delete(state, tx, name),
+        IpcRequest::ListDeviceProfiles => super::profiles::list(state),
+        IpcRequest::ApplyDeviceProfile { name, device_id } => {
+            super::profiles::apply(state, tx, name, device_id)
+        }
     }
 }
 
