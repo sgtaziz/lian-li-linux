@@ -273,6 +273,7 @@ impl WinUsbLcdDevice {
         let mut read_buf = vec![0u8; 64 * 1024];
         let mut accum: Vec<u8> = Vec::with_capacity(256 * 1024);
         let mut next_deadline = std::time::Instant::now() + frame_interval;
+        let mut frame_count: u32 = 0;
 
         loop {
             if stop.load(Ordering::Relaxed) {
@@ -289,6 +290,16 @@ impl WinUsbLcdDevice {
                 let au: Vec<u8> = accum.drain(..split).collect();
                 if !au.is_empty() {
                     self.send_h264_au(&au)?;
+
+                    frame_count += 1;
+                    if frame_count % 30 == 0 {
+                        if let Some(level) = self.query_block() {
+                            if level > 3 {
+                                self.wait_buffer(2);
+                            }
+                        }
+                    }
+
                     let now = std::time::Instant::now();
                     if now < next_deadline {
                         std::thread::sleep(next_deadline - now);
@@ -444,14 +455,15 @@ impl WinUsbLcdDevice {
         let stop_play = self.builder.stop_play_header_winusb();
         self.send_command(stop_play, "StopPlay");
 
-        let query_block = self.builder.query_block_header_winusb();
-        self.send_command(query_block, "QueryBlock");
-        if let Some(resp) = self.read_response("QueryBlock", LCD_READ_TIMEOUT) {
-            if resp.len() >= 12 {
-                let size = u32::from_be_bytes([resp[8], resp[9], resp[10], resp[11]]) as usize;
-                if size > 0 {
-                    self.h264_chunk_size = size;
-                    debug!("H264 chunk size from device: {size}");
+        let h264_block = self.builder.query_block_header_winusb();
+        if self.tx_write_full(&h264_block, LCD_WRITE_TIMEOUT).is_ok() {
+            if let Some(resp) = self.read_response("GetH264Block", LCD_READ_TIMEOUT) {
+                if resp.len() >= 12 {
+                    let size = u32::from_be_bytes([resp[8], resp[9], resp[10], resp[11]]) as usize;
+                    if size > 0 {
+                        self.h264_chunk_size = size;
+                        debug!("H264 chunk size from device: {size}");
+                    }
                 }
             }
         }
@@ -601,8 +613,17 @@ impl WinUsbLcdDevice {
     fn query_block(&mut self) -> Option<u8> {
         let header = self.builder.query_block_header_winusb();
         self.tx_write_full(&header, LCD_WRITE_TIMEOUT).ok()?;
-        let resp = self.read_response("QueryBlock", Duration::from_millis(200))?;
-        Some(resp[8])
+        let mut buf = [0u8; 512];
+        match self.tx_read(&mut buf, Duration::from_millis(200)) {
+            Ok(n) if n > 0 => {
+                self.tx_read_flush();
+                Some(buf[8])
+            }
+            _ => {
+                self.tx_read_flush();
+                None
+            }
+        }
     }
 
     /// Wait until the device buffer drains to an acceptable level.

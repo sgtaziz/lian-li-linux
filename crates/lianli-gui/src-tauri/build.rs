@@ -25,7 +25,8 @@ fn main() {
     let frontend = frontend_dir();
     declare_inputs(&frontend);
 
-    if !bun_available() {
+    let bun = find_bun();
+    if bun.is_none() {
         if !frontend.join("dist/index.html").exists() {
             println!(
                 "cargo:warning=bun not found on PATH and dist/ is missing; \
@@ -38,10 +39,14 @@ fn main() {
     }
 
     if needs_build(&frontend) {
+        let bun_str = bun
+            .as_deref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "bun".to_string());
         if !frontend.join("node_modules").exists() {
-            run("bun", &["install", "--frozen-lockfile"], &frontend);
+            run(&bun_str, &["install", "--frozen-lockfile"], &frontend);
         }
-        run("bun", &["run", "build"], &frontend);
+        run(&bun_str, &["run", "build"], &frontend);
     }
 }
 
@@ -65,14 +70,45 @@ fn declare_inputs(frontend: &Path) {
     println!("cargo:rerun-if-changed={}/src", frontend.display());
 }
 
-fn bun_available() -> bool {
-    Command::new("bun")
+/// Locate the `bun` executable. Checks PATH directly, then `~/.bun/bin/bun`
+/// (the default install location for `curl ... | bash`), then falls back to
+/// the login shell's resolved PATH (which sources `.bashrc`/`.zshrc`).
+fn find_bun() -> Option<PathBuf> {
+    use std::path::Path;
+
+    // 1. Direct PATH check — works when cargo inherits the right env.
+    if Command::new("bun")
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
+    {
+        return Some(PathBuf::from("bun"));
+    }
+
+    // 2. Default bun install location.
+    if let Some(home) = std::env::var_os("HOME") {
+        let candidate = Path::new(&home).join(".bun/bin/bun");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // 3. Login-shell PATH (sources .bashrc / .zshrc / .profile).
+    let out = Command::new("sh")
+        .arg("-lc")
+        .arg("command -v bun")
+        .output()
+        .ok()?;
+    if out.status.success() {
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !path.is_empty() && Path::new(&path).exists() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    None
 }
 
 /// Rebuild iff any tracked frontend input is newer than the newest `dist/`

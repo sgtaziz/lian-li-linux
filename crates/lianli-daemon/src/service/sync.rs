@@ -117,6 +117,8 @@ impl ServiceManager {
                     | lianli_shared::device_id::DeviceFamily::Galahad2Lcd
                     | lianli_shared::device_id::DeviceFamily::HydroShift2Lcd
                     | lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLcd
+                    | lianli_shared::device_id::DeviceFamily::Slv3Lcd
+                    | lianli_shared::device_id::DeviceFamily::Tlv2Lcd
             );
 
             let (firmware_version, supports_c_command) = self
