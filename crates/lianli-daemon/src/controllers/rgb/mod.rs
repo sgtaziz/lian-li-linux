@@ -36,6 +36,7 @@ pub struct RgbController {
     thermal_override: crate::thermal_alert::SharedThermalAlert,
     /// Tracks whether thermal override was active last tick (for edge detection).
     thermal_was_active: bool,
+    thermal_last_color: Option<[u8; 3]>,
     /// Cached last-applied OpenRGB direct colors per (device_id, zone).
     /// Used to re-push state after fan PWM disrupts the device's RGB.
     last_direct: HashMap<(String, u8), Vec<[u8; 3]>>,
@@ -73,6 +74,7 @@ impl RgbController {
             openrgb_active: false,
             thermal_override: crate::thermal_alert::new_shared(),
             thermal_was_active: false,
+            thermal_last_color: None,
             last_direct: HashMap::new(),
         }
     }
@@ -90,8 +92,9 @@ impl RgbController {
     pub fn check_thermal_override(&mut self) -> bool {
         let color = *self.thermal_override.lock();
         let active = color.is_some();
+        let changed = color != self.thermal_last_color;
 
-        if active != self.thermal_was_active {
+        if changed {
             match color {
                 Some(rgb) => {
                     info!(
@@ -114,6 +117,19 @@ impl RgbController {
                             }
                         }
                     }
+                    if let Some(ref wireless) = self.wireless {
+                        for (device_id, state) in &self.wireless_state {
+                            let dim = [rgb[0] / 2, rgb[1] / 2, rgb[2] / 2];
+                            let mut colors = vec![dim; state.led_state.len()];
+                            if colors.is_empty() {
+                                colors = vec![dim; state.fan_count as usize * 32];
+                            }
+                            let idx = effect_index_from_state(&colors);
+                            if let Err(e) = wireless.send_rgb_direct(&state.mac, &colors, &idx, 4) {
+                                warn!("Thermal override failed for {device_id}: {e}");
+                            }
+                        }
+                    }
                 }
                 None => {
                     info!("Thermal alert cleared — restoring RGB config");
@@ -122,8 +138,9 @@ impl RgbController {
                     }
                 }
             }
-            self.thermal_was_active = active;
         }
+        self.thermal_was_active = active;
+        self.thermal_last_color = color;
         active
     }
 
