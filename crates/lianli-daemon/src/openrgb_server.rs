@@ -449,15 +449,13 @@ impl ClientHandler {
 
         // Parse the mode data to extract what we need
         if let Some(effect) = self.parse_mode_data(mode_data) {
-            // Direct mode is controlled exclusively via UpdateLEDs/UpdateZoneLEDs.
-            // Applying it here would overwrite per-LED colors with defaults (all black).
             if effect.mode == RgbMode::Direct {
                 debug!("OpenRGB UpdateMode: mode=Direct (ignored — use UpdateLEDs)");
                 return Ok(());
             }
 
-            // UpdateMode is rare (not streaming hot path), so lock is fine here
-            let caps = self.rgb.lock().capabilities();
+            let mut rgb = self.rgb.lock();
+            let caps = rgb.capabilities();
             if let Some(cap) = caps.get(dev_idx as usize) {
                 let device_id = cap.device_id.clone();
                 debug!(
@@ -465,14 +463,11 @@ impl ClientHandler {
                     effect.mode
                 );
                 for zone_idx in 0..cap.zones.len() {
-                    if let Err(e) = self
-                        .rgb
-                        .lock()
-                        .set_effect(&device_id, zone_idx as u8, &effect)
-                    {
+                    if let Err(e) = rgb.set_effect(&device_id, zone_idx as u8, &effect) {
                         debug!("OpenRGB UpdateMode error for {device_id} zone {zone_idx}: {e}");
                     }
                 }
+                rgb.notify_external_lighting();
             }
         }
 
@@ -733,8 +728,16 @@ impl ClientHandler {
         buf.extend_from_slice(&(DIR_RIGHT).to_le_bytes()); // direction
         buf.extend_from_slice(&color_mode.to_le_bytes());
 
-        // colors: empty by default for new modes
-        buf.extend_from_slice(&0u16.to_le_bytes()); // 0 colors
+        // colors: include defaults when colors_min > 0
+        if colors_min > 0 {
+            let n = colors_min.max(1);
+            buf.extend_from_slice(&(n as u16).to_le_bytes());
+            for _ in 0..n {
+                buf.extend_from_slice(&[255, 255, 255, 0]);
+            }
+        } else {
+            buf.extend_from_slice(&0u16.to_le_bytes());
+        }
 
         buf
     }
