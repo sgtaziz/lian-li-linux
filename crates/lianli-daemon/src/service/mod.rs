@@ -12,7 +12,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use runtime::LcdBackend;
 
@@ -453,8 +453,8 @@ impl ServiceManager {
                 DaemonEvent::ResyncWirelessRgb => {
                     if let Some(ref rgb) = self.controllers.rgb {
                         let rgb = rgb.lock();
-                        if rgb.is_openrgb_active() {
-                            rgb.resync_openrgb();
+                        if rgb.is_openrgb_controlled() {
+                            debug!("OpenRGB server active, skipping wireless drift resync");
                         } else {
                             drop(rgb);
                             self.apply_rgb_config();

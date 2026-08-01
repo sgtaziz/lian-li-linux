@@ -351,6 +351,26 @@ impl TlFanController {
         Ok(())
     }
 
+    pub fn set_group_light_noread(&self, group: u8, effect: &RgbEffect) -> Result<()> {
+        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let mut payload = [0u8; 20];
+        payload[0] = group;
+        payload[1] = mode_byte;
+        payload[2] = lianli_shared::rgb::brightness_scale(effect.brightness);
+        payload[3] = effect.speed.min(4);
+        let color_count = effect.colors.len().min(4);
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 5 + i * 3;
+            payload[offset] = color[0];
+            payload[offset + 1] = color[1];
+            payload[offset + 2] = color[2];
+        }
+        payload[17] = effect.direction.to_tl_byte();
+        payload[18] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[19] = color_count as u8;
+        self.send_command_noread(CMD_SET_FAN_GROUP_LIGHT, &payload)
+    }
+
     /// Set LED effect for a specific fan (SetFanLight 0xA3). Per-fan light has
     /// no side bits — only usable with scope=All.
     ///
@@ -401,6 +421,36 @@ impl TlFanController {
         self.send_command_quiet(CMD_SET_FAN_LIGHT, &payload)?;
         debug!("Set port {port} fan {fan_index} light: mode={mode_byte} sync={sync}");
         Ok(())
+    }
+
+    pub fn set_fan_light_noread(
+        &self,
+        port: u8,
+        fan_index: u8,
+        effect: &RgbEffect,
+        sync: bool,
+    ) -> Result<()> {
+        if port >= 4 {
+            bail!("Port {port} out of range (0-3)");
+        }
+        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let mut payload = [0u8; 20];
+        payload[0] = (port << 4) | (sync as u8);
+        payload[1] = (port << 4) | (fan_index & 0x0F);
+        payload[2] = mode_byte;
+        payload[3] = lianli_shared::rgb::brightness_scale(effect.brightness);
+        payload[4] = effect.speed.min(4);
+        let color_count = effect.colors.len().min(4);
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 5 + i * 3;
+            payload[offset] = color[0];
+            payload[offset + 1] = color[1];
+            payload[offset + 2] = color[2];
+        }
+        payload[17] = effect.direction.to_tl_byte();
+        payload[18] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[19] = color_count as u8;
+        self.send_command_noread(CMD_SET_FAN_LIGHT, &payload)
     }
 
     /// Set fan direction flags for a specific fan.
@@ -455,6 +505,14 @@ impl TlFanController {
         dev.write(&pkt).context("TL Fan: write command")?;
         let mut buf = [0u8; PACKET_SIZE];
         let _ = dev.read_timeout(&mut buf, READ_TIMEOUT_MS);
+        Ok(())
+    }
+
+    pub fn send_command_noread(&self, cmd: u8, data: &[u8]) -> Result<()> {
+        let pkt = Self::build_packet(cmd, data);
+        let mut dev = self.device.lock();
+        dev.read_flush();
+        dev.write(&pkt).context("TL Fan: write command")?;
         Ok(())
     }
 

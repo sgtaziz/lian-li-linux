@@ -29,12 +29,14 @@ impl DirectColorBuffer {
         std::mem::take(&mut self.pending)
     }
 }
-
 pub fn start_direct_color_writer(
     rgb: Arc<Mutex<RgbController>>,
     buffer: Arc<Mutex<DirectColorBuffer>>,
     stop_flag: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
+    let busy_flags: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     thread::spawn(move || {
         debug!("Direct color writer started");
 
@@ -46,54 +48,52 @@ pub fn start_direct_color_writer(
             let updates = buffer.lock().take_all();
 
             if !updates.is_empty() {
-                let mut wired_tasks: Vec<(
-                    Arc<dyn lianli_devices::traits::RgbDevice>,
-                    String,
-                    Vec<(u8, Vec<[u8; 3]>)>,
-                )> = Vec::new();
-                let mut wireless_updates: Vec<(String, HashMap<u8, Vec<[u8; 3]>>)> = Vec::new();
-
+                let mut wireless = Vec::new();
+                let mut wired = Vec::new();
                 {
                     let mut rgb = rgb.lock();
                     rgb.cache_direct_batch(&updates);
                     for (device_id, zones) in &updates {
-                        if rgb.is_wireless(device_id) {
-                            wireless_updates.push((device_id.clone(), zones.clone()));
+                        if device_id.starts_with("wireless:") {
+                            wireless.push((device_id.clone(), zones.clone()));
                         } else if let Some(dev) = rgb.clone_wired_device(device_id) {
-                            let zone_list: Vec<(u8, Vec<[u8; 3]>)> =
-                                zones.iter().map(|(&z, c)| (z, c.clone())).collect();
-                            wired_tasks.push((dev, device_id.clone(), zone_list));
+                            let z: Vec<_> = zones.iter().map(|(&k, v)| (k, v.clone())).collect();
+                            wired.push((dev, device_id.clone(), z));
                         }
                     }
                 }
 
-                std::thread::scope(|s| {
-                    for (dev, device_id, zones) in &wired_tasks {
-                        let device_id = device_id.clone();
-                        let zones = zones.clone();
-                        let dev = Arc::clone(dev);
-                        s.spawn(move || {
-                            for (zone, colors) in &zones {
-                                if let Err(e) = dev.set_direct_colors(*zone, colors) {
-                                    debug!("Wired flush error for {device_id} zone {zone}: {e}");
-                                }
-                            }
-                        });
-                    }
-                });
-
-                if !wireless_updates.is_empty() {
+                if !wireless.is_empty() {
                     let mut rgb = rgb.lock();
-                    for (device_id, zones) in wireless_updates {
-                        for (zone, colors) in zones {
-                            if let Err(e) = rgb.set_direct_colors(&device_id, zone, &colors) {
-                                debug!("Wireless flush error for {device_id} zone {zone}: {e}");
-                            }
+                    for (device_id, zones) in wireless {
+                        if let Err(e) = rgb.apply_wireless_batch(&device_id, &zones) {
+                            debug!("Wireless flush error for {device_id}: {e}");
                         }
                     }
+                }
+
+                for (dev, device_id, zones) in wired {
+                    let flag = {
+                        let mut flags = busy_flags.lock();
+                        flags
+                            .entry(device_id.clone())
+                            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+                            .clone()
+                    };
+                    if flag.swap(true, Ordering::Relaxed) {
+                        continue;
+                    }
+                    thread::spawn(move || {
+                        for (zone, colors) in &zones {
+                            if let Err(e) = dev.set_direct_colors(*zone, colors) {
+                                debug!("Wired flush error for {device_id} zone {zone}: {e}");
+                            }
+                        }
+                        flag.store(false, Ordering::Relaxed);
+                    });
                 }
             } else {
-                thread::sleep(Duration::from_millis(5));
+                thread::sleep(Duration::from_millis(2));
             }
         }
 

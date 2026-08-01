@@ -14,10 +14,8 @@ use lianli_devices::wireless::{WirelessController, WirelessFanType};
 use lianli_shared::rgb::{
     RgbAppConfig, RgbDeviceCapabilities, RgbEffect, RgbMode, RgbPresetZone, RgbZoneInfo,
 };
-use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use wireless::WirelessRgbState;
 
@@ -39,7 +37,6 @@ pub struct RgbController {
     /// Tracks whether thermal override was active last tick (for edge detection).
     thermal_was_active: bool,
     thermal_last_color: Option<[u8; 3]>,
-    external_lighting_until: Arc<Mutex<Instant>>,
     /// Cached last-applied OpenRGB direct colors per (device_id, zone).
     /// Used to re-push state after fan PWM disrupts the device's RGB.
     last_direct: HashMap<(String, u8), Vec<[u8; 3]>>,
@@ -79,13 +76,8 @@ impl RgbController {
             thermal_override: crate::thermal_alert::new_shared(),
             thermal_was_active: false,
             thermal_last_color: None,
-            external_lighting_until: Arc::new(Mutex::new(Instant::now())),
             last_direct: HashMap::new(),
         }
-    }
-
-    pub fn notify_external_lighting(&self) {
-        *self.external_lighting_until.lock() = Instant::now();
     }
 
     /// Set the shared thermal-alert override state.
@@ -107,10 +99,6 @@ impl RgbController {
         let changed = color != self.thermal_last_color;
 
         if active && changed {
-            if self.external_lighting_until.lock().elapsed() < Duration::from_secs(10) {
-                self.thermal_last_color = color;
-                return false;
-            }
             match color {
                 Some(rgb) => {
                     info!(
@@ -141,7 +129,7 @@ impl RgbController {
                                 colors = vec![dim; state.fan_count as usize * 32];
                             }
                             let idx = effect_index_from_state(&colors);
-                            if let Err(e) = wireless.send_rgb_direct(&state.mac, &colors, &idx, 4) {
+                            if let Err(e) = wireless.send_rgb_direct(&state.mac, &colors, &idx, 2) {
                                 warn!("Thermal override failed for {device_id}: {e}");
                             }
                         }
@@ -290,7 +278,7 @@ impl RgbController {
 
             let idx = effect_index_from_state(&state.led_state);
 
-            wireless.send_rgb_direct(&state.mac, &state.led_state, &idx, 4)?;
+            wireless.send_rgb_direct(&state.mac, &state.led_state, &idx, 2)?;
             debug!(
                 "Set wireless RGB on {device_id} zone {zone}: {:?}, {} LEDs/zone",
                 effect.mode, leds_in_zone
@@ -357,6 +345,50 @@ impl RgbController {
         }
 
         anyhow::bail!("RGB device not found: {device_id}");
+    }
+
+    /// Apply all zone updates for a wireless device, then send a single RF frame.
+    /// Avoids N redundant RF transmissions when N zones are updated per frame.
+    pub fn apply_wireless_batch(
+        &mut self,
+        device_id: &str,
+        zones: &HashMap<u8, Vec<[u8; 3]>>,
+    ) -> anyhow::Result<()> {
+        let (wireless, state) = match (&self.wireless, self.wireless_state.get_mut(device_id)) {
+            (Some(w), Some(s)) => (w.clone(), s),
+            _ => return Ok(()),
+        };
+
+        let total_zones = if state.fan_type.is_aio() {
+            state.fan_count as usize + 1
+        } else if state.fan_type.is_rgb_only() {
+            1
+        } else {
+            state.fan_count as usize
+        };
+
+        let leds_in_zone = if state.fan_type.is_rgb_only() {
+            state.led_state.len()
+        } else {
+            state.leds_per_fan as usize
+        };
+
+        for (&zone, colors) in zones {
+            self.last_direct
+                .insert((device_id.to_string(), zone), colors.clone());
+            if zone as usize >= total_zones {
+                continue;
+            }
+            let start = zone as usize * leds_in_zone;
+            let copy_len = colors.len().min(leds_in_zone);
+            if start + copy_len <= state.led_state.len() {
+                state.led_state[start..start + copy_len].copy_from_slice(&colors[..copy_len]);
+            }
+        }
+
+        let idx = effect_index_from_state(&state.led_state);
+        wireless.send_rgb_direct(&state.mac, &state.led_state, &idx, 2)?;
+        Ok(())
     }
 
     /// Upload a multi-frame animation to a wireless device via
@@ -511,10 +543,6 @@ impl RgbController {
         anyhow::bail!("RGB device not found: {device_id}");
     }
 
-    pub fn is_openrgb_active(&self) -> bool {
-        self.openrgb_active
-    }
-
     pub fn ping(&self, device_id: &str, zone: u8) -> anyhow::Result<()> {
         if let Some(dev) = self.wired.get(device_id) {
             dev.ping(zone)?;
@@ -546,23 +574,11 @@ impl RgbController {
         anyhow::bail!("RGB device not found: {device_id}");
     }
 
-    /// Re-push the last-applied OpenRGB direct colors to all devices.
-    /// Used after fan PWM updates disrupt the device's RGB state.
-    pub fn resync_openrgb(&self) {
-        for ((device_id, zone), colors) in &self.last_direct {
-            if let Some(dev) = self.wired.get(device_id) {
-                if let Err(e) = dev.set_direct_colors(*zone, colors) {
-                    debug!("OpenRGB resync failed for {device_id} zone {zone}: {e}");
-                }
-            }
-        }
-    }
-
     pub fn clone_wired_device(&self, device_id: &str) -> Option<Arc<dyn RgbDevice>> {
         self.wired.get(device_id).cloned()
     }
 
-    fn is_openrgb_controlled(&self) -> bool {
+    pub fn is_openrgb_controlled(&self) -> bool {
         self.openrgb_active || self.openrgb_server_enabled
     }
 
@@ -623,10 +639,6 @@ impl RgbController {
             }
         }
         Some(zones)
-    }
-
-    pub fn is_wireless(&self, device_id: &str) -> bool {
-        self.wireless_state.contains_key(device_id)
     }
 
     pub fn set_wireless(&mut self, wireless: Option<Arc<WirelessController>>) {

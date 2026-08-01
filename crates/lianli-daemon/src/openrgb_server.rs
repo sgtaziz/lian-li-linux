@@ -303,9 +303,7 @@ impl ClientHandler {
 
             PKT_SET_CUSTOM_MODE => {
                 debug!("OpenRGB SetCustomMode for device {dev_idx} — direct mode active");
-                let mut rgb = self.rgb.lock();
-                rgb.set_openrgb_active(true);
-                rgb.notify_external_lighting();
+                self.rgb.lock().set_openrgb_active(true);
             }
 
             PKT_UPDATE_LEDS => {
@@ -369,7 +367,6 @@ impl ClientHandler {
         if let Some(cap) = self.caps().get(dev_idx as usize) {
             let device_id = cap.device_id.clone();
             let zones: Vec<_> = cap.zones.iter().map(|z| z.led_count as usize).collect();
-            // Buffer colors per zone — writer thread will flush asap
             let mut buf = self.direct_buffer.lock();
             let mut offset = 0;
             for (zone_idx, count) in zones.iter().enumerate() {
@@ -383,8 +380,6 @@ impl ClientHandler {
                 }
                 offset = end;
             }
-            drop(buf);
-            self.rgb.lock().notify_external_lighting();
         }
 
         Ok(())
@@ -467,7 +462,6 @@ impl ClientHandler {
                         debug!("OpenRGB UpdateMode error for {device_id} zone {zone_idx}: {e}");
                     }
                 }
-                rgb.notify_external_lighting();
             }
         }
 

@@ -263,7 +263,7 @@ impl crate::traits::RgbDevice for WirelessRgbDevice {
         let snapshot = state.clone();
         drop(state);
         self.ctrl
-            .send_rgb_direct(&self.mac.bytes(), &snapshot, &[0, 0, 0, 1], 4)
+            .send_rgb_direct(&self.mac.bytes(), &snapshot, &[0, 0, 0, 1], 2)
     }
 
     fn supports_direct(&self) -> bool {

@@ -193,4 +193,20 @@ impl RgbDevice for TlFanPortDevice {
     fn ping(&self, _zone: u8) -> Result<()> {
         self.controller.test_port_light(self.port)
     }
+
+    fn set_direct_colors(&self, zone: u8, colors: &[[u8; 3]]) -> Result<()> {
+        if zone >= self.fan_count {
+            bail!("Zone {zone} out of range");
+        }
+        let color = colors.first().copied().unwrap_or([255, 255, 255]);
+        let effect = RgbEffect {
+            mode: RgbMode::Static,
+            colors: vec![color],
+            brightness: 4,
+            speed: 0,
+            ..RgbEffect::default()
+        };
+        self.controller
+            .set_fan_light_noread(self.port, zone, &effect, false)
+    }
 }
