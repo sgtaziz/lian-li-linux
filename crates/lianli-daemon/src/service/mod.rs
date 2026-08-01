@@ -25,6 +25,7 @@ mod runtime;
 mod shutdown;
 mod streaming;
 mod subsystems;
+mod suspend;
 mod sync;
 
 use aio_lcd_firmware::AioLcdFirmwareTracker;
@@ -64,6 +65,7 @@ pub enum DaemonEvent {
     FrameFinished,
     RecreateMedia { target_index: usize },
     ResyncWirelessRgb,
+    SystemResumed,
     RebootWirelessLcd { mac: [u8; 6] },
     DisableLc217Wifi { mac: [u8; 6], disable: bool },
     SetLcdBrightness { device_id: String, brightness: u8 },
@@ -265,6 +267,8 @@ impl ServiceManager {
         let (tx, rx) = std::sync::mpsc::channel::<DaemonEvent>();
 
         self.tx = Some(tx.clone());
+
+        suspend::spawn(tx.clone());
 
         // We need to send these two events to ourselves before load_config, as load_config sets up the assets and already sends FrameFinished-Events
         tx.send(DaemonEvent::USBCheck).ok();
@@ -522,6 +526,12 @@ impl ServiceManager {
                             warn!("Failed to set LCD brightness for {device_id}: {e}");
                         }
                     }
+                }
+                DaemonEvent::SystemResumed => {
+                    info!("System resumed — re-applying device state");
+                    let tx = self.tx.clone().unwrap_or_else(|| tx.clone());
+                    self.load_config(tx);
+                    self.device_poll();
                 }
             }
         }

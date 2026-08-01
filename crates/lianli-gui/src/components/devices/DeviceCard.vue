@@ -11,10 +11,6 @@ import { useConfigStore } from "@/stores/config";
 import { useIpc } from "@/composables/useIpc";
 import {
   FAMILY_DISPLAY,
-  familyHasLcd,
-  familyHasFan,
-  familyHasPump,
-  familyHasRgb,
   familySupportsDisplaySwitch,
   familyIsDesktopMode,
 } from "@/constants";
@@ -32,15 +28,12 @@ const ipc = useIpc();
 const d = computed(() => props.device);
 const familyName = computed(() => FAMILY_DISPLAY[d.value.family] ?? d.value.family);
 
-const caps = computed(() => {
-  const f = d.value.family;
-  return {
-    lcd: familyHasLcd(f) || d.value.has_lcd,
-    fan: familyHasFan(f) || d.value.has_fan,
-    pump: familyHasPump(f) || d.value.has_pump,
-    rgb: familyHasRgb(f) || d.value.has_rgb,
-  };
-});
+const caps = computed(() => ({
+  lcd: d.value.has_lcd,
+  fan: d.value.has_fan,
+  pump: d.value.has_pump,
+  rgb: d.value.has_rgb,
+}));
 
 const resolution = computed(() => {
   const { screen_width: w, screen_height: h } = d.value;
@@ -153,7 +146,7 @@ async function ping() {
         <div class="name">{{ d.name }}</div>
         <div class="family">{{ familyName }}</div>
       </div>
-      <button class="ping-btn" title="Identify device" @click="ping">
+      <button v-if="caps.rgb" class="ping-btn" title="Identify device" @click="ping">
         <Locate :size="15" />
       </button>
     </div>
