@@ -19,6 +19,7 @@ pub use port_rgb::TlFanPortDevice;
 use crate::registry::{DeviceDriver, OpenContext, OpenedDevice, SharedHid};
 use anyhow::Result;
 use lianli_shared::device_id::{DeviceFamily, TransportKind};
+use std::sync::Arc;
 
 /// Number of LEDs per TL fan.
 const LEDS_PER_FAN: u16 = 20;
@@ -47,7 +48,7 @@ impl DeviceDriver for TlFanDriver {
             .map(|(port, dev)| {
                 (
                     format!("port{port}"),
-                    Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+                    Arc::new(dev) as Arc<dyn crate::traits::RgbDevice>,
                 )
             })
             .collect();

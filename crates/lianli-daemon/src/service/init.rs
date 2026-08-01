@@ -158,7 +158,7 @@ impl ServiceManager {
     /// retried by the hotplug poller.
     pub(super) fn init_wired_devices(&mut self) {
         let mut fan_devices: HashMap<String, Box<dyn FanDevice>> = HashMap::new();
-        let mut wired_rgb: HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>> =
+        let mut wired_rgb: HashMap<String, std::sync::Arc<dyn lianli_devices::traits::RgbDevice>> =
             HashMap::new();
         self.registry.fan_device_info.clear();
 
@@ -281,7 +281,7 @@ impl ServiceManager {
         serial: Option<&str>,
         opened: registry::OpenedDevice,
         fan_devices: &mut HashMap<String, Box<dyn FanDevice>>,
-        wired_rgb: &mut HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>>,
+        wired_rgb: &mut HashMap<String, std::sync::Arc<dyn lianli_devices::traits::RgbDevice>>,
     ) {
         // Register fan controller.
         if let Some(fan_ctrl) = opened.fan {
@@ -421,7 +421,7 @@ impl ServiceManager {
     /// Create the RgbController from pre-opened wired RGB devices + wireless.
     fn init_rgb_controller_from(
         &mut self,
-        wired_rgb: HashMap<String, Box<dyn lianli_devices::traits::RgbDevice>>,
+        wired_rgb: HashMap<String, std::sync::Arc<dyn lianli_devices::traits::RgbDevice>>,
     ) {
         let wireless = if self.wireless.has_discovered_devices() {
             Some(Arc::new(self.wireless.clone()))

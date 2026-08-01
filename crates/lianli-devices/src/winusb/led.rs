@@ -189,7 +189,7 @@ impl crate::registry::DeviceDriver for WinUsbLedDriver {
             lcd: None,
             rgb: vec![(
                 String::new(),
-                Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+                Arc::new(dev) as Arc<dyn crate::traits::RgbDevice>,
             )],
             aio: None,
             shared_hid: None,

@@ -9,6 +9,7 @@ use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
+use std::sync::Arc;
 use tracing::{debug, info};
 
 const PACKET_SIZE: usize = 8;
@@ -348,7 +349,7 @@ impl crate::registry::DeviceDriver for Hs2OledLedDriver {
             lcd: None,
             rgb: vec![(
                 String::new(),
-                Box::new(std::sync::Arc::clone(&ctrl)) as Box<dyn crate::traits::RgbDevice>,
+                std::sync::Arc::clone(&ctrl) as Arc<dyn crate::traits::RgbDevice>,
             )],
             aio: Some(Box::new(ctrl)),
             shared_hid: None,

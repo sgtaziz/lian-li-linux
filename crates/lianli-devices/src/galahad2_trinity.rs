@@ -557,7 +557,7 @@ impl crate::registry::DeviceDriver for Galahad2TrinityDriver {
             lcd: None,
             rgb: vec![(
                 String::new(),
-                Box::new(ctrl.clone()) as Box<dyn crate::traits::RgbDevice>,
+                ctrl.clone() as Arc<dyn crate::traits::RgbDevice>,
             )],
             aio: Some(Box::new(ctrl)),
             shared_hid: Some(backend),

@@ -719,7 +719,7 @@ impl crate::registry::DeviceDriver for WinUsbLcdDriver {
                             as Box<dyn crate::traits::AioDevice>),
                         vec![(
                             String::new(),
-                            Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
+                            Arc::new(ctrl) as Arc<dyn crate::traits::RgbDevice>,
                         )],
                     )
                 }

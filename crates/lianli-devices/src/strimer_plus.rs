@@ -450,7 +450,7 @@ impl crate::registry::DeviceDriver for StrimerPlusDriver {
             lcd: None,
             rgb: vec![(
                 String::new(),
-                Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
+                Arc::new(ctrl) as Arc<dyn crate::traits::RgbDevice>,
             )],
             aio: None,
             shared_hid: Some(backend),

@@ -7,14 +7,10 @@ use std::sync::Arc;
 /// Result of initializing a wired HID controller that may provide fan, RGB, or both.
 pub struct WiredControllerSet {
     pub fan: Option<Box<dyn crate::traits::FanDevice>>,
-    /// RGB devices as `(suffix, device)` pairs. Suffix is empty for single-zone devices,
-    /// or "portN" for multi-port devices like TL Fan.
-    pub rgb: Vec<(String, Box<dyn crate::traits::RgbDevice>)>,
+    pub rgb: Vec<(String, Arc<dyn crate::traits::RgbDevice>)>,
 }
 
 /// Create all controllers (fan + RGB) for a device family in a single init pass.
-/// This avoids double-initialization for devices that support both fan and RGB
-/// by creating one controller and sharing it via `Arc`.
 pub fn create_wired_controllers(
     family: DeviceFamily,
     pid: u16,
@@ -29,7 +25,7 @@ pub fn create_wired_controllers(
                 .map(|(port, dev)| {
                     (
                         format!("port{port}"),
-                        Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+                        Arc::new(dev) as Arc<dyn crate::traits::RgbDevice>,
                     )
                 })
                 .collect();
@@ -47,7 +43,7 @@ pub fn create_wired_controllers(
                     .map(|(group, dev)| {
                         (
                             format!("group{group}"),
-                            Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+                            Arc::new(dev) as Arc<dyn crate::traits::RgbDevice>,
                         )
                     })
                     .collect();
@@ -62,10 +58,7 @@ pub fn create_wired_controllers(
                 let ctrl = Arc::new(c);
                 WiredControllerSet {
                     fan: Some(Box::new(Arc::clone(&ctrl))),
-                    rgb: vec![(
-                        String::new(),
-                        Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
-                    )],
+                    rgb: vec![(String::new(), ctrl as Arc<dyn crate::traits::RgbDevice>)],
                 }
             }),
         ),
@@ -78,7 +71,7 @@ pub fn create_wired_controllers(
                         fan: Some(Box::new(Arc::new(lcd_ctrl))),
                         rgb: vec![(
                             String::new(),
-                            Box::new(rgb_ctrl) as Box<dyn crate::traits::RgbDevice>,
+                            Arc::new(rgb_ctrl) as Arc<dyn crate::traits::RgbDevice>,
                         )],
                     })
                 }),

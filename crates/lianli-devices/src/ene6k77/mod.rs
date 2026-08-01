@@ -17,6 +17,7 @@ pub use model::{Ene6k77Firmware, Ene6k77Model};
 use crate::registry::{DeviceDriver, OpenContext, OpenedDevice, SharedHid};
 use anyhow::Result;
 use lianli_shared::device_id::{DeviceFamily, TransportKind};
+use std::sync::Arc;
 use std::time::Duration;
 
 const REPORT_ID: u8 = 0xE0;
@@ -46,7 +47,7 @@ impl DeviceDriver for Ene6k77Driver {
             .map(|(group, dev)| {
                 (
                     format!("group{group}"),
-                    Box::new(dev) as Box<dyn crate::traits::RgbDevice>,
+                    Arc::new(dev) as Arc<dyn crate::traits::RgbDevice>,
                 )
             })
             .collect();

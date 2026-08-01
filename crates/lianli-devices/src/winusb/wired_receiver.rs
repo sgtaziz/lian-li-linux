@@ -11,6 +11,7 @@ use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 const PACKET_SIZE: usize = 64;
@@ -732,7 +733,7 @@ impl crate::registry::DeviceDriver for WiredReceiverDriver {
             lcd: None,
             rgb: vec![(
                 String::new(),
-                Box::new(ctrl) as Box<dyn crate::traits::RgbDevice>,
+                Arc::new(ctrl) as Arc<dyn crate::traits::RgbDevice>,
             )],
             aio: None,
             shared_hid: None,

@@ -64,7 +64,7 @@ pub struct OpenedDevice {
     pub lcd: Option<Box<dyn LcdDevice>>,
     /// Multi-zone RGB devices: one entry per zone, labelled
     /// (`""` for single-zone, `"port0"`, `"group1"`, etc.).
-    pub rgb: Vec<(String, Box<dyn RgbDevice>)>,
+    pub rgb: Vec<(String, std::sync::Arc<dyn RgbDevice>)>,
     pub aio: Option<Box<dyn AioDevice>>,
     /// For HID devices: the shared backend the controllers use, so the daemon
     /// can cache it and hand the same backend to a sibling LCD controller

@@ -22,8 +22,7 @@ use tracing::{debug, info, warn};
 use wireless::WirelessRgbState;
 
 pub struct RgbController {
-    /// Wired RGB devices keyed by device_id.
-    wired: HashMap<String, Box<dyn RgbDevice>>,
+    wired: HashMap<String, Arc<dyn RgbDevice>>,
     /// Wireless controller for RF-based LED control.
     wireless: Option<Arc<WirelessController>>,
     /// Wireless device state keyed by device_id ("wireless:xx:xx:xx:xx:xx:xx").
@@ -48,7 +47,7 @@ pub struct RgbController {
 
 impl RgbController {
     pub fn new(
-        wired: HashMap<String, Box<dyn RgbDevice>>,
+        wired: HashMap<String, Arc<dyn RgbDevice>>,
         wireless: Option<Arc<WirelessController>>,
     ) -> Self {
         let mut wireless_state = HashMap::new();
@@ -302,6 +301,15 @@ impl RgbController {
         anyhow::bail!("RGB device not found: {device_id}");
     }
 
+    pub fn cache_direct_batch(&mut self, updates: &HashMap<String, HashMap<u8, Vec<[u8; 3]>>>) {
+        for (device_id, zones) in updates {
+            for (zone, colors) in zones {
+                self.last_direct
+                    .insert((device_id.clone(), *zone), colors.clone());
+            }
+        }
+    }
+
     pub fn set_direct_colors(
         &mut self,
         device_id: &str,
@@ -548,6 +556,10 @@ impl RgbController {
                 }
             }
         }
+    }
+
+    pub fn clone_wired_device(&self, device_id: &str) -> Option<Arc<dyn RgbDevice>> {
+        self.wired.get(device_id).cloned()
     }
 
     fn is_openrgb_controlled(&self) -> bool {

@@ -12,6 +12,7 @@
 //! LCD: 480x480 pixels, 24fps. Pump/fan PWM: 0-100%.
 //! Coolant temperature sensor available.
 
+use std::sync::Arc;
 mod controller;
 mod protocol;
 mod rgb;
@@ -174,7 +175,7 @@ impl crate::registry::DeviceDriver for HydroShiftLcdDriver {
             lcd: None,
             rgb: vec![(
                 String::new(),
-                Box::new(rgb_ctrl) as Box<dyn crate::traits::RgbDevice>,
+                Arc::new(rgb_ctrl) as Arc<dyn crate::traits::RgbDevice>,
             )],
             aio: Some(Box::new(lcd_arc)),
             shared_hid: Some(backend),
