@@ -112,8 +112,8 @@ fn build_dtd(width: u16, height: u16, refresh_hz: u8) -> [u8; 18] {
         | (((V_FRONT >> 4) & 0x03) << 2)
         | ((V_SYNC >> 4) & 0x03)) as u8;
 
-    let h_mm: u16 = 480;
-    let v_mm: u16 = 120;
+    let h_mm: u16 = 0;
+    let v_mm: u16 = 0;
     dtd[12] = (h_mm & 0xFF) as u8;
     dtd[13] = (v_mm & 0xFF) as u8;
     dtd[14] = ((((h_mm >> 8) & 0x0F) << 4) | ((v_mm >> 8) & 0x0F)) as u8;

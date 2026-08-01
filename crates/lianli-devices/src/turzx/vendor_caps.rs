@@ -90,19 +90,11 @@ pub fn parse_vendor_desc(buf: &[u8]) -> Result<VendorCaps> {
                 let w = u16::from_le_bytes([p[0], p[1]]);
                 let h = u16::from_le_bytes([p[2], p[3]]);
                 let refresh = p[4] & 0x7F;
-                let flag = (p[4] & 0x80) != 0;
                 caps.modes.push(Mode {
                     width: w,
                     height: h,
                     refresh_hz: refresh,
                 });
-                if !flag && refresh == 0x1E {
-                    caps.modes.push(Mode {
-                        width: w,
-                        height: h,
-                        refresh_hz: 0x3C,
-                    });
-                }
             }
             _ => {}
         }
@@ -151,7 +143,7 @@ mod tests {
         assert_eq!(caps.max_h, 2047);
         assert_eq!(caps.max_transfer, 131040);
         assert!(caps.supports_mjpeg && caps.supports_h264);
-        assert_eq!(caps.modes.len(), 3);
+        assert_eq!(caps.modes.len(), 2);
         assert!(caps
             .modes
             .iter()

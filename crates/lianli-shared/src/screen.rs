@@ -77,7 +77,7 @@ impl ScreenInfo {
     pub const LANCOOL_207: Self = Self {
         width: 720,
         height: 1472,
-        max_fps: 30,
+        max_fps: 24,
         jpeg_quality: 95,
         max_payload: 512_000,
         h264: false,
@@ -88,7 +88,7 @@ impl ScreenInfo {
     pub const UNIVERSAL_SCREEN: Self = Self {
         width: 480,
         height: 1920,
-        max_fps: 30,
+        max_fps: 24,
         jpeg_quality: 95,
         max_payload: 512_000,
         h264: true,
@@ -99,7 +99,7 @@ impl ScreenInfo {
     pub const VISION_9P2: Self = Self {
         width: 464,
         height: 1920,
-        max_fps: 30,
+        max_fps: 24,
         jpeg_quality: 95,
         max_payload: 512_000,
         h264: false,
