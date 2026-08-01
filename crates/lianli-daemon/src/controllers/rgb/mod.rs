@@ -14,8 +14,10 @@ use lianli_devices::wireless::{WirelessController, WirelessFanType};
 use lianli_shared::rgb::{
     RgbAppConfig, RgbDeviceCapabilities, RgbEffect, RgbMode, RgbPresetZone, RgbZoneInfo,
 };
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use wireless::WirelessRgbState;
 
@@ -37,6 +39,7 @@ pub struct RgbController {
     /// Tracks whether thermal override was active last tick (for edge detection).
     thermal_was_active: bool,
     thermal_last_color: Option<[u8; 3]>,
+    external_lighting_until: Arc<Mutex<Instant>>,
     /// Cached last-applied OpenRGB direct colors per (device_id, zone).
     /// Used to re-push state after fan PWM disrupts the device's RGB.
     last_direct: HashMap<(String, u8), Vec<[u8; 3]>>,
@@ -75,8 +78,13 @@ impl RgbController {
             thermal_override: crate::thermal_alert::new_shared(),
             thermal_was_active: false,
             thermal_last_color: None,
+            external_lighting_until: Arc::new(Mutex::new(Instant::now())),
             last_direct: HashMap::new(),
         }
+    }
+
+    pub fn notify_external_lighting(&self) {
+        *self.external_lighting_until.lock() = Instant::now();
     }
 
     /// Set the shared thermal-alert override state.
@@ -94,7 +102,11 @@ impl RgbController {
         let active = color.is_some();
         let changed = color != self.thermal_last_color;
 
-        if changed {
+        if active && changed {
+            if self.external_lighting_until.lock().elapsed() < Duration::from_secs(10) {
+                self.thermal_last_color = color;
+                return false;
+            }
             match color {
                 Some(rgb) => {
                     info!(

@@ -370,6 +370,8 @@ impl ClientHandler {
                 }
                 offset = end;
             }
+            drop(buf);
+            self.rgb.lock().notify_external_lighting();
         }
 
         Ok(())
