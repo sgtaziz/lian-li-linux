@@ -14,6 +14,7 @@
 //!   0xAD21 — Universal Screen 8.8" (rev2)
 //!   0xAD22 — HydroShift II LCD Square
 //!   0xAD23 — HydroShift II OLED Curve
+//!   0xAD26 — Vision 9.2"
 
 use anyhow::{Context, Result};
 use lianli_transport::RusbHid;
