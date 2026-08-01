@@ -302,8 +302,10 @@ impl ClientHandler {
             }
 
             PKT_SET_CUSTOM_MODE => {
-                // Client wants to switch to direct/custom mode. No-op for us.
-                debug!("OpenRGB SetCustomMode for device {dev_idx}");
+                debug!("OpenRGB SetCustomMode for device {dev_idx} — direct mode active");
+                let mut rgb = self.rgb.lock();
+                rgb.set_openrgb_active(true);
+                rgb.notify_external_lighting();
             }
 
             PKT_UPDATE_LEDS => {
@@ -328,8 +330,19 @@ impl ClientHandler {
             }
 
             PKT_RESIZE_ZONE => {
-                // Ignore zone resize — our zones are fixed hardware
-                debug!("OpenRGB ResizeZone for device {dev_idx} (ignored)");
+                let zone_idx = if payload.len() >= 4 {
+                    u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]))
+                } else {
+                    0
+                };
+                let actual_size = self
+                    .caps()
+                    .get(dev_idx as usize)
+                    .and_then(|cap| cap.zones.get(zone_idx as usize))
+                    .map(|z| z.led_count as u32)
+                    .unwrap_or(0);
+                let resp: Vec<u8> = [zone_idx.to_le_bytes(), actual_size.to_le_bytes()].concat();
+                self.send_packet(dev_idx, PKT_RESIZE_ZONE, &resp)?;
             }
 
             _ => {
@@ -554,7 +567,11 @@ impl ClientHandler {
         buf.extend_from_slice(&0u32.to_le_bytes());
 
         // device_type
-        let dev_type = if cap.device_name.contains("Galahad") || cap.device_name.contains("AIO") {
+        let dev_type = if cap.device_name.contains("Galahad")
+            || cap.device_name.contains("AIO")
+            || cap.device_name.contains("HydroShift")
+            || cap.device_name.contains("Pump")
+        {
             DEVICE_TYPE_COOLER
         } else {
             DEVICE_TYPE_LED_STRIP
