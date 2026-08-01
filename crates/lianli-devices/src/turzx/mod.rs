@@ -28,7 +28,6 @@ pub const STREAM_A_FRAG: u8 = 0x6C;
 pub const STREAM_A_FINAL: u8 = 0x6D;
 pub const STREAM_B_FRAG: u8 = 0x68;
 pub const STREAM_B_FINAL: u8 = 0x69;
-pub const STREAM_C: u8 = 0x6B;
 pub const COMMIT: u8 = 0x66;
 
 pub fn is_turzx(vid: u16, pid: u16) -> bool {

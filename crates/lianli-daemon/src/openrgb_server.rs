@@ -1,6 +1,6 @@
 //! OpenRGB SDK server: exposes Lian Li devices to OpenRGB/SignalRGB clients.
 //!
-//! Implements the OpenRGB network protocol (TCP, port 6742 by default).
+//! Implements the OpenRGB network protocol (TCP, port 6743 by default).
 //! Each physical device is exposed as an OpenRGB controller with its native
 //! LED modes. Clients can enumerate devices, set modes, and update per-LED colors.
 

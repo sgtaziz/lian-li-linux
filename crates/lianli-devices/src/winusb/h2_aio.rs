@@ -27,6 +27,7 @@ pub struct H2Params {
     pub pump_rpm: u16,
     pub fan_rpm: [u16; 3],
     pub coolant_temp: u8,
+    pub mac: Option<[u8; 6]>,
 }
 
 /// After LCD play mode the device ignores control commands until this
@@ -95,7 +96,6 @@ impl H2AioController {
         }
 
         Ok(H2Params {
-            // [13]=coolant temp, [14:20]=fan RPM, [20:22]=pump RPM (u16 BE)
             cpu_temp: 0,
             cpu_load: 0,
             gpu_temp: 0,
@@ -107,6 +107,14 @@ impl H2AioController {
                 u16::from_be_bytes([buf[18], buf[19]]),
             ],
             coolant_temp: buf[13],
+            mac: {
+                let m = [buf[22], buf[23], buf[24], buf[25], buf[26], buf[27]];
+                if m.iter().all(|&b| b == 0) {
+                    None
+                } else {
+                    Some(m)
+                }
+            },
         })
     }
 

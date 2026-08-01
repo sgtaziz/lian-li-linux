@@ -68,13 +68,8 @@ impl Slv3LcdDevice {
         debug!("LCD[bus {} addr {}] init sequence", self.bus, self.address);
 
         // Init sequence:
-        // 1. Rotate(0)
-        let header = builder.header(0, 0x0D, false);
-        self.transport.write(&header, LCD_WRITE_TIMEOUT)?;
+        // 1. CheckNewLcd (0x80) — probe LCD hardware revision
         let mut buf = [0u8; 511];
-        let _ = self.transport.read(&mut buf, USB_TIMEOUT);
-
-        // 2. CheckNewLcd (0x80) — probe LCD hardware revision
         let check = builder.header(0, 0x80, false);
         self.transport.write(&check, LCD_WRITE_TIMEOUT)?;
         let _ = self.transport.read(&mut buf, USB_TIMEOUT);

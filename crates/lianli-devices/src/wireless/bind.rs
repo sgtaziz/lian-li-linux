@@ -119,7 +119,7 @@ impl WirelessController {
     fn get_rx_unused(&self) -> u8 {
         let devices = self.discovered_devices.lock();
         let local_mac = *self.master_mac.lock();
-        for rx in 1..15u8 {
+        for rx in 1..14u8 {
             let in_use = devices
                 .iter()
                 .any(|d| d.master_mac == local_mac && d.rx_type == rx);

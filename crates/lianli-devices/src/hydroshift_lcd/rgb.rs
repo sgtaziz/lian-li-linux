@@ -34,7 +34,7 @@ impl AioLcdRgbController {
         payload[0] = scope;
         payload[1] = mode_byte;
         payload[2] = lianli_shared::rgb::brightness_scale(effect.brightness);
-        payload[3] = effect.speed.min(4);
+        payload[3] = lianli_shared::rgb::brightness_scale(effect.speed);
         for (i, color) in effect.colors.iter().take(4).enumerate() {
             let offset = 4 + i * 3;
             payload[offset] = color[0];
@@ -59,7 +59,7 @@ impl AioLcdRgbController {
         let mut payload = [0u8; 20];
         payload[0] = mode_byte;
         payload[1] = lianli_shared::rgb::brightness_scale(effect.brightness);
-        payload[2] = effect.speed.min(4);
+        payload[2] = lianli_shared::rgb::brightness_scale(effect.speed);
         for (i, color) in effect.colors.iter().take(4).enumerate() {
             let offset = 3 + i * 3;
             payload[offset] = color[0];
