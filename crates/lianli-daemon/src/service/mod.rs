@@ -190,20 +190,9 @@ impl ServiceManager {
     pub fn device_poll(&mut self) {
         let now_mono = Instant::now();
         let now_wall = std::time::SystemTime::now();
-        let mono_elapsed = now_mono.duration_since(self.last_poll_mono);
-        let wall_elapsed = now_wall
-            .duration_since(self.last_poll_wall)
-            .unwrap_or(mono_elapsed);
+        let _mono_elapsed = now_mono.duration_since(self.last_poll_mono);
         self.last_poll_mono = now_mono;
         self.last_poll_wall = now_wall;
-        if wall_elapsed > mono_elapsed + Duration::from_secs(5) {
-            info!(
-                "System resume detected (~{:.0}s sleep), restarting daemon",
-                (wall_elapsed - mono_elapsed).as_secs_f32()
-            );
-            self.restart_requested = true;
-            return;
-        }
 
         // Check for late wireless device discovery
         let current_wireless = self.wireless.devices().len();
@@ -528,10 +517,13 @@ impl ServiceManager {
                     }
                 }
                 DaemonEvent::SystemResumed => {
-                    info!("System resumed — re-applying device state");
-                    let tx = self.tx.clone().unwrap_or_else(|| tx.clone());
-                    self.load_config(tx);
-                    self.device_poll();
+                    info!("System resumed — waiting for USB re-enumeration");
+                    thread::sleep(Duration::from_secs(2));
+                    self.rebuild_rgb_controller();
+                    self.restart_fan_control();
+                    self.start_aio_control();
+                    self.sync_ipc_state();
+                    info!("Device state re-applied after resume");
                 }
             }
         }

@@ -1,27 +1,19 @@
-//! Thermal alert subsystem — overrides RGB lighting when CPU/GPU temperature
-//! exceeds a configured threshold.
-//!
-//! Architecture: a background thread polls CPU/GPU sensors every 1 second.
-//! When temp >= threshold, it pushes an override color to the shared state.
-//! The RGB controller checks the override before applying user effects — when
-//! active, it sends Static mode with the alert color instead.
-
 use lianli_shared::config::ThermalAlertSettings;
 use lianli_shared::sensors::{
     enumerate_sensors, pick_source_for_category, read_sensor_value, resolve_sensor, SensorCategory,
     SensorSource,
 };
 use parking_lot::Mutex;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+const SENSOR_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Shared thermal-alert state. The RGB controller reads `override_color`
-/// to decide whether to apply the alert override.
 pub type SharedThermalAlert = Arc<Mutex<Option<[u8; 3]>>>;
 
 pub fn new_shared() -> SharedThermalAlert {
@@ -49,7 +41,6 @@ impl ThermalAlertMonitor {
         Arc::clone(&self.override_color)
     }
 
-    #[allow(dead_code)]
     pub fn update_settings(&self, settings: ThermalAlertSettings) {
         *self.settings.lock() = settings;
     }
@@ -79,23 +70,37 @@ impl Drop for ThermalAlertMonitor {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AlertKind {
+    Cpu,
+    Gpu,
+}
+
 fn run(
     settings: Arc<Mutex<ThermalAlertSettings>>,
     override_color: SharedThermalAlert,
     stop_flag: Arc<AtomicBool>,
 ) {
-    let sensors = enumerate_sensors();
-    let cpu_source = pick_source_for_category(SensorCategory::CpuTemp, &sensors);
-    let gpu_source = pick_source_for_category(SensorCategory::GpuTemp, &sensors);
+    let mut sensors = enumerate_sensors();
+    let mut cpu_source = pick_source_for_category(SensorCategory::CpuTemp, &sensors);
+    let mut gpu_source = pick_source_for_category(SensorCategory::GpuTemp, &sensors);
+    let mut last_sensor_refresh = Instant::now();
 
-    let mut cpu_triggered;
-    let mut gpu_triggered;
+    let mut active_stack: VecDeque<AlertKind> = VecDeque::new();
 
     info!("Thermal alert monitor started");
     while !stop_flag.load(Ordering::Relaxed) {
         thread::sleep(POLL_INTERVAL);
         if stop_flag.load(Ordering::Relaxed) {
             break;
+        }
+
+        if last_sensor_refresh.elapsed() >= SENSOR_REFRESH_INTERVAL {
+            sensors = enumerate_sensors();
+            cpu_source = pick_source_for_category(SensorCategory::CpuTemp, &sensors);
+            gpu_source = pick_source_for_category(SensorCategory::GpuTemp, &sensors);
+            last_sensor_refresh = Instant::now();
+            debug!("Thermal alert: refreshed sensor list");
         }
 
         let cfg = settings.lock().clone();
@@ -120,31 +125,43 @@ fn run(
                     .map_or(1, |si| si.divider);
                 read_temp(&src, div)
             });
-        // Evaluate trigger state
-        cpu_triggered =
+
+        let cpu_triggered =
             cfg.cpu.enabled && cpu_temp.map_or(false, |t| t >= cfg.cpu.threshold as f32);
-        gpu_triggered =
+        let gpu_triggered =
             cfg.gpu.enabled && gpu_temp.map_or(false, |t| t >= cfg.gpu.threshold as f32);
 
-        // Determine override color: GPU takes priority if both triggered
-        // (last-pushed wins behaviour)
-        let new_override = if gpu_triggered {
-            Some(cfg.gpu.alert_color)
-        } else if cpu_triggered {
-            Some(cfg.cpu.alert_color)
+        let prev_len = active_stack.len();
+        if cpu_triggered {
+            if !active_stack.contains(&AlertKind::Cpu) {
+                active_stack.push_back(AlertKind::Cpu);
+            }
         } else {
-            None
-        };
+            active_stack.retain(|&k| k != AlertKind::Cpu);
+        }
+        if gpu_triggered {
+            if !active_stack.contains(&AlertKind::Gpu) {
+                active_stack.push_back(AlertKind::Gpu);
+            }
+        } else {
+            active_stack.retain(|&k| k != AlertKind::Gpu);
+        }
+
+        let new_override = active_stack.back().map(|&kind| match kind {
+            AlertKind::Cpu => cfg.cpu.alert_color,
+            AlertKind::Gpu => cfg.gpu.alert_color,
+        });
 
         let mut guard = override_color.lock();
-        if *guard != new_override {
+        if *guard != new_override || active_stack.len() != prev_len {
             match new_override {
                 Some(color) => {
                     info!(
-                        "Thermal alert triggered: CPU={:?}°C GPU={:?}°C — overriding RGB with [{},{},{}]",
+                        "Thermal alert active: CPU={:?}°C GPU={:?}°C — override [{},{},{}] (stack: {:?})",
                         cpu_temp.map(|t| t as i32),
                         gpu_temp.map(|t| t as i32),
-                        color[0], color[1], color[2]
+                        color[0], color[1], color[2],
+                        active_stack,
                     );
                 }
                 None => {

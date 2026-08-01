@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::aio::AioConfig;
-use crate::config::Ene6k77DeviceConfig;
+use crate::config::{Ene6k77DeviceConfig, LcdConfig, ThermalAlertSettings};
 use crate::fan::{FanConfig, FanGroup};
 use crate::rgb::RgbDeviceConfig;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceProfile {
@@ -10,14 +11,24 @@ pub struct DeviceProfile {
     pub device_id: String,
     #[serde(default)]
     pub device_family: String,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rgb: Option<RgbDeviceConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lcds: Vec<LcdConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aio: Option<AioConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fan_group: Option<FanGroup>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ene6k77: Option<Ene6k77DeviceConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thermal_alert: Option<ThermalAlertSettings>,
+}
+
+fn default_schema_version() -> u32 {
+    1
 }
 
 impl DeviceProfile {
@@ -34,45 +45,41 @@ impl DeviceProfile {
 
         let aio = config.aio.get(device_id).cloned();
 
-        let fan_group = config
-            .fans
-            .as_ref()
-            .and_then(|f| {
-                f.speeds
-                    .iter()
-                    .find(|g| g.device_id.as_deref() == Some(device_id))
-                    .cloned()
-            })
-            .or_else(|| {
-                if device_family == "WirelessAio"
-                    || device_family == "Galahad2Trinity"
-                    || device_family == "HydroShiftLcd"
-                    || device_family == "Galahad2Lcd"
-                    || device_family == "HydroShift2Lcd"
-                    || device_family == "HydroShift2OledCurveLed"
-                {
-                    None
-                } else {
-                    None
-                }
-            });
-
-        let ene6k77 = config.ene6k77.iter().find_map(|(k, v)| {
-            if device_id.contains(k.as_str()) {
-                Some(v.clone())
-            } else {
-                None
-            }
+        let fan_group = config.fans.as_ref().and_then(|f| {
+            f.speeds
+                .iter()
+                .find(|g| g.device_id.as_deref() == Some(device_id))
+                .cloned()
         });
+
+        let ene6k77 = ene6k77_lookup(config, device_id);
+
+        let lcds: Vec<LcdConfig> = config
+            .lcds
+            .iter()
+            .filter(|lcd| {
+                if let Some(serial) = &lcd.serial {
+                    device_id.contains(serial.as_str())
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect();
+
+        let thermal_alert = Some(config.thermal_alert.clone());
 
         Self {
             name: name.to_string(),
             device_id: device_id.to_string(),
             device_family: device_family.to_string(),
+            schema_version: 1,
             rgb,
+            lcds,
             aio,
             fan_group,
             ene6k77,
+            thermal_alert,
         }
     }
 
@@ -115,13 +122,45 @@ impl DeviceProfile {
         }
 
         if let Some(ene) = &self.ene6k77 {
-            let key = self
-                .device_id
-                .rsplit(':')
-                .next()
-                .unwrap_or(&self.device_id)
-                .to_string();
-            config.ene6k77.insert(key, ene.clone());
+            if let Some(key) = ene6k77_key_for(&self.device_id) {
+                config.ene6k77.insert(key, ene.clone());
+            }
+        }
+
+        if !self.lcds.is_empty() {
+            for lcd in &self.lcds {
+                if let Some(idx) = config.lcds.iter().position(|existing| {
+                    existing.serial == lcd.serial || existing.index == lcd.index
+                }) {
+                    config.lcds[idx] = lcd.clone();
+                } else {
+                    config.lcds.push(lcd.clone());
+                }
+            }
+        }
+
+        if let Some(ta) = &self.thermal_alert {
+            config.thermal_alert = ta.clone();
         }
     }
+}
+
+fn ene6k77_lookup(
+    config: &crate::config::AppConfig,
+    device_id: &str,
+) -> Option<Ene6k77DeviceConfig> {
+    for (key, val) in &config.ene6k77 {
+        if device_id.contains(key.as_str()) {
+            return Some(val.clone());
+        }
+    }
+    None
+}
+
+fn ene6k77_key_for(device_id: &str) -> Option<String> {
+    device_id
+        .split(':')
+        .last()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
