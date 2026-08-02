@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useDialog } from "naive-ui";
 import { Plus, X } from "lucide-vue-next";
 import { useConfigStore } from "@/stores/config";
@@ -17,6 +17,20 @@ const selectedCurve = ref(0);
 
 const curves = computed(() => config.config.fan_curves);
 const current = computed(() => curves.value[selectedCurve.value] ?? null);
+
+// Local edit buffers for the name/command text inputs. Binding these fields
+// directly to `current.name`/`current.temp_command` via a plain `:value`
+// (rather than `v-model`) means Vue force-writes the DOM `value` on every
+// re-render of this page — which happens every ~2s from the telemetry
+// polling loop — silently discarding any keystrokes typed since the last
+// tick. Buffering locally and only resyncing when the *selected curve*
+// changes (not on every render) avoids that.
+const nameBuffer = ref(current.value?.name ?? "");
+const commandBuffer = ref(current.value?.temp_command ?? "");
+watch(current, (c) => {
+  nameBuffer.value = c?.name ?? "";
+  commandBuffer.value = c?.temp_command ?? "";
+});
 
 const fanCfg = computed(() => config.ensureFans());
 
@@ -198,8 +212,8 @@ function onHysteresisPwm(v: number | null) {
             <label class="muted">Name</label>
             <n-input
               size="small"
-              :value="current.name"
-              @blur="renameCurve(($event.target as HTMLInputElement).value)"
+              v-model:value="nameBuffer"
+              @blur="renameCurve(nameBuffer)"
               placeholder="Curve name"
             />
           </div>
@@ -217,8 +231,8 @@ function onHysteresisPwm(v: number | null) {
             <label class="muted">Custom command</label>
             <n-input
               size="small"
-              :value="current.temp_command ?? ''"
-              @blur="onTempCommand(($event.target as HTMLInputElement).value)"
+              v-model:value="commandBuffer"
+              @blur="onTempCommand(commandBuffer)"
               placeholder="e.g. cat /sys/class/thermal/thermal_zone0/temp"
             />
           </div>
