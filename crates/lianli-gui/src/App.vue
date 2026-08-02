@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, onUnmounted } from "vue";
 import { useRoute } from "vue-router";
 import { darkTheme, type GlobalTheme, type GlobalThemeOverrides } from "naive-ui";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useThemeStore } from "@/stores/theme";
+import { LCD_TEMPLATES_CHANGED_EVENT } from "@/stores/lcd";
 import AppSidebar from "@/components/layout/AppSidebar.vue";
 import AppHeader from "@/components/layout/AppHeader.vue";
 
@@ -77,10 +79,23 @@ const themeOverrides = computed(() =>
   theme.isDark ? darkOverrides : lightOverrides,
 );
 
+let unlistenTemplatesChanged: UnlistenFn | undefined;
+
 onMounted(async () => {
   // Kick off the initial config load + polling loop.
   await config.load().catch(() => undefined);
   daemon.start();
+
+  // Each window (main/editor/browser) has its own store instance, so a
+  // template saved in one (e.g. the editor) doesn't update the others on its
+  // own — resync on this window's copy of the template list when notified.
+  unlistenTemplatesChanged = await listen(LCD_TEMPLATES_CHANGED_EVENT, () => {
+    config.load().catch(() => undefined);
+  });
+});
+
+onUnmounted(() => {
+  unlistenTemplatesChanged?.();
 });
 </script>
 

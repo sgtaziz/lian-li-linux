@@ -1,8 +1,13 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { emit } from "@tauri-apps/api/event";
 import { useIpc } from "@/composables/useIpc";
 import { useDebounce } from "@/composables/useDebounce";
 import type { LcdConfig, LcdTemplate } from "@/types";
+
+/** Broadcast when SetLcdTemplates changes the template list, so other open
+ *  windows (each with their own config store instance) know to reload it. */
+export const LCD_TEMPLATES_CHANGED_EVENT = "lcd-templates-changed";
 
 /**
  * LCD-side effects: display-mode switch, media apply, and the template editor
@@ -26,6 +31,7 @@ export const useLcdStore = defineStore("lcd", () => {
 
   async function setTemplates(templates: LcdTemplate[]) {
     await ipc.request("SetLcdTemplates", { templates });
+    await emit(LCD_TEMPLATES_CHANGED_EVENT);
   }
 
   async function setBrightness(deviceId: string, brightness: number) {
