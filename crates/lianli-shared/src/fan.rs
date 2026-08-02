@@ -33,7 +33,7 @@ impl FanCurve {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum FanSpeed {
     Constant(u8),
@@ -118,8 +118,42 @@ pub struct FanGroup {
     /// When absent, groups are matched by index order to discovered devices.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
-    /// PWM per fan slot (up to 4).
+    /// PWM per fan slot (up to 4). Hubs with fewer than 4 physically
+    /// connected fans (e.g. a 3-fan Uni Hub) report shorter arrays from the
+    /// frontend; unpopulated trailing slots are padded with `Constant(0)`.
+    #[serde(deserialize_with = "deserialize_padded_speeds")]
     pub speeds: [FanSpeed; 4],
+}
+
+/// Pads a fan-speed list of length 0..=4 out to exactly 4 slots, filling any
+/// missing trailing slots with `FanSpeed::Constant(0)` (unused/off). Hubs
+/// with fewer than 4 physically connected fans (e.g. a 3-fan Uni Hub) report
+/// shorter arrays from the frontend than the fixed 4-slot wire format.
+fn pad_speeds(mut speeds: Vec<FanSpeed>) -> Result<[FanSpeed; 4], String> {
+    if speeds.len() > 4 {
+        return Err(format!(
+            "invalid length {}, expected at most 4 fan speeds",
+            speeds.len()
+        ));
+    }
+    while speeds.len() < 4 {
+        speeds.push(FanSpeed::Constant(0));
+    }
+    Ok(speeds
+        .try_into()
+        .expect("padded to exactly 4 elements above"))
+}
+
+/// Deserializes a fan-speed array of length 0..=4, padding any missing
+/// trailing slots with `FanSpeed::Constant(0)` (unused/off).
+fn deserialize_padded_speeds<'de, D>(deserializer: D) -> Result<[FanSpeed; 4], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+
+    let speeds: Vec<FanSpeed> = Vec::deserialize(deserializer)?;
+    pad_speeds(speeds).map_err(D::Error::custom)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -188,9 +222,11 @@ where
                         .map_err(|e| de::Error::custom(format!("Invalid fan group: {e}")))?;
                     result.push(group);
                 } else if val.is_array() {
-                    // Legacy format: [speed, speed, speed, speed]
-                    let speeds: [FanSpeed; 4] = serde_json::from_value(val)
+                    // Legacy format: [speed, speed, speed, speed] (or fewer,
+                    // for hubs with less than 4 physically connected fans).
+                    let speeds_vec: Vec<FanSpeed> = serde_json::from_value(val)
                         .map_err(|e| de::Error::custom(format!("Invalid fan speed array: {e}")))?;
+                    let speeds = pad_speeds(speeds_vec).map_err(de::Error::custom)?;
                     result.push(FanGroup {
                         device_id: None,
                         speeds,
@@ -271,5 +307,52 @@ mod tests {
     fn duty_to_percent_quarter() {
         // 64 / 255 ≈ 25.1 → floored to 25
         assert_eq!(duty_to_percent(64), 25);
+    }
+
+    #[test]
+    fn fan_group_object_format_pads_short_speeds_array() {
+        // A 3-fan hub (e.g. a Uni Hub with only 3 connected fans) reports a
+        // 3-element speeds array, which must be padded rather than rejected.
+        let json = r#"[{"device_id": "wireless:AA:BB:CC:DD:EE:01", "speeds": [30, 40, 50]}]"#;
+        let groups: Vec<FanGroup> = serde_json::from_str(&format!(
+            r#"{{"speeds": {json}}}"#
+        ))
+        .map(|c: FanConfig| c.speeds)
+        .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            groups[0].speeds,
+            [
+                FanSpeed::Constant(30),
+                FanSpeed::Constant(40),
+                FanSpeed::Constant(50),
+                FanSpeed::Constant(0),
+            ]
+        );
+    }
+
+    #[test]
+    fn fan_group_legacy_array_format_pads_short_speeds_array() {
+        let json = r#"{"speeds": [[30, 40]]}"#;
+        let groups: Vec<FanGroup> = serde_json::from_str(json)
+            .map(|c: FanConfig| c.speeds)
+            .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            groups[0].speeds,
+            [
+                FanSpeed::Constant(30),
+                FanSpeed::Constant(40),
+                FanSpeed::Constant(0),
+                FanSpeed::Constant(0),
+            ]
+        );
+    }
+
+    #[test]
+    fn fan_group_speeds_array_too_long_is_rejected() {
+        let json = r#"{"speeds": [{"speeds": [10, 20, 30, 40, 50]}]}"#;
+        let result: Result<FanConfig, _> = serde_json::from_str(json);
+        assert!(result.is_err());
     }
 }
