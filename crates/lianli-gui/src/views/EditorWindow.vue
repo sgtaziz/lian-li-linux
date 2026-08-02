@@ -34,15 +34,17 @@ const sensorOptions = computed(() =>
 
 const presetOptions = screenPresets.map((p) => ({ label: p.label, value: `${p.width}x${p.height}` }));
 
-/** Load the template identified by `?template=<id>` (falls back to first). */
+/**
+ * Load the template identified by `?template=<id>`. The "New" button opens
+ * the editor with no id at all (the "Edit" button is disabled unless an
+ * entry already has a template_id, so it always passes one) — treat a
+ * missing/unmatched id as "start a blank template", not "open whatever
+ * happens to be first in the list".
+ */
 function loadRequestedTemplate(id: string | (string | null)[] | null) {
   const tid = Array.isArray(id) ? id[0] : id;
   const match = tid ? config.templates.find((t) => t.id === tid) : undefined;
-  template.value = match
-    ? (JSON.parse(JSON.stringify(match)) as LcdTemplate)
-    : config.templates.length
-      ? (JSON.parse(JSON.stringify(config.templates[0])) as LcdTemplate)
-      : blankTemplate();
+  template.value = match ? (JSON.parse(JSON.stringify(match)) as LcdTemplate) : blankTemplate();
   selectedId.value = null;
   triggerPreview();
 }
