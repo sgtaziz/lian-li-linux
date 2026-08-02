@@ -189,6 +189,16 @@ impl ServiceManager {
         for det in &usb_devs {
             if det.family == lianli_shared::device_id::DeviceFamily::TlLcd
                 || det.family == lianli_shared::device_id::DeviceFamily::HydroShift2OledCurveLcd
+                // WinUsbLcdDriver::open() bundles a fan/aio handle onto the
+                // same shared USB transport as the LCD (see winusb/lcd.rs).
+                // Registering that fan handle here keeps an interface-0 claim
+                // alive for the lifetime of the daemon, which races against
+                // service::media's independent open_for_pid() claim on the
+                // same device and permanently starves LCD image attach
+                // ("interface 0 busy, retrying" in a loop). This device's fan
+                // capability is not otherwise exposed/needed, so skip it and
+                // let service::media own the interface exclusively.
+                || det.family == lianli_shared::device_id::DeviceFamily::HydroShift2Lcd
             {
                 continue;
             }
