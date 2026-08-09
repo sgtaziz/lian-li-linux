@@ -1,0 +1,822 @@
+{
+  "id": "hs2-oled-curve",
+  "name": "HydroShift II OLED Curve",
+  "base_width": 2288,
+  "base_height": 1080,
+  "rotated": false,
+  "background": {
+    "type": "color",
+    "rgb": [
+      0,
+      0,
+      0,
+      255
+    ]
+  },
+  "widgets": [
+    {
+      "id": "cpu-load-label",
+      "x": 297.44,
+      "y": 35.0,
+      "width": 400,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "CPU LOAD",
+        "font": {
+          "path": null
+        },
+        "font_size": 40,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "cpu-load-gauge",
+      "x": 297.44,
+      "y": 280,
+      "width": 400,
+      "height": 400,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 50,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "cpu-load-value",
+      "x": 297.44,
+      "y": 270,
+      "width": 248.0,
+      "height": 168.0,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 108,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "cpu-load-unit",
+      "x": 297.44,
+      "y": 360.0,
+      "width": 200.0,
+      "height": 70,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": null
+        },
+        "font_size": 32,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "cpu-temp-label",
+      "x": 892.3199999999999,
+      "y": 35.0,
+      "width": 400,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "CPU TEMP",
+        "font": {
+          "path": null
+        },
+        "font_size": 40,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "cpu-temp-gauge",
+      "x": 892.3199999999999,
+      "y": 280,
+      "width": 400,
+      "height": 400,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "hwmon",
+          "name": "k10temp",
+          "label": "Tctl",
+          "device_path": ""
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 60,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "cpu-temp-value",
+      "x": 892.3199999999999,
+      "y": 270,
+      "width": 248.0,
+      "height": 168.0,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "k10temp",
+          "label": "Tctl",
+          "device_path": ""
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 108,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "cpu-temp-unit",
+      "x": 892.3199999999999,
+      "y": 360.0,
+      "width": 200.0,
+      "height": 70,
+      "kind": {
+        "type": "label",
+        "text": "\u00b0C",
+        "font": {
+          "path": null
+        },
+        "font_size": 32,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gpu-load-label",
+      "x": 297.44,
+      "y": 555.0,
+      "width": 400,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "GPU LOAD",
+        "font": {
+          "path": null
+        },
+        "font_size": 40,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gpu-load-gauge",
+      "x": 297.44,
+      "y": 800,
+      "width": 400,
+      "height": 400,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "nvidia_gpu",
+          "gpu_index": 0,
+          "metric": "usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 50,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "gpu-load-value",
+      "x": 297.44,
+      "y": 790,
+      "width": 248.0,
+      "height": 168.0,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "nvidia_gpu",
+          "gpu_index": 0,
+          "metric": "usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 108,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "gpu-load-unit",
+      "x": 297.44,
+      "y": 880.0,
+      "width": 200.0,
+      "height": 70,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": null
+        },
+        "font_size": 32,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gpu-temp-label",
+      "x": 892.3199999999999,
+      "y": 555.0,
+      "width": 400,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "GPU TEMP",
+        "font": {
+          "path": null
+        },
+        "font_size": 40,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "gpu-temp-gauge",
+      "x": 892.3199999999999,
+      "y": 800,
+      "width": 400,
+      "height": 400,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "nvidia_gpu",
+          "gpu_index": 0,
+          "metric": "temp"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 60,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "gpu-temp-value",
+      "x": 892.3199999999999,
+      "y": 790,
+      "width": 248.0,
+      "height": 168.0,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "nvidia_gpu",
+          "gpu_index": 0,
+          "metric": "temp"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 108,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "gpu-temp-unit",
+      "x": 892.3199999999999,
+      "y": 880.0,
+      "width": 200.0,
+      "height": 70,
+      "kind": {
+        "type": "label",
+        "text": "\u00b0C",
+        "font": {
+          "path": null
+        },
+        "font_size": 32,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "ram-label",
+      "x": 1853.28,
+      "y": 35.0,
+      "width": 400,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "RAM",
+        "font": {
+          "path": null
+        },
+        "font_size": 40,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "ram-gauge",
+      "x": 1853.28,
+      "y": 280,
+      "width": 400,
+      "height": 400,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "mem_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 50,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 80,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "ram-value",
+      "x": 1853.28,
+      "y": 270,
+      "width": 248.0,
+      "height": 168.0,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "mem_used"
+        },
+        "format": "{:.1}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 108,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 31
+      },
+      "sensor_category": "mem_used"
+    },
+    {
+      "id": "ram-unit",
+      "x": 1853.28,
+      "y": 360.0,
+      "width": 200.0,
+      "height": 70,
+      "kind": {
+        "type": "label",
+        "text": "GB",
+        "font": {
+          "path": null
+        },
+        "font_size": 32,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "nvme-temp-label",
+      "x": 1853.28,
+      "y": 555.0,
+      "width": 400,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "NVME TEMP",
+        "font": {
+          "path": null
+        },
+        "font_size": 40,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "nvme-temp-gauge",
+      "x": 1853.28,
+      "y": 800,
+      "width": 400,
+      "height": 400,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "hwmon",
+          "name": "nvme",
+          "label": "Composite",
+          "device_path": ""
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 300,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.8,
+        "background_color": [
+          32,
+          38,
+          48,
+          255
+        ],
+        "bg_corner_radius": 16,
+        "value_corner_radius": 16,
+        "ranges": [
+          {
+            "max": 55,
+            "color": [
+              0,
+              190,
+              210
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 70,
+            "color": [
+              230,
+              150,
+              0
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              225,
+              45,
+              45
+            ],
+            "alpha": 255
+          }
+        ]
+      }
+    },
+    {
+      "id": "nvme-temp-value",
+      "x": 1853.28,
+      "y": 790,
+      "width": 248.0,
+      "height": 168.0,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "nvme",
+          "label": "Composite",
+          "device_path": ""
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": null
+        },
+        "font_size": 108,
+        "color": [
+          230,
+          238,
+          246,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "nvme-temp-unit",
+      "x": 1853.28,
+      "y": 880.0,
+      "width": 200.0,
+      "height": 70,
+      "kind": {
+        "type": "label",
+        "text": "\u00b0C",
+        "font": {
+          "path": null
+        },
+        "font_size": 32,
+        "color": [
+          150,
+          165,
+          180,
+          255
+        ],
+        "align": "center"
+      }
+    }
+  ]
+}

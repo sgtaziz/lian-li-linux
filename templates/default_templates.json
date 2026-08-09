@@ -157,6 +157,22 @@
       "base_height": 464,
       "rotated": false,
       "files": []
+    },
+    {
+      "id": "hs2-oled-curve",
+      "name": "HydroShift II OLED Curve",
+      "description": "Six-ring monitor shaped to the curved OLED: CPU and GPU load/temp in a 2x2 grid on the flat front face, RAM and NVMe temperature on the side face, with the bend left clear.",
+      "author": "k1nch0",
+      "min_daemon_version": "0.7.0",
+      "folder": "hs2-oled-curve",
+      "template_file": "template.json",
+      "template_sha256": "df8df6c1ef371c15f36cfed33040647ec2b6cceda71cd44d1a20fa2d89b405d0",
+      "preview": "preview.png",
+      "preview_sha256": "0b4c997d044399751dc41abaae64a30b6cdd54c65cbf74930ac0e1a3752fd9bf",
+      "base_width": 2288,
+      "base_height": 1080,
+      "rotated": false,
+      "files": []
     }
   ]
 }
