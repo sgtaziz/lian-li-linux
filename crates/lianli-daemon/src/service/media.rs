@@ -122,18 +122,6 @@ impl ServiceManager {
             return;
         }
 
-        const LCD_FAMILIES: &[DeviceFamily] = &[
-            DeviceFamily::Slv3Lcd,
-            DeviceFamily::Tlv2Lcd,
-            DeviceFamily::HydroShift2Lcd,
-            DeviceFamily::HydroShift2OledCurveLcd,
-            DeviceFamily::Lancool207,
-            DeviceFamily::UniversalScreen,
-            DeviceFamily::HydroShiftLcd,
-            DeviceFamily::Galahad2Lcd,
-            DeviceFamily::TlLcd,
-        ];
-
         struct LcdCandidate {
             family: DeviceFamily,
             device_id: String,
@@ -151,7 +139,7 @@ impl ServiceManager {
 
         if let Ok(usb_devs) = enumerate_devices() {
             for det in usb_devs {
-                if !LCD_FAMILIES.contains(&det.family) {
+                if !is_streamable_lcd(det.family) {
                     continue;
                 }
                 let device_id = det.device_id();
@@ -204,19 +192,26 @@ impl ServiceManager {
                     exact.or_else(|| {
                         // Alias fallback: wired AIO firmwares may alternate between
                         // hardware serial and USB-topology ID across cold boot.
-                        // Only apply when there's one LCD config and one compatible AIO.
-                        if cfg.lcds.len() == 1 && serial.starts_with("hid:") {
-                            let mut compatible = candidates.iter().enumerate()
-                                .filter(|(idx, c)| !claimed.contains(idx) && is_wired_aio_lcd(c.family));
-                            let first = compatible.next();
-                            if let Some((idx, c)) = first {
-                                if compatible.next().is_none() {
-                                    warn!(
-                                        "[devices] configured AIO LCD id '{}' unavailable; using compatible alias '{}'",
-                                        serial, c.device_id
-                                    );
-                                    return Some((idx, c));
-                                }
+                        //
+                        // This is a guess, so it is limited to the one case where
+                        // the answer is unambiguous: a single LCD config and a
+                        // single LCD attached to the machine. The candidate count
+                        // covers every streamable panel, not just wired AIOs — if
+                        // any other LCD is present it may well be the intended
+                        // target, and guessing would stream the template to the
+                        // wrong panel.
+                        if cfg.lcds.len() == 1
+                            && candidates.len() == 1
+                            && serial.starts_with("hid:")
+                        {
+                            if let Some((idx, c)) = candidates.iter().enumerate()
+                                .find(|(idx, c)| !claimed.contains(idx) && is_wired_aio_lcd(c.family))
+                            {
+                                warn!(
+                                    "[devices] configured AIO LCD id '{}' unavailable; using compatible alias '{}'",
+                                    serial, c.device_id
+                                );
+                                return Some((idx, c));
                             }
                         }
                         None
@@ -295,9 +290,15 @@ impl ServiceManager {
                             .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
                         }
                     }
+                    // Plain WinUSB bulk panels: no shared control transport, so
+                    // the LCD is opened directly. `WinUsbLcdDevice::open`
+                    // dispatches to the right protocol variant by PID.
                     DeviceFamily::HydroShift2OledCurveLcd
                     | DeviceFamily::Lancool207
-                    | DeviceFamily::UniversalScreen => {
+                    | DeviceFamily::UniversalScreen
+                    | DeviceFamily::Vision9p2
+                    | DeviceFamily::TlFlexLcd
+                    | DeviceFamily::SlInfFlexLcd => {
                         let device = Device::clone(candidate.usb_device.as_ref().unwrap());
                         lianli_devices::winusb::lcd::WinUsbLcdDevice::open(device, candidate.pid)
                             .map(|d| LcdBackend::WinUsb(ThreadedWinUsbSender::new(d, cfg_idx)))
@@ -360,7 +361,15 @@ impl ServiceManager {
                             }
                         }
                     }
-                    _ => unreachable!(),
+                    // `is_streamable_lcd` admits any family carrying the LCD
+                    // capability, so a newly declared panel reaches this match
+                    // before it has a backend arm. Report it instead of
+                    // panicking: the rest of the daemon keeps running and the
+                    // log says exactly what is missing.
+                    other => Err(anyhow::anyhow!(
+                        "no LCD backend implemented for family {other:?}; \
+                         add an arm in refresh_targets"
+                    )),
                 };
 
                 match backend_result {
@@ -437,6 +446,24 @@ impl ServiceManager {
 
         targets.extend(new_targets);
     }
+}
+
+/// Whether the daemon can stream media to this family over a direct USB attachment.
+///
+/// Derived from the family's own capability flags instead of a hand-kept list,
+/// so a new panel only has to be declared once: add its `DeviceEntry` in
+/// `lianli-shared/src/device_id.rs` with `DeviceCapabilities::LCD` and it
+/// becomes a streaming target here automatically.
+///
+/// Desktop-mode companions are excluded — they present the panel as a virtual
+/// display through EVDI, so the compositor draws to them rather than this
+/// media pipeline.
+///
+/// Adding a family here is only half the job: it also needs a backend arm in
+/// the `match candidate.family` in `refresh_targets`. Without one it is
+/// reported as unsupported and skipped, never bound to a different panel.
+fn is_streamable_lcd(family: DeviceFamily) -> bool {
+    family.has_lcd() && !family.is_desktop_mode()
 }
 
 /// Whether a device family is a wired AIO LCD that may benefit from alias matching.
