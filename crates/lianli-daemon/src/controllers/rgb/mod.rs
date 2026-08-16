@@ -399,6 +399,30 @@ impl RgbController {
         Ok(())
     }
 
+    /// Re-send the last known OpenRGB direct-color frame for every wireless
+    /// device. Wireless fan-speed (PWM) packets share the same RF link as
+    /// the RGB stream and interrupt it, causing the fan to fall back to its
+    /// onboard default effect. When OpenRGB has control, the normal drift
+    /// resync (which reapplies the configured native effect) is skipped, so
+    /// this re-pushes `last_direct` instead to recover the same way.
+    pub fn resync_wireless_direct_colors(&mut self) {
+        let mut by_device: HashMap<String, HashMap<u8, Vec<[u8; 3]>>> = HashMap::new();
+        for ((device_id, zone), colors) in &self.last_direct {
+            if device_id.starts_with("wireless:") {
+                by_device
+                    .entry(device_id.clone())
+                    .or_default()
+                    .insert(*zone, colors.clone());
+            }
+        }
+
+        for (device_id, zones) in by_device {
+            if let Err(e) = self.apply_wireless_batch(&device_id, &zones) {
+                debug!("Direct-color resync failed for {device_id}: {e}");
+            }
+        }
+    }
+
     /// Upload a multi-frame animation to a wireless device via
     /// `send_rgb_frames`. Each frame must be a full-device LED buffer; the
     /// firmware then loops the animation onboard at `interval_ms` with no

@@ -446,9 +446,12 @@ impl ServiceManager {
                 }
                 DaemonEvent::ResyncWirelessRgb => {
                     if let Some(ref rgb) = self.controllers.rgb {
-                        let rgb = rgb.lock();
+                        let mut rgb = rgb.lock();
                         if rgb.is_openrgb_controlled() {
-                            debug!("OpenRGB server active, skipping wireless drift resync");
+                            debug!(
+                                "OpenRGB server active — resyncing last direct-color frame instead of native effect"
+                            );
+                            rgb.resync_wireless_direct_colors();
                         } else {
                             drop(rgb);
                             self.apply_rgb_config();
