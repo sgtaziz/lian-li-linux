@@ -5,7 +5,7 @@ use std::sync::mpsc::Sender;
 
 use lianli_shared::config::AppConfig;
 use lianli_shared::ipc::IpcResponse;
-use lianli_shared::rgb::{RgbDeviceConfig, RgbPreset, RgbPresetZone, RgbZoneConfig};
+use lianli_shared::rgb::{RgbDeviceConfig, RgbMode, RgbPreset, RgbPresetZone, RgbZoneConfig};
 use tracing::info;
 
 use crate::ipc::{DaemonState, SharedState};
@@ -34,13 +34,21 @@ pub fn save(
             .unwrap_or_default();
 
         if let Some(led_zones) = led_colors {
+            // A zone with captured live LED colors is, by definition, in
+            // direct/per-LED mode right now — tag it Direct rather than
+            // carrying over whatever effect was configured before, or a
+            // later reconciliation will re-engage that stale effect (e.g.
+            // Static) ahead of restoring these colors.
             let zones: Vec<RgbPresetZone> = led_zones
                 .into_iter()
                 .map(|mut z| {
-                    z.effect = zone_configs
+                    let mut effect = zone_configs
                         .iter()
                         .find(|zc| zc.zone_index == z.zone)
-                        .map(|zc| zc.effect.clone());
+                        .map(|zc| zc.effect.clone())
+                        .unwrap_or_default();
+                    effect.mode = RgbMode::Direct;
+                    z.effect = Some(effect);
                     z
                 })
                 .collect();
