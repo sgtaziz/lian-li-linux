@@ -170,6 +170,7 @@ function applyDirect() {
   for (const i of selectedLeds.value) {
     ledColors.value[i] = directColor.value;
   }
+  selectedLeds.value = [];
   config.rgbDeviceConfig(props.deviceId).active_preset = null;
   config.markDirty();
   void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
