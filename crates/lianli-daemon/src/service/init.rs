@@ -80,18 +80,6 @@ impl ServiceManager {
     /// For each discovered AIO, ensure an AioConfig exists in the user's config.
     /// Migrates any legacy FanGroup targeting that device, then inserts defaults.
     pub(super) fn ensure_aio_defaults(&mut self) {
-        // Refresh from the IPC-side config before touching it. self.config
-        // can lag behind concurrent IPC-driven writes (RGB presets, device
-        // profiles, etc. all mutate state.config directly), and this
-        // function ends by persisting a full-struct snapshot back over
-        // state.config — without this refresh that snapshot would silently
-        // discard any such concurrent change.
-        if let Some(latest) = self.ipc.state.lock().config.clone() {
-            self.config = Some(latest);
-        }
-        let Some(cfg) = self.config.as_mut() else {
-            return;
-        };
         let aio_device_ids: Vec<String> = self
             .wireless
             .devices()
@@ -102,6 +90,13 @@ impl ServiceManager {
         if aio_device_ids.is_empty() {
             return;
         }
+
+        // Keep the lock held across the write, IPC handlers update
+        // state.config concurrently.
+        let mut ipc_state = self.ipc.state.lock();
+        let Some(mut cfg) = ipc_state.config.clone().or_else(|| self.config.clone()) else {
+            return;
+        };
 
         let mut changed = false;
         for device_id in aio_device_ids {
@@ -119,12 +114,12 @@ impl ServiceManager {
             }
         }
 
+        self.config = Some(cfg.clone());
         if changed {
-            let snapshot = cfg.clone();
-            if let Err(e) = persistence::write_config(&self.config_path, &snapshot) {
+            if let Err(e) = persistence::write_config(&self.config_path, &cfg) {
                 warn!("Failed to persist AIO config additions: {e}");
             } else {
-                self.ipc.state.lock().config = Some(snapshot);
+                ipc_state.config = Some(cfg);
             }
         }
     }
@@ -521,23 +516,18 @@ impl ServiceManager {
         }
 
         if let Some(serial) = serial {
-            // Refresh from the IPC-side config first — see the comment in
-            // ensure_aio_defaults() for why this matters before a snapshot
-            // gets persisted back over state.config.
-            if let Some(latest) = self.ipc.state.lock().config.clone() {
-                self.config = Some(latest);
-            }
-            if let Some(cfg) = self.config.as_mut() {
+            let mut ipc_state = self.ipc.state.lock();
+            if let Some(mut cfg) = ipc_state.config.clone().or_else(|| self.config.clone()) {
                 cfg.ene6k77
                     .entry(serial)
                     .or_default()
                     .fan_quantities
                     .insert(port, quantity);
-                let snapshot = cfg.clone();
-                if let Err(e) = persistence::write_config(&self.config_path, &snapshot) {
+                self.config = Some(cfg.clone());
+                if let Err(e) = persistence::write_config(&self.config_path, &cfg) {
                     warn!("Failed to persist ENE 6K77 fan quantity: {e}");
                 } else {
-                    self.ipc.state.lock().config = Some(snapshot);
+                    ipc_state.config = Some(cfg);
                 }
             }
         }
@@ -605,15 +595,14 @@ impl ServiceManager {
             None
         };
         if let Some(ref rgb) = self.controllers.rgb {
+            // The state lock must be taken before the controller lock, the
+            // IPC handlers use that order and the reverse can deadlock.
+            let ipc_state = self.ipc.state.lock();
             let mut ctrl = rgb.lock();
             ctrl.set_wireless(wireless);
             ctrl.refresh_wireless_devices();
-            // See apply_rgb_config() for why this reads state.config instead
-            // of self.config.
-            let ipc_state = self.ipc.state.lock();
             if let Some(rgb_cfg) = ipc_state.config.as_ref().and_then(|c| c.rgb.clone()) {
                 let presets = ipc_state.rgb_presets.clone();
-                drop(ipc_state);
                 ctrl.apply_config(&rgb_cfg, &presets);
             }
         }
@@ -626,18 +615,12 @@ impl ServiceManager {
 
     /// Apply RGB config from the current AppConfig to the RGB controller.
     pub(super) fn apply_rgb_config(&self) {
-        // Read the RGB section straight from the IPC-side config rather than
-        // self.config: self.config only refreshes on load_config() (driven
-        // by IpcUpdate events), so it can lag behind a just-applied RGB
-        // preset. This runs on the ~1s wireless drift-resync tick, so a
-        // stale self.config here means periodically re-pushing old desired
-        // state (e.g. active_preset=None) onto the hardware, undoing a
-        // preset you just applied.
+        // Read from the IPC-side config, self.config only catches up on
+        // load_config and can lag behind a just-applied preset.
         if let Some(ref rgb) = self.controllers.rgb {
             let ipc_state = self.ipc.state.lock();
             if let Some(rgb_cfg) = ipc_state.config.as_ref().and_then(|c| c.rgb.clone()) {
                 let presets = ipc_state.rgb_presets.clone();
-                drop(ipc_state);
                 rgb.lock().apply_config(&rgb_cfg, &presets);
             }
         }
