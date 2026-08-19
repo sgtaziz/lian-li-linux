@@ -114,13 +114,15 @@ impl ServiceManager {
             }
         }
 
-        self.config = Some(cfg.clone());
         if changed {
             if let Err(e) = persistence::write_config(&self.config_path, &cfg) {
                 warn!("Failed to persist AIO config additions: {e}");
             } else {
+                self.config = Some(cfg.clone());
                 ipc_state.config = Some(cfg);
             }
+        } else {
+            self.config = Some(cfg);
         }
     }
 
@@ -523,10 +525,10 @@ impl ServiceManager {
                     .or_default()
                     .fan_quantities
                     .insert(port, quantity);
-                self.config = Some(cfg.clone());
                 if let Err(e) = persistence::write_config(&self.config_path, &cfg) {
                     warn!("Failed to persist ENE 6K77 fan quantity: {e}");
                 } else {
+                    self.config = Some(cfg.clone());
                     ipc_state.config = Some(cfg);
                 }
             }
