@@ -46,7 +46,12 @@ impl H2WinUsbLcd {
     }
 }
 
-const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
+// Bulk OUT writes block on device NAK while the panel drains its h264
+// buffer (usbmon shows 200 ms+ stalls mid-keyframe). A short timeout makes
+// libusb cancel the URB mid-packet; rusb then reports the partial length and
+// `write_full` resumes from it, which desyncs the firmware and wedges the MCU
+// until power-cycled. WinUSB's default pipe timeout is unbounded; wait.
+const WRITE_TIMEOUT: Duration = Duration::from_millis(5_000);
 const READ_TIMEOUT: Duration = Duration::from_millis(2_000);
 
 impl WinUsbLcd for H2WinUsbLcd {
