@@ -26,6 +26,8 @@ const PKT_REQUEST_CONTROLLER_COUNT: u32 = 0;
 const PKT_REQUEST_CONTROLLER_DATA: u32 = 1;
 const PKT_REQUEST_PROTOCOL_VERSION: u32 = 40;
 const PKT_SET_CLIENT_NAME: u32 = 50;
+const PKT_REQUEST_PROFILE_LIST: u32 = 150;
+const PKT_REQUEST_PLUGIN_LIST: u32 = 200;
 const PKT_RESIZE_ZONE: u32 = 1000;
 const PKT_UPDATE_LEDS: u32 = 1050;
 const PKT_UPDATE_ZONE_LEDS: u32 = 1051;
@@ -341,6 +343,17 @@ impl ClientHandler {
                     .unwrap_or(0);
                 let resp: Vec<u8> = [zone_idx.to_le_bytes(), actual_size.to_le_bytes()].concat();
                 self.send_packet(dev_idx, PKT_RESIZE_ZONE, &resp)?;
+            }
+
+            // We have no profiles or plugins, but clients block waiting for
+            // these replies (openrgb-python hangs during its handshake if
+            // they never arrive), so answer with empty lists:
+            // u32 data_size + u16 entry_count.
+            PKT_REQUEST_PROFILE_LIST | PKT_REQUEST_PLUGIN_LIST => {
+                let mut resp = Vec::with_capacity(6);
+                resp.extend_from_slice(&6u32.to_le_bytes());
+                resp.extend_from_slice(&0u16.to_le_bytes());
+                self.send_packet(0, pkt_id, &resp)?;
             }
 
             _ => {
