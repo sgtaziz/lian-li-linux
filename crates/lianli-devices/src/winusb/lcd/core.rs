@@ -12,6 +12,8 @@ use tracing::{debug, info, warn};
 pub type SharedTransport = Arc<Mutex<RusbBulk>>;
 
 const REOPEN_DELAY: Duration = Duration::from_millis(100);
+/// Chunk writes slower than this are logged: the panel NAKed bulk OUT.
+const SLOW_CHUNK_WRITE: Duration = Duration::from_millis(100);
 const WAIT_BUFFER_POLL: Duration = Duration::from_millis(50);
 const WAIT_BUFFER_NO_STOP_CAP: u32 = 600;
 
@@ -492,7 +494,20 @@ impl WinUsbLcdCore {
         packet[..512].copy_from_slice(&header);
         packet[512..512 + data.len()].copy_from_slice(data);
 
-        match self.tx_write_full(&packet) {
+        let write_started = Instant::now();
+        let write_result = self.tx_write_full(&packet);
+        let write_took = write_started.elapsed();
+        if write_took > SLOW_CHUNK_WRITE {
+            // Device NAK stall: the panel is back-pressuring. Visible at WARN
+            // so field logs show stalls that the write timeout absorbed.
+            warn!(
+                "H264 chunk write stalled {} ms ({} bytes, result {:?})",
+                write_took.as_millis(),
+                packet.len(),
+                write_result.as_ref().map(|_| ()).map_err(|e| e.to_string())
+            );
+        }
+        match write_result {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("H264 chunk write failed: {e}");
