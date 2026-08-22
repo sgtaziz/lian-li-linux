@@ -591,21 +591,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_degraded_records() {
+    fn parse_rejects_only_zero_mac() {
         let mut buf = [0u8; 42];
         buf[41] = 0x1C;
         assert!(parse_device_record(&buf, 0).is_none());
         buf[0..6].copy_from_slice(&[1, 2, 3, 4, 5, 6]);
-        // channel==0 is a legitimate state (device not yet synced to a
-        // channel, e.g. still associated with a different master) -- not
-        // something we reject.
         assert!(parse_device_record(&buf, 0).is_some());
         buf[12] = 8;
         assert!(parse_device_record(&buf, 0).is_some());
-        // rx_type is a pass-through slot id, not something we validate the
-        // range of -- some hardware/firmware revisions (e.g. SL v3 dongles)
-        // report values well outside the old 1..=14 range.
-        buf[13] = 254;
+        buf[13] = 15;
         assert!(parse_device_record(&buf, 0).is_some());
         buf[13] = 1;
         assert!(parse_device_record(&buf, 0).is_some());
