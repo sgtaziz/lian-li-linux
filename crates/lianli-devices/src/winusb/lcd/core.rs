@@ -125,6 +125,32 @@ impl WinUsbLcdCore {
         self.transport.lock().write_full(data, self.write_timeout)
     }
 
+    /// `tx_write_full`, timing only the USB write itself. The lock is taken
+    /// first so a busy `SharedTransport` is not misreported as panel NAK
+    /// backpressure.
+    #[inline]
+    fn tx_write_full_timed(
+        &self,
+        data: &[u8],
+        what: &str,
+    ) -> std::result::Result<(), lianli_transport::TransportError> {
+        let tx = self.transport.lock();
+        let started = Instant::now();
+        let result = tx.write_full(data, self.write_timeout);
+        let took = started.elapsed();
+        if took > SLOW_CHUNK_WRITE {
+            // Device NAK stall: the panel is back-pressuring. Visible at WARN
+            // so field logs show stalls that the write timeout absorbed.
+            warn!(
+                "{what} stalled {} ms ({} bytes, result {:?})",
+                took.as_millis(),
+                data.len(),
+                result.as_ref().map(|_| ()).map_err(|e| e.to_string())
+            );
+        }
+        result
+    }
+
     #[inline]
     fn tx_read(
         &self,
@@ -494,26 +520,13 @@ impl WinUsbLcdCore {
         packet[..512].copy_from_slice(&header);
         packet[512..512 + data.len()].copy_from_slice(data);
 
-        let write_started = Instant::now();
-        let write_result = self.tx_write_full(&packet);
-        let write_took = write_started.elapsed();
-        if write_took > SLOW_CHUNK_WRITE {
-            // Device NAK stall: the panel is back-pressuring. Visible at WARN
-            // so field logs show stalls that the write timeout absorbed.
-            warn!(
-                "H264 chunk write stalled {} ms ({} bytes, result {:?})",
-                write_took.as_millis(),
-                packet.len(),
-                write_result.as_ref().map(|_| ()).map_err(|e| e.to_string())
-            );
-        }
-        match write_result {
+        match self.tx_write_full_timed(&packet, "H264 chunk write") {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("H264 chunk write failed: {e}");
                 self.try_recover()
                     .with_context(|| format!("recovering from h264 write error: {e}"))?;
-                self.tx_write_full(&packet)
+                self.tx_write_full_timed(&packet, "H264 chunk write retry")
                     .context("h264 chunk write after recovery")?;
                 self.note_write_success();
             }
