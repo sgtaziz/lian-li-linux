@@ -247,7 +247,21 @@ impl ServiceManager {
         }
         let configured = self.configured_wireless_device_ids();
         let now = Instant::now();
-        let Some(mac) = self.wireless.rebind_candidates().into_iter().find(|m| {
+
+        // Devices that drifted to a foreign master after we bound them.
+        let mut candidates = self.wireless.rebind_candidates();
+        // Devices that were *already* bound elsewhere when the daemon started.
+        // Those never gained `bind_intent`, so they never show up in
+        // `rebind_candidates()`, and the one-shot rebind in `try_wireless()`
+        // runs before discovery has enumerated them. Without this they stay
+        // dark until the user re-binds by hand.
+        for mac in self.wireless.unbound_devices().into_iter().map(|d| d.mac) {
+            if !candidates.contains(&mac) {
+                candidates.push(mac);
+            }
+        }
+
+        let Some(mac) = candidates.into_iter().find(|m| {
             let id = format!(
                 "wireless:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                 m[0], m[1], m[2], m[3], m[4], m[5]
