@@ -1,3 +1,4 @@
+use super::process::{output_with_timeout, ENCODE_TIMEOUT};
 use super::target_dimensions;
 use crate::common::{render_dimensions, MediaError};
 use lianli_shared::screen::ScreenInfo;
@@ -294,10 +295,9 @@ fn run_encode(
         output.to_string_lossy().into_owned(),
     ]);
 
-    let output_result = Command::new("ffmpeg")
-        .args(&args)
-        .output()
-        .map_err(|e| format!("spawn ffmpeg: {e}"))?;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&args);
+    let output_result = output_with_timeout(cmd, ENCODE_TIMEOUT).map_err(|err| err.to_string())?;
     if output_result.status.success() {
         Ok(())
     } else {

@@ -1,3 +1,4 @@
+use super::process::{output_with_timeout, ENCODE_TIMEOUT, PROBE_TIMEOUT};
 use crate::common::MediaError;
 use std::path::Path;
 use std::process::Command;
@@ -5,20 +6,25 @@ use std::process::Command;
 /// Probe the source's average frame rate via ffprobe. Returns `None` if the
 /// file isn't a video/animated source or ffprobe is unavailable.
 pub fn probe_source_fps(path: &Path) -> Option<f32> {
-    let output = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=avg_frame_rate",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-        ])
-        .arg(path)
-        .output()
-        .ok()?;
+    let mut cmd = Command::new("ffprobe");
+    cmd.args([
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+    ])
+    .arg(path);
+    let output = match output_with_timeout(cmd, PROBE_TIMEOUT) {
+        Ok(output) => output,
+        Err(err) => {
+            tracing::warn!("probing source fps failed: {err}");
+            return None;
+        }
+    };
     if !output.status.success() {
         return None;
     }
@@ -71,10 +77,9 @@ pub(super) fn run_ffmpeg(
         "4".into(),
         output_pattern.to_str().unwrap().into(),
     ]);
-    let output = Command::new("ffmpeg")
-        .args(&args)
-        .output()
-        .map_err(MediaError::Io)?;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&args);
+    let output = output_with_timeout(cmd, ENCODE_TIMEOUT)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -109,10 +114,9 @@ pub(super) fn run_ffmpeg_rgba(
         "rgba".into(),
         output_pattern.to_str().unwrap().into(),
     ]);
-    let output = Command::new("ffmpeg")
-        .args(&args)
-        .output()
-        .map_err(MediaError::Io)?;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&args);
+    let output = output_with_timeout(cmd, ENCODE_TIMEOUT)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -12,6 +12,8 @@ pub enum MediaError {
     Image(#[from] image::ImageError),
     #[error("ffmpeg failed: {0}")]
     Ffmpeg(String),
+    #[error("{0}")]
+    HelperTimedOut(String),
     #[error("generated frame ({size} bytes) exceeds LCD payload limit")]
     PayloadTooLarge { size: usize },
     #[error("video or animation produced no frames")]

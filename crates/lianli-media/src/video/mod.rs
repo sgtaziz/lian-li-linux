@@ -2,6 +2,7 @@ pub mod ffmpeg;
 pub mod h264;
 pub mod h264_inprocess;
 pub mod h264_live;
+mod process;
 
 pub use ffmpeg::{cap_fps_to_source, probe_source_fps};
 pub use h264::encode_h264;
