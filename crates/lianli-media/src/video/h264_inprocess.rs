@@ -42,7 +42,7 @@ impl H264Encoder {
                 Ok(encoder) => {
                     info!("H.264 encoder: {name}");
                     let scaler = ffmpeg::software::scaling::Context::get(
-                        ffmpeg::util::format::Pixel::BGRA,
+                        ffmpeg::util::format::Pixel::RGBA,
                         width,
                         height,
                         ffmpeg::util::format::Pixel::YUV420P,
@@ -52,7 +52,7 @@ impl H264Encoder {
                     )
                     .context("building sws scaler BGRA->YUV420P")?;
                     let frame_in =
-                        ffmpeg::frame::Video::new(ffmpeg::util::format::Pixel::BGRA, width, height);
+                        ffmpeg::frame::Video::new(ffmpeg::util::format::Pixel::RGBA, width, height);
                     let frame_out = ffmpeg::frame::Video::new(
                         ffmpeg::util::format::Pixel::YUV420P,
                         width,
