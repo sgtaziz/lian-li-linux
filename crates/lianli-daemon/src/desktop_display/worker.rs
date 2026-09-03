@@ -206,7 +206,7 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                     width: m.width as usize,
                     height: m.height as usize,
                     pitch: m.width as usize * 4,
-                    format: turbojpeg::PixelFormat::BGRX,
+                    format: turbojpeg::PixelFormat::RGBX,
                 };
                 match turbojpeg::compress(tj_image, 90, turbojpeg::Subsamp::Sub2x2) {
                     Ok(jpeg) => {
