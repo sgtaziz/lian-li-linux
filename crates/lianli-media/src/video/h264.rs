@@ -54,10 +54,15 @@ pub fn encode_h264(
                 );
                 return Ok((output, temp, out_fps as f32));
             }
-            Err(stderr) => {
+            // Only a failed ffmpeg exit is encoder-specific; keep walking
+            // the chain. A helper that cannot start or blows its deadline
+            // fails the same way for every encoder, so retrying would
+            // multiply the stall by the chain length - propagate immediately.
+            Err(MediaError::Ffmpeg(stderr)) => {
                 debug!("LCD H.264 encoder {} unavailable: {stderr}", kind.name());
                 last_stderr = Some(stderr);
             }
+            Err(err) => return Err(err),
         }
     }
 
@@ -278,7 +283,7 @@ fn run_encode(
     kind: EncoderKind,
     output: &Path,
     loop_image: bool,
-) -> Result<(), String> {
+) -> Result<(), MediaError> {
     let mut args: Vec<String> = vec!["-y".into(), "-loglevel".into(), "error".into()];
     args.extend(hwaccel_input_args(kind));
     if loop_image {
@@ -297,11 +302,11 @@ fn run_encode(
 
     let mut cmd = Command::new("ffmpeg");
     cmd.args(&args);
-    let output_result = output_with_timeout(cmd, ENCODE_TIMEOUT).map_err(|err| err.to_string())?;
+    let output_result = output_with_timeout(cmd, ENCODE_TIMEOUT)?;
     if output_result.status.success() {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output_result.stderr);
-        Err(stderr.trim().to_string())
+        Err(MediaError::Ffmpeg(stderr.trim().to_string()))
     }
 }
