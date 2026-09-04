@@ -68,7 +68,7 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
         width: preferred.width as u32,
         height: preferred.height as u32,
         refresh_hz: preferred.refresh_hz as u32,
-        pixel_format: fourcc(b"XR24"),
+        pixel_format: DRM_FORMAT_XRGB8888,
     };
     let mut buffer: Option<EvdiBuffer> = Some(EvdiBuffer::new(
         1,
@@ -332,11 +332,35 @@ const fn fourcc(code: &[u8; 4]) -> u32 {
 const DRM_FORMAT_ABGR8888: u32 = fourcc(b"AB24");
 /// DRM_FORMAT_XBGR8888, memory layout R then G then B then X.
 const DRM_FORMAT_XBGR8888: u32 = fourcc(b"XB24");
+/// DRM_FORMAT_XRGB8888, memory layout B then G then R then X.
+const DRM_FORMAT_XRGB8888: u32 = fourcc(b"XR24");
+/// DRM_FORMAT_ARGB8888, memory layout B then G then R then A.
+const DRM_FORMAT_ARGB8888: u32 = fourcc(b"AR24");
 
 impl ResolvedMode {
     fn from_evdi(m: lianli_evdi::Mode) -> Result<Self> {
         if m.width <= 0 || m.height <= 0 {
             bail!("evdi mode has non-positive dimensions ({:?})", m);
+        }
+        // Every consumer of the framebuffer assumes four bytes per pixel in
+        // one of the two channel orders. A compositor that negotiates
+        // anything else would hand the encoders a buffer they cannot read
+        // correctly, so refuse the mode instead of producing shifted colors
+        // or reading past a smaller buffer.
+        if m.bits_per_pixel != 32
+            || !matches!(
+                m.pixel_format,
+                DRM_FORMAT_XRGB8888
+                    | DRM_FORMAT_ARGB8888
+                    | DRM_FORMAT_ABGR8888
+                    | DRM_FORMAT_XBGR8888
+            )
+        {
+            bail!(
+                "evdi mode has unsupported format {:#x} at {} bpp",
+                m.pixel_format,
+                m.bits_per_pixel
+            );
         }
         let refresh = m.refresh_hz.max(30) as u32;
         Ok(Self {
