@@ -61,11 +61,14 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
     let sku_area_limit = (caps.max_w as u32).saturating_mul(caps.max_h as u32).max(1);
 
     // Pre-register a buffer at the device's preferred mode BEFORE evdi_connect.
+    // No fourcc is known before the first ModeChanged event, and nothing is
+    // encoded until one arrives, so carry the historical XR24 assumption.
     let preferred = turzx::pick_mode(&caps).context("device advertises no modes")?;
     let preferred_resolved = ResolvedMode {
         width: preferred.width as u32,
         height: preferred.height as u32,
         refresh_hz: preferred.refresh_hz as u32,
+        pixel_format: fourcc(b"XR24"),
     };
     let mut buffer: Option<EvdiBuffer> = Some(EvdiBuffer::new(
         1,
@@ -112,13 +115,16 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
         for ev in events {
             match ev {
                 EvdiEvent::ModeChanged(mode) => {
+                    let rgb_first =
+                        matches!(mode.pixel_format, DRM_FORMAT_ABGR8888 | DRM_FORMAT_XBGR8888);
                     info!(
-                        "TURZX {pid:04x} evdi mode: {}×{} @ {}Hz (bpp {}, fmt {:#x})",
+                        "TURZX {pid:04x} evdi mode: {}×{} @ {}Hz (bpp {}, fmt {:#x}, {} first)",
                         mode.width,
                         mode.height,
                         mode.refresh_hz,
                         mode.bits_per_pixel,
-                        mode.pixel_format
+                        mode.pixel_format,
+                        if rgb_first { "red" } else { "blue" }
                     );
                     let resolved =
                         ResolvedMode::from_evdi(mode).context("negotiated mode unsupported")?;
@@ -132,8 +138,13 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                     buffer = Some(new_buf);
                     if !use_jpeg {
                         encoder = Some(
-                            H264Encoder::new(resolved.width, resolved.height, resolved.refresh_hz)
-                                .context("building H264Encoder")?,
+                            H264Encoder::new(
+                                resolved.width,
+                                resolved.height,
+                                resolved.refresh_hz,
+                                resolved.rgb_byte_order(),
+                            )
+                            .context("building H264Encoder")?,
                         );
                     }
                     display
@@ -206,7 +217,11 @@ fn run_worker(pid: u16, stop: Arc<AtomicBool>) -> Result<()> {
                     width: m.width as usize,
                     height: m.height as usize,
                     pitch: m.width as usize * 4,
-                    format: turbojpeg::PixelFormat::RGBX,
+                    format: if m.rgb_byte_order() {
+                        turbojpeg::PixelFormat::RGBX
+                    } else {
+                        turbojpeg::PixelFormat::BGRX
+                    },
                 };
                 match turbojpeg::compress(tj_image, 90, turbojpeg::Subsamp::Sub2x2) {
                     Ok(jpeg) => {
@@ -303,7 +318,20 @@ struct ResolvedMode {
     width: u32,
     height: u32,
     refresh_hz: u32,
+    /// DRM fourcc of the negotiated framebuffer layout.
+    pixel_format: u32,
 }
+
+/// Packs a DRM fourcc code the way the kernel does, first character in the
+/// lowest byte.
+const fn fourcc(code: &[u8; 4]) -> u32 {
+    (code[0] as u32) | ((code[1] as u32) << 8) | ((code[2] as u32) << 16) | ((code[3] as u32) << 24)
+}
+
+/// DRM_FORMAT_ABGR8888, memory layout R then G then B then A.
+const DRM_FORMAT_ABGR8888: u32 = fourcc(b"AB24");
+/// DRM_FORMAT_XBGR8888, memory layout R then G then B then X.
+const DRM_FORMAT_XBGR8888: u32 = fourcc(b"XB24");
 
 impl ResolvedMode {
     fn from_evdi(m: lianli_evdi::Mode) -> Result<Self> {
@@ -315,6 +343,15 @@ impl ResolvedMode {
             width: m.width as u32,
             height: m.height as u32,
             refresh_hz: refresh,
+            pixel_format: m.pixel_format,
         })
+    }
+
+    /// True when the negotiated layout stores red in the first byte of each
+    /// pixel. AB24 and XB24 do, XR24 and AR24 store blue first. The encoders
+    /// read the buffer raw, so they must be told which interpretation to
+    /// use rather than assuming one.
+    fn rgb_byte_order(&self) -> bool {
+        matches!(self.pixel_format, DRM_FORMAT_ABGR8888 | DRM_FORMAT_XBGR8888)
     }
 }

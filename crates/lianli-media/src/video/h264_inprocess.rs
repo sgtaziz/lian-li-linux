@@ -16,8 +16,9 @@ pub fn ensure_ffmpeg_initialized() {
     });
 }
 
-/// libavcodec H.264 encoder specialised for BGRA framebuffers arriving from
-/// evdi. Kept persistent across frames. Returns complete NAL packets
+/// libavcodec H.264 encoder specialised for 32 bit framebuffers arriving
+/// from evdi, in either channel order the negotiated DRM fourcc dictates.
+/// Kept persistent across frames. Returns complete NAL packets
 /// synchronously, unlike the CLI-based [`super::LiveH264Encoder`] which
 /// pipelines via subprocess stdio.
 pub struct H264Encoder {
@@ -32,9 +33,17 @@ pub struct H264Encoder {
 }
 
 impl H264Encoder {
-    pub fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
+    /// `rgb_byte_order` selects the input interpretation: true means the
+    /// framebuffer stores red in the first byte of each pixel, as AB24 and
+    /// XB24 do, false means blue first, as XR24 and AR24 do.
+    pub fn new(width: u32, height: u32, fps: u32, rgb_byte_order: bool) -> Result<Self> {
         ensure_ffmpeg_initialized();
 
+        let src_pixel = if rgb_byte_order {
+            ffmpeg::util::format::Pixel::RGBA
+        } else {
+            ffmpeg::util::format::Pixel::BGRA
+        };
         let gop = (fps / 2).max(1);
         let mut last_err: Option<anyhow::Error> = None;
         for name in ["h264_nvenc", "h264_amf", "libx264"] {
@@ -42,7 +51,7 @@ impl H264Encoder {
                 Ok(encoder) => {
                     info!("H.264 encoder: {name}");
                     let scaler = ffmpeg::software::scaling::Context::get(
-                        ffmpeg::util::format::Pixel::RGBA,
+                        src_pixel,
                         width,
                         height,
                         ffmpeg::util::format::Pixel::YUV420P,
@@ -50,9 +59,8 @@ impl H264Encoder {
                         height,
                         ffmpeg::software::scaling::Flags::BILINEAR,
                     )
-                    .context("building sws scaler BGRA->YUV420P")?;
-                    let frame_in =
-                        ffmpeg::frame::Video::new(ffmpeg::util::format::Pixel::RGBA, width, height);
+                    .with_context(|| format!("building sws scaler {src_pixel:?} -> YUV420P"))?;
+                    let frame_in = ffmpeg::frame::Video::new(src_pixel, width, height);
                     let frame_out = ffmpeg::frame::Video::new(
                         ffmpeg::util::format::Pixel::YUV420P,
                         width,
@@ -78,11 +86,11 @@ impl H264Encoder {
         Err(last_err.unwrap_or_else(|| anyhow!("no H.264 encoder available")))
     }
 
-    pub fn encode(&mut self, bgra: &[u8]) -> Result<Vec<u8>> {
-        self.copy_pixels_in(bgra)?;
+    pub fn encode(&mut self, frame: &[u8]) -> Result<Vec<u8>> {
+        self.copy_pixels_in(frame)?;
         self.scaler
             .run(&self.frame_in, &mut self.frame_out)
-            .context("sws scale BGRA->YUV420P")?;
+            .context("sws scale to YUV420P")?;
         self.frame_out
             .set_pts(Some(self.start.elapsed().as_micros() as i64));
         self.encoder
@@ -98,22 +106,22 @@ impl H264Encoder {
         Ok(out)
     }
 
-    fn copy_pixels_in(&mut self, bgra: &[u8]) -> Result<()> {
+    fn copy_pixels_in(&mut self, frame: &[u8]) -> Result<()> {
         let expected = (self.width as usize) * 4 * (self.height as usize);
-        if bgra.len() < expected {
-            bail!("BGRA buffer too small: {} < {}", bgra.len(), expected);
+        if frame.len() < expected {
+            bail!("frame buffer too small: {} < {}", frame.len(), expected);
         }
         let stride = self.frame_in.stride(0);
         let row_bytes = (self.width as usize) * 4;
         if stride == row_bytes {
-            self.frame_in.data_mut(0)[..expected].copy_from_slice(&bgra[..expected]);
+            self.frame_in.data_mut(0)[..expected].copy_from_slice(&frame[..expected]);
         } else {
             let dst = self.frame_in.data_mut(0);
             for y in 0..self.height as usize {
                 let src_off = y * row_bytes;
                 let dst_off = y * stride;
                 dst[dst_off..dst_off + row_bytes]
-                    .copy_from_slice(&bgra[src_off..src_off + row_bytes]);
+                    .copy_from_slice(&frame[src_off..src_off + row_bytes]);
             }
         }
         Ok(())
