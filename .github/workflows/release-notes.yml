@@ -1,0 +1,159 @@
+name: Release Notes
+
+# Publishes the notes for a release from the history that already exists.
+# Nothing about the commit or tagging workflow has to change: push a `vX.Y.Z`
+# tag exactly as before and the Release page is filled in from the commits
+# that tag introduced.
+#
+# Run it manually first (Actions -> Release Notes -> Run workflow) to see the
+# output for any tag in the job summary. That preview publishes nothing unless
+# you tick "publish".
+#
+# Tag pushes only trigger this in the source repository — see the guard on the
+# job below — so forks stay quiet unless their owner runs it by hand.
+
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to generate notes for (blank = newest)'
+        required: false
+        default: ''
+      publish:
+        description: 'Publish to the GitHub Release (otherwise preview only)'
+        type: boolean
+        required: false
+        default: false
+
+# Only the Release body is written. No commits are pushed by this workflow.
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    # Automatic runs are limited to the source repository. A fork inherits both
+    # this workflow and, on the first `git push --tags`, every upstream tag —
+    # without this guard each of those pushes would publish releases on the
+    # fork. Manual dispatch is deliberately exempt so a fork owner can still
+    # preview or test the workflow from the Actions tab.
+    #
+    # The slug is spelled out rather than read from a top-level `env:` because
+    # a job-level `if:` cannot see the env context (only github, needs, vars
+    # and inputs). Keep it in step with the URLs in .github/cliff.toml.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.repository == 'sgtaziz/lian-li-linux'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # The generator needs the full history and every tag: notes for
+        # v0.8.10 are the commits in v0.8.9..v0.8.10, and the default
+        # fetch-depth of 1 has neither. Submodules are not fetched because
+        # nothing here builds — this reads git metadata only.
+        fetch-depth: 0
+
+    - name: Verify the tag is on the default branch
+      if: github.event_name == 'push'
+      env:
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        # `on.push.branches` cannot express this. A tag push carries
+        # refs/tags/<name> and belongs to no branch, so GitHub ignores a
+        # branch filter on it entirely — the workflow would still run.
+        #
+        # It matters because a tag can be created on any commit, including one
+        # on a feature branch that never merged. Publishing a release from
+        # such a commit would announce code that is not on the default branch,
+        # so the containment check has to be made explicitly.
+        #
+        # ^{commit} dereferences the annotated tag object to the commit it
+        # points at; GITHUB_SHA is not reliably that commit for annotated tags.
+        if git merge-base --is-ancestor "${GITHUB_REF_NAME}^{commit}" "origin/$DEFAULT_BRANCH"; then
+          echo "$GITHUB_REF_NAME is on $DEFAULT_BRANCH"
+        else
+          echo "::error::$GITHUB_REF_NAME points at a commit that is not on $DEFAULT_BRANCH; refusing to publish"
+          exit 1
+        fi
+
+    - name: Resolve tag
+      id: resolve
+      env:
+        # Passed as an environment variable rather than interpolated into the
+        # script body: `${{ inputs.tag }}` expands before bash sees the line,
+        # so a crafted input would run as shell. Via env it is only ever data.
+        INPUT_TAG: ${{ inputs.tag }}
+        EVENT: ${{ github.event_name }}
+      run: |
+        if [ "$EVENT" = "push" ]; then
+          TAG="$GITHUB_REF_NAME"
+        else
+          TAG="$INPUT_TAG"
+        fi
+        # A tag name cannot contain whitespace, and anything outside this set
+        # has no business reaching $GITHUB_OUTPUT, where a newline would let
+        # the value forge a second output.
+        case "$TAG" in
+          *[!A-Za-z0-9._/-]*)
+            echo "Refusing suspicious tag name: $TAG" >&2
+            exit 1
+            ;;
+        esac
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+    # Installs the pinned binary and verifies its checksum. Skipped by the
+    # local harness, which uses whatever git-cliff is already on PATH.
+    - name: Install git-cliff
+      uses: taiki-e/install-action@v2
+      with:
+        tool: git-cliff@2.14.1
+
+    - name: Generate notes
+      id: generate
+      env:
+        TAG: ${{ steps.resolve.outputs.tag }}
+      run: |
+        # One release is the range from its predecessor, which is what
+        # `git describe --abbrev=0 <tag>^` finds. The oldest tag has no
+        # predecessor, so it takes everything up to itself instead.
+        # An empty TAG means the newest release: --latest.
+        if [ -z "$TAG" ]; then
+          range=(--latest)
+        else
+          prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -z "$prev" ]; then
+            # The oldest tag has no predecessor to diff against, so start from
+            # the root commit instead. git ranges exclude their start point,
+            # so the repository's initial commit is the one thing this cannot
+            # list — only ever reachable by previewing the very first release.
+            prev=$(git rev-list --max-parents=0 "$TAG" | tail -1)
+          fi
+          range=("${prev}..${TAG}")
+        fi
+        # --strip header: the document header belongs on a CHANGELOG file,
+        # not in the body of a single GitHub Release.
+        git cliff --config .github/cliff.toml --strip header "${range[@]}" -o notes.md
+
+    - name: Add to job summary
+      run: cat notes.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Publish to GitHub Release
+      if: github.event_name == 'push' || inputs.publish
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.resolve.outputs.tag }}
+      run: |
+        # A tag push may or may not already have a Release attached: the
+        # maintainer may have drafted one by hand, and re-running this job
+        # must not fail on the second attempt. So edit when one exists and
+        # create when it does not, rather than assuming either.
+        if gh release view "$TAG" >/dev/null 2>&1; then
+          gh release edit "$TAG" --notes-file notes.md
+          echo "Updated the notes on release $TAG"
+        else
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md
+          echo "Created release $TAG"
+        fi

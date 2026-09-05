@@ -1,0 +1,138 @@
+# git-cliff configuration — release notes from the history that already exists.
+#
+# Releases are the `vX.Y.Z` tags, each pointing at its own `bump version`
+# commit, so a tag range is exactly one release. Because the maintainer
+# squash-merges, each PR is one commit whose subject already carries its
+# number as a trailing `(#180)`.
+#
+# The Conventional Commits format is encouraged, not required: a subject that
+# does not follow it still appears, under "Other changes". Nothing about the
+# commit or tagging workflow has to change for this to produce useful output.
+#
+#   git cliff --latest                 # newest release
+#   git cliff --tag v0.8.10 --current  # one release
+#   git cliff --unreleased             # commits since the newest tag
+#   git cliff -o CHANGELOG.md          # every release
+
+[changelog]
+header = """
+# Changelog
+
+Generated from git history by git-cliff (see .github/cliff.toml).
+Regenerate rather than editing by hand.
+"""
+
+# `commits` is pre-grouped by the `group` set in commit_parsers below. The
+# scope is printed only when a commit has one — labelling the absence of a
+# scope would bury the scopes that are real.
+body = """
+{% if version %}\
+## {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+{# For a conventional commit `message` is just the description, but for an
+   unconventional one it is the whole message, body included. Taking the
+   first line keeps both to a single-line bullet. #}\
+{% set subject = commit.message | split(pat="\n") | first | trim %}\
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
+{{ subject | upper_first }}\
+{% if not subject is containing("](") %}  (`{{ commit.id | truncate(length=7, end="") }}`){% endif %}
+{% endfor %}\
+{% endfor %}
+"""
+
+# Left off deliberately. `trim` strips leading and trailing whitespace from
+# each rendered release, which eats the newline this template ends with and
+# runs the last bullet of one release straight into the next `##` heading.
+# With it off, the template's own leading newline is the blank line between
+# releases, and `--strip header` still starts a single release at its `##`.
+trim = false
+
+# Turn the bare `#180` a squash merge leaves behind into a link. Order
+# matters: the trailing reference is rewritten before the generic pass runs.
+[[git.commit_preprocessors]]
+# `... (#180)` -> a linked reference. Deliberately not anchored with `$`:
+# preprocessors see the whole commit message, trailing newline included, so
+# an end-of-text anchor never matches the end of the subject line.
+pattern = '\s*\(#(\d+)\)'
+replace = '  ([#${1}](https://github.com/sgtaziz/lian-li-linux/pull/${1}))'
+
+[[git.commit_preprocessors]]
+# `fixes #166` anywhere else in the subject.
+pattern = '\b([Ff]ix(?:e[sd])?|[Cc]lose[sd]?|[Rr]esolve[sd]?)\s+#(\d+)'
+replace = '${1} [#${2}](https://github.com/sgtaziz/lian-li-linux/issues/${2})'
+
+[git]
+conventional_commits = true
+
+# The point of the whole configuration: unconventional subjects are kept, not
+# dropped. Only 15 of 231 commits in this history use the convention, so
+# filtering them out would discard 93% of the changelog.
+filter_unconventional = false
+
+filter_commits = false
+protect_breaking_commits = true
+split_commits = false
+topo_order = false
+sort_commits = "oldest"
+
+# Tag names are `vX.Y.Z`; nothing else is a release.
+tag_pattern = "v[0-9]*"
+
+[[git.commit_parsers]]
+# The version bump IS the release, not a change within it.
+message = "^bump version"
+skip = true
+
+[[git.commit_parsers]]
+message = "^feat"
+group = "Features"
+
+[[git.commit_parsers]]
+message = "^fix"
+group = "Fixes"
+
+[[git.commit_parsers]]
+message = "^perf"
+group = "Performance"
+
+[[git.commit_parsers]]
+message = "^refactor"
+group = "Refactoring"
+
+[[git.commit_parsers]]
+message = "^docs"
+group = "Documentation"
+
+[[git.commit_parsers]]
+message = "^test"
+group = "Tests"
+
+[[git.commit_parsers]]
+message = "^build"
+group = "Build"
+
+[[git.commit_parsers]]
+message = "^ci"
+group = "CI"
+
+[[git.commit_parsers]]
+message = "^style"
+group = "Style"
+
+[[git.commit_parsers]]
+message = "^chore"
+group = "Chores"
+
+[[git.commit_parsers]]
+message = "^revert"
+group = "Reverts"
+
+[[git.commit_parsers]]
+# Everything that follows no convention. Listed, never dropped.
+message = ".*"
+group = "Other changes"
