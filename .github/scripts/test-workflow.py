@@ -13,16 +13,25 @@ or the full expression language. Steps that use an action are reported as
 skipped; the working tree stands in for whatever they would have produced.
 For real runner fidelity, `act` is the tool.
 
-Nothing is ever published. `gh` is replaced with a shim that reports the
-command it was handed and exits without calling GitHub, so even a run that
-reaches the publish step cannot touch a real release.
+Nothing ever leaves your machine. `gh` is replaced with a shim that reports
+the command it was handed and exits without calling GitHub, and `git` with one
+that passes everything through except `push`. So a run that reaches the
+publish step cannot touch a real release, and one that reaches the changelog
+job cannot create a branch on the remote.
+
+Local branches and worktrees that a run does create are removed afterwards,
+the same way files it writes are.
+
+One job at a time, named as the first argument; there is no `needs` between
+them here, which is why each job in release-notes.yml resolves the tag itself.
 
 Usage:
-    .github/scripts/test-workflow.py                          # dispatch, newest release
-    .github/scripts/test-workflow.py --tag v0.8.9             # dispatch, one tag
-    .github/scripts/test-workflow.py --event push --tag v0.8.9
-    .github/scripts/test-workflow.py --publish                # exercise the gh path
-    .github/scripts/test-workflow.py --repository me/my-fork  # prove the fork guard
+    .github/scripts/test-workflow.py notes                      # dispatch, newest release
+    .github/scripts/test-workflow.py notes --tag v0.8.9         # dispatch, one tag
+    .github/scripts/test-workflow.py notes --event push --tag v0.8.9
+    .github/scripts/test-workflow.py notes --publish            # exercise the gh path
+    .github/scripts/test-workflow.py notes --repository me/my-fork  # prove the fork guard
+    .github/scripts/test-workflow.py changelog --event push --tag v0.8.9
 
 Requires yq (brew install yq) to turn the workflow YAML into JSON.
 """
@@ -225,16 +234,31 @@ def untracked(root: Path) -> set[str]:
     return {line[3:] for line in out.splitlines() if line.startswith("?? ")}
 
 
+def local_branches(root: Path) -> set[str]:
+    """Local branch names, so a run's leftovers can be told from yours."""
+    out = subprocess.run(
+        ["git", "-C", str(root), "for-each-ref", "--format=%(refname:short)",
+         "refs/heads"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return set(out.splitlines())
+
+
 def make_gh_shim(bindir: Path) -> None:
     """Put a fake `gh` first on PATH so nothing can reach GitHub.
 
-    `gh release view` exits non-zero so the workflow takes its create branch,
-    which is the interesting path; everything else reports and succeeds.
+    It answers as though nothing exists yet — no release, no pull request — so
+    the workflow takes its create branches, which are the interesting ones.
+    The trace goes to stderr because the workflow captures `gh pr list` in a
+    command substitution: on stdout it would read as "a pull request is
+    already open" and the create path would never run.
     """
     shim = bindir / "gh"
     shim.write_text(
         "#!/usr/bin/env bash\n"
-        'echo "[shim] gh $*"\n'
+        'echo "[shim] gh $*" >&2\n'
         'if [ "$1" = "release" ] && [ "$2" = "view" ]; then\n'
         '  echo "[shim] pretending no release exists yet" >&2\n'
         "  exit 1\n"
@@ -244,7 +268,42 @@ def make_gh_shim(bindir: Path) -> None:
     shim.chmod(0o755)
 
 
-def run_step(step: dict, ctx: Context, root: Path, workdir: Path, bindir: Path) -> bool:
+def make_git_shim(bindir: Path) -> None:
+    """Put a `git` first on PATH that will not push.
+
+    Everything else runs for real: the workflow reads history, adds worktrees
+    and makes a commit on a throwaway branch, and all of that has to work for
+    the test to mean anything. Only the one irreversible, outward-facing verb
+    is stubbed.
+    """
+    real = shutil.which("git")
+    if real is None:  # pragma: no cover - git is required to get this far
+        sys.exit("git is not on PATH")
+    shim = bindir / "git"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "# Find the subcommand: the first argument that is neither a global\n"
+        "# option nor the value of one, so `git -C dir push` is still a push.\n"
+        "sub=\"\"\n"
+        "skip=0\n"
+        'for arg in "$@"; do\n'
+        '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
+        '  case "$arg" in\n'
+        "    -C|-c|--git-dir|--work-tree|--namespace|--exec-path) skip=1 ;;\n"
+        "    -*) ;;\n"
+        '    *) sub="$arg"; break ;;\n'
+        "  esac\n"
+        "done\n"
+        'if [ "$sub" = "push" ]; then\n'
+        '  echo "[shim] refused: git $*" >&2\n'
+        "  exit 0\n"
+        "fi\n"
+        f'exec {real} "$@"\n'
+    )
+    shim.chmod(0o755)
+
+
+def run_step(step: dict, ctx: Context, root: Path, workdir: Path) -> bool:
     """Execute one step. Returns False if it failed."""
     name = step.get("name") or step.get("uses") or "(unnamed)"
 
@@ -260,10 +319,12 @@ def run_step(step: dict, ctx: Context, root: Path, workdir: Path, bindir: Path) 
 
     out_file = workdir / "step_output"
     summary_file = workdir / "step_summary"
+    runner_temp = workdir / "runner-temp"
+    runner_temp.mkdir(exist_ok=True)
     out_file.write_text("")
 
     env = dict(os.environ)
-    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["PATH"] = f"{workdir / 'bin'}:{env['PATH']}"
     env.update(
         {
             "GITHUB_OUTPUT": str(out_file),
@@ -272,6 +333,10 @@ def run_step(step: dict, ctx: Context, root: Path, workdir: Path, bindir: Path) 
             "GITHUB_REPOSITORY": ctx.github["repository"],
             "GITHUB_EVENT_NAME": ctx.github["event_name"],
             "GITHUB_WORKSPACE": str(root),
+            # The changelog job puts its worktrees and its generated file
+            # here. Pointing it at the throwaway directory is what keeps them
+            # out of the repository.
+            "RUNNER_TEMP": str(runner_temp),
             "CI": "true",
         }
     )
@@ -315,12 +380,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run a workflow's shell steps locally.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__.split("Usage:")[1].split("Requires yq")[0].strip(),
+        # Keeps the docstring's own indentation, and its heading: .strip()
+        # alone dedents the first example and leaves the others sitting four
+        # spaces in, which is what RawDescriptionHelpFormatter then prints.
+        epilog="Usage:" + __doc__.split("Usage:")[1].split("Requires yq")[0].rstrip(),
     )
     parser.add_argument(
         "-w", "--workflow", default=DEFAULT_WORKFLOW, help=f"default: {DEFAULT_WORKFLOW}"
     )
-    parser.add_argument("-j", "--job", help="job to run (default: the only one)")
+    parser.add_argument(
+        "job", nargs="?", help="job to run (default: the only one in the workflow)"
+    )
     parser.add_argument(
         "--event",
         default="workflow_dispatch",
@@ -350,8 +420,9 @@ def main() -> int:
 
     jobs = workflow.get("jobs", {})
     job_id = args.job or (list(jobs)[0] if len(jobs) == 1 else None)
-    if job_id is None or job_id not in jobs:
-        sys.exit(f"Pick a job with --job. Available: {', '.join(jobs)}")
+    if job_id not in jobs:
+        named = f"No such job: {job_id}. " if args.job else "Name a job. "
+        sys.exit(f"{named}Available: {', '.join(jobs)}")
     job = jobs[job_id]
 
     ctx = Context(
@@ -381,6 +452,7 @@ def main() -> int:
     # behind. Snapshot first and remove only what this run actually created —
     # never a file that was already sitting there untracked.
     before = untracked(root)
+    branches_before = local_branches(root)
     failed = False
 
     try:
@@ -389,9 +461,10 @@ def main() -> int:
             bindir = workdir / "bin"
             bindir.mkdir()
             make_gh_shim(bindir)
+            make_git_shim(bindir)
 
             for step in job.get("steps", []):
-                if not run_step(step, ctx, root, workdir, bindir):
+                if not run_step(step, ctx, root, workdir):
                     failed = True
                     break
 
@@ -406,9 +479,23 @@ def main() -> int:
             path = root / name
             if path.is_file():
                 path.unlink()
-        if created:
+
+        # The worktrees themselves went with the temporary directory; this
+        # clears the administrative files git keeps for them. The branch the
+        # changelog job cuts is real and local, so it has to go too.
+        subprocess.run(["git", "-C", str(root), "worktree", "prune"], check=False)
+        new_branches = sorted(local_branches(root) - branches_before)
+        for branch in new_branches:
+            subprocess.run(
+                ["git", "-C", str(root), "branch", "-D", branch],
+                check=False,
+                capture_output=True,
+            )
+
+        leftovers = created + new_branches
+        if leftovers:
             print()
-            print(color(f"cleaned up: {', '.join(created)}", DIM))
+            print(color(f"cleaned up: {', '.join(leftovers)}", DIM))
 
     print()
     if failed:

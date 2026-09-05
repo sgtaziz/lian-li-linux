@@ -11,6 +11,13 @@ name: Release Notes
 #
 # Tag pushes only trigger this in the source repository — see the guard on the
 # job below — so forks stay quiet unless their owner runs it by hand.
+#
+# A second job keeps CHANGELOG.md current. It regenerates the file from the
+# tag and opens a pull request when the committed copy has fallen behind, so
+# tagging by hand loses nothing. .github/scripts/bump-version.sh does the same
+# work locally as part of cutting the release, which is tidier — the changelog
+# lands inside the release commit, so the tag covers it — and leaves that job
+# with nothing to open.
 
 on:
   push:
@@ -27,7 +34,8 @@ on:
         required: false
         default: false
 
-# Only the Release body is written. No commits are pushed by this workflow.
+# What the `notes` job needs: the Release body, and nothing else. The
+# `changelog` job asks for more, and asks for it itself.
 permissions:
   contents: write
 
@@ -137,6 +145,8 @@ jobs:
         # not in the body of a single GitHub Release.
         git cliff --config .github/cliff.toml --strip header "${range[@]}" -o notes.md
 
+    # Where the notes are read: rendered, and on the run's own page. Echoing
+    # the file here as well would put the whole thing on screen twice.
     - name: Add to job summary
       run: cat notes.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -156,4 +166,139 @@ jobs:
         else
           gh release create "$TAG" --title "$TAG" --notes-file notes.md
           echo "Created release $TAG"
+        fi
+
+  # The safety net for a release tagged by hand. It regenerates the changelog
+  # from the tag and opens a pull request if the committed copy differs, so
+  # the file stays current whether or not .github/scripts/bump-version.sh was
+  # used. When it was, the regenerated file matches and this job does nothing.
+  #
+  # A pull request rather than a push to the default branch: pushing a new
+  # branch is not what branch protection guards, so this needs no exception
+  # and the merge stays a human decision.
+  changelog:
+    needs: notes
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push the branch the pull request is opened from
+      pull-requests: write   # open it
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    # Recomputed rather than read from `needs.notes.outputs`, so this job
+    # stays runnable — and testable — on its own.
+    - name: Resolve tag
+      id: resolve
+      env:
+        INPUT_TAG: ${{ inputs.tag }}
+        EVENT: ${{ github.event_name }}
+      run: |
+        if [ "$EVENT" = "push" ]; then
+          TAG="$GITHUB_REF_NAME"
+        else
+          TAG="$INPUT_TAG"
+        fi
+        if [ -z "$TAG" ]; then
+          echo "::error::A changelog needs a specific release; pass a tag."
+          exit 1
+        fi
+        case "$TAG" in
+          *[!A-Za-z0-9._/-]*)
+            echo "Refusing suspicious tag name: $TAG" >&2
+            exit 1
+            ;;
+        esac
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+    - name: Install git-cliff
+      uses: taiki-e/install-action@v2
+      with:
+        tool: git-cliff@2.14.1
+
+    - name: Regenerate the changelog at the tag
+      id: regen
+      env:
+        TAG: ${{ steps.resolve.outputs.tag }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        # Both checkouts are worktrees, so the job never moves the primary
+        # checkout off its ref. A re-run then starts from the same state as
+        # the first, and a local test cannot strand your tree on a branch.
+        tag_tree="$RUNNER_TEMP/at-tag"
+        git worktree add --detach "$tag_tree" "$TAG"
+
+        # git-cliff walks from HEAD, so it has to stand on the tag. Generated
+        # from the default branch instead, any commit that landed after the
+        # tag would render as an "Unreleased" section inside the changelog
+        # for this release.
+        git -C "$tag_tree" cliff \
+          --config "$GITHUB_WORKSPACE/.github/cliff.toml" \
+          -o "$RUNNER_TEMP/CHANGELOG.md"
+
+        # Generated at the tag, but committed onto the default branch: the
+        # pull request's merge base is then current main and its diff is this
+        # one file. A branch cut from the tag would look right and be stale.
+        branch="chore/changelog-$TAG"
+        pr_tree="$RUNNER_TEMP/pr"
+        git worktree add -B "$branch" "$pr_tree" "origin/$DEFAULT_BRANCH"
+        cp "$RUNNER_TEMP/CHANGELOG.md" "$pr_tree/CHANGELOG.md"
+
+        # Staged before comparing because `git diff` alone says nothing about
+        # a file the default branch does not have yet — the first release to
+        # run this would look like a no-op.
+        git -C "$pr_tree" add CHANGELOG.md
+        if git -C "$pr_tree" diff --cached --quiet; then
+          echo "CHANGELOG.md is already current for $TAG; nothing to open."
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "worktree=$pr_tree" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Open the changelog pull request
+      if: steps.regen.outputs.changed == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.resolve.outputs.tag }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        BRANCH: ${{ steps.regen.outputs.branch }}
+        WORKTREE: ${{ steps.regen.outputs.worktree }}
+      run: |
+        git -C "$WORKTREE" \
+          -c user.name='github-actions[bot]' \
+          -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+          commit -m "docs(changelog): regenerate for $TAG"
+
+        # --force-with-lease so re-running the workflow for a tag replaces the
+        # branch rather than failing, while still refusing to overwrite a push
+        # this job has not seen.
+        git -C "$WORKTREE" push --force-with-lease origin "$BRANCH"
+
+        cat > "$RUNNER_TEMP/body.md" <<EOF
+        Regenerated from the history at \`$TAG\` by \`.github/workflows/release-notes.yml\`.
+
+        Nothing was written by hand: rerun the workflow to refresh this branch.
+        Committing the changelog as part of the release instead — so the tag
+        covers it and this pull request is never opened — is what
+        \`.github/scripts/bump-version.sh\` does.
+
+        No checks will report here. A pull request opened with \`GITHUB_TOKEN\`
+        does not raise the \`pull_request\` event, so \`Rust\` does not run on it.
+        EOF
+
+        # A branch can already have an open pull request from an earlier run
+        # for the same tag; the push above has already updated it.
+        if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+          echo "A pull request for $BRANCH is already open; its branch now has the notes for $TAG."
+        else
+          gh pr create \
+            --base "$DEFAULT_BRANCH" \
+            --head "$BRANCH" \
+            --title "docs(changelog): regenerate for $TAG" \
+            --body-file "$RUNNER_TEMP/body.md"
         fi
