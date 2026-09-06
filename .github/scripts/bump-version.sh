@@ -25,12 +25,13 @@ case "$version" in
         echo "Pass the bare version, not the tag name: ${version#v}" >&2
         exit 1
         ;;
-    [0-9]*.[0-9]*.[0-9]*) ;;
-    *)
-        echo "Not a version: $version" >&2
-        exit 1
-        ;;
 esac
+# Exactly X.Y.Z. A glob would accept `1.2.3.4` and `1a.2.3` as well, and the
+# first thing that would notice is cargo, several irreversible steps later.
+if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Not a version: $version" >&2
+    exit 1
+fi
 
 cd "$(git rev-parse --show-toplevel)"
 
