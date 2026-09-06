@@ -208,13 +208,13 @@ impl TlFanController {
         }
 
         let addr = (port << 4) | (fan_index & 0x0F);
-        self.send_command_quiet(CMD_SET_FAN_SPEED, &[addr, duty])?;
+        // firmware expects percent 0-100
+        let pwm = lianli_shared::fan::duty_to_percent(duty);
+        self.send_command_quiet(CMD_SET_FAN_SPEED, &[addr, pwm])?;
 
         debug!(
-            "Set port {} fan {} speed to duty={duty} ({:.0}%)",
-            port,
-            fan_index,
-            duty as f32 / 2.55
+            "Set port {} fan {} speed to {pwm}% (duty {duty})",
+            port, fan_index
         );
         Ok(())
     }
@@ -226,7 +226,9 @@ impl TlFanController {
         duty: u8,
     ) -> Result<()> {
         let addr = (port << 4) | (fan_index & 0x0F);
-        let pkt = Self::build_packet(CMD_SET_FAN_SPEED, &[addr, duty]);
+        // firmware expects percent 0-100
+        let pwm = lianli_shared::fan::duty_to_percent(duty);
+        let pkt = Self::build_packet(CMD_SET_FAN_SPEED, &[addr, pwm]);
         dev.read_flush();
         dev.write(&pkt).context("TL Fan: write fan speed")?;
         let mut buf = [0u8; PACKET_SIZE];

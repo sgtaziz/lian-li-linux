@@ -173,11 +173,10 @@ impl Ene6k77Controller {
         if group >= 4 {
             bail!("Group index {group} out of range (0-3)");
         }
-        self.send_feature(&[REPORT_ID, 0x20 | group, 0x00, duty])?;
-        debug!(
-            "Set group {group} speed to duty={duty} ({:.0}%)",
-            duty as f32 / 2.55
-        );
+        // firmware expects percent 0-100
+        let pwm = lianli_shared::fan::duty_to_percent(duty);
+        self.send_feature(&[REPORT_ID, 0x20 | group, 0x00, pwm])?;
+        debug!("Set group {group} speed to {pwm}% (duty {duty})");
         thread::sleep(CMD_DELAY);
         Ok(())
     }
@@ -187,13 +186,11 @@ impl Ene6k77Controller {
     pub fn set_all_speeds(&self, duties: &[u8; 4]) -> Result<()> {
         let mut dev = self.device.lock();
         for (group, &duty) in duties.iter().enumerate() {
-            let data = [REPORT_ID, 0x20 | (group as u8), 0x00, duty];
+            let pwm = lianli_shared::fan::duty_to_percent(duty);
+            let data = [REPORT_ID, 0x20 | (group as u8), 0x00, pwm];
             dev.send_feature_report(&data)
                 .with_context(|| format!("ENE set group {group} speed"))?;
-            debug!(
-                "Set group {group} speed to duty={duty} ({:.0}%)",
-                duty as f32 / 2.55
-            );
+            debug!("Set group {group} speed to {pwm}% (duty {duty})");
             thread::sleep(CMD_DELAY);
         }
         Ok(())
