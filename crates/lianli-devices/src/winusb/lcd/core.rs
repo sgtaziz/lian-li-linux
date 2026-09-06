@@ -20,8 +20,9 @@ pub struct PendingCmd {
     pub queued_at: Instant,
     /// May this go out between chunks once the panel reports headroom? False
     /// for commands that hang the panel in play mode regardless of buffer
-    /// level (PushRgbData — tested at levels 4 and 1, 2026-08-23); those wait
-    /// for the stream to end.
+    /// level (PushRgbData — tested at levels 4 and 1, 2026-08-23) and also
+    /// after it (2026-09-06); those only go out once the stream thread has
+    /// stopped play and reinitialised the panel (see `reinit_and_flush_unsafe`).
     pub play_safe: bool,
 }
 
@@ -37,15 +38,26 @@ pub struct PendingCmd {
 /// headroom.
 pub struct LcdLink {
     bulk: Mutex<RusbBulk>,
+    /// The rusb device the handle was opened from, so any core on this
+    /// transport can close and reopen it (vendor ReInitDev).
+    raw_device: Option<Device<GlobalContext>>,
     streaming: AtomicBool,
+    /// Set by `push_and_recover`: the handle was reopened behind the LCD
+    /// driver's back, so it must rerun its init before the next frame.
+    needs_init: AtomicBool,
+    /// When the last push-and-recover cycle ran, to space cycles out.
+    last_hold: Mutex<Option<Instant>>,
     pending: Mutex<Vec<PendingCmd>>,
 }
 
 impl LcdLink {
-    pub fn new(bulk: RusbBulk) -> Self {
+    pub fn new(bulk: RusbBulk, raw_device: Option<Device<GlobalContext>>) -> Self {
         Self {
             bulk: Mutex::new(bulk),
+            raw_device,
             streaming: AtomicBool::new(false),
+            needs_init: AtomicBool::new(false),
+            last_hold: Mutex::new(None),
             pending: Mutex::new(Vec::new()),
         }
     }
@@ -63,6 +75,147 @@ impl LcdLink {
         self.streaming.store(on, Ordering::Release);
     }
 
+    /// True after `push_and_recover` reopened the handle: the LCD driver
+    /// must rerun its init sequence before it streams or draws again.
+    pub(crate) fn needs_init(&self) -> bool {
+        self.needs_init.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_needs_init(&self, on: bool) {
+        self.needs_init.store(on, Ordering::Release);
+    }
+
+    pub(crate) fn can_reopen(&self) -> bool {
+        self.raw_device.is_some()
+    }
+
+    /// Enough time since the last push-and-recover cycle for another one.
+    /// A colour drag in the GUI queues a write per tick; `defer` keeps only
+    /// the latest, and this keeps the stream from being stopped for each.
+    pub(crate) fn hold_allowed(&self) -> bool {
+        self.last_hold
+            .lock()
+            .is_none_or(|at| at.elapsed() >= HOLD_MIN_INTERVAL)
+    }
+
+    /// Close the bulk handle and reopen it from the raw device (the vendor
+    /// driver's ReInitDev), swapping the new handle in under the guard the
+    /// caller already holds. No USB port reset is involved: that would take
+    /// down composite siblings like the LED MCU, and on the HydroShift II
+    /// locks the header until a power cycle.
+    fn reopen_locked(&self, bulk: &mut RusbBulk, name: &str) -> Result<()> {
+        let raw = self
+            .raw_device
+            .as_ref()
+            .context("no raw device handle to reopen from")?;
+        // FIX: release the interfaces the current handle holds *before*
+        // reopening. The replacement only lands once the new open succeeds,
+        // so without this the old handle still owns interface 0 and every
+        // claim_interface(0) returns EBUSY — the recovery path could never
+        // succeed, it just retried 20 times against a device already in an
+        // error state.
+        bulk.release();
+        std::thread::sleep(REOPEN_DELAY);
+        let mut t = RusbBulk::open_device(raw.clone()).context("reopening device")?;
+        t.detach_and_configure(name)
+            .context("configuring reopened device")?;
+        *bulk = t;
+        Ok(())
+    }
+
+    /// Reopen the handle from the raw device. Used by the LCD driver's
+    /// write-error recovery.
+    pub(crate) fn reopen(&self, name: &str) -> Result<()> {
+        let mut bulk = self.bulk.lock();
+        self.reopen_locked(&mut bulk, name)
+    }
+
+    /// Write PushRgbData (or any command the panel goes quiet after) and
+    /// bring the panel back: the packet goes out, the handle is closed and
+    /// reopened, then GetVer is polled until the panel answers. Everything
+    /// happens under one bulk guard so no stream chunk can interleave.
+    ///
+    /// Measured 2026-09-06 on a HydroShift II Square (fw 1.7): after the
+    /// packet the panel stops answering bulk IN and does not come back on
+    /// its own within 80 s, but answers GetVer 0.5 s after a reopen. Six
+    /// cycles in a row all recovered in 3.1 s with the reopen at 2.5 s.
+    ///
+    /// `from_stream_thread` says the caller is the stream thread itself;
+    /// any other caller is refused (`Ok(false)`) if a stream has begun in
+    /// the meantime, and must queue the command instead.
+    pub(crate) fn push_and_recover(
+        &self,
+        name: &str,
+        cmds: &[PendingCmd],
+        write_timeout: Duration,
+        from_stream_thread: bool,
+    ) -> Result<bool> {
+        let mut bulk = self.bulk.lock();
+        if !from_stream_thread && self.is_streaming() {
+            return Ok(false);
+        }
+        let started = Instant::now();
+        for cmd in cmds {
+            debug!(
+                "H2 ring: sending {} ({} bytes, queued {} ms ago)",
+                cmd.label,
+                cmd.packet.len(),
+                cmd.queued_at.elapsed().as_millis()
+            );
+            bulk.write_full(&cmd.packet, write_timeout)
+                .with_context(|| format!("H2 ring: {} write", cmd.label))?;
+            let mut buf = [0u8; 512];
+            match bulk.read(&mut buf, cmd.reply_wait) {
+                Ok(n) if n > 0 => debug!(
+                    "H2 ring: reply to {} ({n} bytes): {:02x?}",
+                    cmd.label,
+                    &buf[..n.min(8)]
+                ),
+                Ok(_) => debug!("H2 ring: no reply to {} (timeout)", cmd.label),
+                Err(e) => debug!("H2 ring: no reply to {}: {e}", cmd.label),
+            }
+        }
+        let pushed_at = Instant::now();
+        *self.last_hold.lock() = Some(Instant::now());
+        // The handle is released before the reopen, so on failure there is
+        // nothing to poll; the driver's write-error recovery retries later.
+        if let Err(e) = self.reopen_locked(&mut bulk, name) {
+            self.set_needs_init(true);
+            return Err(e.context("H2 ring: reopen after push"));
+        }
+        debug!("H2 ring: handle reopened");
+        bulk.read_flush();
+        let mut builder = PacketBuilder::new();
+        let mut answered = None;
+        while pushed_at.elapsed() < PANEL_SILENCE_BUDGET {
+            let ver = builder.get_ver_header_winusb();
+            if let Err(e) = bulk.write_full(&ver, write_timeout) {
+                debug!("H2 ring: GetVer poll write failed: {e}");
+            } else {
+                let mut buf = [0u8; 512];
+                if matches!(bulk.read(&mut buf, PANEL_POLL_READ), Ok(n) if n > 0) {
+                    bulk.read_flush();
+                    answered = Some(pushed_at.elapsed());
+                    break;
+                }
+            }
+            std::thread::sleep(PANEL_POLL_GAP);
+        }
+        self.set_needs_init(true);
+        match answered {
+            Some(after) => info!(
+                "H2 ring: panel answering {} ms after the push, cycle took {} ms",
+                after.as_millis(),
+                started.elapsed().as_millis()
+            ),
+            None => warn!(
+                "H2 ring: panel still silent {} s after the push and reopen",
+                pushed_at.elapsed().as_secs()
+            ),
+        }
+        Ok(true)
+    }
+
     /// Queue a control command for the stream thread. Latest wins per label:
     /// an older SyncPumpFan still waiting is replaced, not appended.
     pub fn defer(&self, cmd: PendingCmd) {
@@ -73,11 +226,6 @@ impl LcdLink {
 
     pub fn has_pending(&self) -> bool {
         !self.pending.lock().is_empty()
-    }
-
-    /// Take every queued command (stream over).
-    pub(crate) fn take_pending(&self) -> Vec<PendingCmd> {
-        std::mem::take(&mut *self.pending.lock())
     }
 
     /// Take only the commands that may be sent mid-stream.
@@ -92,6 +240,21 @@ impl LcdLink {
 
     pub(crate) fn has_play_safe_pending(&self) -> bool {
         self.pending.lock().iter().any(|c| c.play_safe)
+    }
+
+    /// True if a command that must wait for a panel reinit is queued.
+    pub(crate) fn has_unsafe_pending(&self) -> bool {
+        self.pending.lock().iter().any(|c| !c.play_safe)
+    }
+
+    /// Take only the commands that need the panel reinitialised first.
+    pub(crate) fn take_unsafe(&self) -> Vec<PendingCmd> {
+        let mut q = self.pending.lock();
+        let (unsafe_cmds, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut *q)
+            .into_iter()
+            .partition(|c| !c.play_safe);
+        *q = rest;
+        unsafe_cmds
     }
 
     pub(crate) fn oldest_play_safe_age(&self) -> Option<Duration> {
@@ -114,6 +277,15 @@ const CONTROL_RELAXED_LEVEL: u8 = 2;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
 
 const REOPEN_DELAY: Duration = Duration::from_millis(100);
+/// Gap between the wake-preamble commands (StopPlay, StopClock, GetVer).
+const WAKE_STEP: Duration = Duration::from_millis(150);
+/// After a PushRgbData and reopen: how long to poll GetVer for the panel
+/// to answer, the gap between polls, and each poll's reply wait.
+const PANEL_SILENCE_BUDGET: Duration = Duration::from_secs(10);
+const PANEL_POLL_GAP: Duration = Duration::from_millis(250);
+const PANEL_POLL_READ: Duration = Duration::from_millis(500);
+/// Minimum spacing between push-and-recover cycles while streaming.
+const HOLD_MIN_INTERVAL: Duration = Duration::from_secs(3);
 /// Chunk writes slower than this are logged: the panel NAKed bulk OUT.
 const SLOW_CHUNK_WRITE: Duration = Duration::from_millis(100);
 const WAIT_BUFFER_POLL: Duration = Duration::from_millis(50);
@@ -126,7 +298,6 @@ pub(crate) struct WinUsbLcdCore {
     write_timeout: Duration,
     read_timeout: Duration,
     name: String,
-    raw_device: Option<Device<GlobalContext>>,
     pub(crate) initialized: bool,
     pub(crate) consecutive_failures: u32,
     pub(crate) h264_chunk_size: usize,
@@ -202,13 +373,12 @@ impl WinUsbLcdCore {
         );
 
         Ok(Self {
-            transport: Arc::new(LcdLink::new(transport)),
+            transport: Arc::new(LcdLink::new(transport, Some(device.clone()))),
             builder: PacketBuilder::new(),
             screen,
             write_timeout,
             read_timeout,
             name: name.to_string(),
-            raw_device: Some(device),
             initialized: false,
             consecutive_failures: 0,
             h264_chunk_size: 202_752,
@@ -231,7 +401,6 @@ impl WinUsbLcdCore {
             write_timeout,
             read_timeout,
             name,
-            raw_device: None,
             initialized: false,
             consecutive_failures: 0,
             h264_chunk_size: 202_752,
@@ -314,6 +483,12 @@ impl WinUsbLcdCore {
         self.consecutive_failures = 0;
     }
 
+    /// True after the control channel reopened the handle (see
+    /// `LcdLink::push_and_recover`); the driver must rerun its init.
+    pub(crate) fn needs_init(&self) -> bool {
+        self.transport.needs_init()
+    }
+
     /// Vendor-faithful recovery: close the handle and reopen it from the raw
     /// device (ReInitDev), so a stalled endpoint is recovered within the
     /// session without a USB port reset (which would take down composite
@@ -328,23 +503,12 @@ impl WinUsbLcdCore {
         }
         self.consecutive_failures += 1;
 
-        if let Some(raw) = &self.raw_device {
-            // FIX: release the interfaces the current handle holds *before*
-            // reopening. The replacement only lands in self.transport once the
-            // new open succeeds, so without this the old handle still owns
-            // interface 0 and every claim_interface(0) returns EBUSY — the
-            // recovery path could never succeed, it just retried 20 times
-            // against a device already in an error state.
-            self.transport.lock().release();
-            std::thread::sleep(REOPEN_DELAY);
-            match RusbBulk::open_device(raw.clone()) {
-                Ok(mut t) => {
-                    if t.detach_and_configure(&self.name).is_ok() {
-                        *self.transport.lock() = t;
-                        self.consecutive_failures = 0;
-                        debug!("recovered via close+reopen");
-                        return Ok(());
-                    }
+        if self.transport.can_reopen() {
+            match self.transport.reopen(&self.name) {
+                Ok(()) => {
+                    self.consecutive_failures = 0;
+                    debug!("recovered via close+reopen");
+                    return Ok(());
                 }
                 Err(e) => warn!("reopen failed: {e}"),
             }
@@ -396,6 +560,24 @@ impl WinUsbLcdCore {
             }
         }
         self.read_response(label);
+    }
+
+    /// HydroShift II control-channel init: GetVer, frame rate, SyncClock,
+    /// StopClock. Run by `H2WinUsbLcd::do_init` after enumeration and again
+    /// by `reinit_and_flush_unsafe` after a stream.
+    pub(crate) fn h2_control_init(&mut self) {
+        self.read_firmware();
+        // FIX: this AIO never answers GetVer and set_frame_rate can fail
+        // transiently. The `?` aborted do_init and left the shared control
+        // channel unusable, taking fans and RGB down with it. Degrade instead.
+        if let Err(e) = self.set_frame_rate(30) {
+            warn!("set_frame_rate failed, continuing anyway: {e:#}");
+        }
+        let sync = self.builder.sync_clock_header_winusb(2);
+        self.send_command(sync, "SyncClock");
+        let stop_clock = self.builder.stop_clock_header_winusb();
+        self.send_command(stop_clock, "StopClock");
+        self.transport.set_needs_init(false);
     }
 
     pub(crate) fn read_firmware(&mut self) {
@@ -706,8 +888,57 @@ impl WinUsbLcdCore {
         let transport = self.transport.lock();
         transport.write_full(&cmd.packet, self.write_timeout)?;
         let mut buf = [0u8; 512];
-        let _ = transport.read(&mut buf, cmd.reply_wait);
+        match transport.read(&mut buf, cmd.reply_wait) {
+            Ok(n) if n > 0 => debug!(
+                "Reply to deferred {} ({n} bytes): {:02x?}",
+                cmd.label,
+                &buf[..n.min(16)]
+            ),
+            Ok(_) => debug!("No reply to deferred {} (timeout)", cmd.label),
+            Err(e) => debug!("Reply read after deferred {} failed: {e}", cmd.label),
+        }
         Ok(())
+    }
+
+    /// Send the queued PushRgbData mid-stream and bring the panel back,
+    /// from the stream thread. StopPlay and StopClock
+    /// first, then `LcdLink::push_and_recover` (push, reopen, wait for
+    /// GetVer), then the H2 init again. The caller resumes the stream.
+    /// Cycles are spaced by `HOLD_MIN_INTERVAL`; a command that arrives
+    /// sooner stays queued for the next chunk.
+    pub(crate) fn reinit_and_flush_unsafe(&mut self, force: bool) -> Result<bool> {
+        if !self.transport.has_unsafe_pending() || !(force || self.transport.hold_allowed()) {
+            return Ok(false);
+        }
+        let cmds = self.transport.take_unsafe();
+        info!(
+            "H2 ring: stopping play for {} queued command(s)",
+            cmds.len()
+        );
+        let started = Instant::now();
+        let stop = self.builder.stop_play_header_winusb();
+        self.send_command(stop, "StopPlay");
+        std::thread::sleep(WAKE_STEP);
+        let stop_clock = self.builder.stop_clock_header_winusb();
+        self.send_command(stop_clock, "StopClock");
+        std::thread::sleep(WAKE_STEP);
+        if let Err(e) = self
+            .transport
+            .push_and_recover(&self.name, &cmds, self.write_timeout, true)
+        {
+            // Nothing confirmed delivered: put the commands back so the
+            // next stream start or control-channel write retries them.
+            for cmd in cmds {
+                self.transport.defer(cmd);
+            }
+            return Err(e);
+        }
+        self.h2_control_init();
+        info!(
+            "H2 ring: push and reinit done in {} ms",
+            started.elapsed().as_millis()
+        );
+        Ok(true)
     }
 
     fn send_h264_chunk(
@@ -766,25 +997,44 @@ impl WinUsbLcdCore {
         self.transport.set_streaming(true);
     }
 
-    /// Mark the end of a stream. If it ended cleanly the panel is idle now, so
-    /// anything still queued goes out directly (bypassing the level check);
-    /// after an error the queue is dropped rather than hammering a device that
-    /// just stopped answering.
+    /// Mark the end of a stream and flush the play-safe commands the control
+    /// channel queued while it ran. After an error the queue is dropped
+    /// rather than hammering a device that just stopped answering.
+    ///
+    /// Commands that are unsafe in play mode go through the reinit
+    /// sequence instead of straight onto the wire: the host stopping the
+    /// feed does not idle the panel, and a PushRgbData sent here wedged
+    /// the MCU twice on 2026-09-06, once straight after the feed stopped
+    /// and once after an acknowledged StopPlay.
     fn stream_end(&mut self, clean: bool) {
         {
             let _bulk = self.transport.lock();
             self.transport.set_streaming(false);
         }
-        let pending = self.transport.take_pending();
         if !clean {
+            // Play-safe commands are resent every tick anyway; a queued
+            // ring write is kept for the next stream start or the control
+            // channel, so a later identical write is not deduplicated away.
+            self.transport.take_play_safe();
             return;
         }
-        for cmd in pending {
+        for cmd in self.transport.take_play_safe() {
             debug!("Sending deferred {} after stream end", cmd.label);
             if let Err(e) = self.send_deferred(&cmd) {
                 warn!("Deferred {} write failed: {e}", cmd.label);
             }
         }
+        // No stream left to protect, so the spacing does not apply here.
+        if let Err(e) = self.reinit_and_flush_unsafe(true) {
+            warn!("Panel reinit at stream end failed: {e:#}");
+        }
+    }
+
+    /// Mid-stream hold: a command that cannot go out in play mode is
+    /// waiting, so stop play, reinitialise, send it, and let the caller
+    /// carry on streaming. Returns true if a hold happened.
+    fn hold_for_unsafe_pending(&mut self) -> Result<bool> {
+        self.reinit_and_flush_unsafe(false)
     }
 
     pub(crate) fn stream_h264(
@@ -801,6 +1051,9 @@ impl WinUsbLcdCore {
         let interval = chunk_interval(fps);
         let mut next_deadline = Instant::now() + interval;
 
+        // A ring write queued while the panel sat idle after an earlier
+        // stream goes out now, before play starts, via the same reinit path.
+        self.reinit_and_flush_unsafe(false)?;
         self.stream_begin();
         let result = self.stream_h264_inner(
             &mut file,
@@ -847,6 +1100,13 @@ impl WinUsbLcdCore {
                 pos >= len
             };
             self.send_h264_chunk(&file_buf[..n], is_last, play_count, play_tick, stop)?;
+            if self.hold_for_unsafe_pending()? {
+                // Play was stopped and the panel reinitialised; restart the
+                // clip from its first keyframe rather than resuming mid-GOP.
+                file.seek(std::io::SeekFrom::Start(0))?;
+                *next_deadline = Instant::now() + interval;
+                continue;
+            }
             sleep_until(next_deadline, interval);
         }
 
@@ -863,6 +1123,7 @@ impl WinUsbLcdCore {
         play_tick: u32,
     ) -> Result<()> {
         let mut buf = vec![0u8; self.h264_chunk_size];
+        self.reinit_and_flush_unsafe(false)?;
         self.stream_begin();
         let result = (|| -> Result<()> {
             loop {
@@ -876,6 +1137,9 @@ impl WinUsbLcdCore {
                     break;
                 }
                 self.send_h264_chunk(&buf[..n], false, play_count, play_tick, stop)?;
+                // Live feed: cannot rewind, the decoder resyncs at the next
+                // keyframe after a hold.
+                self.hold_for_unsafe_pending()?;
             }
             Ok(())
         })();

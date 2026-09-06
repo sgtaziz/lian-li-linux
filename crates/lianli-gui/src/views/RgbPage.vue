@@ -34,7 +34,7 @@ const statusText = computed(() => {
   return "Starting...";
 });
 
-const rgbCaps = computed(() => config.rgbCaps);
+const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
 </script>
 
 <template>

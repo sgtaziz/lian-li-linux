@@ -34,17 +34,7 @@ impl H2WinUsbLcd {
     fn do_init(&mut self) -> Result<()> {
         self.core.init_logging();
         self.core.reset_failure_state();
-        self.core.read_firmware();
-        // FIX: this AIO never answers GetVer and set_frame_rate can fail
-        // transiently. The `?` aborted do_init and left the shared control
-        // channel unusable, taking fans and RGB down with it. Degrade instead.
-        if let Err(e) = self.core.set_frame_rate(30) {
-            tracing::warn!("set_frame_rate failed, continuing anyway: {e:#}");
-        }
-        let sync = self.core.builder_mut().sync_clock_header_winusb(2);
-        self.core.send_command(sync, "SyncClock");
-        let stop_clock = self.core.builder_mut().stop_clock_header_winusb();
-        self.core.send_command(stop_clock, "StopClock");
+        self.core.h2_control_init();
         // FIX: clear_layers() paints a black 480x480 PNG over the panel. With
         // `lcds: []` the daemon never draws anything afterwards, so the screen
         // stays black and the firmware's own content is wiped. Media streaming
@@ -78,19 +68,19 @@ impl WinUsbLcd for H2WinUsbLcd {
         self.core.transport_release()
     }
     fn initialize(&mut self) -> Result<()> {
-        if !self.core.initialized {
+        if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
         Ok(())
     }
     fn send_frame(&mut self, frame: &[u8]) -> Result<()> {
-        if !self.core.initialized {
+        if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
         self.core.send_frame(frame)
     }
     fn send_frame_verified(&mut self, frame: &[u8]) -> Result<()> {
-        if !self.core.initialized {
+        if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
         self.core.send_frame_verified(frame)
@@ -108,7 +98,7 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        if !self.core.initialized {
+        if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
         self.core.apply_stream_fps(fps)?;
@@ -121,7 +111,7 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        if !self.core.initialized {
+        if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
         self.core.apply_stream_fps(fps)?;

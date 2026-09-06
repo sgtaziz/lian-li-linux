@@ -204,14 +204,14 @@ impl ClientHandler {
     /// Get capabilities, caching on first call to avoid mutex contention during streaming.
     fn caps(&mut self) -> &[RgbDeviceCapabilities] {
         if self.cached_caps.is_none() {
-            self.cached_caps = Some(self.rgb.lock().capabilities());
+            self.cached_caps = Some(self.rgb.lock().exposed_capabilities());
         }
         self.cached_caps.as_ref().unwrap()
     }
 
     /// Force-refresh the cached capabilities (e.g., after mode changes).
     fn refresh_caps(&mut self) {
-        self.cached_caps = Some(self.rgb.lock().capabilities());
+        self.cached_caps = Some(self.rgb.lock().exposed_capabilities());
     }
 
     fn run(&mut self) -> anyhow::Result<()> {
@@ -463,7 +463,7 @@ impl ClientHandler {
             }
 
             let mut rgb = self.rgb.lock();
-            let caps = rgb.capabilities();
+            let caps = rgb.exposed_capabilities();
             if let Some(cap) = caps.get(dev_idx as usize) {
                 let device_id = cap.device_id.clone();
                 debug!(

@@ -697,6 +697,10 @@ pub struct RgbDeviceCapabilities {
     /// Whether this device supports merge-lighting (cross-zone synchronized animation).
     #[serde(default)]
     pub supports_merge_lighting: bool,
+    /// The LEDs are driven over RF by a bound wireless device; writes to this
+    /// entry are skipped. Hidden by the GUI and the OpenRGB server.
+    #[serde(default)]
+    pub rf_owned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
