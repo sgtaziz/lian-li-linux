@@ -39,10 +39,10 @@ on:
 permissions:
   contents: write
 
-# One run per ref at a time: two runs for the same tag race the release
-# edit and the changelog branch push. Never cancel, queued runs catch up.
+# One release run at a time. A fixed key, not the ref: a manual run on a
+# branch and a tag push for the same release must still serialize.
 concurrency:
-  group: release-notes-${{ github.ref }}
+  group: release-notes
   cancel-in-progress: false
 
 jobs:
