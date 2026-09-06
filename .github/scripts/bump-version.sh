@@ -48,6 +48,15 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     exit 1
 fi
 
+# Checked before the first file is rewritten so a missing tool leaves no
+# half done version bump behind.
+for tool in cargo git-cliff; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "$tool not found on PATH" >&2
+        exit 1
+    }
+done
+
 # The three places the version is written. Anywhere else derives it:
 # packaging/archlinux/PKGBUILD computes pkgver() from git describe, and every
 # crate takes `version.workspace = true`.

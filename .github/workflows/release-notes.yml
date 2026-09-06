@@ -39,6 +39,12 @@ on:
 permissions:
   contents: write
 
+# One run per ref at a time: two runs for the same tag race the release
+# edit and the changelog branch push. Never cancel, queued runs catch up.
+concurrency:
+  group: release-notes-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   notes:
     # Automatic runs are limited to the source repository. A fork inherits both
@@ -98,6 +104,12 @@ jobs:
             exit 1
             ;;
         esac
+        # Only vX.Y.Z is a release. Anything else is a typo or a test tag and
+        # must not reach the publish step.
+        if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Not a release tag: $TAG (expected vX.Y.Z)"
+          exit 1
+        fi
         # A typo in the manual input would otherwise surface further down as
         # whatever git says about an unknown revision.
         if ! git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
@@ -235,6 +247,12 @@ jobs:
             exit 1
             ;;
         esac
+        # Only vX.Y.Z is a release. Anything else is a typo or a test tag and
+        # must not reach the changelog job.
+        if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Not a release tag: $TAG (expected vX.Y.Z)"
+          exit 1
+        fi
         if ! git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
           echo "::error::No such tag: $TAG"
           exit 1

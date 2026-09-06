@@ -225,13 +225,15 @@ class Context:
 
 def untracked(root: Path) -> set[str]:
     """Paths git currently considers untracked, as a set of repo-relative names."""
+    # ls-files does not C-quote unusual paths the way `status --porcelain`
+    # does, and -z makes the split unambiguous.
     out = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "-z"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    return {line[3:] for line in out.splitlines() if line.startswith("?? ")}
+    return {name for name in out.split("\0") if name}
 
 
 def local_branches(root: Path) -> set[str]:
