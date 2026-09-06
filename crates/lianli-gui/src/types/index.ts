@@ -281,6 +281,8 @@ export interface RgbDeviceCapabilities {
   supported_scopes: RgbScope[][];
   supports_direction?: boolean;
   supports_merge_lighting?: boolean;
+  /** LEDs are driven over RF by a bound wireless device; hidden from the list. */
+  rf_owned?: boolean;
 }
 
 export interface RgbPresetZone {

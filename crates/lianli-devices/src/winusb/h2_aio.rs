@@ -606,6 +606,10 @@ impl RgbDevice for H2AioController {
         true
     }
 
+    fn rf_owned(&self) -> bool {
+        self.is_wireless_mode()
+    }
+
     fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
         if zone != 0 {
             anyhow::bail!("H2 RGB: zone {zone} out of range (only zone 0)");

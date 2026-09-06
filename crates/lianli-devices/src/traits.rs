@@ -327,6 +327,14 @@ pub trait RgbDevice: Send + Sync {
         false
     }
 
+    /// True when the LEDs this device exposes are driven over RF by a bound
+    /// wireless device, so writes here are skipped. The GUI and the OpenRGB
+    /// server hide such devices, as the fan list already hides bound wired
+    /// fan entries.
+    fn rf_owned(&self) -> bool {
+        false
+    }
+
     /// Enable or disable motherboard ARGB sync.
     /// When enabled, the device reads ARGB from the motherboard header instead of using
     /// software-controlled effects.
@@ -378,6 +386,9 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn set_direct_colors(&self, zone: u8, colors: &[[u8; 3]]) -> Result<()> {
         (**self).set_direct_colors(zone, colors)
+    }
+    fn rf_owned(&self) -> bool {
+        (**self).rf_owned()
     }
     fn supports_direct(&self) -> bool {
         (**self).supports_direct()

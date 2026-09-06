@@ -485,6 +485,7 @@ impl RgbController {
                 supported_scopes: dev.supported_scopes(),
                 supports_direction: dev.supports_direction(),
                 supports_merge_lighting: dev.supports_merge_lighting(),
+                rf_owned: dev.rf_owned(),
             });
         }
 
@@ -527,10 +528,20 @@ impl RgbController {
                 supported_scopes: vec![],
                 supports_direction: false,
                 supports_merge_lighting: !state.fan_type.is_rgb_only(),
+                rf_owned: false,
             });
         }
 
         caps
+    }
+
+    /// Capabilities minus RF-owned entries, for the OpenRGB SDK, whose
+    /// device indices must stay stable across every request that uses them.
+    pub fn exposed_capabilities(&self) -> Vec<RgbDeviceCapabilities> {
+        self.capabilities()
+            .into_iter()
+            .filter(|c| !c.rf_owned)
+            .collect()
     }
 
     pub fn set_mb_rgb_sync(&mut self, device_id: &str, enabled: bool) -> anyhow::Result<()> {
