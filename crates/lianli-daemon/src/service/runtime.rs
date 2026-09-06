@@ -27,6 +27,10 @@ pub(super) struct HidLcd {
     device: Mutex<Box<dyn LcdDevice>>,
     // Separate from the LCD mutex: recovery must not even take that mutex
     // while a worker is feeding H.264. Count overlapping replacement workers.
+    //
+    // Ungated device access is limited to non autonomous frame sends,
+    // brightness applies and the init worker, only brightness can overlap
+    // a live stream
     streams: Mutex<usize>,
 }
 
@@ -44,7 +48,7 @@ impl HidLcd {
         Some(HidStreamLease(Arc::clone(self)))
     }
 
-    fn recovery_idle(&self) -> Option<parking_lot::MutexGuard<'_, usize>> {
+    pub(super) fn recovery_idle(&self) -> Option<parking_lot::MutexGuard<'_, usize>> {
         let streams = self.streams.try_lock()?;
         (*streams == 0).then_some(streams)
     }
@@ -357,6 +361,7 @@ impl HidStreamWorker {
     /// once the caller replaces the encoder, so join is bounded.
     fn stop(&self, timeout: Duration) {
         self.halt.store(true, Ordering::Relaxed);
+        // No handle means the worker never spawned, the pending reader drops with it
         let Some(handle) = &self.handle else {
             return;
         };
@@ -683,10 +688,11 @@ impl ActiveTarget {
             LcdBackend::HidLcd(d) => {
                 // bounded: the init worker holds this mutex across the 10s
                 // settle on some paths
-                let supports = d.recovery_idle().is_some_and(|_idle| {
-                    d.try_lock_for(Duration::from_millis(200))
-                        .is_some_and(|guard| guard.supports_c_command())
-                });
+                // Not gated on recovery_idle, renderer targets already hold
+                // a lease here. The thread idles itself while streams run
+                let supports = d
+                    .try_lock_for(Duration::from_millis(200))
+                    .is_some_and(|guard| guard.supports_c_command());
                 if supports {
                     Some(spawn_recovery_thread(
                         Arc::clone(d),
@@ -1112,6 +1118,8 @@ impl FrameSource for H264FileSource {
                     warn!("HID h264 stream thread ended; resetting for restart");
                     self.hid_stop = Arc::new(AtomicBool::new(false));
                     self.started = false;
+                    // Back off so a wedged device cannot spin the restart loop
+                    self.retry_after = Some(std::time::Instant::now() + FILE_OPEN_RETRY);
                 } else {
                     return Ok(());
                 }
@@ -1594,14 +1602,14 @@ mod tests {
                 .load(Ordering::Acquire));
             assert!(lcd.recovery_idle().is_some());
 
-            // Holding the device makes it deterministic that the restarted worker
-            // is still alive when we check its separately registered lease.
             source.looping = false;
             let idle = lcd.recovery_idle().unwrap();
             source.start(&backend).unwrap();
             assert!(!source.started);
             assert!(source.hid_thread.is_none());
             drop(idle);
+            // Clear the restart backoff the dead worker armed
+            source.retry_after = None;
             let device = lcd.lock();
             source.start(&backend).unwrap();
             assert!(lcd.recovery_idle().is_none());
