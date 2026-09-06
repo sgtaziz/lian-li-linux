@@ -246,6 +246,33 @@ def local_branches(root: Path) -> set[str]:
     return set(out.splitlines())
 
 
+def worktree_branches(root: Path, workdir: Path) -> set[str]:
+    """Branches checked out in worktrees this run created under `workdir`.
+
+    Attribution by who made the branch, rather than by "it was not there when
+    we started": a branch you create in another terminal while a run is going
+    is not the harness's to delete. `git worktree list` still reports a
+    worktree whose directory has already gone, which is what makes this
+    readable after the temporary directory is removed and before the prune.
+    """
+    out = subprocess.run(
+        ["git", "-C", str(root), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    branches: set[str] = set()
+    mine = False
+    ours = workdir.resolve()
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = Path(line[len("worktree ") :]).resolve()
+            mine = path == ours or ours in path.parents
+        elif line.startswith("branch ") and mine:
+            branches.add(line[len("branch ") :].removeprefix("refs/heads/"))
+    return branches
+
+
 def make_gh_shim(bindir: Path) -> None:
     """Put a fake `gh` first on PATH so nothing can reach GitHub.
 
@@ -454,6 +481,9 @@ def main() -> int:
     before = untracked(root)
     branches_before = local_branches(root)
     failed = False
+    # Bound outside the `with` so the cleanup below can still name the
+    # directory the run worked in after it has been removed.
+    workdir: Path | None = None
 
     try:
         with tempfile.TemporaryDirectory(prefix="test-workflow-") as tmp:
@@ -482,9 +512,13 @@ def main() -> int:
 
         # The worktrees themselves went with the temporary directory; this
         # clears the administrative files git keeps for them. The branch the
-        # changelog job cuts is real and local, so it has to go too.
+        # changelog job cuts is real and local, so it has to go too — but only
+        # a branch one of this run's own worktrees created, and only if it was
+        # not already there beforehand. Read before the prune, which is what
+        # forgets the worktrees this asks about.
+        mine = worktree_branches(root, workdir) if workdir else set()
         subprocess.run(["git", "-C", str(root), "worktree", "prune"], check=False)
-        new_branches = sorted(local_branches(root) - branches_before)
+        new_branches = sorted(mine & (local_branches(root) - branches_before))
         for branch in new_branches:
             subprocess.run(
                 ["git", "-C", str(root), "branch", "-D", branch],
