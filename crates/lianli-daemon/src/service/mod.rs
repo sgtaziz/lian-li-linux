@@ -237,6 +237,13 @@ impl ServiceManager {
             let Some(lcd) = lcd else {
                 continue;
             };
+            // Defer the read while an H.264 stream runs, reads interrupt playback
+            let Some(_idle) = lcd.recovery_idle() else {
+                debug!("AIO LCD {device_id}: stream active, deferring firmware read by 10s");
+                self.aio_lcd_firmware
+                    .schedule(&device_id, Duration::from_secs(10), enable_512);
+                continue;
+            };
             let Some(mut guard) = lcd.try_lock_for(Duration::from_millis(500)) else {
                 debug!("AIO LCD {device_id}: busy, deferring firmware read by 10s");
                 self.aio_lcd_firmware

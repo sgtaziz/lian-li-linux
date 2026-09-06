@@ -307,7 +307,7 @@ impl ServiceManager {
                             if let Some(d) =
                                 self.registry.aio_lcd_devices.remove(&candidate.device_id)
                             {
-                                Ok(LcdBackend::HidLcd(Arc::new(parking_lot::Mutex::new(d))))
+                                Ok(LcdBackend::HidLcd(Arc::new(super::runtime::HidLcd::new(d))))
                             } else if let Some(backend) =
                                 self.registry.hid_backends.get(&candidate.device_id)
                             {
@@ -317,7 +317,7 @@ impl ServiceManager {
                                     Arc::clone(backend),
                                 ) {
                                     Some(result) => result.map(|d| {
-                                        LcdBackend::HidLcd(Arc::new(parking_lot::Mutex::new(d)))
+                                        LcdBackend::HidLcd(Arc::new(super::runtime::HidLcd::new(d)))
                                     }),
                                     None => Err(anyhow::anyhow!("Not an LCD device")),
                                 }
@@ -338,7 +338,7 @@ impl ServiceManager {
                                     Arc::clone(backend),
                                 ) {
                                     Some(result) => result.map(|d| {
-                                        LcdBackend::HidLcd(Arc::new(parking_lot::Mutex::new(d)))
+                                        LcdBackend::HidLcd(Arc::new(super::runtime::HidLcd::new(d)))
                                     }),
                                     None => Err(anyhow::anyhow!("Not an LCD device")),
                                 }
@@ -357,7 +357,7 @@ impl ServiceManager {
                                 };
                                 match open_hid_lcd_device(&det, self.hid_backend()) {
                                     Some(result) => result.map(|d| {
-                                        LcdBackend::HidLcd(Arc::new(parking_lot::Mutex::new(d)))
+                                        LcdBackend::HidLcd(Arc::new(super::runtime::HidLcd::new(d)))
                                     }),
                                     None => Err(anyhow::anyhow!("Not an LCD device")),
                                 }

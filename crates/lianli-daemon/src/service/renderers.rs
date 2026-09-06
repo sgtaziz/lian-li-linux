@@ -384,6 +384,9 @@ impl AsyncCustomH264Renderer {
                     next_deadline = Instant::now() + frame_interval;
                 }
 
+                if !restarter.try_start_pending() {
+                    continue;
+                }
                 let outcome = asset.render_frame_rgba_with(true, |rgba| {
                     let mut enc = encoder_clone.lock();
                     enc.write_frame(rgba)
@@ -470,8 +473,13 @@ impl AsyncSensorH264Renderer {
         let frame_interval =
             Duration::from_secs_f32(1.0 / fps.max(1.0)).max(Duration::from_millis(16));
 
-        if let Err(e) = encoder_clone.lock().write_frame(initial.as_raw()) {
-            warn!("sensor h264 initial frame write failed: {e}");
+        if stream_thread
+            .as_mut()
+            .is_none_or(HidStreamWorker::try_start)
+        {
+            if let Err(e) = encoder_clone.lock().write_frame(initial.as_raw()) {
+                warn!("sensor h264 initial frame write failed: {e}");
+            }
         }
 
         let restarter = lcd
@@ -496,6 +504,9 @@ impl AsyncSensorH264Renderer {
                     next_deadline = Instant::now() + frame_interval;
                 }
 
+                if !restarter.try_start_pending() {
+                    continue;
+                }
                 match asset.render_frame_rgba(true) {
                     Ok(Some(rgba)) => {
                         let mut enc = encoder_clone.lock();
