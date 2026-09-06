@@ -80,12 +80,14 @@ split_commits = false
 topo_order = false
 sort_commits = "oldest"
 
-# Tag names are `vX.Y.Z`; nothing else is a release. Anchored, because the
-# pattern is an unanchored regex: `v[0-9]` alone matches anywhere in a name,
-# so a tag like `preview-v2-old` would be read as a release boundary. Left
-# open at the end so a prerelease tag such as `v1.0.0-rc1`, should one ever
-# be cut, still counts as the release it names.
-tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+'
+# Tag names are `vX.Y.Z`; nothing else is a release. Anchored at both ends
+# because this is a regex and not a glob: unanchored, `v[0-9]` matches
+# anywhere in a name, so `preview-v2-old` would be read as a release
+# boundary. A prerelease tag, should one ever be cut, is then not a boundary
+# either — its commits stay under "Unreleased" and land whole under the
+# version they lead to, rather than leaving an `-rc1` heading in the
+# changelog for good with the release's commits split across the two.
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+$'
 
 [[git.commit_parsers]]
 # The version bump IS the release, not a change within it.
