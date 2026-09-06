@@ -45,7 +45,10 @@ impl HidLcd {
     /// Recovery may hold the gate for seconds; let the caller retry next tick.
     fn begin_stream(self: &Arc<Self>) -> Option<HidStreamLease> {
         *self.streams.try_lock()? += 1;
-        Some(HidStreamLease(Arc::clone(self)))
+        Some(HidStreamLease {
+            lcd: Arc::clone(self),
+            released: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     pub(super) fn recovery_idle(&self) -> Option<parking_lot::MutexGuard<'_, usize>> {
@@ -64,11 +67,33 @@ impl std::ops::Deref for HidLcd {
 
 /// Registered before spawning and owned by the worker until every exit path,
 /// including unwinding. A detached old worker cannot clear a new one's state.
-struct HidStreamLease(SharedHidLcd);
+/// Release is idempotent so stop() can drop the gate early, a halted worker
+/// never touches the device again.
+struct HidStreamLease {
+    lcd: SharedHidLcd,
+    released: Arc<AtomicBool>,
+}
+
+impl Clone for HidStreamLease {
+    fn clone(&self) -> Self {
+        Self {
+            lcd: Arc::clone(&self.lcd),
+            released: Arc::clone(&self.released),
+        }
+    }
+}
+
+impl HidStreamLease {
+    fn release(&self) {
+        if !self.released.swap(true, Ordering::AcqRel) {
+            *self.lcd.streams.lock() -= 1;
+        }
+    }
+}
 
 impl Drop for HidStreamLease {
     fn drop(&mut self) {
-        *self.0.streams.lock() -= 1;
+        self.release();
     }
 }
 
@@ -305,6 +330,7 @@ impl LcdBackend {
 pub(super) struct HidStreamWorker {
     handle: Option<JoinHandle<()>>,
     halt: Arc<AtomicBool>,
+    lease: Option<HidStreamLease>,
     pending: Option<PendingHidStream>,
 }
 
@@ -325,6 +351,7 @@ impl HidStreamWorker {
         let mut worker = Self {
             handle: None,
             halt: Arc::new(AtomicBool::new(false)),
+            lease: None,
             pending: Some(PendingHidStream {
                 lcd,
                 reader,
@@ -350,10 +377,11 @@ impl HidStreamWorker {
             pending.reader,
             pending.stop,
             pending.fps,
-            lease,
+            lease.clone(),
         );
         self.handle = Some(handle);
         self.halt = halt;
+        self.lease = Some(lease);
         true
     }
 
@@ -361,6 +389,11 @@ impl HidStreamWorker {
     /// once the caller replaces the encoder, so join is bounded.
     fn stop(&self, timeout: Duration) {
         self.halt.store(true, Ordering::Relaxed);
+        // A halted worker never touches the device again, release the gate
+        // now so a detached thread parked in its read cannot defer recovery
+        if let Some(lease) = &self.lease {
+            lease.release();
+        }
         // No handle means the worker never spawned, the pending reader drops with it
         let Some(handle) = &self.handle else {
             return;
@@ -1670,6 +1703,55 @@ mod tests {
         drop(device);
         worker.join().unwrap();
         assert_eq!(sends.load(Ordering::Relaxed), 3);
+        assert!(lcd.recovery_idle().is_some());
+    }
+
+    #[test]
+    fn stop_releases_the_lease_while_the_worker_stays_parked() {
+        // A reader that blocks until released, like an encoder stdout whose
+        // child has not exited yet
+        struct ParkedReader {
+            go: Arc<AtomicBool>,
+            in_read: Arc<AtomicBool>,
+        }
+        impl std::io::Read for ParkedReader {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                self.in_read.store(true, Ordering::Release);
+                while !self.go.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Ok(0)
+            }
+        }
+
+        let (lcd, _) = lcd(0);
+        let go = Arc::new(AtomicBool::new(false));
+        let in_read = Arc::new(AtomicBool::new(false));
+        let mut worker = HidStreamWorker::new(
+            Arc::clone(&lcd),
+            Box::new(ParkedReader {
+                go: Arc::clone(&go),
+                in_read: Arc::clone(&in_read),
+            }),
+            Arc::new(AtomicBool::new(false)),
+            30.0,
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !in_read.load(Ordering::Acquire) {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(lcd.recovery_idle().is_none());
+
+        worker.stop(Duration::from_millis(50));
+        // The thread stays parked inside its read, yet the gate is free
+        assert!(!worker.handle.as_ref().unwrap().is_finished());
+        assert!(lcd.recovery_idle().is_some());
+
+        // Let the thread exit, its own lease drop must not double decrement
+        go.store(true, Ordering::Release);
+        worker.handle.take().unwrap().join().unwrap();
+        assert_eq!(*lcd.streams.lock(), 0);
         assert!(lcd.recovery_idle().is_some());
     }
 }
