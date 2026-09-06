@@ -64,29 +64,6 @@ jobs:
         # nothing here builds — this reads git metadata only.
         fetch-depth: 0
 
-    - name: Verify the tag is on the default branch
-      if: github.event_name == 'push'
-      env:
-        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      run: |
-        # `on.push.branches` cannot express this. A tag push carries
-        # refs/tags/<name> and belongs to no branch, so GitHub ignores a
-        # branch filter on it entirely — the workflow would still run.
-        #
-        # It matters because a tag can be created on any commit, including one
-        # on a feature branch that never merged. Publishing a release from
-        # such a commit would announce code that is not on the default branch,
-        # so the containment check has to be made explicitly.
-        #
-        # ^{commit} dereferences the annotated tag object to the commit it
-        # points at; GITHUB_SHA is not reliably that commit for annotated tags.
-        if git merge-base --is-ancestor "${GITHUB_REF_NAME}^{commit}" "origin/$DEFAULT_BRANCH"; then
-          echo "$GITHUB_REF_NAME is on $DEFAULT_BRANCH"
-        else
-          echo "::error::$GITHUB_REF_NAME points at a commit that is not on $DEFAULT_BRANCH; refusing to publish"
-          exit 1
-        fi
-
     - name: Resolve tag
       id: resolve
       env:
@@ -101,6 +78,17 @@ jobs:
         else
           TAG="$INPUT_TAG"
         fi
+        # A blank tag input means "the newest release". Turning that into the
+        # tag itself here, rather than leaving it empty for each later step to
+        # interpret, is what lets the containment check, the commit range and
+        # the release being written to all name one concrete release.
+        if [ -z "$TAG" ]; then
+          TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -z "$TAG" ]; then
+            echo "::error::No release tag found; nothing to generate notes for."
+            exit 1
+          fi
+        fi
         # A tag name cannot contain whitespace, and anything outside this set
         # has no business reaching $GITHUB_OUTPUT, where a newline would let
         # the value forge a second output.
@@ -110,7 +98,41 @@ jobs:
             exit 1
             ;;
         esac
+        # A typo in the manual input would otherwise surface further down as
+        # whatever git says about an unknown revision.
+        if ! git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+          echo "::error::No such tag: $TAG"
+          exit 1
+        fi
         echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+    # Not only on a tag push. Manual dispatch is exempt from the repository
+    # guard above so a fork owner can preview, and a preview publishes nothing
+    # — but the moment `publish` is ticked it writes a real release, so the
+    # same rule has to hold.
+    - name: Verify the tag is on the default branch
+      if: github.event_name == 'push' || inputs.publish
+      env:
+        TAG: ${{ steps.resolve.outputs.tag }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        # `on.push.branches` cannot express this. A tag push carries
+        # refs/tags/<name> and belongs to no branch, so GitHub ignores a
+        # branch filter on it entirely — the workflow would still run.
+        #
+        # It matters because a tag can be created on any commit, including one
+        # on a feature branch that never merged. Publishing a release from
+        # such a commit would announce code that is not on the default branch,
+        # so the containment check has to be made explicitly.
+        #
+        # ^{commit} dereferences the annotated tag object to the commit it
+        # points at; GITHUB_SHA is not reliably that commit for annotated tags.
+        if git merge-base --is-ancestor "${TAG}^{commit}" "origin/$DEFAULT_BRANCH"; then
+          echo "$TAG is on $DEFAULT_BRANCH"
+        else
+          echo "::error::$TAG points at a commit that is not on $DEFAULT_BRANCH; refusing to publish"
+          exit 1
+        fi
 
     # Installs the pinned binary and verifies its checksum. Skipped by the
     # local harness, which uses whatever git-cliff is already on PATH.
@@ -125,25 +147,20 @@ jobs:
         TAG: ${{ steps.resolve.outputs.tag }}
       run: |
         # One release is the range from its predecessor, which is what
-        # `git describe --abbrev=0 <tag>^` finds. The oldest tag has no
-        # predecessor, so it takes everything up to itself instead.
-        # An empty TAG means the newest release: --latest.
-        if [ -z "$TAG" ]; then
-          range=(--latest)
-        else
-          prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
-          if [ -z "$prev" ]; then
-            # The oldest tag has no predecessor to diff against, so start from
-            # the root commit instead. git ranges exclude their start point,
-            # so the repository's initial commit is the one thing this cannot
-            # list — only ever reachable by previewing the very first release.
-            prev=$(git rev-list --max-parents=0 "$TAG" | tail -1)
-          fi
-          range=("${prev}..${TAG}")
+        # `git describe --abbrev=0 <tag>^` finds. The tag is always concrete
+        # by now, so there is one range to compute rather than a special case
+        # for "newest" — for the newest release this is what --latest means.
+        prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${TAG}^" 2>/dev/null || true)
+        if [ -z "$prev" ]; then
+          # The oldest tag has no predecessor to diff against, so start from
+          # the root commit instead. git ranges exclude their start point, so
+          # the repository's initial commit is the one thing this cannot list
+          # — only ever reachable by previewing the very first release.
+          prev=$(git rev-list --max-parents=0 "$TAG" | tail -1)
         fi
         # --strip header: the document header belongs on a CHANGELOG file,
         # not in the body of a single GitHub Release.
-        git cliff --config .github/cliff.toml --strip header "${range[@]}" -o notes.md
+        git cliff --config .github/cliff.toml --strip header "${prev}..${TAG}" -o notes.md
 
     # Where the notes are read: rendered, and on the run's own page. Echoing
     # the file here as well would put the whole thing on screen twice.
@@ -202,9 +219,15 @@ jobs:
         else
           TAG="$INPUT_TAG"
         fi
+        # Resolved the same way as in `notes`, so a manual run with the tag
+        # left blank regenerates the changelog for the release whose notes
+        # that job just published, rather than refusing.
         if [ -z "$TAG" ]; then
-          echo "::error::A changelog needs a specific release; pass a tag."
-          exit 1
+          TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -z "$TAG" ]; then
+            echo "::error::No release tag found; nothing to regenerate for."
+            exit 1
+          fi
         fi
         case "$TAG" in
           *[!A-Za-z0-9._/-]*)
@@ -212,6 +235,10 @@ jobs:
             exit 1
             ;;
         esac
+        if ! git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+          echo "::error::No such tag: $TAG"
+          exit 1
+        fi
         echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
     - name: Install git-cliff
