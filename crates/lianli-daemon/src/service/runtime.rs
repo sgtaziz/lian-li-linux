@@ -38,9 +38,10 @@ impl HidLcd {
         }
     }
 
-    fn begin_stream(self: &Arc<Self>) -> HidStreamLease {
-        *self.streams.lock() += 1;
-        HidStreamLease(Arc::clone(self))
+    /// Recovery may hold the gate for seconds; let the caller retry next tick.
+    fn begin_stream(self: &Arc<Self>) -> Option<HidStreamLease> {
+        *self.streams.try_lock()? += 1;
+        Some(HidStreamLease(Arc::clone(self)))
     }
 
     fn recovery_idle(&self) -> Option<parking_lot::MutexGuard<'_, usize>> {
@@ -105,6 +106,7 @@ fn spawn_hid_h264_stream(
     mut reader: Box<dyn std::io::Read + Send>,
     stop: Arc<AtomicBool>,
     fps: f32,
+    lease: HidStreamLease,
 ) -> (JoinHandle<()>, Arc<AtomicBool>) {
     use lianli_devices::hydroshift_lcd::{find_au_split, pace_frame};
     use std::io::Read;
@@ -113,7 +115,6 @@ fn spawn_hid_h264_stream(
     let halt = Arc::new(AtomicBool::new(false));
     let worker_halt = Arc::clone(&halt);
     let worker_stop = Arc::clone(&stop);
-    let lease = lcd.begin_stream();
     let handle = thread::spawn(move || {
         let _lease = lease;
         let halted = || worker_stop.load(Ordering::Relaxed) || worker_halt.load(Ordering::Relaxed);
@@ -263,11 +264,12 @@ impl LcdBackend {
         fps: f32,
     ) -> anyhow::Result<Option<HidStreamWorker>> {
         match self {
-            Self::HidLcd(lcd) => {
-                let (handle, halt) =
-                    spawn_hid_h264_stream(Arc::clone(lcd), Box::new(stdout), stop, fps);
-                Ok(Some(HidStreamWorker { handle, halt }))
-            }
+            Self::HidLcd(lcd) => Ok(Some(HidStreamWorker::new(
+                Arc::clone(lcd),
+                Box::new(stdout),
+                stop,
+                fps,
+            ))),
             Self::WinUsb(sender) => {
                 sender.stream_h264_reader(stdout, fps)?;
                 Ok(None)
@@ -297,20 +299,72 @@ impl LcdBackend {
 }
 
 pub(super) struct HidStreamWorker {
-    handle: JoinHandle<()>,
+    handle: Option<JoinHandle<()>>,
     halt: Arc<AtomicBool>,
+    pending: Option<PendingHidStream>,
+}
+
+struct PendingHidStream {
+    lcd: SharedHidLcd,
+    reader: Box<dyn std::io::Read + Send + Sync>,
+    stop: Arc<AtomicBool>,
+    fps: f32,
 }
 
 impl HidStreamWorker {
+    fn new(
+        lcd: SharedHidLcd,
+        reader: Box<dyn std::io::Read + Send + Sync>,
+        stop: Arc<AtomicBool>,
+        fps: f32,
+    ) -> Self {
+        let mut worker = Self {
+            handle: None,
+            halt: Arc::new(AtomicBool::new(false)),
+            pending: Some(PendingHidStream {
+                lcd,
+                reader,
+                stop,
+                fps,
+            }),
+        };
+        worker.try_start();
+        worker
+    }
+
+    /// Keep the reader for the next render tick when recovery owns the gate.
+    pub(super) fn try_start(&mut self) -> bool {
+        let Some(pending) = self.pending.as_ref() else {
+            return true;
+        };
+        let Some(lease) = pending.lcd.begin_stream() else {
+            return false;
+        };
+        let pending = self.pending.take().unwrap();
+        let (handle, halt) = spawn_hid_h264_stream(
+            pending.lcd,
+            pending.reader,
+            pending.stop,
+            pending.fps,
+            lease,
+        );
+        self.handle = Some(handle);
+        self.halt = halt;
+        true
+    }
+
     /// The worker may be parked reading an encoder stdout that only EOFs
     /// once the caller replaces the encoder, so join is bounded.
     fn stop(&self, timeout: Duration) {
         self.halt.store(true, Ordering::Relaxed);
+        let Some(handle) = &self.handle else {
+            return;
+        };
         let deadline = std::time::Instant::now() + timeout;
-        while !self.handle.is_finished() && std::time::Instant::now() < deadline {
+        while !handle.is_finished() && std::time::Instant::now() < deadline {
             thread::sleep(Duration::from_millis(25));
         }
-        if !self.handle.is_finished() {
+        if !handle.is_finished() {
             debug!("h264 stream worker did not stop within {timeout:?}, detaching");
         }
     }
@@ -323,6 +377,17 @@ pub(super) enum StreamRestarter {
 }
 
 impl StreamRestarter {
+    /// Called before feeding the encoder so a deferred reader cannot fill its pipe.
+    pub(super) fn try_start_pending(&self) -> bool {
+        match self {
+            Self::HidLcd(_, current) => current
+                .lock()
+                .as_mut()
+                .is_none_or(HidStreamWorker::try_start),
+            Self::WinUsb(..) => true,
+        }
+    }
+
     /// Start a new h264 stream reading from the given stdout. The old
     /// stream is halted and joined (bounded) first.
     pub(super) fn start_stream(
@@ -337,9 +402,12 @@ impl StreamRestarter {
                 if let Some(old) = current.take() {
                     old.stop(Duration::from_secs(1));
                 }
-                let (handle, halt) =
-                    spawn_hid_h264_stream(Arc::clone(lcd), Box::new(stdout), stop, fps);
-                *current = Some(HidStreamWorker { handle, halt });
+                *current = Some(HidStreamWorker::new(
+                    Arc::clone(lcd),
+                    Box::new(stdout),
+                    stop,
+                    fps,
+                ));
                 Ok(())
             }
             Self::WinUsb(tx, h264_stop) => {
@@ -1077,7 +1145,9 @@ impl FrameSource for H264FileSource {
                 let completed = Arc::new(AtomicBool::new(false));
                 let done = Arc::clone(&completed);
                 self.hid_completed = Some(completed);
-                let lease = lcd.begin_stream();
+                let Some(lease) = lcd.begin_stream() else {
+                    return Ok(());
+                };
                 self.hid_thread = Some(thread::spawn(move || {
                     let _lease = lease;
                     if stream_h264_file_to_hid(lcd, file, looping, fps, stop) {
@@ -1378,8 +1448,8 @@ mod tests {
     #[test]
     fn overlapping_workers_exclude_recovery_without_lcd_access() {
         let (lcd, _) = lcd(0);
-        let old = lcd.begin_stream();
-        let new = lcd.begin_stream();
+        let old = lcd.begin_stream().unwrap();
+        let new = lcd.begin_stream().unwrap();
         let _device = lcd.lock();
         assert!(lcd.recovery_idle().is_none());
         drop(old);
@@ -1389,24 +1459,43 @@ mod tests {
     }
 
     #[test]
-    fn recovery_gate_serializes_stream_start() {
+    fn recovery_gate_defers_stream_start_without_blocking() {
         let (lcd, _) = lcd(0);
         let idle = lcd.recovery_idle().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let worker_lcd = Arc::clone(&lcd);
-        let worker = thread::spawn(move || {
-            tx.send(()).unwrap();
-            let lease = worker_lcd.begin_stream();
-            tx.send(()).unwrap();
-            lease
+        let caller = thread::spawn(move || {
+            let worker = HidStreamWorker::new(
+                worker_lcd,
+                Box::new(std::io::empty()),
+                Arc::new(AtomicBool::new(false)),
+                30.0,
+            );
+            tx.send(worker).unwrap();
         });
-        rx.recv().unwrap();
-        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+        let result = rx.recv_timeout(Duration::from_secs(1));
+        drop(idle); // Release even on failure so the test cannot strand the caller.
+        caller.join().unwrap();
+        let worker = result.expect("stream start blocked on recovery");
+        assert!(worker.handle.is_none());
+        let restarter = StreamRestarter::HidLcd(Arc::clone(&lcd), Mutex::new(Some(worker)));
+        let idle = lcd.recovery_idle().unwrap();
+        assert!(!restarter.try_start_pending());
         drop(idle);
-        rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        let lease = worker.join().unwrap();
+        let device = lcd.lock();
+        assert!(restarter.try_start_pending());
         assert!(lcd.recovery_idle().is_none());
-        drop(lease);
+        drop(device);
+        let StreamRestarter::HidLcd(_, current) = restarter else {
+            unreachable!()
+        };
+        current
+            .into_inner()
+            .unwrap()
+            .handle
+            .unwrap()
+            .join()
+            .unwrap();
         assert!(lcd.recovery_idle().is_some());
     }
 
@@ -1455,6 +1544,7 @@ mod tests {
                 reader,
                 Arc::new(AtomicBool::new(stopped)),
                 30.0,
+                lcd.begin_stream().unwrap(),
             );
             assert_eq!(worker.join().is_err(), panics);
             assert!(lcd.recovery_idle().is_some());
@@ -1488,6 +1578,11 @@ mod tests {
             let (lcd, sends) = lcd_with_failures(2, 3);
             let backend = LcdBackend::HidLcd(Arc::clone(&lcd));
             let mut source = H264FileSource::new(path.clone(), looping, 30.0);
+            let idle = lcd.recovery_idle().unwrap();
+            source.start(&backend).unwrap();
+            assert!(!source.started);
+            assert!(source.hid_thread.is_none());
+            drop(idle);
             source.start(&backend).unwrap();
             assert!(lcd.recovery_idle().is_none());
             wait_for_file_worker(&source);
@@ -1502,6 +1597,11 @@ mod tests {
             // Holding the device makes it deterministic that the restarted worker
             // is still alive when we check its separately registered lease.
             source.looping = false;
+            let idle = lcd.recovery_idle().unwrap();
+            source.start(&backend).unwrap();
+            assert!(!source.started);
+            assert!(source.hid_thread.is_none());
+            drop(idle);
             let device = lcd.lock();
             source.start(&backend).unwrap();
             assert!(lcd.recovery_idle().is_none());
@@ -1548,6 +1648,7 @@ mod tests {
             Box::new(std::io::Cursor::new(vec![0, 0, 0, 1, 5, 128])),
             Arc::new(AtomicBool::new(false)),
             30.0,
+            lcd.begin_stream().unwrap(),
         );
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while sends.load(Ordering::Relaxed) == 0 {
