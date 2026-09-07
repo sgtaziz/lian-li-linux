@@ -120,6 +120,7 @@ impl ServiceManager {
                                 .map_or(false, |s| lcd_id_matches(s, &device_identity))
                         })
                         .and_then(|l| l.brightness)
+                        .or_else(|| cfg.lcds.get(idx).and_then(|l| l.brightness))
                         .or_else(|| cfg.aio.get(&device_identity).map(|a| a.brightness))
                 })
                 .unwrap_or(75);

@@ -53,13 +53,44 @@ pub fn pixel_cleaner_asset_path() -> PathBuf {
         }
     }
 
-    // Embedded fallback ensures binary functions stand-alone without asset files installed
-    let temp_path = std::env::temp_dir().join("lianli_pixel_cleaner.mp4");
+    // Embedded fallback ensures binary functions stand-alone without asset files installed.
+    // Prefer user-private runtime directory over shared /tmp, and create atomically with 0o600.
+    let target_dir = std::env::var("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .or_else(|_| {
+            std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join(".config/lianli"))
+        })
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let temp_path = target_dir.join("lianli_pixel_cleaner.mp4");
     if !temp_path.exists() {
         const EMBEDDED_CLEANER: &[u8] =
             include_bytes!("../../../assets/media/pixel_cleaner.mp4");
-        if let Err(e) = std::fs::write(&temp_path, EMBEDDED_CLEANER) {
-            warn!("Failed to extract embedded pixel cleaner asset: {e}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temp_path)
+            {
+                Ok(mut f) => {
+                    if let Err(e) = f.write_all(EMBEDDED_CLEANER) {
+                        warn!("Failed to write embedded pixel cleaner asset: {e}");
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => {
+                    warn!("Failed to extract embedded pixel cleaner asset: {e}");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            if let Err(e) = std::fs::write(&temp_path, EMBEDDED_CLEANER) {
+                warn!("Failed to extract embedded pixel cleaner asset: {e}");
+            }
         }
     }
     temp_path

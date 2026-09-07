@@ -125,14 +125,16 @@ export const useLcdStore = defineStore("lcd", () => {
     deviceId?: string | null,
     durationMinutes: number = 30,
   ) {
-    const res = await ipc.request("StartPixelClean", {
+    const res = await ipc.request<{ started?: boolean }>("StartPixelClean", {
       device_id: deviceId ?? null,
       duration_minutes: durationMinutes,
     });
-    cleaningActive.value = true;
-    cleaningDeviceId.value = deviceId ?? null;
-    cleaningDurationMinutes.value = durationMinutes;
-    startTimer(durationMinutes);
+    if (res && res.started !== false) {
+      cleaningActive.value = true;
+      cleaningDeviceId.value = deviceId ?? null;
+      cleaningDurationMinutes.value = durationMinutes;
+      startTimer(durationMinutes);
+    }
     return res;
   }
 

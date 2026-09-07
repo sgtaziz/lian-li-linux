@@ -349,6 +349,9 @@ const isCleaningThis = computed(
 );
 
 async function togglePixelClean() {
+  if (lcd.cleaningActive && !isCleaningThis.value) {
+    return;
+  }
   try {
     if (isCleaningThis.value) {
       await lcd.stopPixelClean(selectedDeviceId.value);
@@ -378,7 +381,14 @@ async function togglePixelClean() {
           :type="isCleaningThis ? 'error' : 'warning'"
           class="cleaner-btn"
           @click="togglePixelClean"
-          :title="isCleaningThis ? `Stop conditioning on this screen (${lcd.formattedRemaining} remaining)` : 'Run pixel conditioning to clear image retention'"
+          :disabled="lcd.cleaningActive && !isCleaningThis"
+          :title="
+            isCleaningThis
+              ? `Stop conditioning on this screen (${lcd.formattedRemaining} remaining)`
+              : lcd.cleaningActive
+                ? 'Pixel cleaner is currently active on another device'
+                : 'Run pixel conditioning to clear image retention'
+          "
         >
           <template #icon><Sparkles :size="12" /></template>
           {{ isCleaningThis ? "Stop Cleaner (" + lcd.formattedRemaining + ")" : "Clean Pixels" }}
