@@ -66,20 +66,6 @@ pub fn prepare_media_asset(
 ) -> Result<MediaAssetKind, MediaError> {
     let fps_cap = default_fps.min(screen.max_fps as f32).max(1.0);
     match cfg.media_type {
-        MediaType::Image if h264 => {
-            let path = cfg.path.as_ref().ok_or(MediaError::InvalidConfig(
-                "image entry requires a 'path' field".into(),
-            ))?;
-            let fps = cfg.fps.unwrap_or(default_fps).min(fps_cap).max(1.0);
-            let (h264_path, temp, encoded_fps) =
-                video::encode_h264(path, fps, cfg.orientation, screen)?;
-            Ok(MediaAssetKind::H264Stream {
-                path: h264_path,
-                looping: true,
-                fps: encoded_fps,
-                _temp: Arc::new(temp),
-            })
-        }
         MediaType::Image => {
             let path = cfg.path.as_ref().ok_or(MediaError::InvalidConfig(
                 "image entry requires a 'path' field".into(),
@@ -87,24 +73,6 @@ pub fn prepare_media_asset(
             let frame = image::load_image_frame(path, cfg.orientation, screen)?;
             Ok(MediaAssetKind::Static {
                 frame: Arc::new(frame),
-            })
-        }
-        MediaType::Color if h264 => {
-            let rgb = cfg.rgb.ok_or(MediaError::InvalidConfig(
-                "color entry requires an 'rgb' field".into(),
-            ))?;
-            let temp = TempDir::new()?;
-            let jpeg_path = temp.path().join("color.jpg");
-            std::fs::write(&jpeg_path, image::build_color_frame(rgb, screen))?;
-            let fps = cfg.fps.unwrap_or(default_fps).min(fps_cap).max(1.0);
-            let (h264_path, h264_temp, encoded_fps) =
-                video::encode_h264(&jpeg_path, fps, cfg.orientation, screen)?;
-            drop(temp);
-            Ok(MediaAssetKind::H264Stream {
-                path: h264_path,
-                looping: true,
-                fps: encoded_fps,
-                _temp: Arc::new(h264_temp),
             })
         }
         MediaType::Color => {

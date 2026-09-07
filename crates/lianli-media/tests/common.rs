@@ -109,3 +109,66 @@ fn encode_compressed_rejects_oversized_payload() {
     let result = encode_jpeg(img, &screen);
     assert!(matches!(result, Err(MediaError::PayloadTooLarge { .. })));
 }
+
+#[test]
+fn prepare_media_asset_image_produces_static_even_when_h264_screen() {
+    let mut screen = test_screen();
+    screen.h264 = true;
+    let temp = tempfile::TempDir::new().unwrap();
+    let img_path = temp.path().join("test.png");
+    let img: RgbImage = ImageBuffer::from_pixel(16, 16, Rgb([0, 255, 0]));
+    img.save(&img_path).unwrap();
+
+    let cfg = lianli_shared::config::LcdConfig {
+        index: None,
+        serial: None,
+        media_type: lianli_shared::media::MediaType::Image,
+        path: Some(img_path),
+        fps: Some(30.0),
+        update_interval_ms: None,
+        rgb: None,
+        orientation: 0.0,
+        sensor: None,
+        sensor_source_1: Default::default(),
+        sensor_source_2: Default::default(),
+        doublegauge: None,
+        template_id: None,
+        smooth_edges: None,
+        custom_h264: None,
+        aio_512_frame: None,
+        brightness: None,
+    };
+
+    let asset =
+        lianli_media::prepare_media_asset(&cfg, 30.0, &screen, screen.h264, &[], &[]).unwrap();
+    assert!(matches!(asset, lianli_media::MediaAssetKind::Static { .. }));
+}
+
+#[test]
+fn prepare_media_asset_color_produces_static_even_when_h264_screen() {
+    let mut screen = test_screen();
+    screen.h264 = true;
+    let cfg = lianli_shared::config::LcdConfig {
+        index: None,
+        serial: None,
+        media_type: lianli_shared::media::MediaType::Color,
+        path: None,
+        fps: Some(30.0),
+        update_interval_ms: None,
+        rgb: Some([255, 0, 0]),
+        orientation: 0.0,
+        sensor: None,
+        sensor_source_1: Default::default(),
+        sensor_source_2: Default::default(),
+        doublegauge: None,
+        template_id: None,
+        smooth_edges: None,
+        custom_h264: None,
+        aio_512_frame: None,
+        brightness: None,
+    };
+
+    let asset =
+        lianli_media::prepare_media_asset(&cfg, 30.0, &screen, screen.h264, &[], &[]).unwrap();
+    assert!(matches!(asset, lianli_media::MediaAssetKind::Static { .. }));
+}

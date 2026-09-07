@@ -287,7 +287,7 @@ fn run_encode(
     let mut args: Vec<String> = vec!["-y".into(), "-loglevel".into(), "error".into()];
     args.extend(hwaccel_input_args(kind));
     if loop_image {
-        args.extend(["-loop".into(), "1".into(), "-t".into(), "1".into()]);
+        args.extend(["-loop".into(), "1".into(), "-t".into(), "10".into()]);
     }
     args.extend(["-i".into(), input.to_string_lossy().into_owned()]);
     args.extend(["-vf".into(), finalize_vf(kind, vf)]);

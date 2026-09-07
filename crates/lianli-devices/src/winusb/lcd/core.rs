@@ -1137,7 +1137,9 @@ impl WinUsbLcdCore {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
-            let is_last = {
+            let is_last = if looping {
+                false
+            } else {
                 let pos = file.stream_position()?;
                 let len = file.metadata()?.len();
                 pos >= len

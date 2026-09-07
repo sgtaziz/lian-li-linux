@@ -973,6 +973,7 @@ impl ActiveTarget {
         }
 
         self.frame_counter += 1;
+        self.media.mark_sent();
         Ok(true)
     }
 
@@ -1019,6 +1020,9 @@ trait FrameSource: Send {
         None
     }
 
+    /// Mark the current frame as successfully sent over USB.
+    fn mark_sent(&mut self) {}
+
     /// `true` if the source produces a single unchanging frame (uses the
     /// verified-send path that tolerates a dropped USB write).
     fn is_static(&self) -> bool {
@@ -1039,10 +1043,17 @@ impl FrameSource for NoopFrameSource {}
 
 struct StaticSource {
     frame: Arc<Vec<u8>>,
+    sent: bool,
 }
 impl FrameSource for StaticSource {
     fn next_frame(&mut self) -> Option<&[u8]> {
+        if self.sent {
+            return None;
+        }
         Some(self.frame.as_slice())
+    }
+    fn mark_sent(&mut self) {
+        self.sent = true;
     }
     fn is_static(&self) -> bool {
         true
@@ -1246,6 +1257,7 @@ fn make_frame_source(
     match &asset.kind {
         MediaAssetKind::Static { frame } => Box::new(StaticSource {
             frame: Arc::clone(frame),
+            sent: false,
         }),
         MediaAssetKind::Video { frames, .. } => {
             let player = Arc::new(AsyncVideoPlayer::new(tx, Arc::clone(&asset)));
@@ -1753,5 +1765,25 @@ mod tests {
         worker.handle.take().unwrap().join().unwrap();
         assert_eq!(*lcd.streams.lock(), 0);
         assert!(lcd.recovery_idle().is_some());
+    }
+
+    #[test]
+    fn static_source_only_yields_frame_until_marked_sent() {
+        let frame = Arc::new(vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        let mut source = StaticSource {
+            frame: Arc::clone(&frame),
+            sent: false,
+        };
+        assert!(source.is_static());
+        assert!(!source.is_autonomous());
+
+        // Yields frame before being marked sent
+        assert_eq!(source.next_frame(), Some(frame.as_slice()));
+        assert_eq!(source.next_frame(), Some(frame.as_slice()));
+
+        // Once marked sent, yields None
+        source.mark_sent();
+        assert_eq!(source.next_frame(), None);
+        assert_eq!(source.next_frame(), None);
     }
 }
