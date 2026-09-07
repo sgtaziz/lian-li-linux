@@ -3,6 +3,15 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v0.8.12 — 2026-09-07
+
+### Documentation
+- **changelog**: Regenerate for v0.8.11  ([#186](https://github.com/sgtaziz/lian-li-linux/pull/186))
+
+### Fixes
+- **wireless**: Stop tracking the dongle self record as a foreign master (fixes [#189](https://github.com/sgtaziz/lian-li-linux/issues/189))
+- **h2**: Wired PushRgbData wedges the panel after any H.264 stream; skip it on bridged units and drop it at stream end  ([#187](https://github.com/sgtaziz/lian-li-linux/pull/187))
+
 ## v0.8.11 — 2026-09-06
 
 ### Fixes
