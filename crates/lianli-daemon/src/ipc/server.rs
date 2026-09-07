@@ -21,6 +21,18 @@ use std::sync::Arc;
 use std::thread;
 use tracing::{debug, error, info, warn};
 
+use lianli_shared::ipc::PixelCleanStatus;
+use std::time::{Duration, Instant};
+
+/// Active cleaner session state stored in DaemonState.
+#[derive(Debug, Clone)]
+pub struct PixelCleanState {
+    pub session_id: u64,
+    pub device_id: Option<String>,
+    pub duration_minutes: u32,
+    pub clean_until: Instant,
+}
+
 /// Shared state between the daemon main loop and the IPC server thread.
 pub struct DaemonState {
     pub config: Option<AppConfig>,
@@ -32,6 +44,7 @@ pub struct DaemonState {
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
     pub user_templates: Vec<LcdTemplate>,
     pub rgb_presets: Vec<RgbPreset>,
+    pub pixel_clean_state: Option<PixelCleanState>,
 }
 
 impl DaemonState {
@@ -50,11 +63,29 @@ impl DaemonState {
             rgb_controller: None,
             user_templates: Vec::new(),
             rgb_presets,
+            pixel_clean_state: None,
         }
     }
 
     pub fn templates_path(&self) -> PathBuf {
         template_store::templates_path_for(&self.config_path)
+    }
+
+    pub fn pixel_clean_status(&self) -> Option<PixelCleanStatus> {
+        if let Some(ref state) = self.pixel_clean_state {
+            let now = Instant::now();
+            if now < state.clean_until {
+                let remaining = (state.clean_until - now).as_secs();
+                return Some(PixelCleanStatus {
+                    active: true,
+                    session_id: Some(state.session_id),
+                    device_id: state.device_id.clone(),
+                    duration_minutes: state.duration_minutes,
+                    remaining_seconds: remaining,
+                });
+            }
+        }
+        None
     }
 }
 
@@ -269,15 +300,49 @@ fn handle_request(
             device_id,
             duration_minutes,
         } => {
-            let _ = tx.send(DaemonEvent::StartPixelClean {
-                device_id,
-                duration_minutes,
-            });
-            IpcResponse::ok(serde_json::json!({ "started": true }))
+            let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
+            if tx
+                .send(DaemonEvent::StartPixelClean {
+                    device_id,
+                    duration_minutes,
+                    reply: reply_tx,
+                })
+                .is_err()
+            {
+                return IpcResponse::error("daemon service not running");
+            }
+            match reply_rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(Ok(session_id)) => {
+                    IpcResponse::ok(serde_json::json!({ "started": true, "session_id": session_id }))
+                }
+                Ok(Err(err)) => IpcResponse::error(err),
+                Err(e) => IpcResponse::error(format!("timeout starting pixel cleaner: {e}")),
+            }
         }
-        IpcRequest::StopPixelClean { device_id } => {
-            let _ = tx.send(DaemonEvent::StopPixelClean { device_id });
-            IpcResponse::ok(serde_json::json!({ "stopped": true }))
+        IpcRequest::StopPixelClean {
+            device_id,
+            session_id,
+        } => {
+            let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
+            if tx
+                .send(DaemonEvent::StopPixelClean {
+                    device_id,
+                    session_id,
+                    reply: Some(reply_tx),
+                })
+                .is_err()
+            {
+                return IpcResponse::error("daemon service not running");
+            }
+            match reply_rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(stopped) => IpcResponse::ok(serde_json::json!({ "stopped": stopped })),
+                Err(e) => IpcResponse::error(format!("timeout stopping pixel cleaner: {e}")),
+            }
+        }
+        IpcRequest::GetPixelCleanStatus => {
+            let state = state.lock();
+            let status = state.pixel_clean_status().unwrap_or_default();
+            IpcResponse::ok(status)
         }
         IpcRequest::PingDevice { device_id, zone } => {
             let rgb = state.lock();

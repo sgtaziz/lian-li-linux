@@ -145,9 +145,12 @@ pub enum DaemonEvent {
     StartPixelClean {
         device_id: Option<String>,
         duration_minutes: u32,
+        reply: std::sync::mpsc::SyncSender<Result<u64, String>>,
     },
     StopPixelClean {
         device_id: Option<String>,
+        session_id: Option<u64>,
+        reply: Option<std::sync::mpsc::SyncSender<bool>>,
     },
     BindAll,
     UnbindAll,
@@ -656,7 +659,7 @@ impl ServiceManager {
                     if let Some(ref session) = self.pixel_clean_session {
                         if Instant::now() >= session.clean_until {
                             info!("Pixel cleaner duration elapsed; restoring previous display");
-                            self.stop_pixel_cleaning(None);
+                            self.stop_pixel_cleaning(None, None);
                         }
                     }
                     self.device_poll();
@@ -702,7 +705,7 @@ impl ServiceManager {
                 }
                 DaemonEvent::IpcUpdate => {
                     if self.pixel_clean_session.is_some() {
-                        self.stop_pixel_cleaning(None);
+                        self.stop_pixel_cleaning(None, None);
                     }
                     let ipc_state = self.ipc.state.lock();
                     info!("Config reload triggered via IPC");
@@ -846,11 +849,20 @@ impl ServiceManager {
                 DaemonEvent::StartPixelClean {
                     device_id,
                     duration_minutes,
+                    reply,
                 } => {
-                    self.start_pixel_cleaning(device_id, duration_minutes);
+                    let res = self.start_pixel_cleaning(device_id, duration_minutes);
+                    let _ = reply.send(res);
                 }
-                DaemonEvent::StopPixelClean { device_id } => {
-                    self.stop_pixel_cleaning(device_id);
+                DaemonEvent::StopPixelClean {
+                    device_id,
+                    session_id,
+                    reply,
+                } => {
+                    let stopped = self.stop_pixel_cleaning(device_id, session_id);
+                    if let Some(r) = reply {
+                        let _ = r.send(stopped);
+                    }
                 }
                 DaemonEvent::SystemResumed => {
                     info!("System resumed — waiting for USB re-enumeration");

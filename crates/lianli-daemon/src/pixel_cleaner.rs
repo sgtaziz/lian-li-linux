@@ -22,6 +22,7 @@ pub struct SavedTargetState {
 
 #[derive(Debug)]
 pub struct PixelCleanSession {
+    pub session_id: u64,
     pub original_targets: Vec<SavedTargetState>,
     pub clean_until: Instant,
 }
@@ -133,17 +134,19 @@ pub fn run_clean_command(
         duration_minutes: minutes,
     };
 
-    match send_ipc(&socket_path, &start_req)? {
-        IpcResponse::Ok { .. } => {
+    let session_id = match send_ipc(&socket_path, &start_req)? {
+        IpcResponse::Ok { data } => {
+            let sid = data.get("session_id").and_then(|v| v.as_u64());
             println!(
                 "[+] Pixel cleaner active at 75% brightness. Asset: pixel_cleaner.mp4\n\
                  [+] Running for {minutes} minutes. Press Ctrl+C at any time to cancel and restore previous display."
             );
+            sid
         }
         IpcResponse::Error { message } => {
             anyhow::bail!("Daemon rejected StartPixelClean: {message}");
         }
-    }
+    };
 
     let running = Arc::new(AtomicBool::new(true));
     let r = Arc::clone(&running);
@@ -163,7 +166,10 @@ pub fn run_clean_command(
     }
 
     println!("\n[*] Restoring original LCD configuration...");
-    let stop_req = IpcRequest::StopPixelClean { device_id };
+    let stop_req = IpcRequest::StopPixelClean {
+        device_id,
+        session_id,
+    };
     match send_ipc(&socket_path, &stop_req)? {
         IpcResponse::Ok { .. } => {
             println!("[+] Restored previous LCD media and brightness successfully.");

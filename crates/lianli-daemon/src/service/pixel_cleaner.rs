@@ -4,28 +4,32 @@ use crate::pixel_cleaner::{pixel_cleaner_asset_path, PixelCleanSession, SavedTar
 use lianli_media::MediaAsset;
 use lianli_shared::config::LcdConfig;
 use lianli_shared::screen::ScreenInfo;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
+
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 impl ServiceManager {
     pub(super) fn start_pixel_cleaning(
         &mut self,
         target_dev_id: Option<String>,
         minutes: u32,
-    ) {
+    ) -> Result<u64, String> {
         let cleaner_path = pixel_cleaner_asset_path();
         if !cleaner_path.exists() {
-            warn!(
+            let msg = format!(
                 "Pixel cleaner asset does not exist at {}",
                 cleaner_path.display()
             );
-            return;
+            warn!("{msg}");
+            return Err(msg);
         }
 
         // If a session is already active, restore previous first to avoid clobbering original state
         if self.pixel_clean_session.is_some() {
-            self.stop_pixel_cleaning(None);
+            self.stop_pixel_cleaning(None, None);
         }
 
         let target_info: Vec<(usize, String, ScreenInfo, bool)> = {
@@ -51,10 +55,12 @@ impl ServiceManager {
         };
 
         if target_info.is_empty() {
-            warn!("No active LCD targets found matching {:?}", target_dev_id);
-            return;
+            let msg = format!("No active LCD targets found matching {:?}", target_dev_id);
+            warn!("{msg}");
+            return Err(msg);
         }
 
+        let session_id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         let mut saved_targets = Vec::new();
 
         for (idx, device_identity, screen, custom_h264) in target_info {
@@ -146,20 +152,49 @@ impl ServiceManager {
         if !saved_targets.is_empty() {
             let clean_until = Instant::now() + Duration::from_secs(minutes as u64 * 60);
             self.pixel_clean_session = Some(PixelCleanSession {
+                session_id,
                 original_targets: saved_targets,
+                clean_until,
+            });
+            self.ipc.state.lock().pixel_clean_state = Some(crate::ipc::PixelCleanState {
+                session_id,
+                device_id: target_dev_id,
+                duration_minutes: minutes,
                 clean_until,
             });
             if let Some(ref tx) = self.tx {
                 tx.send(DaemonEvent::FrameFinished).ok();
             }
+            Ok(session_id)
+        } else {
+            let msg = "Failed to initialize pixel cleaner on target LCDs".to_string();
+            warn!("{msg}");
+            Err(msg)
         }
     }
 
-    pub(super) fn stop_pixel_cleaning(&mut self, target_dev_id: Option<String>) {
-        let Some(mut session) = self.pixel_clean_session.take() else {
-            return;
+    pub(super) fn stop_pixel_cleaning(
+        &mut self,
+        target_dev_id: Option<String>,
+        session_id: Option<u64>,
+    ) -> bool {
+        let Some(session) = self.pixel_clean_session.as_ref() else {
+            self.ipc.state.lock().pixel_clean_state = None;
+            return false;
         };
 
+        if let Some(req_session_id) = session_id {
+            if session.session_id != req_session_id {
+                tracing::debug!(
+                    "Ignoring StopPixelClean for session {} (active session is {})",
+                    req_session_id,
+                    session.session_id
+                );
+                return false;
+            }
+        }
+
+        let mut session = self.pixel_clean_session.take().unwrap();
         let mut remaining = Vec::new();
         for saved in session.original_targets {
             let matches = match &target_dev_id {
@@ -195,10 +230,13 @@ impl ServiceManager {
         if !remaining.is_empty() {
             session.original_targets = remaining;
             self.pixel_clean_session = Some(session);
+        } else {
+            self.ipc.state.lock().pixel_clean_state = None;
         }
 
         if let Some(ref tx) = self.tx {
             tx.send(DaemonEvent::FrameFinished).ok();
         }
+        true
     }
 }

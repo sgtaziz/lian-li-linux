@@ -79,11 +79,20 @@ export interface OpenRgbServerStatus {
   error: string | null;
 }
 
+export interface PixelCleanStatus {
+  active: boolean;
+  session_id?: number | null;
+  device_id?: string | null;
+  duration_minutes: number;
+  remaining_seconds: number;
+}
+
 export interface TelemetrySnapshot {
   fan_rpms: Record<string, number[]>;
   coolant_temps: Record<string, number>;
   streaming_active: boolean;
   openrgb_status: OpenRgbServerStatus;
+  pixel_clean_status?: PixelCleanStatus | null;
 }
 
 export interface PollResult {

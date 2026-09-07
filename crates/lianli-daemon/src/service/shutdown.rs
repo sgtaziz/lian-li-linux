@@ -57,7 +57,11 @@ impl ServiceManager {
 
         // Drop RGB controller reference from IPC state before clearing the
         // device registry so device handles are released cleanly.
-        self.ipc.state.lock().rgb_controller = None;
+        {
+            let mut state = self.ipc.state.lock();
+            state.rgb_controller = None;
+            state.pixel_clean_state = None;
+        }
         self.registry.clear();
         mark("registry", t0);
 

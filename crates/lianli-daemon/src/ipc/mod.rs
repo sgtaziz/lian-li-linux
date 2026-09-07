@@ -25,7 +25,7 @@ pub mod system;
 pub mod templates;
 pub mod wireless;
 
-pub use server::{start_ipc_server, DaemonState};
+pub use server::{start_ipc_server, DaemonState, PixelCleanState};
 
 use std::sync::mpsc::Sender;
 

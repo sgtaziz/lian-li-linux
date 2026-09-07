@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { emit } from "@tauri-apps/api/event";
 import { useIpc } from "@/composables/useIpc";
 import { useDebounce } from "@/composables/useDebounce";
-import type { CatalogTemplate, LcdConfig, LcdTemplate } from "@/types";
+import type { CatalogTemplate, LcdConfig, LcdTemplate, PixelCleanStatus } from "@/types";
 
 /** Broadcast when SetLcdTemplates changes the template list, so other open
  *  windows (each with their own config store instance) know to reload it. */
@@ -88,14 +88,15 @@ export const useLcdStore = defineStore("lcd", () => {
     return `${m}m ${s < 10 ? "0" : ""}${s}s`;
   });
 
-  function startTimer(durationMinutes: number) {
+  const currentSessionId = ref<number | null>(null);
+
+  function startTimerFromRemaining(remainingSecs: number) {
     if (timerInterval) {
       clearInterval(timerInterval);
       timerInterval = null;
     }
-    const totalSecs = durationMinutes * 60;
-    remainingSeconds.value = totalSecs;
-    const endsAt = Date.now() + totalSecs * 1000;
+    remainingSeconds.value = remainingSecs;
+    const endsAt = Date.now() + remainingSecs * 1000;
 
     timerInterval = setInterval(() => {
       // `left` is the remaining seconds until target completion timestamp (`endsAt`),
@@ -105,12 +106,17 @@ export const useLcdStore = defineStore("lcd", () => {
       if (left <= 0) {
         cleaningActive.value = false;
         cleaningDeviceId.value = null;
+        currentSessionId.value = null;
         if (timerInterval) {
           clearInterval(timerInterval);
           timerInterval = null;
         }
       }
     }, TIMER_TICK_INTERVAL_MS);
+  }
+
+  function startTimer(durationMinutes: number) {
+    startTimerFromRemaining(durationMinutes * 60);
   }
 
   function stopTimer() {
@@ -121,18 +127,40 @@ export const useLcdStore = defineStore("lcd", () => {
     remainingSeconds.value = 0;
   }
 
+  function applyCleanerTelemetry(status?: PixelCleanStatus | null) {
+    if (status && status.active) {
+      cleaningActive.value = true;
+      cleaningDeviceId.value = status.device_id ?? null;
+      cleaningDurationMinutes.value = status.duration_minutes;
+      currentSessionId.value = status.session_id ?? null;
+      // Sync local timer if drift exceeds 2 seconds or if timer is not running
+      if (Math.abs(remainingSeconds.value - status.remaining_seconds) > 2 || !timerInterval) {
+        startTimerFromRemaining(status.remaining_seconds);
+      }
+    } else if (cleaningActive.value) {
+      cleaningActive.value = false;
+      cleaningDeviceId.value = null;
+      currentSessionId.value = null;
+      stopTimer();
+    }
+  }
+
   async function startPixelClean(
     deviceId?: string | null,
     durationMinutes: number = 30,
   ) {
-    const res = await ipc.request<{ started?: boolean }>("StartPixelClean", {
-      device_id: deviceId ?? null,
-      duration_minutes: durationMinutes,
-    });
+    const res = await ipc.request<{ started?: boolean; session_id?: number }>(
+      "StartPixelClean",
+      {
+        device_id: deviceId ?? null,
+        duration_minutes: durationMinutes,
+      },
+    );
     if (res && res.started !== false) {
       cleaningActive.value = true;
       cleaningDeviceId.value = deviceId ?? null;
       cleaningDurationMinutes.value = durationMinutes;
+      currentSessionId.value = res.session_id ?? null;
       startTimer(durationMinutes);
     }
     return res;
@@ -141,9 +169,11 @@ export const useLcdStore = defineStore("lcd", () => {
   async function stopPixelClean(deviceId?: string | null) {
     const res = await ipc.request("StopPixelClean", {
       device_id: deviceId ?? null,
+      session_id: currentSessionId.value,
     });
     cleaningActive.value = false;
     cleaningDeviceId.value = null;
+    currentSessionId.value = null;
     stopTimer();
     return res;
   }
@@ -154,6 +184,7 @@ export const useLcdStore = defineStore("lcd", () => {
     cleaningActive,
     cleaningDeviceId,
     cleaningDurationMinutes,
+    currentSessionId,
     remainingSeconds,
     formattedRemaining,
     switchDisplayMode,
@@ -164,5 +195,6 @@ export const useLcdStore = defineStore("lcd", () => {
     renderPreview,
     startPixelClean,
     stopPixelClean,
+    applyCleanerTelemetry,
   };
 });

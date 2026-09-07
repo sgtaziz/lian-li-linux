@@ -176,7 +176,11 @@ pub enum IpcRequest {
     StopPixelClean {
         #[serde(default)]
         device_id: Option<String>,
+        #[serde(default)]
+        session_id: Option<u64>,
     },
+    /// Query current pixel cleaner status.
+    GetPixelCleanStatus,
 }
 
 fn default_pixel_clean_minutes() -> u32 {
@@ -297,6 +301,20 @@ pub struct OpenRgbServerStatus {
     pub error: Option<String>,
 }
 
+/// Current state of the LCD pixel conditioning cleaner.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PixelCleanStatus {
+    pub active: bool,
+    #[serde(default)]
+    pub session_id: Option<u64>,
+    #[serde(default)]
+    pub device_id: Option<String>,
+    #[serde(default)]
+    pub duration_minutes: u32,
+    #[serde(default)]
+    pub remaining_seconds: u64,
+}
+
 /// Snapshot of live telemetry data, returned by GetTelemetry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TelemetrySnapshot {
@@ -309,4 +327,7 @@ pub struct TelemetrySnapshot {
     /// OpenRGB SDK server status.
     #[serde(default)]
     pub openrgb_status: OpenRgbServerStatus,
+    /// Active pixel cleaner session status, if running.
+    #[serde(default)]
+    pub pixel_clean_status: Option<PixelCleanStatus>,
 }
