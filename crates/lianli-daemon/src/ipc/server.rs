@@ -323,6 +323,9 @@ fn handle_request(
             device_id,
             session_id,
         } => {
+            let Some(session_id) = session_id else {
+                return IpcResponse::error("session_id is required to stop pixel cleaning");
+            };
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
             if tx
                 .send(DaemonEvent::StopPixelClean {

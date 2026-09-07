@@ -149,7 +149,7 @@ pub enum DaemonEvent {
     },
     StopPixelClean {
         device_id: Option<String>,
-        session_id: Option<u64>,
+        session_id: u64,
         reply: Option<std::sync::mpsc::SyncSender<bool>>,
     },
     BindAll,
@@ -659,7 +659,7 @@ impl ServiceManager {
                     if let Some(ref session) = self.pixel_clean_session {
                         if Instant::now() >= session.clean_until {
                             info!("Pixel cleaner duration elapsed; restoring previous display");
-                            self.stop_pixel_cleaning(None, None);
+                            self.force_stop_pixel_cleaning(None);
                         }
                     }
                     self.device_poll();
@@ -705,7 +705,7 @@ impl ServiceManager {
                 }
                 DaemonEvent::IpcUpdate => {
                     if self.pixel_clean_session.is_some() {
-                        self.stop_pixel_cleaning(None, None);
+                        self.force_stop_pixel_cleaning(None);
                     }
                     let ipc_state = self.ipc.state.lock();
                     info!("Config reload triggered via IPC");

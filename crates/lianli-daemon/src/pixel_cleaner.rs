@@ -136,7 +136,10 @@ pub fn run_clean_command(
 
     let session_id = match send_ipc(&socket_path, &start_req)? {
         IpcResponse::Ok { data } => {
-            let sid = data.get("session_id").and_then(|v| v.as_u64());
+            let sid = data
+                .get("session_id")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow::anyhow!("Daemon response missing session_id"))?;
             println!(
                 "[+] Pixel cleaner active at 75% brightness. Asset: pixel_cleaner.mp4\n\
                  [+] Running for {minutes} minutes. Press Ctrl+C at any time to cancel and restore previous display."
@@ -168,7 +171,7 @@ pub fn run_clean_command(
     println!("\n[*] Restoring original LCD configuration...");
     let stop_req = IpcRequest::StopPixelClean {
         device_id,
-        session_id,
+        session_id: Some(session_id),
     };
     match send_ipc(&socket_path, &stop_req)? {
         IpcResponse::Ok { .. } => {

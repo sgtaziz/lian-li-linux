@@ -167,14 +167,16 @@ export const useLcdStore = defineStore("lcd", () => {
   }
 
   async function stopPixelClean(deviceId?: string | null) {
-    const res = await ipc.request("StopPixelClean", {
+    const res = await ipc.request<{ stopped?: boolean }>("StopPixelClean", {
       device_id: deviceId ?? null,
       session_id: currentSessionId.value,
     });
-    cleaningActive.value = false;
-    cleaningDeviceId.value = null;
-    currentSessionId.value = null;
-    stopTimer();
+    if (res && res.stopped === true) {
+      cleaningActive.value = false;
+      cleaningDeviceId.value = null;
+      currentSessionId.value = null;
+      stopTimer();
+    }
     return res;
   }
 

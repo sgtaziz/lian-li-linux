@@ -29,7 +29,7 @@ impl ServiceManager {
 
         // If a session is already active, restore previous first to avoid clobbering original state
         if self.pixel_clean_session.is_some() {
-            self.stop_pixel_cleaning(None, None);
+            self.force_stop_pixel_cleaning(None);
         }
 
         let target_info: Vec<(usize, String, ScreenInfo, bool)> = {
@@ -176,26 +176,41 @@ impl ServiceManager {
     pub(super) fn stop_pixel_cleaning(
         &mut self,
         target_dev_id: Option<String>,
-        session_id: Option<u64>,
+        session_id: u64,
     ) -> bool {
         let Some(session) = self.pixel_clean_session.as_ref() else {
             self.ipc.state.lock().pixel_clean_state = None;
             return false;
         };
 
-        if let Some(req_session_id) = session_id {
-            if session.session_id != req_session_id {
-                tracing::debug!(
-                    "Ignoring StopPixelClean for session {} (active session is {})",
-                    req_session_id,
-                    session.session_id
-                );
-                return false;
-            }
+        if session.session_id != session_id {
+            tracing::debug!(
+                "Ignoring StopPixelClean for session {} (active session is {})",
+                session_id,
+                session.session_id
+            );
+            return false;
         }
 
-        let mut session = self.pixel_clean_session.take().unwrap();
+        self.internal_stop_pixel_cleaning(target_dev_id)
+    }
+
+    pub(super) fn force_stop_pixel_cleaning(&mut self, target_dev_id: Option<String>) -> bool {
+        if self.pixel_clean_session.is_none() {
+            self.ipc.state.lock().pixel_clean_state = None;
+            return false;
+        }
+        self.internal_stop_pixel_cleaning(target_dev_id)
+    }
+
+    fn internal_stop_pixel_cleaning(&mut self, target_dev_id: Option<String>) -> bool {
+        let Some(mut session) = self.pixel_clean_session.take() else {
+            self.ipc.state.lock().pixel_clean_state = None;
+            return false;
+        };
+
         let mut remaining = Vec::new();
+        let mut matched = false;
         for saved in session.original_targets {
             let matches = match &target_dev_id {
                 Some(id) => {
@@ -205,6 +220,7 @@ impl ServiceManager {
             };
 
             if matches {
+                matched = true;
                 self.media_assets
                     .insert(saved.target_index, Arc::clone(&saved.media_asset));
                 let mut targets = self.targets.lock();
@@ -237,6 +253,6 @@ impl ServiceManager {
         if let Some(ref tx) = self.tx {
             tx.send(DaemonEvent::FrameFinished).ok();
         }
-        true
+        matched
     }
 }
