@@ -67,6 +67,9 @@ package() {
   install -Dm644 assets/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.sgtaziz.lianlilinux.png"
   install -Dm644 assets/icons/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.sgtaziz.lianlilinux.svg"
 
+  # Media assets
+  install -Dm644 assets/media/pixel_cleaner.mp4 "$pkgdir/usr/share/lianli/media/pixel_cleaner.mp4"
+
   # License
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

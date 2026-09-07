@@ -265,6 +265,20 @@ fn handle_request(
             });
             IpcResponse::ok(serde_json::json!({ "applied": true }))
         }
+        IpcRequest::StartPixelClean {
+            device_id,
+            duration_minutes,
+        } => {
+            let _ = tx.send(DaemonEvent::StartPixelClean {
+                device_id,
+                duration_minutes,
+            });
+            IpcResponse::ok(serde_json::json!({ "started": true }))
+        }
+        IpcRequest::StopPixelClean { device_id } => {
+            let _ = tx.send(DaemonEvent::StopPixelClean { device_id });
+            IpcResponse::ok(serde_json::json!({ "stopped": true }))
+        }
         IpcRequest::PingDevice { device_id, zone } => {
             let rgb = state.lock();
             if let Some(ref controller) = rgb.rgb_controller {

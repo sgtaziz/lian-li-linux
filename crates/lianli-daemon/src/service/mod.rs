@@ -20,6 +20,7 @@ mod aio_lcd_firmware;
 mod display_mode;
 mod init;
 mod media;
+mod pixel_cleaner;
 mod renderers;
 mod runtime;
 mod shutdown;
@@ -51,6 +52,8 @@ fn event_label(event: &DaemonEvent) -> &'static str {
         DaemonEvent::RebootWirelessLcd { .. } => "RebootWirelessLcd",
         DaemonEvent::DisableLc217Wifi { .. } => "DisableLc217Wifi",
         DaemonEvent::SetLcdBrightness { .. } => "SetLcdBrightness",
+        DaemonEvent::StartPixelClean { .. } => "StartPixelClean",
+        DaemonEvent::StopPixelClean { .. } => "StopPixelClean",
         DaemonEvent::BindAll => "BindAll",
         DaemonEvent::UnbindAll => "UnbindAll",
         DaemonEvent::Shutdown => "Shutdown",
@@ -139,6 +142,13 @@ pub enum DaemonEvent {
         device_id: String,
         brightness: u8,
     },
+    StartPixelClean {
+        device_id: Option<String>,
+        duration_minutes: u32,
+    },
+    StopPixelClean {
+        device_id: Option<String>,
+    },
     BindAll,
     UnbindAll,
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
@@ -177,6 +187,7 @@ pub struct ServiceManager {
     tx: Option<Sender<DaemonEvent>>,
     mode_switch_suppression: HashMap<String, Instant>,
     serial_rewrite_backoff: Option<Instant>,
+    pixel_clean_session: Option<crate::pixel_cleaner::PixelCleanSession>,
 }
 
 impl ServiceManager {
@@ -210,6 +221,7 @@ impl ServiceManager {
             tx: None,
             mode_switch_suppression: HashMap::new(),
             serial_rewrite_backoff: None,
+            pixel_clean_session: None,
         })
     }
 
@@ -641,6 +653,12 @@ impl ServiceManager {
                     }
                 }
                 DaemonEvent::DevicePoll => {
+                    if let Some(ref session) = self.pixel_clean_session {
+                        if Instant::now() >= session.clean_until {
+                            info!("Pixel cleaner duration elapsed; restoring previous display");
+                            self.stop_pixel_cleaning(None);
+                        }
+                    }
                     self.device_poll();
                     if self.restart_requested {
                         break;
@@ -683,6 +701,9 @@ impl ServiceManager {
                     self.handle_set_ene6k77_fan_quantity(&device_id, quantity);
                 }
                 DaemonEvent::IpcUpdate => {
+                    if self.pixel_clean_session.is_some() {
+                        self.stop_pixel_cleaning(None);
+                    }
                     let ipc_state = self.ipc.state.lock();
                     info!("Config reload triggered via IPC");
                     drop(ipc_state);
@@ -821,6 +842,15 @@ impl ServiceManager {
                             warn!("Failed to set LCD brightness for {device_id}: {e}");
                         }
                     }
+                }
+                DaemonEvent::StartPixelClean {
+                    device_id,
+                    duration_minutes,
+                } => {
+                    self.start_pixel_cleaning(device_id, duration_minutes);
+                }
+                DaemonEvent::StopPixelClean { device_id } => {
+                    self.stop_pixel_cleaning(device_id);
                 }
                 DaemonEvent::SystemResumed => {
                     info!("System resumed — waiting for USB re-enumeration");

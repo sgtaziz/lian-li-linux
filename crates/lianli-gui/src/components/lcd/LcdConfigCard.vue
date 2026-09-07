@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useDialog } from "naive-ui";
-import { FolderOpen, Trash2 } from "lucide-vue-next";
+import { useDialog, useMessage } from "naive-ui";
+import { FolderOpen, Sparkles, Trash2 } from "lucide-vue-next";
 import type { DeviceInfo, LcdConfig, MediaType, SensorDescriptor } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
@@ -27,6 +27,7 @@ const devices = useDevicesStore();
 const lcd = useLcdStore();
 const ipc = useIpc();
 const dialog = useDialog();
+const message = useMessage();
 
 const lcdDevices = computed(() => devices.lcdDevices);
 
@@ -340,6 +341,26 @@ const brightness = computed({
     }
   },
 });
+
+const isCleaningThis = computed(
+  () =>
+    lcd.cleaningActive &&
+    (lcd.cleaningDeviceId === null || lcd.cleaningDeviceId === selectedDeviceId.value),
+);
+
+async function togglePixelClean() {
+  try {
+    if (isCleaningThis.value) {
+      await lcd.stopPixelClean(selectedDeviceId.value);
+      message.info("Pixel cleaner stopped; previous LCD display restored");
+    } else {
+      await lcd.startPixelClean(selectedDeviceId.value, 30);
+      message.success("Pixel cleaner started for 30 minutes at 75% brightness");
+    }
+  } catch (err: any) {
+    message.error(`Failed to toggle pixel cleaner: ${err}`);
+  }
+}
 </script>
 
 <script lang="ts">
@@ -349,7 +370,20 @@ const brightness = computed({
 <template>
   <div class="card lcd-config">
     <div class="head">
-      <span class="title">LCD {{ index + 1 }}</span>
+      <div class="title-wrap">
+        <span class="title">LCD {{ index + 1 }}</span>
+        <n-button
+          size="tiny"
+          secondary
+          :type="isCleaningThis ? 'error' : 'warning'"
+          class="cleaner-btn"
+          @click="togglePixelClean"
+          :title="isCleaningThis ? `Stop conditioning on this screen (${lcd.formattedRemaining} remaining)` : 'Run pixel conditioning to clear image retention'"
+        >
+          <template #icon><Sparkles :size="12" /></template>
+          {{ isCleaningThis ? "Stop Cleaner (" + lcd.formattedRemaining + ")" : "Clean Pixels" }}
+        </n-button>
+      </div>
       <n-button size="small" quaternary type="error" @click="removeEntry">
         <template #icon><Trash2 :size="14" /></template>
       </n-button>
@@ -478,6 +512,11 @@ const brightness = computed({
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+.title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 .title {
   font-weight: 600;

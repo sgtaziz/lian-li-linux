@@ -165,6 +165,22 @@ pub enum IpcRequest {
         name: String,
         device_id: String,
     },
+    /// Run pixel conditioning / exercise loop to clear image retention on LCD(s).
+    StartPixelClean {
+        #[serde(default)]
+        device_id: Option<String>,
+        #[serde(default = "default_pixel_clean_minutes")]
+        duration_minutes: u32,
+    },
+    /// Stop pixel conditioning loop and restore previous LCD configuration.
+    StopPixelClean {
+        #[serde(default)]
+        device_id: Option<String>,
+    },
+}
+
+fn default_pixel_clean_minutes() -> u32 {
+    30
 }
 
 /// Responses from daemon to GUI.

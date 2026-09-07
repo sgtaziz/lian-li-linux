@@ -29,11 +29,26 @@ impl ServiceManager {
         mark("desktop_displays", t0);
 
         let mut targets = self.targets.lock();
+        // Temporarily permit shutdown teardown packet through transport
+        lianli_transport::usb::SHUTTING_DOWN
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         for target in targets.values_mut() {
+            if let Err(e) = target.lcd.set_brightness(
+                Some(&self.wireless),
+                &mut self.packet_builder,
+                0,
+            ) {
+                tracing::warn!(
+                    "Failed to turn off LCD brightness on shutdown for {}: {e}",
+                    target.device_identity
+                );
+            }
             target.stop();
         }
         targets.clear();
         drop(targets);
+        lianli_transport::usb::SHUTTING_DOWN
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         mark("targets", t0);
 
         // Controllers (fan / AIO / RGB / direct-color writer)

@@ -4,11 +4,12 @@ mod ipc;
 mod openrgb_server;
 mod persistence;
 mod pidlock;
+mod pixel_cleaner;
 mod service;
 mod template_store;
 mod thermal_alert;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -56,6 +57,32 @@ struct Cli {
     /// Logging verbosity (error, warn, info, debug, trace)
     #[arg(long, default_value = "info")]
     log_level: String,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// LCD utilities and maintenance
+    Lcd {
+        #[command(subcommand)]
+        command: LcdCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum LcdCommands {
+    /// Run pixel conditioning / exercise loop to clear image retention
+    Clean {
+        /// Target device ID (or all detected LCDs if omitted)
+        #[arg(long)]
+        device_id: Option<String>,
+
+        /// Duration in minutes to run cleaner (default: 30)
+        #[arg(long, default_value_t = 30)]
+        minutes: u32,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -63,6 +90,13 @@ fn main() -> anyhow::Result<()> {
     let system = cli.system;
     let config = cli.config.unwrap_or_else(|| default_config_path(system));
     let socket = cli.socket.unwrap_or_else(|| default_socket_path(system));
+
+    if let Some(Commands::Lcd {
+        command: LcdCommands::Clean { device_id, minutes },
+    }) = cli.command
+    {
+        return pixel_cleaner::run_clean_command(socket, device_id, minutes);
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(
