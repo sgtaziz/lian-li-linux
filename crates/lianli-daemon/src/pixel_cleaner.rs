@@ -174,8 +174,12 @@ pub fn run_clean_command(
         session_id: Some(session_id),
     };
     match send_ipc(&socket_path, &stop_req)? {
-        IpcResponse::Ok { .. } => {
-            println!("[+] Restored previous LCD media and brightness successfully.");
+        IpcResponse::Ok { data } => {
+            if data.get("stopped").and_then(|v| v.as_bool()) == Some(true) {
+                println!("[+] Restored previous LCD media and brightness successfully.");
+            } else {
+                eprintln!("[-] Warning: the requested pixel-clean session was not stopped.");
+            }
         }
         IpcResponse::Error { message } => {
             eprintln!("[-] Warning: Failed to restore previous config: {message}");
@@ -191,5 +195,24 @@ fn thread_sleep_interruptible(running: &AtomicBool, dur: Duration) {
     while running.load(Ordering::Relaxed) && elapsed < dur {
         std::thread::sleep(step);
         elapsed += step;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stop_response_stopped_true() {
+        let resp = IpcResponse::ok(serde_json::json!({ "stopped": true }));
+        let IpcResponse::Ok { data } = resp else { panic!("expected Ok") };
+        assert_eq!(data.get("stopped").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn test_stop_response_stopped_false() {
+        let resp = IpcResponse::ok(serde_json::json!({ "stopped": false }));
+        let IpcResponse::Ok { data } = resp else { panic!("expected Ok") };
+        assert_ne!(data.get("stopped").and_then(|v| v.as_bool()), Some(true));
     }
 }

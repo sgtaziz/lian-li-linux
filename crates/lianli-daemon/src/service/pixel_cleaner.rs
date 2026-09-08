@@ -256,3 +256,50 @@ impl ServiceManager {
         matched
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::pixel_cleaner::PixelCleanSession;
+    use crate::service::ServiceManager;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn test_stop_pixel_cleaning_mismatched_session_returns_false() {
+        let mut service = ServiceManager::new(
+            PathBuf::from("/tmp/test_config.json"),
+            PathBuf::from("/tmp/test_socket.sock"),
+        )
+        .expect("failed to instantiate ServiceManager");
+
+        service.pixel_clean_session = Some(PixelCleanSession {
+            session_id: 12345,
+            original_targets: Vec::new(),
+            clean_until: Instant::now() + Duration::from_secs(60),
+        });
+
+        // Attempting to stop with a mismatched session ID should return false
+        let stopped = service.stop_pixel_cleaning(None, 99999);
+        assert!(!stopped);
+
+        // Active session should remain untouched
+        assert!(service.pixel_clean_session.is_some());
+        assert_eq!(
+            service.pixel_clean_session.as_ref().unwrap().session_id,
+            12345
+        );
+    }
+
+    #[test]
+    fn test_stop_pixel_cleaning_no_active_session_returns_false() {
+        let mut service = ServiceManager::new(
+            PathBuf::from("/tmp/test_config.json"),
+            PathBuf::from("/tmp/test_socket.sock"),
+        )
+        .expect("failed to instantiate ServiceManager");
+
+        assert!(service.pixel_clean_session.is_none());
+        let stopped = service.stop_pixel_cleaning(None, 12345);
+        assert!(!stopped);
+    }
+}
