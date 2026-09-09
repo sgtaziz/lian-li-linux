@@ -15,6 +15,7 @@ pub struct WirelessRgbUpload {
     led_count: u8,
     frame_count: u16,
     interval_ticks: u16,
+    interval_fraction: u8,
     effect_index: [u8; 4],
 }
 
@@ -25,6 +26,19 @@ impl WirelessRgbUpload {
     pub fn new(
         frames: &[Vec<[u8; 3]>],
         interval_ms: u16,
+        reverse_fan_leds: Option<usize>,
+    ) -> Result<Self> {
+        ensure!(
+            (1..=40_959).contains(&interval_ms),
+            "RGB interval must be 1..=40959 ms"
+        );
+        Self::with_tick_interval(frames, u32::from(interval_ms) * 160, reverse_fan_leds)
+    }
+
+    /// Interval in hundredths of a 0.625 ms RF tick, matching the vendor header.
+    pub fn with_tick_interval(
+        frames: &[Vec<[u8; 3]>],
+        interval_hundredths: u32,
         reverse_fan_leds: Option<usize>,
     ) -> Result<Self> {
         ensure!(
@@ -41,8 +55,8 @@ impl WirelessRgbUpload {
             "RGB frames must have equal LED counts"
         );
         ensure!(
-            (1..=40_959).contains(&interval_ms),
-            "RGB interval must be 1..=40959 ms"
+            (100..=6_553_599).contains(&interval_hundredths),
+            "RGB interval must be 1..=65535.99 RF ticks"
         );
         if let Some(count) = reverse_fan_leds {
             ensure!(
@@ -69,14 +83,15 @@ impl WirelessRgbUpload {
             compressed.len() <= MAX_COMPRESSED_BYTES,
             "compressed RGB animation exceeds {MAX_COMPRESSED_BYTES} bytes"
         );
-        // The RF clock uses 0.625 ms ticks (MasterDevice.SysClock).
-        let interval_ticks = (u32::from(interval_ms) * 8).div_ceil(5) as u16;
+        let interval_ticks = (interval_hundredths / 100) as u16;
+        let interval_fraction = (interval_hundredths % 100) as u8;
         let frame_count = frames.len() as u16;
         let mut hash = 0x811c_9dc5u32;
         for byte in compressed
             .iter()
             .copied()
             .chain(interval_ticks.to_be_bytes())
+            .chain([interval_fraction])
             .chain(frame_count.to_be_bytes())
             .chain([led_count as u8])
         {
@@ -87,6 +102,7 @@ impl WirelessRgbUpload {
             led_count: led_count as u8,
             frame_count,
             interval_ticks,
+            interval_fraction,
             effect_index: hash.max(1).to_be_bytes(),
         })
     }
@@ -105,6 +121,7 @@ impl WirelessRgbUpload {
             packet[25..27].copy_from_slice(&self.frame_count.to_be_bytes());
             packet[27] = self.led_count;
             packet[32..34].copy_from_slice(&self.interval_ticks.to_be_bytes());
+            packet[34] = self.interval_fraction;
         } else {
             let offset = (index - 1) * CHUNK_BYTES;
             let data = &self.compressed[offset..self.compressed.len().min(offset + CHUNK_BYTES)];
@@ -174,6 +191,17 @@ impl WirelessController {
             self.set_mb_rgb_sync(mac, false)?;
         }
         let started = Instant::now();
+        tracing::debug!(
+            mac = ?mac,
+            frames = upload.frame_count,
+            leds = upload.led_count,
+            compressed_bytes = upload.compressed.len(),
+            packets = upload.compressed.len().div_ceil(CHUNK_BYTES) + 1,
+            interval_ticks = upload.interval_ticks,
+            interval_fraction = upload.interval_fraction,
+            effect_index = ?upload.effect_index,
+            "Uploading wireless RGB loop"
+        );
         self.tx_recover(|handle| {
             for index in 0..=upload.compressed.len().div_ceil(CHUNK_BYTES) {
                 ensure!(
@@ -187,7 +215,10 @@ impl WirelessController {
                     1
                 };
                 for repeat in 0..repeats {
-                    self.send_rf_packet(handle, &device, &packet)?;
+                    self.send_rf_packet(handle, &device, &packet)
+                        .with_context(|| {
+                            format!("sending wireless RGB packet {index}, repeat {repeat}")
+                        })?;
                     if repeat + 1 < repeats {
                         thread::sleep(Duration::from_millis(if repeats <= 2 { 2 } else { 20 }));
                     }
@@ -312,6 +343,19 @@ mod tests {
                 .unwrap()
                 .effect_index
         );
+    }
+
+    #[test]
+    fn preserves_vendor_fractional_rf_intervals() {
+        let frames = vec![vec![[255, 0, 0]; 78], vec![[0, 255, 0]; 78]];
+        for (ticks, bytes) in [(1100, [0, 11, 0]), (1430, [0, 14, 30]), (1650, [0, 16, 50])] {
+            let upload = WirelessRgbUpload::with_tick_interval(&frames, ticks, None).unwrap();
+            assert_eq!(&upload.packet(&[1; 6], &[2; 6], 0)[32..35], &bytes);
+        }
+        let upload = WirelessRgbUpload::new(&frames, 11, None).unwrap();
+        assert_eq!(&upload.packet(&[1; 6], &[2; 6], 0)[32..35], &[0, 17, 60]);
+        assert!(WirelessRgbUpload::with_tick_interval(&frames, 0, None).is_err());
+        assert!(WirelessRgbUpload::with_tick_interval(&frames, 6_553_600, None).is_err());
     }
 
     #[test]
