@@ -274,6 +274,7 @@ export interface RgbDeviceCapabilities {
   device_id: string;
   device_name: string;
   supported_modes: RgbMode[];
+  software_modes?: RgbMode[];
   zones: RgbZoneInfo[];
   supports_direct: boolean;
   supports_mb_rgb_sync: boolean;
