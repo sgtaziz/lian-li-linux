@@ -518,7 +518,7 @@ pub enum RgbScope {
 }
 
 /// A complete RGB effect definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbEffect {
     pub mode: RgbMode,
     /// Up to 4 RGB colors.
@@ -682,6 +682,8 @@ pub struct RgbDeviceCapabilities {
     pub device_id: String,
     pub device_name: String,
     pub supported_modes: Vec<RgbMode>,
+    #[serde(default)]
+    pub software_modes: Vec<RgbMode>,
     pub zones: Vec<RgbZoneInfo>,
     /// Whether this device supports per-LED direct color control.
     pub supports_direct: bool,
