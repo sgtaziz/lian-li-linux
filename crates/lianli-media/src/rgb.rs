@@ -204,7 +204,7 @@ mod tests {
         };
         let mut forward = [[0; 3]; 26];
         let mut reverse = forward;
-        render_zone(&effect, 119, &mut forward);
+        render_zone(&effect, LOOP_FRAMES - 1, &mut forward);
         effect.direction = RgbDirection::CounterClockwise;
         render_zone(&effect, 1, &mut reverse);
         assert_eq!(forward, reverse);

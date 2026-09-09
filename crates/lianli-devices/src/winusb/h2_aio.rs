@@ -689,7 +689,7 @@ impl RgbDevice for H2AioController {
         if frames.is_empty() || frames.len() > 120 {
             anyhow::bail!("H2 RGB requires 1-120 frames")
         }
-        if interval_ms > u8::MAX as u16 {
+        if interval_ms == 0 || interval_ms > u8::MAX as u16 {
             anyhow::bail!("H2 RGB interval exceeds device limit")
         }
         if frames.iter().any(|frame| frame.len() != RING_LED_COUNT) {

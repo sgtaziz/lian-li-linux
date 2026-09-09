@@ -278,7 +278,8 @@ impl ServiceManager {
 
         // Rebuild wireless-dependent controllers only after the bound-device
         // count holds stable for 3 consecutive polls.
-        let current_wireless = self.wireless.devices().len();
+        let wireless_devices = self.wireless.devices();
+        let current_wireless = wireless_devices.len();
         if current_wireless != self.wireless_stable_count {
             match self.wireless_pending_count {
                 Some(c) if c == current_wireless => self.wireless_pending_streak += 1,
@@ -306,6 +307,13 @@ impl ServiceManager {
         } else if self.wireless_pending_count.is_some() {
             self.wireless_pending_count = None;
             self.wireless_pending_streak = 0;
+        } else if self
+            .controllers
+            .rgb
+            .as_ref()
+            .is_some_and(|rgb| !rgb.lock().wireless_topology_matches(&wireless_devices))
+        {
+            self.rebuild_rgb_controller();
         }
 
         self.run_wireless_rebind_supervisor();
@@ -702,6 +710,7 @@ impl ServiceManager {
                             self.start_aio_control();
                         }
                         self.start_openrgb_server();
+                        self.apply_rgb_config();
                         if let Some(ref ta) = self.controllers.thermal_alert {
                             if let Some(ref cfg) = self.config {
                                 ta.update_settings(cfg.thermal_alert.clone());
@@ -729,8 +738,7 @@ impl ServiceManager {
                             // the resync fight the alert coloring.
                             debug!("Thermal override active — skipping RGB resync");
                         } else {
-                            drop(rgb);
-                            self.apply_rgb_config();
+                            rgb.resync_wireless_effects();
                         }
                     }
                 }
@@ -825,6 +833,9 @@ impl ServiceManager {
                 DaemonEvent::SystemResumed => {
                     info!("System resumed — waiting for USB re-enumeration");
                     thread::sleep(Duration::from_secs(2));
+                    if let Some(rgb) = &self.controllers.rgb {
+                        rgb.lock().invalidate_hardware_state();
+                    }
                     self.rebuild_rgb_controller();
                     self.restart_fan_control();
                     self.start_aio_control();

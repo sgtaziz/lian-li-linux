@@ -34,9 +34,6 @@ pub fn start_direct_color_writer(
     buffer: Arc<Mutex<DirectColorBuffer>>,
     stop_flag: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
-    let busy_flags: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-
     thread::spawn(move || {
         debug!("Direct color writer started");
 
@@ -54,7 +51,7 @@ pub fn start_direct_color_writer(
                     let mut rgb = rgb.lock();
                     rgb.cache_direct_batch(&updates);
                     for (device_id, zones) in &updates {
-                        if device_id.starts_with("wireless:") {
+                        if rgb.software_controlled(device_id) {
                             wireless.push((device_id.clone(), zones.clone()));
                         } else if let Some(dev) = rgb.clone_wired_device(device_id) {
                             let z: Vec<_> = zones.iter().map(|(&k, v)| (k, v.clone())).collect();
@@ -73,28 +70,20 @@ pub fn start_direct_color_writer(
                 }
 
                 for (dev, device_id, zones) in wired {
-                    let flag = {
-                        let mut flags = busy_flags.lock();
-                        flags
-                            .entry(device_id.clone())
-                            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
-                            .clone()
-                    };
-                    if flag.swap(true, Ordering::Relaxed) {
-                        continue;
+                    if stop_flag.load(Ordering::Relaxed) {
+                        break;
                     }
-                    thread::spawn(move || {
-                        for (zone, colors) in &zones {
-                            if let Err(e) = dev.set_direct_colors(*zone, colors) {
-                                debug!("Wired flush error for {device_id} zone {zone}: {e}");
-                            }
+                    for (zone, colors) in zones {
+                        if stop_flag.load(Ordering::Relaxed) {
+                            break;
                         }
-                        flag.store(false, Ordering::Relaxed);
-                    });
+                        if let Err(e) = dev.set_direct_colors(zone, &colors) {
+                            debug!("Wired flush error for {device_id} zone {zone}: {e}");
+                        }
+                    }
                 }
-            } else {
-                thread::sleep(Duration::from_millis(2));
             }
+            thread::sleep(Duration::from_millis(16));
         }
 
         debug!("Direct color writer stopped");

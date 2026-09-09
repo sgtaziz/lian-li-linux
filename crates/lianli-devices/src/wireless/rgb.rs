@@ -2,7 +2,7 @@ use super::controller::WirelessController;
 use super::{WirelessFanType, RF_DATA_SIZE, RF_SELECT, RF_SET_RGB};
 use anyhow::{ensure, Context, Result};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // MasterDevice.LzoMaxRgbDataLen and lzo_rgb_rf_valid_len in the vendor RF uploader.
 const MAX_COMPRESSED_BYTES: usize = 12_288;
@@ -19,6 +19,9 @@ pub struct WirelessRgbUpload {
 }
 
 impl WirelessRgbUpload {
+    pub fn frame_count(&self) -> u16 {
+        self.frame_count
+    }
     pub fn new(
         frames: &[Vec<[u8; 3]>],
         interval_ms: u16,
@@ -149,6 +152,15 @@ impl WirelessController {
         header_repeats: u8,
     ) -> Result<()> {
         let device = self.device_by_mac_snapshot(mac)?;
+        let master = *self.master_mac.lock();
+        ensure!(
+            device.bind_intent || device.master_mac == master,
+            "RGB device is no longer bound to this controller"
+        );
+        ensure!(
+            device.fan_type != WirelessFanType::Unknown,
+            "unknown wireless RGB layout"
+        );
         let expected: usize = device
             .fan_type
             .rgb_zone_led_counts(device.fan_count)
@@ -158,9 +170,16 @@ impl WirelessController {
             expected == upload.led_count as usize,
             "RGB device layout changed before upload"
         );
-        let master = *self.master_mac.lock();
+        if device.is_sync_mb_light && device.fan_type.supports_mb_rgb_sync() {
+            self.set_mb_rgb_sync(mac, false)?;
+        }
+        let started = Instant::now();
         self.tx_recover(|handle| {
             for index in 0..=upload.compressed.len().div_ceil(CHUNK_BYTES) {
+                ensure!(
+                    started.elapsed() < Duration::from_secs(3),
+                    "wireless RGB upload timed out"
+                );
                 let packet = upload.packet(mac, &master, index);
                 let repeats = if index == 0 {
                     header_repeats.clamp(1, 4)

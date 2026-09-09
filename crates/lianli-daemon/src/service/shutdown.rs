@@ -25,6 +25,16 @@ impl ServiceManager {
             .stop
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
+        if let Some(writer) = self.controllers.direct_color_writer.take() {
+            if writer.join().is_err() {
+                tracing::warn!("Direct RGB writer panicked during shutdown");
+            }
+        }
+
+        if let Some(rgb) = &self.controllers.rgb {
+            rgb.lock().stop();
+        }
+
         self.desktop_displays.shutdown();
         mark("desktop_displays", t0);
 

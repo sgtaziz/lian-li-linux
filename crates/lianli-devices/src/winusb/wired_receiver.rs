@@ -592,7 +592,7 @@ impl WiredReceiverController {
         let transport = self.transport.lock();
         let deadline = Instant::now() + RGB_PACKAGE_DEADLINE;
         transport.write(&hdr, rgb_timeout(deadline, LCD_WRITE_TIMEOUT)?)?;
-        read_rgb_ack(&*transport, deadline, CMD_SEND_LIGHT_PACKAGE)?;
+        read_rgb_ack(&transport, deadline, CMD_SEND_LIGHT_PACKAGE)?;
 
         let mut offset = 0usize;
         let mut idx = 1u8;
@@ -603,7 +603,7 @@ impl WiredReceiverController {
             let chunk = (compressed.len() - offset).min(60);
             pkt[4..4 + chunk].copy_from_slice(&compressed[offset..offset + chunk]);
             transport.write(&pkt, rgb_timeout(deadline, LCD_WRITE_TIMEOUT)?)?;
-            read_rgb_ack(&*transport, deadline, CMD_SEND_LIGHT_PACKAGE)?;
+            read_rgb_ack(&transport, deadline, CMD_SEND_LIGHT_PACKAGE)?;
             offset += 60;
             idx += 1;
         }
@@ -611,7 +611,7 @@ impl WiredReceiverController {
         let mut apply = [0u8; PACKET_SIZE];
         apply[0] = CMD_APPLY_LIGHTING;
         transport.write(&apply, rgb_timeout(deadline, LCD_WRITE_TIMEOUT)?)?;
-        read_rgb_ack(&*transport, deadline, CMD_APPLY_LIGHTING)?;
+        read_rgb_ack(&transport, deadline, CMD_APPLY_LIGHTING)?;
 
         debug!(
             "{}: flash-saved {led_total} LEDs ({} compressed bytes, idx={:#010x}, frames={total_frame}, interval={interval_ms}ms) via 0x18+0x19",
@@ -647,22 +647,6 @@ fn validate_rgb_ack(response: &[u8], expected_command: u8) -> Result<()> {
         expected_command
     );
     Ok(())
-}
-
-#[cfg(test)]
-mod rgb_ack_tests {
-    use super::validate_rgb_ack;
-
-    #[test]
-    fn accepts_expected_command() {
-        assert!(validate_rgb_ack(&[0x18], 0x18).is_ok());
-    }
-
-    #[test]
-    fn rejects_empty_or_wrong_command() {
-        assert!(validate_rgb_ack(&[], 0x18).is_err());
-        assert!(validate_rgb_ack(&[0x19], 0x18).is_err());
-    }
 }
 
 impl FanDevice for WiredReceiverController {
@@ -911,5 +895,21 @@ impl crate::registry::DeviceDriver for WiredReceiverDriver {
             shared_hid: None,
             shared_usb: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod rgb_ack_tests {
+    use super::validate_rgb_ack;
+
+    #[test]
+    fn accepts_expected_command() {
+        assert!(validate_rgb_ack(&[0x18], 0x18).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_or_wrong_command() {
+        assert!(validate_rgb_ack(&[], 0x18).is_err());
+        assert!(validate_rgb_ack(&[0x19], 0x18).is_err());
     }
 }

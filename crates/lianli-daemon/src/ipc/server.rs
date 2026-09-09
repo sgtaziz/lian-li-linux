@@ -179,6 +179,11 @@ fn handle_request(
         IpcRequest::GetTelemetry => super::system::get_telemetry(state),
 
         IpcRequest::SetConfig { config } => {
+            if let Some(rgb_config) = &config.rgb {
+                if let Some(response) = super::rgb::validate_config(state, rgb_config) {
+                    return response;
+                }
+            }
             let mut state = state.lock();
             state.config = Some(config);
             super::persist_and_notify(&mut state, &tx, "SetConfig")

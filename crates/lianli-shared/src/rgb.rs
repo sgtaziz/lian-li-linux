@@ -719,6 +719,17 @@ pub struct MergeLightingConfig {
 mod tests {
     use super::*;
 
+    #[test]
+    fn older_capabilities_default_to_no_software_modes() {
+        let caps: RgbDeviceCapabilities = serde_json::from_value(serde_json::json!({
+            "device_id": "legacy", "device_name": "Legacy", "supported_modes": ["Static"],
+            "zones": [], "supports_direct": true, "supports_mb_rgb_sync": false,
+            "total_led_count": 0, "supported_scopes": []
+        }))
+        .unwrap();
+        assert!(caps.software_modes.is_empty());
+    }
+
     const ALL_MODES: &[RgbMode] = &[
         RgbMode::Off,
         RgbMode::Direct,

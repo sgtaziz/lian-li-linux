@@ -34,14 +34,12 @@ pub fn save(
             .unwrap_or_default();
 
         if let Some(led_zones) = led_colors {
-            // A zone with captured live LED colors is, by definition, in
-            // direct/per-LED mode right now — tag it Direct rather than
-            // carrying over whatever effect was configured before, or a
-            // later reconciliation will re-engage that stale effect (e.g.
-            // Static) ahead of restoring these colors.
             let zones: Vec<RgbPresetZone> = led_zones
                 .into_iter()
                 .map(|mut z| {
+                    if z.effect.is_some() {
+                        return z;
+                    }
                     let mut effect = zone_configs
                         .iter()
                         .find(|zc| zc.zone_index == z.zone)
