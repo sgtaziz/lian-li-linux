@@ -102,7 +102,7 @@ function patchEffect(p: Partial<RgbEffect>) {
 
 function modeOptions() {
   return props.cap.supported_modes.map((m) => ({
-    label: props.cap.software_modes?.includes(m) ? `${modeLabel(m)} (Software)` : modeLabel(m),
+    label: modeLabel(m),
     value: m,
   }));
 }
