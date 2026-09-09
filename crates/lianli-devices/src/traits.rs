@@ -307,6 +307,14 @@ pub trait RgbDevice: Send + Sync {
         false
     }
 
+    fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
+        None
+    }
+
+    fn set_software_frames(&self, _frames: &[Vec<[u8; 3]>], _interval_ms: u16) -> Result<()> {
+        anyhow::bail!("software frame delivery not supported by this device")
+    }
+
     /// Supported scopes per zone. Return empty vec for zones with only "All".
     fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
         vec![]
@@ -393,6 +401,12 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     fn supports_direct(&self) -> bool {
         (**self).supports_direct()
     }
+    fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
+        (**self).software_frame_delivery()
+    }
+    fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], interval_ms: u16) -> Result<()> {
+        (**self).set_software_frames(frames, interval_ms)
+    }
     fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
         (**self).supported_scopes()
     }
@@ -420,4 +434,10 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     fn ping(&self, zone: u8) -> Result<()> {
         (**self).ping(zone)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RgbFrameDelivery {
+    Streaming,
+    LoopUpload,
 }

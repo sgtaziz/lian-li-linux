@@ -6,7 +6,7 @@
 
 use super::lcd::{PendingCmd, SharedTransport};
 use crate::crypto::PacketBuilder;
-use crate::traits::{AioDevice, FanDevice, RgbDevice};
+use crate::traits::{AioDevice, FanDevice, RgbDevice, RgbFrameDelivery};
 use anyhow::{Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use lianli_transport::usb::{LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
@@ -676,6 +676,26 @@ impl RgbDevice for H2AioController {
 
     fn supports_direct(&self) -> bool {
         true
+    }
+
+    fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
+        (!self.rf_owned()).then_some(RgbFrameDelivery::LoopUpload)
+    }
+
+    fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], interval_ms: u16) -> Result<()> {
+        if self.rf_owned() {
+            anyhow::bail!("H2 RGB ring is owned by the wireless bridge")
+        }
+        if frames.is_empty() || frames.len() > 120 {
+            anyhow::bail!("H2 RGB requires 1-120 frames")
+        }
+        if interval_ms > u8::MAX as u16 {
+            anyhow::bail!("H2 RGB interval exceeds device limit")
+        }
+        if frames.iter().any(|frame| frame.len() != RING_LED_COUNT) {
+            anyhow::bail!("H2 RGB requires exactly {RING_LED_COUNT} LEDs per frame")
+        }
+        self.send_rgb_frames(frames, interval_ms as u8)
     }
 
     fn rf_owned(&self) -> bool {

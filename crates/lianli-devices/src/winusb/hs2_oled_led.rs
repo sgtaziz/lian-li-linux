@@ -3,7 +3,7 @@
 //! Separate microcontroller from the LCD MCU — handles pump PWM, motor,
 //! RGB, and telemetry via 8-byte unencrypted bulk packets.
 //!
-use crate::traits::{AioDevice, FanDevice, RgbDevice};
+use crate::traits::{AioDevice, FanDevice, RgbDevice, RgbFrameDelivery};
 use anyhow::{Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
@@ -299,6 +299,17 @@ impl RgbDevice for Hs2OledLedController {
 
     fn supports_direct(&self) -> bool {
         true
+    }
+
+    fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
+        Some(RgbFrameDelivery::Streaming)
+    }
+
+    fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], _interval_ms: u16) -> Result<()> {
+        if frames.len() != 1 || frames[0].len() != RGB_LED_COUNT {
+            anyhow::bail!("HS2 OLED RGB requires one full {RGB_LED_COUNT}-LED frame")
+        }
+        self.send_rgb_frame(&frames[0])
     }
 
     fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {

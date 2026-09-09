@@ -119,6 +119,10 @@ impl WirelessController {
         interval_ms: u16,
     ) -> Result<WirelessRgbUpload> {
         let device = self.device_by_mac_snapshot(mac)?;
+        ensure!(
+            device.fan_type != WirelessFanType::Unknown,
+            "unknown wireless RGB layout"
+        );
         let expected: usize = device
             .fan_type
             .rgb_zone_led_counts(device.fan_count)
@@ -129,9 +133,12 @@ impl WirelessController {
             "RGB frame must contain {expected} LEDs for {}",
             device.fan_type.display_name()
         );
-        let reverse = device
-            .is_inf_right_attach
-            .then_some(device.fan_type.leds_per_fan() as usize);
+        let reverse = (device.is_inf_right_attach
+            && matches!(
+                device.fan_type,
+                WirelessFanType::SlInf | WirelessFanType::SlInfV3 { .. }
+            ))
+        .then_some(device.fan_type.leds_per_fan() as usize);
         WirelessRgbUpload::new(frames, interval_ms, reverse)
     }
 

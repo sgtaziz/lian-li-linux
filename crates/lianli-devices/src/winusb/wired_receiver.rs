@@ -11,8 +11,9 @@ use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 const PACKET_SIZE: usize = 64;
@@ -34,6 +35,7 @@ const CMD_WIRELESS_THEME_SWITCH: u8 = 0x29;
 
 const RGB_LED_CHUNK: usize = 20;
 const RGB_ACK_INTERVAL: u8 = 14;
+const RGB_PACKAGE_DEADLINE: Duration = Duration::from_secs(3);
 
 /// Per-PID parameters.
 #[derive(Debug, Clone, Copy)]
@@ -131,6 +133,8 @@ pub struct WiredReceiverController {
     led_buffer: Mutex<Vec<[u8; 3]>>,
     /// Incrementing nonce for FanThemeColor (0x27) packets.
     color_nonce: Mutex<u8>,
+    /// Receiver cache key for the currently uploaded lighting package.
+    effect_nonce: AtomicU32,
     /// Frame-terminator counter for RGB streaming ack cadence (vendor: read
     /// ack every 14th frame terminator, not every frame).
     stream_ack_counter: Mutex<u8>,
@@ -161,6 +165,7 @@ impl WiredReceiverController {
             firmware: Mutex::new(None),
             led_buffer: Mutex::new(Vec::new()),
             color_nonce: Mutex::new(1),
+            effect_nonce: AtomicU32::new(1),
             stream_ack_counter: Mutex::new(0),
             mac: Mutex::new(None),
             is_wireless: AtomicBool::new(false),
@@ -459,6 +464,11 @@ impl WiredReceiverController {
             raw.extend_from_slice(c);
         }
         if self.params.compresses_rgb {
+            let effect_index = if effect_index == 0 {
+                self.effect_nonce.fetch_add(1, Ordering::Relaxed).max(1)
+            } else {
+                effect_index
+            };
             self.send_rgb_flash_save(
                 &raw,
                 ordered.len(),
@@ -472,6 +482,31 @@ impl WiredReceiverController {
             self.send_rgb_stream(&raw)?;
         }
         Ok(())
+    }
+
+    fn send_rgb_frames_loop(&self, frames: &[Vec<[u8; 3]>], interval_ms: u16) -> Result<()> {
+        let right_attach = *self.is_inf_right_attach.lock();
+        let leds_per_fan = self.params.leds_per_fan as usize;
+        let mut raw = Vec::with_capacity(frames.len() * frames[0].len() * 3);
+        for frame in frames {
+            let ordered = if right_attach {
+                reverse_per_fan_chunks(frame, leds_per_fan)
+            } else {
+                frame.clone()
+            };
+            for color in ordered {
+                raw.extend_from_slice(&color);
+            }
+        }
+        self.send_rgb_flash_save(
+            &raw,
+            frames[0].len(),
+            self.effect_nonce.fetch_add(1, Ordering::Relaxed).max(1),
+            frames.len() as u16,
+            0,
+            interval_ms,
+            false,
+        )
     }
 
     /// P28 V2 / CL V2: stream raw RGB via 0x11 in 20-LED chunks.
@@ -524,7 +559,22 @@ impl WiredReceiverController {
         interval_ms: u16,
         is_outer_match_max: bool,
     ) -> Result<()> {
+        anyhow::ensure!(
+            led_total <= u8::MAX as usize,
+            "{}: too many LEDs",
+            self.params.name
+        );
         let compressed = crate::tinyuz::compress(raw).context("compressing RGB data")?;
+        anyhow::ensure!(
+            compressed.len() <= 12_288,
+            "{}: compressed RGB upload exceeds 12288 bytes",
+            self.params.name
+        );
+        anyhow::ensure!(
+            compressed.len().div_ceil(60) <= u8::MAX as usize,
+            "{}: RGB upload has too many packets",
+            self.params.name
+        );
 
         let mut hdr = [0u8; PACKET_SIZE];
         hdr[0] = CMD_SEND_LIGHT_PACKAGE;
@@ -540,9 +590,9 @@ impl WiredReceiverController {
         hdr[40..42].copy_from_slice(&total_sub_frame.to_be_bytes());
 
         let transport = self.transport.lock();
-        transport.write(&hdr, LCD_WRITE_TIMEOUT)?;
-        let mut rx = [0u8; PACKET_SIZE];
-        let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+        let deadline = Instant::now() + RGB_PACKAGE_DEADLINE;
+        transport.write(&hdr, rgb_timeout(deadline, LCD_WRITE_TIMEOUT)?)?;
+        read_rgb_ack(&*transport, deadline, CMD_SEND_LIGHT_PACKAGE)?;
 
         let mut offset = 0usize;
         let mut idx = 1u8;
@@ -552,18 +602,16 @@ impl WiredReceiverController {
             pkt[1] = idx;
             let chunk = (compressed.len() - offset).min(60);
             pkt[4..4 + chunk].copy_from_slice(&compressed[offset..offset + chunk]);
-            transport.write(&pkt, LCD_WRITE_TIMEOUT)?;
-            let mut rx = [0u8; PACKET_SIZE];
-            let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+            transport.write(&pkt, rgb_timeout(deadline, LCD_WRITE_TIMEOUT)?)?;
+            read_rgb_ack(&*transport, deadline, CMD_SEND_LIGHT_PACKAGE)?;
             offset += 60;
             idx += 1;
         }
 
         let mut apply = [0u8; PACKET_SIZE];
         apply[0] = CMD_APPLY_LIGHTING;
-        transport.write(&apply, LCD_WRITE_TIMEOUT)?;
-        let mut rx = [0u8; PACKET_SIZE];
-        let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
+        transport.write(&apply, rgb_timeout(deadline, LCD_WRITE_TIMEOUT)?)?;
+        read_rgb_ack(&*transport, deadline, CMD_APPLY_LIGHTING)?;
 
         debug!(
             "{}: flash-saved {led_total} LEDs ({} compressed bytes, idx={:#010x}, frames={total_frame}, interval={interval_ms}ms) via 0x18+0x19",
@@ -572,6 +620,48 @@ impl WiredReceiverController {
             effect_index,
         );
         Ok(())
+    }
+}
+
+fn rgb_timeout(deadline: Instant, configured: Duration) -> Result<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    anyhow::ensure!(!remaining.is_zero(), "wired RGB package deadline exceeded");
+    Ok(remaining.min(configured))
+}
+
+fn read_rgb_ack(transport: &RusbBulk, deadline: Instant, expected_command: u8) -> Result<()> {
+    let mut rx = [0u8; PACKET_SIZE];
+    let timeout = rgb_timeout(deadline, LCD_READ_TIMEOUT)?;
+    transport
+        .read(&mut rx, timeout)
+        .context("wired RGB package ACK read")?;
+    validate_rgb_ack(&rx, expected_command)
+}
+
+fn validate_rgb_ack(response: &[u8], expected_command: u8) -> Result<()> {
+    anyhow::ensure!(!response.is_empty(), "wired RGB package ACK is empty");
+    anyhow::ensure!(
+        response[0] == expected_command,
+        "wired RGB package ACK command 0x{:02x}, expected 0x{:02x}",
+        response[0],
+        expected_command
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod rgb_ack_tests {
+    use super::validate_rgb_ack;
+
+    #[test]
+    fn accepts_expected_command() {
+        assert!(validate_rgb_ack(&[0x18], 0x18).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_or_wrong_command() {
+        assert!(validate_rgb_ack(&[], 0x18).is_err());
+        assert!(validate_rgb_ack(&[0x19], 0x18).is_err());
     }
 }
 
@@ -645,6 +735,58 @@ impl RgbDevice for WiredReceiverController {
 
     fn supports_direct(&self) -> bool {
         true
+    }
+
+    fn rf_owned(&self) -> bool {
+        self.is_wireless.load(Ordering::Relaxed)
+    }
+
+    fn software_frame_delivery(&self) -> Option<crate::traits::RgbFrameDelivery> {
+        if self.params.compresses_rgb {
+            Some(crate::traits::RgbFrameDelivery::LoopUpload)
+        } else {
+            Some(crate::traits::RgbFrameDelivery::Streaming)
+        }
+    }
+
+    fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], interval_ms: u16) -> Result<()> {
+        if self.rf_owned() {
+            return Ok(());
+        }
+        let fan_count = *self.fan_count.lock() as usize;
+        let expected_leds = fan_count * self.params.leds_per_fan as usize;
+        anyhow::ensure!(!frames.is_empty(), "{}: no RGB frames", self.params.name);
+        anyhow::ensure!(
+            frames.len() <= 120,
+            "{}: too many RGB frames",
+            self.params.name
+        );
+        anyhow::ensure!(
+            frames.iter().all(|frame| frame.len() == expected_leds),
+            "{}: RGB frames must contain {expected_leds} LEDs",
+            self.params.name
+        );
+        anyhow::ensure!(
+            (1..=40_959).contains(&interval_ms),
+            "{}: RGB interval out of range",
+            self.params.name
+        );
+
+        match self.software_frame_delivery() {
+            Some(crate::traits::RgbFrameDelivery::Streaming) => {
+                anyhow::ensure!(
+                    frames.len() == 1,
+                    "{}: streaming accepts one frame",
+                    self.params.name
+                );
+                self.send_rgb_frame_ext(&frames[0], 0, 1, 0, interval_ms, false)
+            }
+            Some(crate::traits::RgbFrameDelivery::LoopUpload) => {
+                let interval_ticks = (u32::from(interval_ms) * 8).div_ceil(5) as u16;
+                self.send_rgb_frames_loop(frames, interval_ticks)
+            }
+            None => Ok(()),
+        }
     }
 
     fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
