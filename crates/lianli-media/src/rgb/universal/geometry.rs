@@ -11,6 +11,15 @@ pub(super) fn palette(effect: &RgbEffect) -> [Color; 6] {
     colors
 }
 
+pub(super) fn variable_palette(effect: &RgbEffect, limit: usize) -> &[Color] {
+    const BLACK: [Color; 1] = [[0; 3]];
+    if effect.colors.is_empty() {
+        &BLACK
+    } else {
+        &effect.colors[..effect.colors.len().min(limit)]
+    }
+}
+
 pub(super) fn scale(color: Color, value: u8) -> Color {
     color.map(|channel| ((u16::from(channel) * u16::from(value)) >> 8) as u8)
 }

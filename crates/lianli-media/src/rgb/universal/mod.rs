@@ -56,6 +56,14 @@ pub fn render(effect: &RgbEffect, led_count: usize) -> Result<Animation> {
         [0, 64, 128, 192, 255][effect.brightness as usize]
     };
     let colors = geometry::palette(effect);
+    let variable_colors = geometry::variable_palette(
+        effect,
+        if matches!(effect.mode, RgbMode::Hourglass | RgbMode::ElectricCurrent) {
+            4
+        } else {
+            6
+        },
+    );
     let reverse = matches!(
         effect.direction,
         lianli_shared::rgb::RgbDirection::CounterClockwise
@@ -66,29 +74,41 @@ pub fn render(effect: &RgbEffect, led_count: usize) -> Result<Animation> {
         match effect.mode {
             RgbMode::Rainbow => (classic::rainbow(led_count, brightness, reverse), 1_650),
             RgbMode::Wave => (
-                classic::wave(led_count, &colors, brightness, reverse),
+                classic::wave(led_count, variable_colors, brightness, reverse),
                 1_430,
             ),
             RgbMode::Static => (classic::solid(led_count, colors[0], brightness), 1_100),
             RgbMode::Breathing => (classic::breathing(led_count, colors[0], brightness), 1_100),
             RgbMode::RainbowMorph => (classic::morph(led_count, brightness), 1_100),
-            RgbMode::Paint => (paths::paint(led_count, &colors, brightness), 1_100),
+            RgbMode::Paint => (paths::paint(led_count, variable_colors, brightness), 1_100),
             RgbMode::Runway => (paths::runway(led_count, &colors, brightness), 1_100),
-            RgbMode::Tide => (paths::tide(led_count, &colors, brightness), 1_100),
-            RgbMode::BlowUp => (paths::blow_up(led_count, &colors, brightness), 1_100),
-            RgbMode::Meteor => (
-                paths::meteor(led_count, &colors, brightness, reverse),
+            RgbMode::Tide => (paths::tide(led_count, variable_colors, brightness), 1_100),
+            RgbMode::BlowUp => (
+                paths::blow_up(led_count, variable_colors, brightness),
                 1_100,
             ),
-            RgbMode::Snooker => (paths::snooker(led_count, &colors, brightness), 1_100),
+            RgbMode::Meteor => (
+                paths::meteor(led_count, variable_colors, brightness, reverse),
+                1_100,
+            ),
+            RgbMode::Snooker => (
+                paths::snooker(led_count, variable_colors, brightness),
+                1_100,
+            ),
             RgbMode::Mixing => (paths::mixing(led_count, &colors, brightness), 1_100),
-            RgbMode::PingPong => (paths::ping_pong(led_count, &colors, brightness), 1_100),
+            RgbMode::PingPong => (
+                paths::ping_pong(led_count, variable_colors, brightness),
+                1_100,
+            ),
             RgbMode::BulletStack => (paths::bullet_stack(led_count, brightness, reverse), 1_100),
             RgbMode::Twinkle => (twinkle::render(led_count, brightness), 1_100),
             RgbMode::River => (paths::river(led_count, &colors, brightness, reverse), 1_430),
-            RgbMode::Hourglass => (tables::hourglass(led_count, &colors, brightness), 1_100),
+            RgbMode::Hourglass => (
+                tables::hourglass(led_count, variable_colors, brightness),
+                1_100,
+            ),
             RgbMode::ElectricCurrent => (
-                tables::electric_current(led_count, &colors, brightness),
+                tables::electric_current(led_count, variable_colors, brightness),
                 1_100,
             ),
             RgbMode::RainbowWave => (paths::rainbow_wave(led_count, brightness, reverse), 1_650),
@@ -230,5 +250,54 @@ mod tests {
     fn rejects_the_unsupported_45_led_geometry() {
         let effect = effect(RgbMode::Static, 4, RgbDirection::Clockwise);
         assert!(render(&effect, 45).is_err());
+    }
+
+    #[test]
+    fn variable_modes_cycle_only_the_two_supplied_colors() {
+        let cases = [
+            (RgbMode::Wave, 96),
+            (RgbMode::Paint, 62),
+            (RgbMode::Tide, 32),
+            (RgbMode::BlowUp, 102),
+            (RgbMode::Meteor, 60),
+            (RgbMode::Snooker, 56),
+            (RgbMode::PingPong, 116),
+            (RgbMode::Hourglass, 140),
+            (RgbMode::ElectricCurrent, 90),
+        ];
+        for (mode, expected_frames) in cases {
+            let mut effect = effect(mode, 4, RgbDirection::Clockwise);
+            effect.colors.truncate(2);
+            assert_eq!(render(&effect, 60).unwrap().frames.len(), expected_frames);
+        }
+    }
+
+    #[test]
+    fn variable_palettes_preserve_black_and_handle_an_empty_list() {
+        let mut effect = effect(RgbMode::Wave, 4, RgbDirection::Clockwise);
+        effect.colors = vec![[0; 3], [255, 0, 0]];
+        let frames = render(&effect, 60).unwrap().frames;
+        assert!(frames[..48].iter().flatten().all(|&color| color == [0; 3]));
+        assert!(frames[48..].iter().flatten().any(|&color| color != [0; 3]));
+
+        effect.colors.clear();
+        let frames = render(&effect, 60).unwrap().frames;
+        assert_eq!(frames.len(), 48);
+        assert!(frames.iter().flatten().all(|&color| color == [0; 3]));
+    }
+
+    #[test]
+    fn fixed_role_modes_keep_the_compatibility_palette() {
+        for (mode, expected_frames) in [
+            (RgbMode::Runway, 70),
+            (RgbMode::Mixing, 32),
+            (RgbMode::River, 6),
+        ] {
+            let mut effect = effect(mode, 4, RgbDirection::Clockwise);
+            effect.colors.truncate(1);
+            let frames = render(&effect, 60).unwrap().frames;
+            assert_eq!(frames.len(), expected_frames);
+            assert!(frames.iter().flatten().any(|&color| color != [0; 3]));
+        }
     }
 }

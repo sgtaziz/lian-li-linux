@@ -50,12 +50,12 @@ pub(super) fn rainbow(led_count: usize, brightness: u8, reverse: bool) -> Vec<Ve
 
 pub(super) fn wave(
     led_count: usize,
-    colors: &[Color; 6],
+    colors: &[Color],
     brightness: u8,
     reverse: bool,
 ) -> Vec<Vec<Color>> {
     const INTENSITY: [u8; 12] = [0, 0, 32, 64, 128, 255, 128, 64, 32, 0, 0, 0];
-    let mut frames = Vec::with_capacity(288);
+    let mut frames = Vec::with_capacity(colors.len() * 48);
     for color in colors {
         for _ in 0..4 {
             for shift in 0..12 {

@@ -1,13 +1,13 @@
 use super::geometry::{frame, map_16, map_25, map_31, scale, Color};
 
-pub(super) fn paint(led_count: usize, colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(186);
-    for color_index in 0..6 {
+pub(super) fn paint(led_count: usize, colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 31);
+    for color_index in 0..colors.len() {
         for step in 0..31 {
             let mut path = [[0; 3]; 31];
             for position in 0..31 {
                 let source = if position > step {
-                    (color_index + 5) % 6
+                    (color_index + colors.len() - 1) % colors.len()
                 } else {
                     color_index
                 };
@@ -40,14 +40,14 @@ pub(super) fn runway(led_count: usize, colors: &[Color; 6], brightness: u8) -> V
     frames
 }
 
-pub(super) fn tide(led_count: usize, colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(96);
-    for color_index in 0..6 {
+pub(super) fn tide(led_count: usize, colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 16);
+    for color_index in 0..colors.len() {
         for step in 0..16 {
             let mut path = [[0; 3]; 16];
             for (position, target) in path.iter_mut().enumerate() {
                 let source = if position > step {
-                    (color_index + 5) % 6
+                    (color_index + colors.len() - 1) % colors.len()
                 } else {
                     color_index
                 };
@@ -59,8 +59,8 @@ pub(super) fn tide(led_count: usize, colors: &[Color; 6], brightness: u8) -> Vec
     frames
 }
 
-pub(super) fn blow_up(led_count: usize, colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(306);
+pub(super) fn blow_up(led_count: usize, colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 51);
     for color in colors {
         for step in 0..16 {
             let mut path = [[0; 3]; 16];
@@ -84,12 +84,12 @@ pub(super) fn blow_up(led_count: usize, colors: &[Color; 6], brightness: u8) -> 
 
 pub(super) fn meteor(
     led_count: usize,
-    colors: &[Color; 6],
+    colors: &[Color],
     brightness: u8,
     reverse: bool,
 ) -> Vec<Vec<Color>> {
     const TAIL: [u8; 5] = [16, 32, 64, 128, 255];
-    let mut frames = Vec::with_capacity(180);
+    let mut frames = Vec::with_capacity(colors.len() * 30);
     for color in colors {
         for step in 0..30 {
             let mut path = [[0; 3]; 25];
@@ -111,8 +111,8 @@ pub(super) fn meteor(
     frames
 }
 
-pub(super) fn snooker(led_count: usize, colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(168);
+pub(super) fn snooker(led_count: usize, colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 28);
     for color in colors {
         for reverse in [false, true] {
             for step in 1..15 {
@@ -171,8 +171,8 @@ pub(super) fn mixing(led_count: usize, colors: &[Color; 6], brightness: u8) -> V
     frames
 }
 
-pub(super) fn ping_pong(led_count: usize, colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(348);
+pub(super) fn ping_pong(led_count: usize, colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 58);
     for color in colors {
         for reverse in [false, true] {
             for step in 0..29 {

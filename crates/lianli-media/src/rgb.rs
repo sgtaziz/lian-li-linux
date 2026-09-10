@@ -9,6 +9,8 @@ pub mod lancool217;
 pub mod lancool_v150;
 pub mod p28;
 pub mod parameters;
+#[cfg(test)]
+mod screen_palette_tests;
 pub mod sl_inf;
 pub mod sl_v4;
 pub mod sl_wireless;

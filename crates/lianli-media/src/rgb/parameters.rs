@@ -254,7 +254,23 @@ pub fn for_scope(
             };
             RgbEffectParameters {
                 mode,
-                min_colors: max_colors,
+                min_colors: if screen
+                    && matches!(
+                        mode,
+                        RgbMode::Wave
+                            | RgbMode::Paint
+                            | RgbMode::Tide
+                            | RgbMode::BlowUp
+                            | RgbMode::Meteor
+                            | RgbMode::Snooker
+                            | RgbMode::PingPong
+                            | RgbMode::Hourglass
+                            | RgbMode::ElectricCurrent
+                    ) {
+                    1
+                } else {
+                    max_colors
+                },
                 max_colors,
                 per_fan_colors,
                 directions: if direction {

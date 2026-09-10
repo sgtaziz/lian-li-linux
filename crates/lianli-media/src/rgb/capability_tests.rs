@@ -2,7 +2,7 @@ use super::{family, parameters};
 use lianli_shared::rgb::{RgbEffect, RgbRegionConfig, RgbRenderFamily, RgbRenderProfile};
 
 #[test]
-fn every_screen_palette_effect_preserves_short_configuration_playback() {
+fn fixed_role_screen_palettes_preserve_short_configuration_playback() {
     use lianli_shared::rgb::RgbScope;
     for (family, led_count) in [
         (RgbRenderFamily::UniversalScreen, 60),
@@ -16,7 +16,9 @@ fn every_screen_palette_effect_preserves_short_configuration_playback() {
             right_attach: false,
         };
         for controls in parameters::for_scope(profile, RgbScope::All) {
-            assert_eq!(controls.min_colors, controls.max_colors);
+            if controls.min_colors != controls.max_colors {
+                continue;
+            }
             for count in 1..controls.min_colors {
                 let mut region = RgbRegionConfig {
                     effect: RgbEffect {
@@ -45,7 +47,7 @@ fn every_screen_palette_effect_preserves_short_configuration_playback() {
 }
 
 #[test]
-fn screen_wave_extends_legacy_palettes_without_inventing_black_slots() {
+fn screen_wave_cycles_only_configured_colors_and_preserves_explicit_black() {
     use lianli_shared::rgb::{RgbMode, RgbScope};
     for (family, led_count) in [
         (RgbRenderFamily::UniversalScreen, 60),
@@ -62,7 +64,7 @@ fn screen_wave_extends_legacy_palettes_without_inventing_black_slots() {
             .into_iter()
             .find(|controls| controls.mode == RgbMode::Wave)
             .unwrap();
-        assert_eq!((controls.min_colors, controls.max_colors), (6, 6));
+        assert_eq!((controls.min_colors, controls.max_colors), (1, 6));
         let mut region = RgbRegionConfig {
             effect: RgbEffect {
                 mode: RgbMode::Wave,
@@ -75,7 +77,11 @@ fn screen_wave_extends_legacy_palettes_without_inventing_black_slots() {
         let legacy = family::render(profile, &[region.clone()]).unwrap();
         region.effect.colors = vec![[255, 0, 0]; 6];
         let full = family::render(profile, &[region.clone()]).unwrap();
-        assert_eq!(legacy.frames, full.frames);
+        assert_eq!(legacy.frames.len() * 6, full.frames.len());
+        assert!(full
+            .frames
+            .chunks_exact(legacy.frames.len())
+            .all(|cycle| cycle == legacy.frames));
         assert!(legacy
             .frames
             .iter()
@@ -86,6 +92,34 @@ fn screen_wave_extends_legacy_palettes_without_inventing_black_slots() {
             .frames
             .iter()
             .any(|frame| frame.iter().all(|color| *color == [0; 3])));
+    }
+}
+
+#[test]
+fn tl_direction_controls_reach_reversible_effects() {
+    use lianli_shared::rgb::{RgbDirection, RgbMode};
+    for fan_count in 1..=4 {
+        let profile = RgbRenderProfile {
+            family: RgbRenderFamily::Tl,
+            fan_count,
+            led_count: u16::from(fan_count) * 26,
+            right_attach: false,
+        };
+        for mode in [RgbMode::Wave, RgbMode::Paint, RgbMode::Racing] {
+            let mut region = RgbRegionConfig {
+                effect: RgbEffect {
+                    mode,
+                    colors: vec![[255, 0, 0], [0, 255, 0]],
+                    brightness: 4,
+                    ..Default::default()
+                },
+                flip: false,
+            };
+            let forward = family::render(profile, &[region.clone()]).unwrap();
+            region.effect.direction = RgbDirection::CounterClockwise;
+            let reverse = family::render(profile, &[region]).unwrap();
+            assert_ne!(forward.frames, reverse.frames, "{mode:?}/{fan_count}");
+        }
     }
 }
 

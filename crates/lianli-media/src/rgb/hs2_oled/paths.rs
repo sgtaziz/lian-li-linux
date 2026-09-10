@@ -1,13 +1,13 @@
 use super::geometry::{centered_15, frame, mirrored_18, scale, Color, ACTIVE_LEDS};
 
-pub(super) fn paint(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(108);
-    for color_index in 0..6 {
+pub(super) fn paint(colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 18);
+    for color_index in 0..colors.len() {
         for step in 0..18 {
             let mut path = [[0; 3]; 18];
             for position in 0..18 {
                 let source = if position > step {
-                    (color_index + 5) % 6
+                    (color_index + colors.len() - 1) % colors.len()
                 } else {
                     color_index
                 };
@@ -40,14 +40,14 @@ pub(super) fn runway(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
     frames
 }
 
-pub(super) fn tide(colors: &[Color; 6], brightness: u8, reverse: bool) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(108);
-    for color_index in 0..6 {
+pub(super) fn tide(colors: &[Color], brightness: u8, reverse: bool) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 18);
+    for color_index in 0..colors.len() {
         for step in 0..18 {
             let mut path = [[0; 3]; 18];
             for position in 0..18 {
                 let source = if position > step {
-                    (color_index + 5) % 6
+                    (color_index + colors.len() - 1) % colors.len()
                 } else {
                     color_index
                 };
@@ -60,8 +60,8 @@ pub(super) fn tide(colors: &[Color; 6], brightness: u8, reverse: bool) -> Vec<Ve
     frames
 }
 
-pub(super) fn blow_up(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(258);
+pub(super) fn blow_up(colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 43);
     for color in colors {
         for step in 0..8 {
             let mut segment = [[0; 3]; 8];
@@ -93,9 +93,9 @@ pub(super) fn blow_up(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
     frames
 }
 
-pub(super) fn meteor(colors: &[Color; 6], brightness: u8, reverse: bool) -> Vec<Vec<Color>> {
+pub(super) fn meteor(colors: &[Color], brightness: u8, reverse: bool) -> Vec<Vec<Color>> {
     const TAIL: [u8; 5] = [16, 32, 64, 128, 255];
-    let mut frames = Vec::with_capacity(138);
+    let mut frames = Vec::with_capacity(colors.len() * 23);
     for color in colors {
         for step in 0..23 {
             let mut path = [[0; 3]; 18];
@@ -117,8 +117,8 @@ pub(super) fn meteor(colors: &[Color; 6], brightness: u8, reverse: bool) -> Vec<
     frames
 }
 
-pub(super) fn snooker(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(192);
+pub(super) fn snooker(colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 32);
     for color in colors {
         for reverse in [false, true] {
             for step in 1..17 {
@@ -180,8 +180,8 @@ pub(super) fn mixing(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
     frames
 }
 
-pub(super) fn ping_pong(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(228);
+pub(super) fn ping_pong(colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 38);
     for color in colors {
         for reverse in [false, true] {
             for step in 0..19 {
@@ -254,9 +254,9 @@ pub(super) fn river(colors: &[Color; 6], brightness: u8, reverse: bool) -> Vec<V
         .collect()
 }
 
-pub(super) fn hourglass(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(388);
-    for color in colors.iter().take(4) {
+pub(super) fn hourglass(colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 97);
+    for color in colors {
         for pass in 0..4 {
             for step in 0..18 {
                 let mut output = frame();
@@ -286,9 +286,9 @@ pub(super) fn hourglass(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> 
     frames
 }
 
-pub(super) fn electric_current(colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
-    let mut frames = Vec::with_capacity(160);
-    for color in colors.iter().take(4) {
+pub(super) fn electric_current(colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
+    let mut frames = Vec::with_capacity(colors.len() * 40);
+    for color in colors {
         let mut warmup = 0;
         for reverse in [false, true] {
             let mut step = 0;

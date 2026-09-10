@@ -52,9 +52,9 @@ pub(super) fn rainbow(brightness: u8, reverse: bool) -> Vec<Vec<Color>> {
         .collect()
 }
 
-pub(super) fn wave(colors: &[Color; 6], brightness: u8, reverse: bool) -> Vec<Vec<Color>> {
+pub(super) fn wave(colors: &[Color], brightness: u8, reverse: bool) -> Vec<Vec<Color>> {
     const INTENSITY: [u8; 12] = [0, 0, 16, 48, 128, 255, 128, 48, 16, 0, 0, 0];
-    let mut frames = Vec::with_capacity(288);
+    let mut frames = Vec::with_capacity(colors.len() * 48);
     for color in colors {
         for _ in 0..4 {
             for shift in 0..12 {

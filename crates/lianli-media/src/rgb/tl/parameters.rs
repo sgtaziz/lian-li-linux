@@ -51,6 +51,9 @@ pub fn for_fans(fans: u8) -> Vec<RgbEffectParameters> {
                         | RgbMode::CoverCycle
                         | RgbMode::Lottery
                         | RgbMode::MeteorShower
+                        | RgbMode::Wave
+                        | RgbMode::Paint
+                        | RgbMode::Racing
                 ) {
                     vec![RgbDirection::Clockwise, RgbDirection::CounterClockwise]
                 } else {
@@ -67,7 +70,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn controls_match_the_tl_profile_menu() {
+    fn controls_expose_supported_tl_parameters() {
         let effects = for_fans(3);
         let parameters = |mode| effects.iter().find(|p| p.mode == mode).unwrap();
         assert_eq!(parameters(RgbMode::Breathing).max_colors, 3);
@@ -76,8 +79,9 @@ mod tests {
         assert_eq!(parameters(RgbMode::Mixing).max_colors, 2);
         assert_eq!(parameters(RgbMode::Twinkle).max_colors, 0);
         assert!(parameters(RgbMode::Reflect).directions.is_empty());
-        assert!(parameters(RgbMode::Paint).directions.is_empty());
-        assert!(parameters(RgbMode::Wave).directions.is_empty());
+        assert_eq!(parameters(RgbMode::Paint).directions.len(), 2);
+        assert_eq!(parameters(RgbMode::Wave).directions.len(), 2);
+        assert_eq!(parameters(RgbMode::Racing).directions.len(), 2);
         assert_eq!(parameters(RgbMode::Lottery).directions.len(), 2);
     }
 }

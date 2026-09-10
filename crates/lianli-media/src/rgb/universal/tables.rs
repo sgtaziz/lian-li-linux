@@ -129,10 +129,10 @@ const ELECTRIC: &str = concat!(
     "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB",
 );
 
-pub(super) fn hourglass(led_count: usize, colors: &[Color; 6], brightness: u8) -> Vec<Vec<Color>> {
+pub(super) fn hourglass(led_count: usize, colors: &[Color], brightness: u8) -> Vec<Vec<Color>> {
     let table = HOURGLASS.as_bytes();
-    let mut frames = Vec::with_capacity(280);
-    for color in colors.iter().take(4) {
+    let mut frames = Vec::with_capacity(colors.len() * 70);
+    for color in colors {
         for row in 0..70 {
             let path = std::array::from_fn(|column| {
                 let level = HOURGLASS_LEVELS[(table[row * 31 + column] - b'A') as usize];
@@ -146,7 +146,7 @@ pub(super) fn hourglass(led_count: usize, colors: &[Color; 6], brightness: u8) -
 
 pub(super) fn electric_current(
     led_count: usize,
-    colors: &[Color; 6],
+    colors: &[Color],
     brightness: u8,
 ) -> Vec<Vec<Color>> {
     let table = ELECTRIC.as_bytes();
@@ -154,8 +154,8 @@ pub(super) fn electric_current(
     rows.extend(std::iter::repeat_n(0, 5));
     rows.extend(1..=28);
     rows.extend((30..=52).step_by(2));
-    let mut frames = Vec::with_capacity(180);
-    for color in colors.iter().take(4) {
+    let mut frames = Vec::with_capacity(colors.len() * rows.len());
+    for color in colors {
         for &row in &rows {
             let path = std::array::from_fn(|column| {
                 let source = table[row * 31 + column] - b'A';
