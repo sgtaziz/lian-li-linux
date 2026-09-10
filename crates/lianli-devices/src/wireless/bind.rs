@@ -21,6 +21,7 @@ impl WirelessController {
 
     pub fn unbind_device(&self, mac: &[u8; 6]) -> Result<()> {
         self.check_unbind_allowed(mac)?;
+        self.forget_mb_rgb_target(mac);
         self.set_bind_intent(mac, false);
         self.converge_bind_state(mac, &[0u8; 6], 0)?;
         self.save_rf_config()

@@ -27,7 +27,8 @@ pub enum IpcRequest {
     GetTelemetry,
     /// Get RGB capabilities for all devices.
     GetRgbCapabilities,
-    /// Set RGB effect for a specific device zone.
+    /// Set RGB effect for a specific device zone. Software effects acknowledge
+    /// acceptance by the bounded renderer; device delivery runs asynchronously.
     SetRgbEffect {
         device_id: String,
         zone: u8,

@@ -7,9 +7,25 @@ use lianli_shared::rgb::RgbEffect;
 
 use crate::ipc::SharedState;
 
+pub fn validate_config(
+    state: &SharedState,
+    config: &lianli_shared::rgb::RgbAppConfig,
+) -> Option<IpcResponse> {
+    if let Err(error) = lianli_shared::rgb::validate_effect_memory(config) {
+        return Some(IpcResponse::error(format!(
+            "Invalid RGB configuration: {error}"
+        )));
+    }
+    let controller = state.lock().rgb_controller.clone()?;
+    let result = controller.lock().validate_config(config);
+    result
+        .err()
+        .map(|error| IpcResponse::error(format!("Invalid RGB configuration: {error}")))
+}
+
 pub fn capabilities(state: &SharedState) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         let caps = rgb.lock().capabilities();
         IpcResponse::ok(&caps)
     } else {
@@ -23,8 +39,8 @@ pub fn set_effect(
     zone: u8,
     effect: RgbEffect,
 ) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         match rgb.lock().set_effect(&device_id, zone, &effect) {
             Ok(()) => IpcResponse::ok(serde_json::json!(null)),
             Err(e) => IpcResponse::error(format!("RGB effect error: {e}")),
@@ -40,8 +56,8 @@ pub fn set_direct(
     zone: u8,
     colors: Vec<[u8; 3]>,
 ) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         match rgb.lock().set_direct_colors(&device_id, zone, &colors) {
             Ok(()) => IpcResponse::ok(serde_json::json!(null)),
             Err(e) => IpcResponse::error(format!("RGB direct error: {e}")),
@@ -57,8 +73,8 @@ pub fn set_frames(
     frames: Vec<Vec<[u8; 3]>>,
     interval_ms: u16,
 ) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         match rgb.lock().set_rgb_frames(&device_id, &frames, interval_ms) {
             Ok(()) => IpcResponse::ok(serde_json::json!(null)),
             Err(e) => IpcResponse::error(format!("RGB frames error: {e}")),
@@ -69,8 +85,8 @@ pub fn set_frames(
 }
 
 pub fn set_mb_sync(state: &SharedState, device_id: String, enabled: bool) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         match rgb.lock().set_mb_rgb_sync(&device_id, enabled) {
             Ok(()) => IpcResponse::ok(serde_json::json!(null)),
             Err(e) => IpcResponse::error(format!("MB RGB sync error: {e}")),
@@ -87,8 +103,8 @@ pub fn set_fan_direction(
     swap_lr: bool,
     swap_tb: bool,
 ) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         match rgb
             .lock()
             .set_fan_direction(&device_id, zone, swap_lr, swap_tb)
@@ -108,8 +124,8 @@ pub fn set_led_color(
     led_index: u16,
     color: [u8; 3],
 ) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         let mut rgb = rgb.lock();
         let mut colors = match rgb.get_zone_colors(&device_id, zone) {
             Some(c) => c,
@@ -135,8 +151,8 @@ pub fn set_led_color(
 }
 
 pub fn get_zone_colors(state: &SharedState, device_id: String, zone: u8) -> IpcResponse {
-    let state = state.lock();
-    if let Some(ref rgb) = state.rgb_controller {
+    let controller = state.lock().rgb_controller.clone();
+    if let Some(rgb) = controller {
         let rgb = rgb.lock();
         match rgb.get_zone_colors(&device_id, zone) {
             Some(colors) => IpcResponse::ok(&colors),

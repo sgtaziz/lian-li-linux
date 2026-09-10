@@ -8,13 +8,17 @@ import { useConfigStore } from "@/stores/config";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LedStrip from "@/components/rgb/LedStrip.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
-import { RGB_DIRECTIONS, RGB_SCOPES, RGB_BRIGHTNESS, modeLabel } from "@/constants";
+import { recallDeviceEffect, rememberDeviceEffect } from "@/components/rgb/effectMemory";
+import { RGB_DIRECTIONS, RGB_BRIGHTNESS, modeLabel } from "@/constants";
 
 const props = defineProps<{
   deviceId: string;
   cap: RgbDeviceCapabilities;
   zoneIndex: number;
   zone: RgbZoneConfig;
+  directOnly?: boolean;
+  groupEffects?: boolean;
+  perFanOnly?: boolean;
 }>();
 
 const rgb = useRgbStore();
@@ -25,15 +29,17 @@ const expanded = ref(true);
 
 const effect = computed(() => props.zone.effect);
 
-// Direct-mode LED state (wireless + Direct mode).
-const isDirect = computed(() => effect.value.mode === "Direct");
-const isWireless = computed(() => props.deviceId.startsWith("wireless:"));
+const isDirect = computed(() => props.directOnly || effect.value.mode === "Direct");
+const hasSoftwareRenderer = computed(() => (props.cap.software_modes?.length ?? 0) > 0);
+const isSoftware = computed(() => props.cap.software_modes?.includes(effect.value.mode) ?? false);
+const isAnimated = computed(() => !["Off", "Static", "Direct"].includes(effect.value.mode));
+const canEditLeds = computed(() => props.cap.supports_direct && hasSoftwareRenderer.value);
 const ledCount = computed(() => props.cap.zones[props.zoneIndex]?.led_count ?? 0);
 const ledColors = ref<RGB[]>([]);
 const selectedLeds = ref<number[]>([]);
 
 async function loadLedColors() {
-  if (isDirect.value && isWireless.value && ledCount.value > 0) {
+  if (isDirect.value && canEditLeds.value && ledCount.value > 0) {
     ledColors.value = await rgb.getZoneColors(props.deviceId, props.zoneIndex);
     if (ledColors.value.length === 0) {
       ledColors.value = Array.from({ length: ledCount.value }, () => [0, 0, 0] as RGB);
@@ -42,7 +48,7 @@ async function loadLedColors() {
 }
 
 watch(
-  () => [isDirect.value, isWireless.value, ledCount.value, props.zoneIndex] as const,
+  () => [isDirect.value, canEditLeds.value, ledCount.value, props.zoneIndex] as const,
   () => void loadLedColors(),
   { immediate: true },
 );
@@ -50,12 +56,8 @@ watch(
 const supportedScopes = computed(
   () => props.cap.supported_scopes?.[props.zoneIndex] ?? [],
 );
-const showScope = computed(() => supportedScopes.value.length > 0);
-const showDirection = computed(() => props.cap.supports_direction);
-
-// ── Effect mutation helpers ──────────────────────────────────────────────────
-// RGB effects are NOT applied live — they only update the config mirror and
-// take effect when the user saves (SetConfig re-applies all RGB on the daemon).
+const showScope = computed(() => !props.perFanOnly && !isSoftware.value && supportedScopes.value.length > 0);
+const showDirection = computed(() => (isSoftware.value && isAnimated.value) || props.cap.supports_direction);
 
 const propagateChoice = ref<"ask" | "yes" | "no">("ask");
 
@@ -67,9 +69,19 @@ function propagateToZones() {
 }
 
 function patchEffect(p: Partial<RgbEffect>) {
+  if (props.perFanOnly) {
+    const device = config.rgbDeviceConfig(props.deviceId);
+    for (const zone of device.zones) {
+      zone.effect = { ...zone.effect, scope: "Fan", mode: props.cap.zone_effect_modes?.includes(zone.effect.mode) ? zone.effect.mode : "Static" };
+    }
+    p.scope = "Fan";
+  }
+  if (props.groupEffects && effect.value.scope === "Fan") p.scope ??= "All";
   Object.assign(effect.value, p);
 
-  if (props.zoneIndex === 0) {
+  if (props.groupEffects) propagateToZones();
+
+  if (props.zoneIndex === 0 && !hasSoftwareRenderer.value && !props.groupEffects && !props.perFanOnly) {
     const isPerFan =
       (effect.value.mode === "Off" ||
         effect.value.mode === "Static" ||
@@ -103,11 +115,21 @@ function patchEffect(p: Partial<RgbEffect>) {
 }
 
 function modeOptions() {
-  return props.cap.supported_modes.map((m) => ({ label: modeLabel(m), value: m }));
+  const modes = props.directOnly ? ["Direct"] : props.groupEffects ? props.cap.group_effect_modes ?? [] : props.perFanOnly ? props.cap.zone_effect_modes ?? [] : props.cap.supported_modes;
+  return modes.map((m) => ({
+    label: modeLabel(m),
+    value: m,
+  }));
 }
 
 function onMode(value: string) {
-  patchEffect({ mode: value });
+  if (effect.value.mode === value && (!props.perFanOnly || effect.value.scope === "Fan") && (!props.groupEffects || effect.value.scope !== "Fan")) return;
+  const device = config.rgbDeviceConfig(props.deviceId);
+  const memoryZone = props.groupEffects ? null : props.zoneIndex;
+  rememberDeviceEffect(device, memoryZone, effect.value, false);
+  const scope = props.perFanOnly ? "Fan" : props.cap.software_modes?.includes(value) || (props.groupEffects && effect.value.scope === "Fan") ? "All" : effect.value.scope;
+  const remembered = recallDeviceEffect(device, memoryZone, scope, value);
+  patchEffect(remembered?.effect ?? { mode: value, scope });
 }
 
 function onColor(index: number, value: RGB | any) {
@@ -144,7 +166,8 @@ function onSpeed(value: number) {
 }
 function onBrightness(value: number) {
   patchEffect({ brightness: value });
-}function onSwapLr(v: boolean) {
+}
+function onSwapLr(v: boolean) {
   props.zone.swap_lr = v;
   config.markDirty();
 }
@@ -153,7 +176,6 @@ function onSwapTb(v: boolean) {
   config.markDirty();
 }
 
-// ── Direct LED controls ──────────────────────────────────────────────────────
 function onSelectLed(i: number) {
   const idx = selectedLeds.value.indexOf(i);
   if (idx >= 0) selectedLeds.value.splice(idx, 1);
@@ -165,21 +187,29 @@ function setDirectColor(value: RGB | any) {
   directColor.value = value as RGB;
 }
 
+function markDirectChange() {
+  const device = config.rgbDeviceConfig(props.deviceId);
+  device.active_preset = null;
+  if (props.directOnly) {
+    device.regions = null;
+    for (const zone of device.zones) zone.effect.mode = "Direct";
+  }
+  config.markDirty();
+}
+
 function applyDirect() {
   if (selectedLeds.value.length === 0) return;
   for (const i of selectedLeds.value) {
     ledColors.value[i] = directColor.value;
   }
   selectedLeds.value = [];
-  config.rgbDeviceConfig(props.deviceId).active_preset = null;
-  config.markDirty();
+  markDirectChange();
   void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
 }
 
 function fillAll() {
   ledColors.value = Array.from({ length: ledCount.value }, () => directColor.value);
-  config.rgbDeviceConfig(props.deviceId).active_preset = null;
-  config.markDirty();
+  markDirectChange();
   void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
 }
 
@@ -191,15 +221,14 @@ function clearAll() {
     negativeText: "Cancel",
     onPositiveClick: () => {
       ledColors.value = Array.from({ length: ledCount.value }, () => [0, 0, 0]);
-      config.rgbDeviceConfig(props.deviceId).active_preset = null;
-      config.markDirty();
+      markDirectChange();
       void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
     },
   });
 }
 
 const zoneLabel = computed(
-  () => props.cap.zones[props.zoneIndex]?.name ?? `Zone ${props.zoneIndex}`,
+  () => props.groupEffects ? "Port effects" : props.cap.zones[props.zoneIndex]?.name ?? `Zone ${props.zoneIndex}`,
 );
 </script>
 
@@ -215,15 +244,23 @@ const zoneLabel = computed(
         <label class="muted">Mode</label>
         <n-select
           size="small"
-          :value="effect.mode"
+          :value="directOnly ? 'Direct' : effect.mode"
           :options="modeOptions()"
           @update:value="onMode"
           style="width: 200px"
         />
       </div>
 
-      <!-- Direct LED editor -->
-      <div v-if="isDirect && isWireless && ledCount > 0" class="direct">
+      <p v-if="groupEffects" class="muted">Changes apply to every fan in this port. Save changes to apply lighting.</p>
+      <p v-else-if="perFanOnly" class="muted">Individual fan effects replace the port's group effect when edited. Save changes to apply lighting.</p>
+      <p v-else-if="directOnly" class="muted">
+        Applying direct colors replaces the group's animation with direct LED control.
+      </p>
+      <p v-else-if="hasSoftwareRenderer" class="muted">
+        Each zone can use its own effect. Save changes to apply lighting.
+      </p>
+
+      <div v-if="isDirect && canEditLeds && ledCount > 0" class="direct">
         <LedStrip
           :colors="ledColors"
           :selected="selectedLeds"
@@ -238,8 +275,7 @@ const zoneLabel = computed(
         </div>
       </div>
 
-      <!-- Colors (hidden in Direct mode — per-LED colors are set via the LED strip above) -->
-      <div v-if="!isDirect" class="colors">
+      <div v-if="!isDirect && !(isSoftware && ['Off', 'Rainbow', 'RainbowMorph'].includes(effect.mode))" class="colors">
         <label class="muted">Colors</label>
         <div class="color-list">
           <div v-for="(_, i) in effect.colors" :key="i" class="color-item">
@@ -258,8 +294,9 @@ const zoneLabel = computed(
         </div>
       </div>
 
-      <div class="two-col">
+      <div v-if="!isDirect" class="two-col">
         <LabeledSlider
+          v-if="isAnimated"
           label="Speed"
           :model-value="effect.speed"
           :min="0"
@@ -291,14 +328,14 @@ const zoneLabel = computed(
           <label class="muted">Scope</label>
           <n-select
             size="small"
-            :value="effect.scope"
+            :value="groupEffects && effect.scope === 'Fan' ? 'All' : effect.scope"
             :options="supportedScopes.map((s) => ({ label: s, value: s }))"
             @update:value="onScope"
           />
         </div>
       </div>
 
-      <div v-if="showDirection" class="checkboxes">
+      <div v-if="cap.supports_direction && !groupEffects" class="checkboxes">
         <n-checkbox :checked="zone.swap_lr" @update:checked="onSwapLr">Swap L/R</n-checkbox>
         <n-checkbox :checked="zone.swap_tb" @update:checked="onSwapTb">Swap T/B</n-checkbox>
       </div>

@@ -1,5 +1,7 @@
 use anyhow::Result;
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
+use lianli_shared::rgb::{
+    RgbEffect, RgbMode, RgbPlaybackTiming, RgbRenderProfile, RgbScope, RgbZoneInfo,
+};
 use lianli_shared::screen::ScreenInfo;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -268,6 +270,14 @@ pub trait RgbDevice: Send + Sync {
     /// Supported LED effect modes for this device.
     fn supported_modes(&self) -> Vec<RgbMode>;
 
+    fn group_effect_modes(&self) -> Vec<RgbMode> {
+        Vec::new()
+    }
+
+    fn zone_effect_modes(&self) -> Vec<RgbMode> {
+        self.supported_modes()
+    }
+
     /// Information about each independently controllable LED zone.
     fn zone_info(&self) -> Vec<RgbZoneInfo>;
 
@@ -305,6 +315,94 @@ pub trait RgbDevice: Send + Sync {
     /// When false, `set_direct_colors` maps to Static mode with the first color.
     fn supports_direct(&self) -> bool {
         false
+    }
+
+    fn software_render_profile(&self) -> Option<RgbRenderProfile> {
+        None
+    }
+
+    fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
+        None
+    }
+
+    fn set_sync_animation(&self, frames: &[Vec<[u8; 3]>], timing: RgbPlaybackTiming) -> Result<()> {
+        self.set_software_animation(frames, timing)
+    }
+
+    fn validate_sync_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        self.validate_software_animation(frames, timing)
+    }
+
+    fn set_rgb_clock(&self, _ticks: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_software_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.software_frame_delivery() == Some(RgbFrameDelivery::Streaming),
+            "software animation upload not supported by this device"
+        );
+        anyhow::ensure!(
+            timing.secondary_interval_ticks == 0
+                && timing.secondary_frame_count == 0
+                && !timing.outer_longest,
+            "secondary RGB timing not supported by this device"
+        );
+        anyhow::ensure!(
+            (100..=6_553_599).contains(&timing.interval_hundredths),
+            "software RGB interval out of range"
+        );
+        let interval_ms = timing.interval_hundredths.div_ceil(160);
+        anyhow::ensure!(
+            (1..=u32::from(u16::MAX)).contains(&interval_ms),
+            "software RGB interval out of range"
+        );
+        self.set_software_frames(frames, interval_ms as u16)
+    }
+
+    fn validate_software_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.software_frame_delivery().is_some(),
+            "software RGB is not supported"
+        );
+        anyhow::ensure!(
+            !frames.is_empty() && frames.len() <= usize::from(u16::MAX),
+            "invalid RGB frame count"
+        );
+        let leds = usize::from(self.total_led_count());
+        anyhow::ensure!(
+            leds > 0 && frames.iter().all(|frame| frame.len() == leds),
+            "RGB frame does not match device layout"
+        );
+        anyhow::ensure!(
+            (100..=6_553_599).contains(&timing.interval_hundredths),
+            "invalid RGB playback interval"
+        );
+        if self.software_frame_delivery() == Some(RgbFrameDelivery::Streaming) {
+            anyhow::ensure!(
+                timing.secondary_interval_ticks == 0
+                    && timing.secondary_frame_count == 0
+                    && !timing.outer_longest,
+                "streaming RGB does not support secondary timing"
+            );
+        }
+        Ok(())
+    }
+
+    fn set_software_frames(&self, _frames: &[Vec<[u8; 3]>], _interval_ms: u16) -> Result<()> {
+        anyhow::bail!("software frame delivery not supported by this device")
     }
 
     /// Supported scopes per zone. Return empty vec for zones with only "All".
@@ -372,6 +470,12 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     fn supported_modes(&self) -> Vec<RgbMode> {
         (**self).supported_modes()
     }
+    fn group_effect_modes(&self) -> Vec<RgbMode> {
+        (**self).group_effect_modes()
+    }
+    fn zone_effect_modes(&self) -> Vec<RgbMode> {
+        (**self).zone_effect_modes()
+    }
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         (**self).zone_info()
     }
@@ -392,6 +496,42 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn supports_direct(&self) -> bool {
         (**self).supports_direct()
+    }
+    fn software_render_profile(&self) -> Option<RgbRenderProfile> {
+        (**self).software_render_profile()
+    }
+    fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
+        (**self).software_frame_delivery()
+    }
+    fn set_sync_animation(&self, frames: &[Vec<[u8; 3]>], timing: RgbPlaybackTiming) -> Result<()> {
+        (**self).set_sync_animation(frames, timing)
+    }
+    fn validate_sync_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        (**self).validate_sync_animation(frames, timing)
+    }
+    fn set_rgb_clock(&self, ticks: u32) -> Result<()> {
+        (**self).set_rgb_clock(ticks)
+    }
+    fn set_software_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        (**self).set_software_animation(frames, timing)
+    }
+    fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], interval_ms: u16) -> Result<()> {
+        (**self).set_software_frames(frames, interval_ms)
+    }
+    fn validate_software_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        (**self).validate_software_animation(frames, timing)
     }
     fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
         (**self).supported_scopes()
@@ -419,5 +559,81 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn ping(&self, zone: u8) -> Result<()> {
         (**self).ping(zone)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RgbFrameDelivery {
+    Streaming,
+    LoopUpload,
+}
+
+#[cfg(test)]
+mod rgb_profile_tests {
+    use super::*;
+    use lianli_shared::rgb::RgbRenderFamily;
+
+    struct NativeRgb;
+
+    impl RgbDevice for NativeRgb {
+        fn device_name(&self) -> String {
+            "test".to_string()
+        }
+
+        fn supported_modes(&self) -> Vec<RgbMode> {
+            Vec::new()
+        }
+
+        fn zone_info(&self) -> Vec<RgbZoneInfo> {
+            Vec::new()
+        }
+
+        fn set_zone_effect(&self, _zone: u8, _effect: &RgbEffect) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    struct SoftwareRgb;
+
+    impl RgbDevice for SoftwareRgb {
+        fn device_name(&self) -> String {
+            "software".to_string()
+        }
+
+        fn supported_modes(&self) -> Vec<RgbMode> {
+            Vec::new()
+        }
+
+        fn zone_info(&self) -> Vec<RgbZoneInfo> {
+            Vec::new()
+        }
+
+        fn set_zone_effect(&self, _zone: u8, _effect: &RgbEffect) -> Result<()> {
+            Ok(())
+        }
+
+        fn software_render_profile(&self) -> Option<RgbRenderProfile> {
+            Some(RgbRenderProfile {
+                family: RgbRenderFamily::Tl,
+                fan_count: 4,
+                led_count: 104,
+                right_attach: false,
+            })
+        }
+    }
+
+    #[test]
+    fn arc_forwards_software_profiles_and_native_devices_can_opt_out() {
+        let native = Arc::new(NativeRgb);
+        assert_eq!(native.software_render_profile(), None);
+
+        let expected = RgbRenderProfile {
+            family: RgbRenderFamily::Tl,
+            fan_count: 4,
+            led_count: 104,
+            right_attach: false,
+        };
+        let software = Arc::new(SoftwareRgb);
+        assert_eq!(software.software_render_profile(), Some(expected));
     }
 }

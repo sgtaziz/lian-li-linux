@@ -128,10 +128,9 @@ impl Controllers {
         if let Some(writer) = self.direct_color_writer.take() {
             let _ = writer.join();
         }
-        // RgbController has no stop() — its threads live inside
-        // DirectColorBuffer / OpenRGB subsystem, both of which are
-        // shut down separately.
-        self.rgb.take();
+        if let Some(rgb) = self.rgb.take() {
+            rgb.lock().stop();
+        }
     }
 }
 

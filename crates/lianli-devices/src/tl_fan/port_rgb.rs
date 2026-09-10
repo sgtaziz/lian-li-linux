@@ -6,12 +6,16 @@ use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use std::sync::Arc;
 use tracing::debug;
 
+#[cfg(test)]
+#[path = "port_rgb_tests.rs"]
+mod tests;
+
 /// Per-port RGB device for the TL Fan controller.
 ///
 /// Each port with detected fans becomes a separate `RgbDevice`.
 /// Zones within the device = individual fans on that port.
-/// Animated effects use SetFanGroupLight (0xB0) for synced animation across the port.
-/// Static/Direct/Off use per-fan SetFanLight (0xA3) for individual color control.
+/// Fan scope uses SetFanLight (0xA3); port animations use SetFanGroupLight (0xB0).
+/// Legacy unscoped Static/Direct/Off settings retain individual fan control.
 pub struct TlFanPortDevice {
     controller: Arc<TlFanController>,
     port: u8,
@@ -54,6 +58,46 @@ impl TlFanController {
 }
 
 impl RgbDevice for TlFanPortDevice {
+    fn group_effect_modes(&self) -> Vec<RgbMode> {
+        self.supported_modes()
+    }
+
+    fn zone_effect_modes(&self) -> Vec<RgbMode> {
+        vec![
+            RgbMode::Off,
+            RgbMode::Rainbow,
+            RgbMode::Static,
+            RgbMode::Runway,
+            RgbMode::Meteor,
+            RgbMode::ColorCycle,
+            RgbMode::Render,
+            RgbMode::TailChasing,
+            RgbMode::Stack,
+            RgbMode::CoverCycle,
+            RgbMode::Wave,
+            RgbMode::Racing,
+            RgbMode::Lottery,
+            RgbMode::Intertwine,
+            RgbMode::MeteorShower,
+        ]
+    }
+
+    fn set_all_effects(&self, effect: &RgbEffect) -> Result<()> {
+        if effect.scope == RgbScope::Fan
+            || (effect.scope == RgbScope::All
+                && matches!(
+                    effect.mode,
+                    RgbMode::Static | RgbMode::Direct | RgbMode::Off
+                ))
+        {
+            for zone in 0..self.fan_count {
+                self.set_zone_effect(zone, effect)?;
+            }
+            Ok(())
+        } else {
+            self.set_zone_effect(0, effect)
+        }
+    }
     fn device_name(&self) -> String {
         format!("UNI FAN TL Port {}", self.port)
     }
@@ -111,6 +155,15 @@ impl RgbDevice for TlFanPortDevice {
         }
 
         let base_group = (self.port as u16 * 4 * 2) as u8;
+        if effect.scope == RgbScope::Fan {
+            anyhow::ensure!(
+                self.zone_effect_modes().contains(&effect.mode),
+                "unsupported per-fan TL effect"
+            );
+            return self
+                .controller
+                .set_fan_light(self.port, zone, effect, false);
+        }
         let scoped = !matches!(effect.scope, RgbScope::All);
 
         // Per-fan light (0xA3) has no side bits; scoped modes use group light (0xB0).

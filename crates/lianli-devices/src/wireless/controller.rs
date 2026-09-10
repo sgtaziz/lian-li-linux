@@ -1,7 +1,9 @@
 use super::convergence::{PendingQueue, TargetSeqMap};
 use super::discovery::{
-    poll_and_discover, DeviceHealthMap, DiscoveredDevice, MasterEntryMap, REBIND_FOREIGN_AFTER,
+    poll_and_discover, DeviceHealthMap, DiscoveredDevice, MasterEntryMap, ACK_FRESHNESS,
+    REBIND_FOREIGN_AFTER,
 };
+use super::mb_sync::MbRgbTargetMap;
 use super::transport::{open_any, with_transport_recovery};
 use super::{
     CMD_RESET, CMD_RX_LCD_MODE, CMD_RX_QUERY_34, CMD_RX_QUERY_37, CMD_VIDEO_START, RF_CHUNKS,
@@ -36,6 +38,8 @@ pub struct WirelessController {
     pub(super) fg_sync: Arc<AtomicBool>,
     pub(super) tx_failures: Arc<AtomicU32>,
     pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
+    pub(super) mb_rgb_targets: MbRgbTargetMap,
+    pub(super) command_order: Arc<Mutex<()>>,
     /// Pending commands awaiting device ack, drained by the convergence loop.
     pub(super) pending_commands: Option<PendingQueue>,
     /// Per-device target `cmd_seq`; incremented per state-changing command.
@@ -61,6 +65,8 @@ impl Clone for WirelessController {
             fg_sync: Arc::clone(&self.fg_sync),
             tx_failures: Arc::clone(&self.tx_failures),
             desired_effects: Arc::clone(&self.desired_effects),
+            mb_rgb_targets: Arc::clone(&self.mb_rgb_targets),
+            command_order: Arc::clone(&self.command_order),
             pending_commands: self.pending_commands.clone(),
             target_cmd_seqs: self.target_cmd_seqs.clone(),
             convergence_thread: None,
@@ -88,6 +94,8 @@ impl WirelessController {
             fg_sync: Arc::new(AtomicBool::new(false)),
             tx_failures: Arc::new(AtomicU32::new(0)),
             desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            mb_rgb_targets: Arc::new(Mutex::new(Default::default())),
+            command_order: Arc::new(Mutex::new(())),
             pending_commands: Some(pending_commands),
             target_cmd_seqs: Some(target_cmd_seqs),
             convergence_thread: None,
@@ -95,6 +103,7 @@ impl WirelessController {
     }
 
     pub fn connect(&mut self) -> Result<()> {
+        self.mb_rgb_targets.lock().clear();
         let mut tx = None;
         let max_retries = 3;
 
@@ -312,16 +321,14 @@ impl WirelessController {
             thread::sleep(Duration::from_millis(50));
         }
 
-        if let (Some(queue), Some(target_seqs)) =
-            (self.pending_commands.clone(), self.target_cmd_seqs.clone())
-        {
+        if let Some(queue) = self.pending_commands.clone() {
             let conv_stop = self.poll_stop.clone();
             let device_health = Arc::clone(&self.device_health);
             self.convergence_thread = Some(Self::spawn_convergence_loop(
                 Arc::clone(&tx),
                 queue,
-                target_seqs,
                 device_health,
+                Arc::clone(&self.desired_effects),
                 conv_stop,
             ));
         }
@@ -707,8 +714,12 @@ impl WirelessController {
         device: &DiscoveredDevice,
         rf_data: &[u8],
     ) -> Result<()> {
+        anyhow::ensure!(
+            rf_data.len() == RF_DATA_SIZE,
+            "invalid RGB RF packet length"
+        );
         for chunk_idx in 0..RF_CHUNKS as u8 {
-            let mut packet = vec![0u8; 64];
+            let mut packet = [0u8; 64];
             packet[0] = USB_CMD_SEND_RF;
             packet[1] = chunk_idx;
             packet[2] = device.channel;
@@ -718,9 +729,13 @@ impl WirelessController {
             let end = start + RF_CHUNK_SIZE;
             packet[4..64].copy_from_slice(&rf_data[start..end]);
 
-            handle
+            let written = handle
                 .write(&packet, USB_TIMEOUT)
                 .context("sending RGB RF packet")?;
+            anyhow::ensure!(
+                written == packet.len(),
+                "short RGB RF packet write: {written}/64 bytes"
+            );
             thread::sleep(Duration::from_millis(1));
         }
         Ok(())
@@ -752,6 +767,10 @@ impl WirelessController {
     }
 
     pub fn stop(&mut self) {
+        let owns_runtime = self.poll_thread.is_some() || self.convergence_thread.is_some();
+        if owns_runtime {
+            self.mb_rgb_targets.lock().clear();
+        }
         if self.poll_thread.is_some() {
             self.poll_stop.store(true, Ordering::SeqCst);
             if let Some(handle) = self.poll_thread.take() {
@@ -760,6 +779,19 @@ impl WirelessController {
         }
         self.tx.take();
         self.rx.take();
+    }
+
+    pub fn rgb_upload_applied(&self, mac: &[u8; 6], effect_index: [u8; 4]) -> bool {
+        // A matching firmware index can survive a daemon restart without a local upload.
+        if self.desired_effects.lock().get(mac) != Some(&effect_index) {
+            return false;
+        }
+        let observed = self.device_health.lock().get(mac).is_some_and(|health| {
+            health.raw_seen.elapsed() <= ACK_FRESHNESS
+                && !health.published.is_sync_mb_light
+                && health.published.effect_index == effect_index
+        });
+        observed && !self.has_pending_mb_rgb_transition(mac)
     }
 }
 
@@ -807,6 +839,54 @@ mod tests {
         h.observed_master = master;
         h.raw_master = master;
         h
+    }
+
+    #[test]
+    fn matching_effect_is_not_applied_during_motherboard_sync_or_transition() {
+        let controller = WirelessController::new();
+        controller
+            .desired_effects
+            .lock()
+            .insert([1, 2, 3, 4, 5, 6], [7; 4]);
+        let mut health = entry([9; 6]);
+        health.published.effect_index = [7; 4];
+        health.published.is_sync_mb_light = true;
+        health.raw_seen = Instant::now();
+        controller
+            .device_health
+            .lock()
+            .insert([1, 2, 3, 4, 5, 6], health);
+
+        assert!(!controller.rgb_upload_applied(&[1, 2, 3, 4, 5, 6], [7; 4]));
+        controller
+            .device_health
+            .lock()
+            .get_mut(&[1, 2, 3, 4, 5, 6])
+            .unwrap()
+            .published
+            .is_sync_mb_light = false;
+        assert!(controller.rgb_upload_applied(&[1, 2, 3, 4, 5, 6], [7; 4]));
+
+        let now = Instant::now();
+        controller.reserve_mb_rgb_transition(&[1, 2, 3, 4, 5, 6], false, true, 0, now);
+        assert!(!controller.rgb_upload_applied(&[1, 2, 3, 4, 5, 6], [7; 4]));
+    }
+
+    #[test]
+    fn retained_firmware_effect_requires_an_upload_in_this_session() {
+        let controller = WirelessController::new();
+        let mac = [1, 2, 3, 4, 5, 6];
+        let mut health = entry([9; 6]);
+        health.published.effect_index = [7; 4];
+        health.raw_seen = Instant::now();
+        controller.device_health.lock().insert(mac, health);
+
+        assert!(!controller.rgb_upload_applied(&mac, [7; 4]));
+        controller.desired_effects.lock().insert(mac, [7; 4]);
+        assert!(controller.rgb_upload_applied(&mac, [7; 4]));
+        assert!(!controller.rgb_upload_applied(&mac, [8; 4]));
+        controller.clear_rgb_targets();
+        assert!(!controller.rgb_upload_applied(&mac, [7; 4]));
     }
 
     fn controller_with_health(entries: Vec<([u8; 6], DeviceHealth)>) -> WirelessController {

@@ -57,6 +57,12 @@ Both V1 (VID 0x0416) and V2 (VID 0x1A86) wireless dongles are supported. Binding
 
 > **Note:** Wireless devices with LCDs still need to be plugged in via USB to control the LCD. LCD cannot be controlled through wireless dongle alone.
 
+### Software RGB effects
+
+The RGB page offers software effects for supported wireless devices and verified wired frame-capable controllers. Choose an effect per zone, adjust colors, speed, brightness and direction, then save. Supported effects include Rainbow, Rainbow Morph, Breathing, Color Cycle, Runway, Meteor, Wave, Tide, Ping Pong and Twinkle, plus Static and Off. Direct mode edits individual LEDs; presets preserve either effects or direct colors.
+
+Wireless devices and compatible wired receivers loop uploaded animations. Other supported wired LED controllers receive frames from the daemon, capped at 20 fps, and require the daemon to remain running. Large uploads may use fewer frames to fit device memory without changing the animation duration. Hardware effect controllers such as TL retain their existing modes.
+
 When a device is connected both ways at once it shows once as a wireless group and the duplicate
 wired entry is hidden, control and telemetry go over RF. Merging wired LCD fans into their wireless
 group needs the V2 dongle, V1 dongles show both entries.

@@ -443,6 +443,9 @@ impl ServiceManager {
 
         let arc = Arc::new(fan_devices);
         self.registry.fan_devices = Arc::clone(&arc);
+        if let Some(rgb) = &self.controllers.rgb {
+            rgb.lock().retain_wired(&present_ids);
+        }
         self.init_rgb_controller_from(wired_rgb);
         match self.snapshot_wired() {
             Ok((ids, topos)) => {
@@ -646,6 +649,17 @@ impl ServiceManager {
             None
         };
 
+        if let Some(rgb) = &self.controllers.rgb {
+            {
+                let mut controller = rgb.lock();
+                controller.replace_wired(all_wired);
+                controller.set_wireless(wireless);
+                controller.refresh_wireless_devices();
+            }
+            self.apply_rgb_config();
+            return;
+        }
+
         let mut controller = RgbController::new(all_wired, wireless);
 
         // Start thermal alert monitor and share override state with RGB controller
@@ -697,16 +711,24 @@ impl ServiceManager {
         self.start_fan_control();
     }
 
-    /// Apply RGB config from the current AppConfig to the RGB controller.
     pub(super) fn apply_rgb_config(&self) {
-        // Read from the IPC-side config, self.config only catches up on
-        // load_config and can lag behind a just-applied preset.
-        if let Some(ref rgb) = self.controllers.rgb {
-            let ipc_state = self.ipc.state.lock();
-            if let Some(rgb_cfg) = ipc_state.config.as_ref().and_then(|c| c.rgb.clone()) {
-                let presets = ipc_state.rgb_presets.clone();
-                rgb.lock().apply_config(&rgb_cfg, &presets);
-            }
+        let (controller, config, presets) = {
+            let state = self.ipc.state.lock();
+            (
+                state.rgb_controller.clone(),
+                state
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.rgb.clone())
+                    .unwrap_or_else(|| lianli_shared::rgb::RgbAppConfig {
+                        enabled: false,
+                        ..Default::default()
+                    }),
+                state.rgb_presets.clone(),
+            )
+        };
+        if let Some(controller) = controller {
+            controller.lock().apply_config(&config, &presets);
         }
     }
 
@@ -754,7 +776,6 @@ impl ServiceManager {
                 Arc::clone(&self.openrgb.stop),
                 Arc::clone(&self.openrgb.state),
             ));
-            // Start the async writer thread that flushes buffered colors at 30fps
             if self.controllers.direct_color_writer.is_none() {
                 self.controllers.direct_color_writer =
                     Some(crate::controllers::rgb::start_direct_color_writer(

@@ -90,7 +90,7 @@ impl WirelessController {
         rf_data[16] = slot_index;
         rf_data[17..21].copy_from_slice(&pwm);
 
-        self.enqueue_rf_command(&device, rf_data, AckSignal::Pwm(pwm), "fan PWM");
+        self.enqueue_rf_command(&device, rf_data, AckSignal::Pwm(pwm), "fan PWM")?;
 
         pwm_last_sent().lock().insert(*mac, Instant::now());
 

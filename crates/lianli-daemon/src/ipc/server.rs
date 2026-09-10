@@ -179,6 +179,11 @@ fn handle_request(
         IpcRequest::GetTelemetry => super::system::get_telemetry(state),
 
         IpcRequest::SetConfig { config } => {
+            if let Some(rgb_config) = &config.rgb {
+                if let Some(response) = super::rgb::validate_config(state, rgb_config) {
+                    return response;
+                }
+            }
             let mut state = state.lock();
             state.config = Some(config);
             super::persist_and_notify(&mut state, &tx, "SetConfig")
@@ -230,6 +235,16 @@ fn handle_request(
         IpcRequest::UnbindAllWireless => super::wireless::unbind_all(tx),
         IpcRequest::GetChannel => super::wireless::get_channel(state),
         IpcRequest::SetMergeLightingConfig { config } => {
+            let mut rgb = state
+                .lock()
+                .config
+                .as_ref()
+                .and_then(|c| c.rgb.clone())
+                .unwrap_or_default();
+            rgb.merge_lighting = Some(config.clone());
+            if let Some(error) = super::rgb::validate_config(state, &rgb) {
+                return error;
+            }
             let mut state = state.lock();
             if let Some(ref mut app_config) = state.config {
                 app_config

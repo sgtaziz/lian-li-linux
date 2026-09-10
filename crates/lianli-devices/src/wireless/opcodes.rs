@@ -34,7 +34,7 @@ impl WirelessController {
             rf_data,
             AckSignal::CmdSeq(target_cmd_seq),
             "selected group".to_string(),
-        );
+        )?;
 
         debug!("Selected group: {}", device.mac_str());
         Ok(())
@@ -62,7 +62,7 @@ impl WirelessController {
             rf_data,
             AckSignal::CmdSeq(target_cmd_seq),
             "LCD reboot".to_string(),
-        );
+        )?;
 
         debug!("LCD reboot: {}", device.mac_str());
         Ok(())
@@ -91,7 +91,7 @@ impl WirelessController {
             rf_data,
             AckSignal::CmdSeq(target_cmd_seq),
             format!("217 wifi {}", if disable { "disable" } else { "enable" }),
-        );
+        )?;
 
         debug!(
             "217 wifi {}: {}",

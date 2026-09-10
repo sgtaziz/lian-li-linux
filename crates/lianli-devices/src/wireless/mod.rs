@@ -12,6 +12,7 @@ mod fan_type;
 mod mb_sync;
 mod opcodes;
 mod rgb;
+mod rgb_clock;
 mod transport;
 mod v2_hid;
 
@@ -20,6 +21,7 @@ pub use clock_sync::{build_payload, SensorSnapshot};
 pub use controller::WirelessController;
 pub use discovery::DiscoveredDevice;
 pub use fan_type::WirelessFanType;
+pub use rgb::WirelessRgbUpload;
 pub use v2_hid::{query_v2_hid_macs, share_parent, V2HidEntry, V2_HID_PID, V2_HID_VID};
 
 use once_cell::sync::Lazy;
