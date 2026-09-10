@@ -182,7 +182,7 @@ pub(super) fn scaled_colors(effect: &RgbEffect) -> Vec<Color> {
     effect
         .colors
         .iter()
-        .map(|color| color.map(|channel| ((u16::from(channel) * brightness) >> 8) as u8))
+        .map(|&color| crate::rgb::color::scale(color, brightness))
         .collect()
 }
 

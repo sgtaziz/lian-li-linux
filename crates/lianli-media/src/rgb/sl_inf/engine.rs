@@ -1,3 +1,4 @@
+pub(super) use crate::rgb::color::scale;
 use anyhow::{ensure, Result};
 use lianli_shared::rgb::RgbEffect;
 
@@ -56,11 +57,8 @@ pub(super) fn drumming_palette(effect: &RgbEffect) -> [Color; 4] {
     colors
 }
 
-pub(super) fn clamp_current(mut color: Color) -> Color {
-    while color.iter().map(|&channel| u16::from(channel)).sum::<u16>() > 600 {
-        color = color.map(|channel| (f64::from(channel) * 0.95) as u8);
-    }
-    color
+pub(super) fn clamp_current(color: Color) -> Color {
+    crate::rgb::color::limit_current(color, 600)
 }
 
 pub(super) fn mixed_color(first: Color, second: Color) -> Color {
@@ -87,10 +85,6 @@ pub(super) fn center_order(index: usize, pn: u8) -> usize {
 
 pub(super) fn brightness(effect: &RgbEffect) -> u16 {
     [0, 64, 128, 192, 255][effect.brightness as usize]
-}
-
-pub(super) fn scale(color: Color, factor: u16) -> Color {
-    color.map(|channel| ((u16::from(channel) * factor) >> 8) as u8)
 }
 
 pub(super) fn place(

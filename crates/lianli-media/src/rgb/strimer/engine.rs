@@ -1,3 +1,4 @@
+pub(super) use crate::rgb::color::scale_byte as scale;
 use anyhow::{bail, Result};
 use lianli_shared::rgb::{is_brightness_off, RgbEffect, RgbScope};
 
@@ -76,15 +77,8 @@ pub(super) fn colors(effect: &RgbEffect) -> [Color; 6] {
     colors
 }
 
-fn clamp(mut color: Color) -> Color {
-    while color.iter().map(|&channel| u16::from(channel)).sum::<u16>() > 600 {
-        color = color.map(|channel| (f64::from(channel) * 0.95) as u8);
-    }
-    color
-}
-
-pub(super) fn scale(color: Color, value: u8) -> Color {
-    color.map(|channel| ((u16::from(channel) * u16::from(value)) >> 8) as u8)
+fn clamp(color: Color) -> Color {
+    crate::rgb::color::limit_current(color, 600)
 }
 
 pub(super) fn frame(geometry: Geometry) -> Frame {

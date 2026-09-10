@@ -1,3 +1,4 @@
+use crate::rgb::color::scale;
 const PULSE: [u16; 19] = [
     5, 30, 55, 80, 105, 130, 160, 190, 220, 255, 220, 190, 160, 130, 105, 80, 55, 30, 5,
 ];
@@ -196,7 +197,7 @@ const SINGLE_SPARKS: &[(usize, usize)] = &[
     (164, 93),
 ];
 
-pub(super) const FAN_COLORS: [usize; 174] = [
+pub(crate) const FAN_COLORS: [usize; 174] = [
     1, 0, 2, 3, 1, 2, 1, 0, 2, 3, 0, 3, 1, 0, 1, 2, 0, 2, 1, 0, 3, 1, 3, 0, 1, 0, 2, 0, 1, 3, 1, 2,
     3, 1, 2, 1, 0, 2, 1, 2, 0, 2, 0, 1, 3, 0, 2, 3, 1, 0, 1, 2, 3, 0, 1, 2, 1, 3, 0, 3, 2, 1, 0, 3,
     0, 2, 1, 0, 3, 0, 1, 2, 0, 3, 2, 1, 0, 1, 2, 3, 0, 1, 2, 1, 3, 2, 1, 0, 1, 3, 2, 0, 2, 1, 0, 1,
@@ -205,7 +206,7 @@ pub(super) const FAN_COLORS: [usize; 174] = [
     0, 1, 3, 0, 1, 3, 2, 0, 1, 3, 0, 2, 1, 0,
 ];
 
-pub(super) const STRIMER_COLORS: [usize; 174] = [
+pub(crate) const STRIMER_COLORS: [usize; 174] = [
     1, 0, 5, 3, 4, 2, 1, 0, 2, 5, 0, 3, 1, 5, 4, 2, 0, 2, 1, 5, 3, 4, 3, 0, 1, 4, 2, 0, 1, 5, 1, 4,
     3, 4, 2, 1, 0, 4, 5, 2, 0, 2, 0, 1, 3, 4, 2, 5, 1, 0, 4, 2, 5, 0, 5, 2, 1, 3, 4, 3, 5, 1, 0, 5,
     4, 2, 1, 5, 3, 0, 1, 5, 0, 3, 2, 5, 4, 1, 2, 3, 0, 4, 2, 1, 3, 5, 4, 0, 1, 3, 2, 4, 2, 1, 0, 1,
@@ -214,7 +215,7 @@ pub(super) const STRIMER_COLORS: [usize; 174] = [
     0, 1, 3, 5, 1, 3, 2, 0, 1, 3, 5, 2, 4, 0,
 ];
 
-pub(super) fn render(
+pub(crate) fn render(
     led_count: usize,
     colors: &[[u8; 3]],
     color_indices: &[usize],
@@ -248,8 +249,4 @@ pub(super) fn render(
         }
     }
     frames
-}
-
-fn scale(color: [u8; 3], level: u16) -> [u8; 3] {
-    color.map(|channel| ((u16::from(channel) * level) >> 8) as u8)
 }

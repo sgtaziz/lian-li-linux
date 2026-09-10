@@ -1,3 +1,4 @@
+pub(super) use crate::rgb::color::scale;
 use anyhow::{ensure, Result};
 use lianli_shared::rgb::RgbEffect;
 
@@ -12,6 +13,11 @@ pub(super) enum Side {
 impl Side {
     pub fn leds_per_track(self) -> usize {
         13
+    }
+
+    pub fn mirrored_track_len(self, fans: usize) -> usize {
+        // Mirrored effects pad odd tracks; physical projection drops the extra LED.
+        (fans * self.leds_per_track()).next_multiple_of(2)
     }
 }
 
@@ -57,19 +63,12 @@ fn palette_with_defaults(effect: &RgbEffect, defaults: [Color; 4]) -> [Color; 4]
     }
 }
 
-pub(super) fn clamp_current(mut color: Color) -> Color {
-    while color.iter().map(|&channel| u16::from(channel)).sum::<u16>() > 600 {
-        color = color.map(|channel| (f64::from(channel) * 0.95) as u8);
-    }
-    color
+pub(super) fn clamp_current(color: Color) -> Color {
+    crate::rgb::color::limit_current(color, 600)
 }
 
 pub(super) fn brightness(effect: &RgbEffect) -> u16 {
     [0, 64, 128, 192, 255][effect.brightness as usize]
-}
-
-pub(super) fn scale(color: Color, factor: u16) -> Color {
-    color.map(|channel| ((u16::from(channel) * factor) >> 8) as u8)
 }
 
 pub(super) fn place(track: &[Color], side: Side, fans: usize) -> Vec<Color> {

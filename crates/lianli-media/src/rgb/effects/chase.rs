@@ -1,17 +1,13 @@
-type Color = [u8; 3];
+use crate::rgb::color::{scale, Color};
 
-fn scale(color: Color, value: u16) -> Color {
-    color.map(|channel| ((u16::from(channel) * value) >> 8) as u8)
-}
-
-pub(super) const METEOR_TAILS: [&[u16]; 4] = [
+pub(crate) const METEOR_TAILS: [&[u16]; 4] = [
     &[32, 255],
     &[16, 64, 128, 255],
     &[8, 16, 32, 64, 128, 255],
     &[6, 10, 16, 32, 64, 96, 168, 255],
 ];
 
-pub(super) fn runway(
+pub(crate) fn runway(
     len: usize,
     head: usize,
     colors: [Color; 2],
@@ -40,7 +36,7 @@ pub(super) fn runway(
     frames
 }
 
-pub(super) fn meteor(
+pub(crate) fn meteor(
     len: usize,
     colors: &[Color],
     tail: &[u16],
@@ -67,6 +63,33 @@ pub(super) fn meteor(
                 } else {
                     position
                 }] = color;
+            }
+            frames.push(project(&track));
+        }
+    }
+    frames
+}
+
+pub(crate) fn ping_pong(
+    len: usize,
+    fans: usize,
+    colors: [Color; 2],
+    project: impl Fn(&[Color]) -> Vec<Color>,
+) -> Vec<Vec<Color>> {
+    let span = len + fans;
+    let mut frames = Vec::with_capacity(span * 2);
+    for (pass, color) in colors.iter().take(2).enumerate() {
+        for step in 0..span {
+            let mut track = vec![[0; 3]; len];
+            for position in 0..len {
+                if position <= step && position + 2 * fans > step {
+                    let target = if pass == 0 {
+                        position
+                    } else {
+                        len - position - 1
+                    };
+                    track[target] = *color;
+                }
             }
             frames.push(project(&track));
         }

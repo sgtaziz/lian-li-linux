@@ -3,7 +3,7 @@ use lianli_shared::rgb::{RgbDirection, RgbEffect};
 
 pub(super) fn runway(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
     let colors = palette(effect, side).map(|color| scale(color, brightness(effect)));
-    crate::rgb::track_effects::runway(
+    crate::rgb::effects::chase::runway(
         fans * side.leds_per_track(),
         2 * fans,
         [colors[0], colors[1]],
@@ -12,10 +12,10 @@ pub(super) fn runway(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Col
 }
 
 pub(super) fn meteor(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    crate::rgb::track_effects::meteor(
+    crate::rgb::effects::chase::meteor(
         fans * side.leds_per_track(),
         &palette(effect, side),
-        crate::rgb::track_effects::METEOR_TAILS[fans - 1],
+        crate::rgb::effects::chase::METEOR_TAILS[fans - 1],
         brightness(effect),
         matches!(effect.direction, RgbDirection::CounterClockwise),
         |track| place(track, side, fans),

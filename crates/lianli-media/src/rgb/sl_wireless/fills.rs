@@ -6,55 +6,14 @@ pub(super) fn mixing(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Col
     let mixed = clamp_current(std::array::from_fn(|channel| {
         colors[0][channel].saturating_add(colors[1][channel])
     }));
-    let bright = brightness(effect);
-    let half = fans * side.leds_per_track() / 2;
-    let span = half + 2 * fans - 1;
-    let mut delay = 0;
-    let mut frames = Vec::new();
-    for phase in 0..3 {
-        let mut step = 0;
-        while step < span {
-            if delay < 10 {
-                delay += 1;
-                step = 0;
-            }
-            let mut track = vec![[0; 3]; half * 2];
-            for position in 0..half {
-                let blended =
-                    (phase == 1 && position < step) || (phase == 2 && position + 2 * fans > step);
-                let moving = position < step && position + 2 * fans > step;
-                let first = if blended {
-                    mixed
-                } else if moving {
-                    colors[0]
-                } else {
-                    [0; 3]
-                };
-                let second = if blended {
-                    mixed
-                } else if moving {
-                    colors[if phase == 0 { 1 } else { 2 }]
-                } else {
-                    [0; 3]
-                };
-                let first_target = if phase == 0 {
-                    position
-                } else {
-                    half - position - 1
-                };
-                let second_target = if phase == 0 {
-                    half - position - 1
-                } else {
-                    position
-                };
-                track[first_target] = scale(first, bright);
-                track[half + second_target] = scale(second, bright);
-            }
-            frames.push(place(&track, side, fans));
-            step += if phase == 0 { 1 } else { 2 };
-        }
-    }
-    frames
+    crate::rgb::effects::fills::mixing(
+        fans * side.leds_per_track(),
+        2 * fans,
+        colors,
+        mixed,
+        brightness(effect),
+        |track| place(track, side, fans),
+    )
 }
 
 pub(super) fn render_effect(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
@@ -107,68 +66,25 @@ pub(super) fn render_effect(effect: &RgbEffect, fans: usize, side: Side) -> Vec<
 }
 
 pub(super) fn ping_pong(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    let len = fans * side.leds_per_track();
-    let span = len + fans;
     let colors = palette(effect, side).map(|color| scale(color, brightness(effect)));
-    let mut frames = Vec::with_capacity(span * 2);
-    for (pass, color) in colors.iter().take(2).enumerate() {
-        for step in 0..span {
-            let mut track = vec![[0; 3]; len];
-            for position in 0..len {
-                if position <= step && position + 2 * fans > step {
-                    let target = if pass == 0 {
-                        position
-                    } else {
-                        len - position - 1
-                    };
-                    track[target] = *color;
-                }
-            }
-            frames.push(place(&track, side, fans));
-        }
-    }
-    frames
+    crate::rgb::effects::chase::ping_pong(
+        fans * side.leds_per_track(),
+        fans,
+        [colors[0], colors[1]],
+        |track| place(track, side, fans),
+    )
 }
 
 pub(super) fn stack(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    let len = fans * side.leds_per_track();
-    let width = if matches!(side, Side::Outer) { 2 } else { 3 };
     let colors = palette(effect, side).map(|color| scale(color, brightness(effect)));
-    let reverse = matches!(effect.direction, RgbDirection::CounterClockwise);
-    let mut source = Vec::new();
-    let mut track = vec![[0; 3]; len];
-    for color in colors {
-        let mut stacked = 0;
-        for _ in 0..4 * fans {
-            for step in 0..len - stacked {
-                for position in 0..len - stacked {
-                    let target = if reverse {
-                        len - position - 1
-                    } else {
-                        position
-                    };
-                    track[target] = if position <= step && position + width > step {
-                        color
-                    } else {
-                        [0; 3]
-                    };
-                }
-                source.push(place(&track, side, fans));
-            }
-            stacked += width;
-        }
-        for step in 0..len {
-            for position in 0..len {
-                let target = if reverse {
-                    len - position - 1
-                } else {
-                    position
-                };
-                track[target] = if position > step { color } else { [0; 3] };
-            }
-            source.push(place(&track, side, fans));
-        }
-    }
+    let source = crate::rgb::effects::fills::stack(
+        fans * side.leds_per_track(),
+        if matches!(side, Side::Outer) { 2 } else { 3 },
+        4 * fans,
+        colors,
+        effect.direction == RgbDirection::CounterClockwise,
+        |track| place(track, side, fans),
+    );
     source.into_iter().step_by(2).collect()
 }
 

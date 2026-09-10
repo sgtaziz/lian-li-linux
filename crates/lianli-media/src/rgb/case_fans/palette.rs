@@ -1,3 +1,4 @@
+pub(crate) use crate::rgb::color::scale_byte as scale;
 use lianli_shared::rgb::RgbEffect;
 
 pub(crate) type Color = [u8; 3];
@@ -20,13 +21,6 @@ pub(crate) fn palettes(effect: &RgbEffect) -> [[Color; 4]; 4] {
     colors
 }
 
-fn clamp_color(mut color: Color) -> Color {
-    while color.iter().map(|&channel| u16::from(channel)).sum::<u16>() > 600 {
-        color = color.map(|channel| (f64::from(channel) * 0.95) as u8);
-    }
-    color
-}
-
-pub(crate) fn scale(color: Color, value: u8) -> Color {
-    color.map(|channel| ((u16::from(channel) * u16::from(value)) >> 8) as u8)
+fn clamp_color(color: Color) -> Color {
+    crate::rgb::color::limit_current(color, 600)
 }

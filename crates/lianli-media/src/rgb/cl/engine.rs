@@ -1,3 +1,4 @@
+pub(crate) use crate::rgb::color::scale;
 use anyhow::{ensure, Result};
 use lianli_shared::rgb::{is_brightness_off, RgbEffect};
 
@@ -61,11 +62,8 @@ fn palette_with_defaults(effect: &RgbEffect, mut colors: [Color; 4]) -> [Color; 
     colors
 }
 
-pub(crate) fn clamp_current(mut color: Color) -> Color {
-    while color.iter().map(|&channel| u16::from(channel)).sum::<u16>() > 600 {
-        color = color.map(|channel| (f64::from(channel) * 0.95) as u8);
-    }
-    color
+pub(crate) fn clamp_current(color: Color) -> Color {
+    crate::rgb::color::limit_current(color, 600)
 }
 
 pub(crate) fn mixed_color(first: Color, second: Color) -> Color {
@@ -82,10 +80,6 @@ pub(crate) fn brightness(effect: &RgbEffect) -> u16 {
     } else {
         [0, 64, 128, 192, 255][effect.brightness as usize]
     }
-}
-
-pub(crate) fn scale(color: Color, factor: u16) -> Color {
-    color.map(|channel| ((u16::from(channel) * factor) >> 8) as u8)
 }
 
 pub(crate) fn place(track: &[Color], plane: Plane, fans: usize) -> Vec<Color> {

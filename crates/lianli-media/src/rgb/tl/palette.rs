@@ -3,9 +3,7 @@ use lianli_shared::rgb::{RgbEffect, RgbMode};
 pub(super) fn prepare(effect: &RgbEffect, bottom: bool) -> RgbEffect {
     let mut prepared = effect.clone();
     for color in &mut prepared.colors {
-        while color.iter().map(|&channel| u16::from(channel)).sum::<u16>() > 600 {
-            *color = color.map(|channel| (f64::from(channel) * 0.95) as u8);
-        }
+        *color = crate::rgb::color::limit_current(*color, 600);
     }
     if matches!(
         effect.mode,

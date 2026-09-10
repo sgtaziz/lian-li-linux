@@ -1,31 +1,10 @@
-use lianli_shared::rgb::RgbEffect;
+pub(super) use crate::rgb::color::scale_byte as scale;
+pub(super) use crate::rgb::color::{active_palette as variable_palette, screen_palette as palette};
 
 pub(super) type Color = [u8; 3];
 
 pub(super) const ACTIVE_LEDS: usize = 35;
 pub(super) const TOTAL_LEDS: usize = 45;
-
-pub(super) fn palette(effect: &RgbEffect) -> [Color; 6] {
-    // Older configurations allowed incomplete palettes; missing slots are not intentional black.
-    let mut colors = [effect.colors.last().copied().unwrap_or([0; 3]); 6];
-    for (target, source) in colors.iter_mut().zip(&effect.colors) {
-        *target = *source;
-    }
-    colors
-}
-
-pub(super) fn variable_palette(effect: &RgbEffect, limit: usize) -> &[Color] {
-    const BLACK: [Color; 1] = [[0; 3]];
-    if effect.colors.is_empty() {
-        &BLACK
-    } else {
-        &effect.colors[..effect.colors.len().min(limit)]
-    }
-}
-
-pub(super) fn scale(color: Color, value: u8) -> Color {
-    color.map(|channel| ((u16::from(channel) * u16::from(value)) >> 8) as u8)
-}
 
 pub(super) fn frame() -> Vec<Color> {
     vec![[0; 3]; TOTAL_LEDS]

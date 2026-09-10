@@ -1,8 +1,13 @@
+//! `family` dispatches to device renderers; `effects` contains shared logical animations.
+//! Device modules own LED mappings, palette defaults, and playback timing; `color` owns color math.
+
 pub mod animation;
 #[cfg(test)]
 mod capability_tests;
 mod case_fans;
 pub mod cl;
+mod color;
+mod effects;
 pub mod family;
 pub mod h2;
 pub mod hs2_oled;
@@ -19,8 +24,6 @@ pub mod strimer;
 pub mod sync_effects;
 pub mod sync_layout;
 pub mod tl;
-mod track_effects;
-mod twinkle_pattern;
 pub mod universal;
 pub use animation::{Animation, SecondaryTiming};
 

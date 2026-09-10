@@ -1,5 +1,5 @@
 use super::engine::{brightness, palette_all, Color, Side};
-use crate::rgb::twinkle_pattern;
+use crate::rgb::effects::twinkle as twinkle_pattern;
 use lianli_shared::rgb::RgbEffect;
 
 pub(super) fn render(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {

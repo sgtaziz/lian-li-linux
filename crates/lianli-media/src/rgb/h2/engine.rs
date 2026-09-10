@@ -1,3 +1,4 @@
+pub(super) use crate::rgb::color::scale_byte as scale;
 use lianli_shared::rgb::RgbEffect;
 
 pub(super) type Color = [u8; 3];
@@ -12,15 +13,8 @@ pub(super) fn palette(effect: &RgbEffect) -> [Color; 4] {
     colors
 }
 
-fn clamp_color(mut color: Color) -> Color {
-    while color.iter().map(|&channel| u16::from(channel)).sum::<u16>() > 570 {
-        color = color.map(|channel| (f64::from(channel) * 0.95) as u8);
-    }
-    color
-}
-
-pub(super) fn scale(color: Color, value: u8) -> Color {
-    color.map(|channel| ((u16::from(channel) * u16::from(value)) >> 8) as u8)
+fn clamp_color(color: Color) -> Color {
+    crate::rgb::color::limit_current(color, 570)
 }
 
 pub(super) fn frame() -> Vec<Color> {

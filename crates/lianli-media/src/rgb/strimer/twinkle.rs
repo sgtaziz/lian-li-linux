@@ -1,5 +1,5 @@
 use super::engine::{Color, Frame, Geometry};
-use crate::rgb::twinkle_pattern;
+use crate::rgb::effects::twinkle as twinkle_pattern;
 
 pub(super) fn twinkle(geometry: Geometry, colors: &[Color; 6], brightness: u8) -> Vec<Frame> {
     twinkle_pattern::render(

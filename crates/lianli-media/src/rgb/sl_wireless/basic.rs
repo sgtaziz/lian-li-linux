@@ -55,65 +55,34 @@ pub(super) fn rainbow_color(index: usize, table_len: usize) -> Color {
 }
 
 pub(super) fn rainbow_morph(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    let track_len = fans * side.leds_per_track();
-    let bright = brightness(effect);
-    let mut red = 255u8;
-    let mut green = 0u8;
-    let mut blue = 0u8;
-    let mut source = Vec::with_capacity(255);
-    for frame in 0..255 {
-        source.push(place(
-            &vec![scale([red, green, blue], bright); track_len],
-            side,
-            fans,
-        ));
-        if frame < 85 {
-            red = red.wrapping_sub(3);
-            green = green.wrapping_add(3);
-            blue = 0;
-        } else if frame < 170 {
-            red = 0;
-            green = green.wrapping_sub(3);
-            blue = blue.wrapping_add(3);
-        } else {
-            red = red.wrapping_add(3);
-            green = 0;
-            blue = blue.wrapping_sub(3);
-        }
-    }
-    source.into_iter().step_by(2).take(127).collect()
+    crate::rgb::effects::basic::rainbow_morph(
+        fans * side.leds_per_track(),
+        brightness(effect),
+        |track| place(track, side, fans),
+    )
+    .into_iter()
+    .step_by(2)
+    .take(127)
+    .collect()
 }
 
 pub(super) fn static_color(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    let colors = palette(effect, side);
-    let bright = brightness(effect);
-    let per_fan = side.leds_per_track();
-    let mut track = Vec::with_capacity(fans * per_fan);
-    for color in colors.iter().take(fans) {
-        track.extend(std::iter::repeat_n(scale(*color, bright), per_fan));
-    }
-    vec![place(&track, side, fans); 30]
+    let frames = crate::rgb::effects::basic::static_color(
+        &palette(effect, side)[..fans],
+        side.leds_per_track(),
+        brightness(effect),
+        |track| place(track, side, fans),
+    );
+    vec![frames[0].clone(); 30]
 }
 
 pub(super) fn breathing(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    let colors = palette(effect, side);
-    let bright = brightness(effect);
-    let per_fan = side.leds_per_track();
-    let mut level = 0u32;
-    let mut frames = Vec::with_capacity(170);
-    for frame in 0..170 {
-        let intensity = ((level * 3) & 0xff) as u16;
-        let mut track = Vec::with_capacity(fans * per_fan);
-        for color in colors.iter().take(fans) {
-            track.extend(std::iter::repeat_n(
-                scale(scale(*color, intensity), bright),
-                per_fan,
-            ));
-        }
-        frames.push(place(&track, side, fans));
-        level = if frame >= 85 { level - 1 } else { level + 1 };
-    }
-    frames
+    crate::rgb::effects::basic::breathing(
+        &palette(effect, side)[..fans],
+        side.leds_per_track(),
+        brightness(effect),
+        |track| place(track, side, fans),
+    )
 }
 
 #[cfg(test)]

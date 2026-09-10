@@ -13,7 +13,7 @@ pub(super) fn render(effect: &RgbEffect, fans: usize, bottom: bool) -> Result<Ve
         effect.colors.get(1).copied().unwrap_or([0; 3]),
     ]
     .map(|color| scale(color, effect.brightness));
-    Ok(crate::rgb::track_effects::runway(
+    Ok(crate::rgb::effects::chase::runway(
         fans * 13,
         2 * fans,
         colors,
