@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 // MasterDevice.LzoMaxRgbDataLen and lzo_rgb_rf_valid_len in the vendor RF uploader.
 const MAX_COMPRESSED_BYTES: usize = 12_288;
 const CHUNK_BYTES: usize = 220;
-const MAX_FRAMES: usize = 2048;
+const MAX_FRAMES: usize = lianli_shared::rgb::MAX_RGB_ANIMATION_FRAMES;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WirelessRgbUpload {
@@ -419,12 +419,12 @@ mod tests {
 
     #[test]
     fn accepts_long_native_loops_without_decimating_frames() {
-        let frames = vec![vec![[5, 6, 7]; 174]; 2048];
+        let frames = vec![vec![[5, 6, 7]; 174]; 4096];
         let upload = WirelessRgbUpload::new(&frames, 50, None).unwrap();
-        assert_eq!(upload.frame_count(), 2048);
+        assert_eq!(upload.frame_count(), 4096);
         let header = upload.packet(&[1; 6], &[2; 6], 0);
-        assert_eq!(&header[25..27], &[8, 0]);
-        assert!(WirelessRgbUpload::new(&vec![vec![[0; 3]; 1]; 2049], 50, None).is_err());
+        assert_eq!(&header[25..27], &[16, 0]);
+        assert!(WirelessRgbUpload::new(&vec![vec![[0; 3]; 1]; 4097], 50, None).is_err());
     }
 
     #[test]

@@ -95,7 +95,8 @@ pub fn render(effect: &RgbEffect, logical_leds: usize) -> Result<Animation> {
     }
     if effect.mode == RgbMode::Stack {
         ensure!(
-            modes_7_12::stack_frame_count(logical_leds) <= 4096,
+            modes_7_12::stack_frame_count(logical_leds)
+                <= lianli_shared::rgb::MAX_RGB_ANIMATION_FRAMES,
             "sync lighting Stack exceeds the source 4096-frame buffer"
         );
     }

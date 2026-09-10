@@ -1,7 +1,7 @@
 //! RGB/LED effect types shared between daemon, devices, and GUI.
 
 pub mod profile;
-pub use profile::{RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile};
+pub use profile::{RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, MAX_RGB_ANIMATION_FRAMES};
 
 use crate::device_id::DeviceFamily;
 use serde::{Deserialize, Serialize};

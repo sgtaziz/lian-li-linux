@@ -185,8 +185,9 @@ impl RgbController {
                 }
             }
             ensure!(
-                !animation.frames.is_empty() && animation.frames.len() <= 2048,
-                "RGB sync animation exceeds the 2048-frame playback capacity for {id}"
+                !animation.frames.is_empty()
+                    && animation.frames.len() <= lianli_shared::rgb::MAX_RGB_ANIMATION_FRAMES,
+                "RGB sync animation exceeds the playback frame capacity for {id}"
             );
             if let Some(wireless_device) = self.wireless_state.get(&id) {
                 let wireless = self

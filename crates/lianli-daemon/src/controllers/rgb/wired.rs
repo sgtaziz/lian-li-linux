@@ -172,7 +172,7 @@ impl WiredRenderer {
         clock: Option<Arc<super::sync_clock::SyncClock>>,
     ) -> Result<()> {
         ensure!(
-            !frames.is_empty() && frames.len() <= 2048,
+            !frames.is_empty() && frames.len() <= lianli_shared::rgb::MAX_RGB_ANIMATION_FRAMES,
             "invalid software RGB frame count"
         );
         ensure!(

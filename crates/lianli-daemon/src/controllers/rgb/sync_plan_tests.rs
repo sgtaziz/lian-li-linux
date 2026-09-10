@@ -2,6 +2,32 @@ use super::*;
 use lianli_shared::rgb::{RgbRenderFamily as Family, RgbRenderProfile};
 
 #[test]
+fn source_capacity_stack_survives_projection_and_upload_preparation() {
+    let effect = RgbEffect {
+        mode: RgbMode::Stack,
+        colors: vec![[120, 30, 50]],
+        ..Default::default()
+    };
+    let animation = sync_effects::render(&effect, 307).unwrap();
+    assert_eq!(animation.frames.len(), 4082);
+    let layout = Layout::for_profile(RgbRenderProfile {
+        family: Family::Tl,
+        fan_count: 1,
+        led_count: 26,
+        right_attach: false,
+    })
+    .unwrap();
+    let frames = animation
+        .frames
+        .iter()
+        .map(|frame| layout.project_frame(frame, 0..13, false).unwrap())
+        .collect::<Vec<_>>();
+    let upload = WirelessRgbUpload::with_timing(&frames, animation.timing(), None).unwrap();
+    assert_eq!(upload.frame_count(), 4082);
+    assert!(sync_effects::render(&effect, 308).is_err());
+}
+
+#[test]
 fn native_sync_modes_cover_every_software_family() {
     for (family, fan_count, led_count) in [
         (Family::Tl, 3, 78),
