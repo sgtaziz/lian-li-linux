@@ -18,6 +18,8 @@ const TICK_INTERVAL: Duration = Duration::from_millis(100);
 const RGB_CONTROL_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_PENDING_COMMANDS: usize = 256;
 
+pub(super) type BindingMac = Arc<Mutex<Option<[u8; 6]>>>;
+
 pub(super) type RgbTargets = Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>;
 
 /// How a pending command is acknowledged. Different RF command types use
@@ -78,6 +80,10 @@ impl WirelessController {
             rf_data.len() == RF_DATA_SIZE,
             "invalid wireless command length"
         );
+        ensure!(
+            !binding_blocks_control(&self.binding_mac, &self.device_health, &device.mac),
+            "wireless binding change prevents this control command"
+        );
         let queue = self
             .pending_commands
             .as_ref()
@@ -124,8 +130,9 @@ impl WirelessController {
         queue: PendingQueue,
         health_map: DeviceHealthMap,
         rgb_targets: RgbTargets,
+        binding_mac: BindingMac,
         stop: Arc<AtomicBool>,
-    ) -> thread::JoinHandle<()> {
+    ) -> Result<thread::JoinHandle<()>> {
         thread::Builder::new()
             .name("wireless-convergence".into())
             .spawn(move || {
@@ -133,7 +140,7 @@ impl WirelessController {
                 while !stop.load(Ordering::SeqCst) {
                     let tick_start = Instant::now();
 
-                    drain_pending(&tx, &queue, &health_map, &rgb_targets, &stop);
+                    drain_pending(&tx, &queue, &health_map, &rgb_targets, &binding_mac, &stop);
 
                     let elapsed = tick_start.elapsed();
                     if elapsed < TICK_INTERVAL {
@@ -142,7 +149,7 @@ impl WirelessController {
                 }
                 debug!("wireless convergence loop stopped");
             })
-            .expect("spawning convergence thread")
+            .context("spawning wireless convergence thread")
     }
 }
 
@@ -158,6 +165,7 @@ fn drain_pending(
     queue: &PendingQueue,
     health_map: &DeviceHealthMap,
     rgb_targets: &RgbTargets,
+    binding_mac: &BindingMac,
     stop: &Arc<AtomicBool>,
 ) {
     if lianli_transport::usb::shutting_down() {
@@ -217,6 +225,9 @@ fn drain_pending(
             }
             cmd.last_sent = now;
             let handle = tx.lock();
+            if binding_blocks_control(binding_mac, health_map, &cmd.mac) {
+                continue;
+            }
             if superseded_command(&queue.lock(), &cmd) {
                 continue;
             }
@@ -236,6 +247,10 @@ fn drain_pending(
             warn!(mac = ?cmd.mac, operation = %cmd.description, "Wireless command retry discarded because the queue is full");
         }
     }
+}
+
+fn binding_blocks_control(binding: &BindingMac, health: &DeviceHealthMap, mac: &[u8; 6]) -> bool {
+    *binding.lock() == Some(*mac) || health.lock().get(mac).is_some_and(|h| h.man_unbind)
 }
 
 fn retry_due(elapsed: Duration, changing_rgb: bool, acknowledgement: &AckSignal) -> bool {
@@ -302,10 +317,13 @@ fn send_rf_frame(handle: &RusbBulk, channel: &u8, rx_type: &u8, rf_data: &[u8]) 
 /// Check whether the device's reported PWM values match the target. Allows a
 /// tolerance of 5 because the device rounds to its nearest internal step.
 fn pwm_acked(reported: &[u8; 4], target: &[u8; 4]) -> bool {
-    reported
-        .iter()
-        .zip(target.iter())
-        .all(|(r, t)| r.abs_diff(*t) <= 5 || (*t <= 10 && *r == *t))
+    reported.iter().zip(target.iter()).all(|(r, t)| {
+        if *t <= 10 {
+            *r == *t
+        } else {
+            r.abs_diff(*t) <= 5
+        }
+    })
 }
 
 #[cfg(test)]

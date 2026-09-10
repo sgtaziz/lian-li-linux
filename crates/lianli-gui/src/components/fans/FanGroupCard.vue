@@ -63,11 +63,15 @@ function decodeMode(value: string): FanSpeed {
 
 // Speed mode dropdown options: Off / curve names / Constant PWM / MB Sync.
 const modeOptions = computed(() => {
-  const opts: { label: string; value: string }[] = [
+  const opts: { label: string; value: string; disabled?: boolean }[] = [
     { label: "Off", value: "off" },
     ...props.curveNames.map((n) => ({ label: `Curve: ${n}`, value: `curve:${n}` })),
     { label: "Constant PWM", value: "constant" },
-    { label: "MB Sync", value: "__mb_sync__" },
+    {
+      label: "MB Sync",
+      value: MB_SYNC_KEY,
+      disabled: !props.device.mb_sync_support && !props.pwmHeaders.length,
+    },
   ];
   return opts;
 });
@@ -91,9 +95,12 @@ function modeOf(slot: number): string {
 
 function onMode(slot: number, value: string) {
   if (value === "__mb_sync__") {
-    // Port-wide: every fan on this port becomes MB Sync.
-    // Preserve any existing PWM source, default to bare __mb_sync__.
-    setAllSlots(MB_SYNC_KEY);
+    if (props.device.mb_sync_support) {
+      setAllSlots(MB_SYNC_KEY);
+    } else {
+      const source = currentPwmSource.value || props.pwmHeaders[0]?.id;
+      if (source) setAllSlots(`${MB_SYNC_PREFIX}${source}`);
+    }
     return;
   }
   const decoded = decodeMode(value);
@@ -169,9 +176,14 @@ function setPwm(slot: number, v: number) {
       </div>
     </div>
 
-    <!-- PWM source picker: only for devices without hardware MB sync (e.g. wireless) -->
-    <div v-if="groupIsMbSync() && !device.mb_sync_support && pwmHeaderOptions.length" class="pwm-source-row">
+    <div
+      v-if="groupIsMbSync() && !device.mb_sync_support"
+      class="pwm-source-row"
+    >
       <label class="muted">PWM source</label>
+      <span class="muted">
+        Fans run at full speed if the selected source is unavailable.
+      </span>
       <n-select
         size="small"
         :value="currentPwmSource"

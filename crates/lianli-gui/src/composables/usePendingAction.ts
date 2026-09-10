@@ -6,20 +6,14 @@ const PENDING_TIMEOUT_MS = 10_000;
 interface PendingEntry {
   kind: PendingActionKind;
   startedAt: number;
+  awaitingResult: boolean;
 }
 
-/**
- * Tracks in-flight device actions (bind/unbind/display-mode switch/fan-qty).
- *
- * An entry is cleared when the daemon reports the expected state change or
- * after the 10s safety timeout — whichever comes first. Mirrors the Slint
- * GUI's `SharedState::pending_actions` semantics.
- */
 export function usePendingAction() {
   const pending = reactive<Record<string, PendingEntry>>({});
 
-  function set(deviceId: string, kind: PendingActionKind) {
-    pending[deviceId] = { kind, startedAt: Date.now() };
+  function set(deviceId: string, kind: PendingActionKind, awaitingResult = false) {
+    pending[deviceId] = { kind, startedAt: Date.now(), awaitingResult };
   }
 
   function clear(deviceId: string) {
@@ -35,6 +29,7 @@ export function usePendingAction() {
     const now = Date.now();
     const present = new Set(deviceIds);
     for (const [key, entry] of Object.entries(pending)) {
+      if (entry.awaitingResult) continue;
       if (now - entry.startedAt >= PENDING_TIMEOUT_MS) {
         delete pending[key];
         continue;
@@ -50,6 +45,8 @@ export function usePendingAction() {
           break;
         }
         case "unbind":
+          if (!present.has(key)) delete pending[key];
+          break;
         case "switch":
           // clears once the device reappears (post-switch) — kept until then
           if (present.has(key)) delete pending[key];

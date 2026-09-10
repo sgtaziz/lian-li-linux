@@ -5,7 +5,7 @@ use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
@@ -332,6 +332,22 @@ fn commit_streak<T: Copy + Eq>(cand: &mut Option<(T, u32)>, observed: T) -> Opti
     }
 }
 
+pub(super) struct ReceiverState {
+    pub pwm: AtomicU16,
+    pub pages: AtomicU8,
+    pub fg_sync: AtomicBool,
+}
+
+impl Default for ReceiverState {
+    fn default() -> Self {
+        Self {
+            pwm: AtomicU16::new(0xFFFF),
+            pages: AtomicU8::new(1),
+            fg_sync: AtomicBool::new(false),
+        }
+    }
+}
+
 /// Polls the RX device for the current device list.
 ///
 /// Sends GetDev command (0x10) and parses the response into
@@ -342,22 +358,19 @@ pub(super) fn poll_and_discover(
     discovered_devices: &Arc<Mutex<Vec<DiscoveredDevice>>>,
     health_map: &DeviceHealthMap,
     master_entries: &MasterEntryMap,
-    mobo_pwm: &Arc<AtomicU16>,
-    fg_sync: &Arc<AtomicBool>,
+    receiver: &ReceiverState,
+    stop: &AtomicBool,
     master_mac: &Arc<Mutex<[u8; 6]>>,
 ) -> Result<()> {
     sweep(health_map, discovered_devices, master_mac);
 
-    let pages = {
-        let devices = discovered_devices.lock();
-        (devices.len().div_ceil(10).clamp(1, 2)) as u8
-    };
+    let pages = receiver.pages.load(Ordering::Relaxed).clamp(1, 26);
 
     let mut cmd = vec![0u8; 64];
     cmd[0] = USB_CMD_SEND_RF;
     cmd[1] = pages;
 
-    if fg_sync.load(Ordering::Relaxed) {
+    if receiver.fg_sync.load(Ordering::Relaxed) {
         let rpm = discovered_devices
             .lock()
             .iter()
@@ -369,45 +382,46 @@ pub(super) fn poll_and_discover(
         cmd[3] = (rpm & 0xFF) as u8;
     }
 
-    with_transport_recovery(rx, &RX_IDS, "RX", |handle| {
+    let mut response = [0u8; 26 * 512];
+    let len = with_transport_recovery(rx, &RX_IDS, "RX", stop, |handle| {
         handle.read_flush();
         handle
             .write(&cmd, USB_TIMEOUT)
             .context("sending GetDev command")?;
-        Ok(())
-    })?;
-    let handle = rx.lock();
-
-    let mut response = [0u8; 1024];
-    let len = handle.read_silence(
-        &mut response,
-        Duration::from_millis(100),
-        Duration::from_millis(10),
-    );
-
-    if len < 4 || response[0] != USB_CMD_SEND_RF {
-        debug!(
-            "GetDev: no usable response (len={len}, echo=0x{:02x}), retrying next poll",
-            response[0]
+        let len = handle.read_silence(
+            &mut response[..usize::from(pages) * 512],
+            Duration::from_millis(100),
+            Duration::from_millis(10),
         );
-        return Ok(());
-    }
+        validate_discovery_response(&response[..len], pages)?;
+        Ok(len)
+    });
+    let len = match len {
+        Ok(len) => len,
+        Err(error) => {
+            receiver.pwm.store(0xFFFF, Ordering::Relaxed);
+            return Err(error);
+        }
+    };
+    receiver
+        .pages
+        .store(discovery_page_count(response[1]), Ordering::Relaxed);
 
     {
-        let device_count = (response[1] as usize).min(12);
+        let device_count = usize::from(response[1]).min(usize::from(pages) * 10);
 
         let indicator = response[2];
         if indicator >> 7 == 1 {
-            mobo_pwm.store(0xFFFF, Ordering::Relaxed);
+            receiver.pwm.store(0xFFFF, Ordering::Relaxed);
         } else {
             let off_time = (indicator & 0x7F) as u16;
             let on_time = response[3] as u16;
             let denominator = off_time + on_time;
             if denominator > 0 {
                 let pwm = (255u16 * on_time / denominator).min(255);
-                mobo_pwm.store(pwm, Ordering::Relaxed);
+                receiver.pwm.store(pwm, Ordering::Relaxed);
             } else {
-                mobo_pwm.store(0xFFFF, Ordering::Relaxed);
+                receiver.pwm.store(0xFFFF, Ordering::Relaxed);
             }
         }
 
@@ -457,6 +471,23 @@ pub(super) fn poll_and_discover(
         }
     }
 
+    Ok(())
+}
+
+fn discovery_page_count(total: u8) -> u8 {
+    total.div_ceil(10).max(1)
+}
+
+fn validate_discovery_response(response: &[u8], pages: u8) -> Result<()> {
+    anyhow::ensure!(
+        response.len() >= 4 && response[0] == USB_CMD_SEND_RF,
+        "missing or invalid GetDev response"
+    );
+    let records = usize::from(response[1]).min(usize::from(pages) * 10);
+    anyhow::ensure!(
+        response.len() >= 4 + records * 42,
+        "truncated GetDev response"
+    );
     Ok(())
 }
 
@@ -601,9 +632,10 @@ fn rebuild_published_vec(
             .filter(|d| !d.bind_intent && d.master_mac != *local)
         {
             info!(
-                "  {} ({}) not bound to this dongle",
+                "  {} ({}) not bound to this dongle; reported master={:02x?}",
                 d.mac_str(),
-                d.fan_type.display_name()
+                d.fan_type.display_name(),
+                d.master_mac
             );
         }
     }
@@ -919,5 +951,34 @@ mod tests {
         assert_eq!(h.published.fan_rpms, [100, 200, 0, 0]);
         assert_eq!(h.raw_master, [7u8; 6]);
         assert_eq!(devices.lock().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+
+    #[test]
+    fn receiver_total_bootstraps_followup_pages_without_known_devices() {
+        let mut first = vec![0; 4 + 10 * 42];
+        first[0] = USB_CMD_SEND_RF;
+        first[1] = 23;
+        assert!(validate_discovery_response(&first, 1).is_ok());
+        let pages = discovery_page_count(first[1]);
+        assert_eq!(pages, 3);
+        assert!(validate_discovery_response(&first, pages).is_err());
+        first.resize(4 + 23 * 42, 0);
+        assert!(validate_discovery_response(&first, pages).is_ok());
+        assert_eq!(discovery_page_count(0), 1);
+        assert_eq!(discovery_page_count(255), 26);
+    }
+
+    #[test]
+    fn empty_scan_is_healthy_but_silence_wrong_echo_and_truncation_are_errors() {
+        assert!(validate_discovery_response(&[0x10, 0, 0x80, 0], 1).is_ok());
+        assert!(validate_discovery_response(&[], 1).is_err());
+        assert!(validate_discovery_response(&[0x10, 0, 0], 1).is_err());
+        assert!(validate_discovery_response(&[0x11, 0, 0, 0], 1).is_err());
+        assert!(validate_discovery_response(&[0x10, 1, 0, 0], 1).is_err());
     }
 }

@@ -308,14 +308,16 @@ fn fan_control_thread(
                 if let Some(ref device_id) = group.device_id {
                     if let Some(ref w) = wireless {
                         let mac_str = device_id.strip_prefix("wireless:").unwrap_or(device_id);
-                        let is_hw_sync = w
+                        let hw_sync_device = w
                             .devices()
                             .iter()
                             .find(|d| d.mac_str() == mac_str)
-                            .map(|d| d.fan_type.supports_hw_mobo_sync())
-                            .unwrap_or(false);
-                        if is_hw_sync {
-                            apply_wireless_by_id(&wireless, device_id, &[6, 6, 6, 6], group_idx);
+                            .filter(|d| d.fan_type.supports_hw_mobo_sync())
+                            .map(|d| d.mac);
+                        if let Some(mac) = hw_sync_device {
+                            if let Err(err) = w.set_hardware_pwm_sync(&mac) {
+                                warn!("Failed to enable hardware PWM sync for {device_id}: {err}");
+                            }
                             continue;
                         }
                     }
@@ -536,11 +538,7 @@ fn calculate_fan_speeds(
         pwm_values[i] = match fan_speed {
             FanSpeed::Constant(value) => *value,
             _ if fan_speed.is_mb_sync() => {
-                if let Some(source) = fan_speed.mb_sync_source() {
-                    lianli_shared::sensors::read_pwm_header(source).unwrap_or(0)
-                } else {
-                    0
-                }
+                software_sync_pwm(fan_speed, lianli_shared::sensors::read_pwm_header)
             }
             FanSpeed::Curve(curve_name) => {
                 let curve = curves
@@ -659,5 +657,27 @@ fn resolve_and_read(
             cache.remove(source);
             None
         }
+    }
+}
+
+fn software_sync_pwm(speed: &FanSpeed, read: impl FnOnce(&str) -> Option<u8>) -> u8 {
+    speed.mb_sync_source().and_then(read).unwrap_or(255)
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::*;
+
+    #[test]
+    fn missing_software_pwm_source_runs_full_speed() {
+        let missing: FanSpeed = serde_json::from_str("\"__mb_sync__\"").unwrap();
+        assert_eq!(
+            software_sync_pwm(&missing, |_| panic!("bare sync must not read a header")),
+            255
+        );
+        let selected: FanSpeed = serde_json::from_str("\"__mb_sync__:test-header\"").unwrap();
+        assert_eq!(software_sync_pwm(&selected, |_| Some(128)), 128);
+        assert_eq!(software_sync_pwm(&selected, |_| None), 255);
+        assert_eq!(software_sync_pwm(&selected, |_| Some(0)), 0);
     }
 }
