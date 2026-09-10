@@ -3,6 +3,46 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v0.9.0 — 2026-09-10
+
+### Chores
+- Add AGENTS.md file  (`ffbc7d8`)
+
+### Documentation
+- **changelog**: Regenerate for v0.8.12  ([#190](https://github.com/sgtaziz/lian-li-linux/pull/190))
+
+### Features
+- **rgb**: Add bounded effect rendering and wireless upload validation  (`ad2895a`)
+- **rgb**: Expose verified wired frame delivery paths  (`0becbad`)
+- **rgb**: Manage software effects across config and device lifecycles  (`a66acc4`)
+- **gui**: Expose device-supported software RGB effects  (`0c0d1a2`)
+- **rgb**: Implement device-specific lighting engines  (`61dbff4`)
+- **rgb**: Integrate regional effects across daemon and GUI  (`8022f93`)
+- **rgb**: Support dynamic screen palettes and TL direction controls  (`8943cab`)
+- **rgb**: Add cross-device sync and per-effect recall  (`9fc102b`)
+- **rgb**: Software rgb renderer  ([#194](https://github.com/sgtaziz/lian-li-linux/pull/194))
+
+### Fixes
+- **gui**: Use plain RGB effect names  (`fdc9d45`)
+- **rgb**: Preserve fractional wireless playback timing  (`902b39e`)
+- **rgb**: Align playback protocols and wireless transitions  (`9a9710d`)
+- **gui**: Prevent regional color pickers from collapsing  (`50e43bb`)
+- **rgb**: Preserve missing palette colors across screen and SL effects  (`ac4034a`)
+- **rgb**: Isolate sync failures and align Strimer timing  (`dcc5568`)
+- **rgb**: Retain full-length generated sync animations  (`3904832`)
+- **tl**: Preserve synced ports and expose per-fan effects  (`36e0292`)
+- **rgb**: Normalize Quick Sync palette roles  (`de01c79`)
+- **wireless**: Resend RGB animations after daemon restart  (`1422261`)
+- **wireless**: Restore sync and device recovery  (`e84717d`)
+- **wireless**: Require confirmed ownership for automatic rebind  (`f1e212b`)
+- **wireless**: Cancel discovery recovery during shutdown  (`627be82`)
+- **wireless**: Claim worker runtime across controller clones  (`07cf334`)
+- **wireless**: Improve sync, binding, and connection recovery  ([#195](https://github.com/sgtaziz/lian-li-linux/pull/195))
+
+### Refactoring
+- **rgb**: Share renderers and name effect modules  (`4a74321`)
+- **rgb**: Separate shared effects from device adapters  (`7d865a0`)
+
 ## v0.8.12 — 2026-09-07
 
 ### Documentation
