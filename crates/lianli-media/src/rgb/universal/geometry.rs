@@ -3,7 +3,8 @@ use lianli_shared::rgb::RgbEffect;
 pub(super) type Color = [u8; 3];
 
 pub(super) fn palette(effect: &RgbEffect) -> [Color; 6] {
-    let mut colors = [[0; 3]; 6];
+    // Older configurations allowed incomplete palettes; missing slots are not intentional black.
+    let mut colors = [effect.colors.last().copied().unwrap_or([0; 3]); 6];
     for (target, source) in colors.iter_mut().zip(&effect.colors) {
         *target = *source;
     }

@@ -2,6 +2,94 @@ use super::{family, parameters};
 use lianli_shared::rgb::{RgbEffect, RgbRegionConfig, RgbRenderFamily, RgbRenderProfile};
 
 #[test]
+fn every_screen_palette_effect_preserves_short_configuration_playback() {
+    use lianli_shared::rgb::RgbScope;
+    for (family, led_count) in [
+        (RgbRenderFamily::UniversalScreen, 60),
+        (RgbRenderFamily::UniversalScreen, 88),
+        (RgbRenderFamily::HydroShiftIIOled, 45),
+    ] {
+        let profile = RgbRenderProfile {
+            family,
+            led_count,
+            fan_count: 0,
+            right_attach: false,
+        };
+        for controls in parameters::for_scope(profile, RgbScope::All) {
+            assert_eq!(controls.min_colors, controls.max_colors);
+            for count in 1..controls.min_colors {
+                let mut region = RgbRegionConfig {
+                    effect: RgbEffect {
+                        mode: controls.mode,
+                        colors: vec![[23, 170, 91]; usize::from(count)],
+                        brightness: 4,
+                        ..Default::default()
+                    },
+                    flip: false,
+                };
+                let short = family::render(profile, &[region.clone()]).unwrap();
+                region
+                    .effect
+                    .colors
+                    .resize(usize::from(controls.min_colors), [23, 170, 91]);
+                let full = family::render(profile, &[region]).unwrap();
+                assert_eq!(
+                    short.frames, full.frames,
+                    "{family:?}/{:?}, {count} colors",
+                    controls.mode
+                );
+                assert_eq!(short.timing(), full.timing());
+            }
+        }
+    }
+}
+
+#[test]
+fn screen_wave_extends_legacy_palettes_without_inventing_black_slots() {
+    use lianli_shared::rgb::{RgbMode, RgbScope};
+    for (family, led_count) in [
+        (RgbRenderFamily::UniversalScreen, 60),
+        (RgbRenderFamily::UniversalScreen, 88),
+        (RgbRenderFamily::HydroShiftIIOled, 45),
+    ] {
+        let profile = RgbRenderProfile {
+            family,
+            led_count,
+            fan_count: 0,
+            right_attach: false,
+        };
+        let controls = parameters::for_scope(profile, RgbScope::All)
+            .into_iter()
+            .find(|controls| controls.mode == RgbMode::Wave)
+            .unwrap();
+        assert_eq!((controls.min_colors, controls.max_colors), (6, 6));
+        let mut region = RgbRegionConfig {
+            effect: RgbEffect {
+                mode: RgbMode::Wave,
+                colors: vec![[255, 0, 0]],
+                brightness: 4,
+                ..Default::default()
+            },
+            flip: false,
+        };
+        let legacy = family::render(profile, &[region.clone()]).unwrap();
+        region.effect.colors = vec![[255, 0, 0]; 6];
+        let full = family::render(profile, &[region.clone()]).unwrap();
+        assert_eq!(legacy.frames, full.frames);
+        assert!(legacy
+            .frames
+            .iter()
+            .all(|frame| frame.iter().any(|color| *color != [0; 3])));
+        region.effect.colors[5] = [0; 3];
+        let explicit_black = family::render(profile, &[region]).unwrap();
+        assert!(explicit_black
+            .frames
+            .iter()
+            .any(|frame| frame.iter().all(|color| *color == [0; 3])));
+    }
+}
+
+#[test]
 fn advertised_region_controls_produce_valid_native_layouts() {
     use RgbRenderFamily::*;
     for (family, fan_count, led_count) in [

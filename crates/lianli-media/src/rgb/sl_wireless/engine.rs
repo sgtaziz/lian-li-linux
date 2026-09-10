@@ -47,7 +47,7 @@ pub(super) fn palette_all(effect: &RgbEffect) -> [Color; 4] {
 }
 
 fn palette_with_defaults(effect: &RgbEffect, defaults: [Color; 4]) -> [Color; 4] {
-    let mut colors = [[0; 3]; 4];
+    let mut colors = defaults;
     let mut sum = 0u32;
     for (target, source) in colors.iter_mut().zip(&effect.colors) {
         *target = clamp_current(*source);
@@ -135,5 +135,19 @@ mod tests {
         effect.colors[2] = [255; 3];
         assert_eq!(palette(&effect, Side::Outer)[2], [195; 3]);
         assert_eq!(palette(&effect, Side::Outer)[0], [0; 3]);
+    }
+
+    #[test]
+    fn short_palettes_keep_the_unassigned_native_colors() {
+        let effect = RgbEffect {
+            colors: vec![[10, 20, 30]],
+            ..Default::default()
+        };
+        assert_eq!(
+            palette(&effect, Side::Inner),
+            [[10, 20, 30], [0, 255, 0], [0, 0, 255], [255, 255, 0]]
+        );
+        assert_eq!(palette(&effect, Side::Outer)[1], [0, 0, 255]);
+        assert_eq!(palette_all(&effect)[1], [255, 255, 0]);
     }
 }

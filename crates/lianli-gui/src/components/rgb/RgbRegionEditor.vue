@@ -31,9 +31,13 @@ const isPalette = computed(() => (parameters.value?.max_colors ?? 0) > 0);
 const perFanColors = computed(() => parameters.value?.per_fan_colors ?? false);
 const maxColors = computed(() => parameters.value?.max_colors ?? 0);
 const minColors = computed(() => parameters.value?.min_colors ?? 0);
-const paletteColors = computed(() => perFanColors.value
-  ? Array.from({ length: maxColors.value }, (_, index) => current.value?.effect.colors[index] ?? [0, 0, 0] as RGB)
-  : current.value?.effect.colors ?? []);
+const paletteColors = computed(() => {
+  const colors = current.value?.effect.colors ?? [];
+  const screen = props.cap.render_profile?.family === "UniversalScreen" || props.cap.render_profile?.family === "HydroShiftIIOled";
+  const count = perFanColors.value ? maxColors.value : screen ? Math.max(minColors.value, colors.length) : colors.length;
+  const fallback: RGB = perFanColors.value ? [0, 0, 0] : colors[colors.length - 1] ?? [0, 0, 0];
+  return Array.from({ length: count }, (_, index) => colors[index] ?? fallback);
+});
 const directionOptions = computed(() => RGB_DIRECTIONS.filter((d) => parameters.value?.directions.includes(d.value)));
 const copyToSegments = computed(() => props.cap.render_profile?.family === "Strimer" && selected.value !== "All");
 const canApplyAll = computed(() => !!current.value && (copyToSegments.value

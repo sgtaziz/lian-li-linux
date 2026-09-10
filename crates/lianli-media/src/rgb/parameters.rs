@@ -254,13 +254,7 @@ pub fn for_scope(
             };
             RgbEffectParameters {
                 mode,
-                min_colors: if max_colors == 0 {
-                    0
-                } else if per_fan_colors {
-                    max_colors
-                } else {
-                    1
-                },
+                min_colors: max_colors,
                 max_colors,
                 per_fan_colors,
                 directions: if direction {
