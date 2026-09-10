@@ -95,6 +95,19 @@ impl RgbController {
         let ids = self.sync_ids(config);
         let native = sync.kind == RgbSyncKind::Matched
             || matches!(sync.effect.mode, RgbMode::RainbowMorph | RgbMode::Twinkle);
+        let strimer_reference = if native {
+            ids.iter()
+                .find_map(|id| {
+                    self.regional_profile(id).filter(|profile| {
+                        profile.family == lianli_shared::rgb::RgbRenderFamily::Strimer
+                            && matches!(profile.led_count, 116 | 174)
+                    })
+                })
+                .map(|profile| native_animation(profile, &sync.effect))
+                .transpose()?
+        } else {
+            None
+        };
         let layouts: Vec<_> = if native {
             Vec::new()
         } else {
@@ -118,7 +131,7 @@ impl RgbController {
         let mut prepared = Vec::with_capacity(ids.len());
         for (index, id) in ids.into_iter().enumerate() {
             let projected = !native;
-            let animation = if let Some(generic) = &generic {
+            let mut animation = if let Some(generic) = &generic {
                 let layout = &layouts[index];
                 let end = offset + layout.logical_led_count();
                 let reverse = sync
@@ -162,6 +175,15 @@ impl RgbController {
                 });
                 continue;
             };
+            if native && self.is_short_strimer(&id) {
+                if let Some(reference) = &strimer_reference {
+                    animation.interval_hundredths = super::strimer_sync::matched_interval(
+                        reference.interval_hundredths,
+                        reference.frames.len(),
+                        animation.frames.len(),
+                    )?;
+                }
+            }
             ensure!(
                 !animation.frames.is_empty() && animation.frames.len() <= 2048,
                 "RGB sync animation exceeds the 2048-frame playback capacity for {id}"
@@ -288,69 +310,5 @@ fn native_animation(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use lianli_shared::rgb::{RgbRenderFamily as Family, RgbRenderProfile};
-
-    #[test]
-    fn native_sync_modes_cover_every_software_family() {
-        for (family, fan_count, led_count) in [
-            (Family::Tl, 3, 78),
-            (Family::Sl, 3, 120),
-            (Family::SlInf, 3, 132),
-            (Family::SlInfV3, 3, 132),
-            (Family::SlV4, 3, 156),
-            (Family::Cl, 3, 72),
-            (Family::P28, 3, 27),
-            (Family::Strimer, 0, 116),
-            (Family::HydroShiftII, 3, 96),
-            (Family::HydroShiftII, 0, 24),
-            (Family::HydroShiftIIOled, 0, 45),
-            (Family::UniversalScreen, 0, 60),
-            (Family::Lancool217, 0, 96),
-            (Family::LancoolV150, 4, 88),
-        ] {
-            let profile = RgbRenderProfile {
-                family,
-                fan_count,
-                led_count,
-                right_attach: false,
-            };
-            for mode in MATCHED_MODES.iter().copied().chain([RgbMode::Twinkle]) {
-                let effect = RgbEffect {
-                    mode,
-                    colors: vec![[255, 0, 0], [0, 255, 0]],
-                    ..Default::default()
-                };
-                let animation = native_animation(profile, &effect)
-                    .unwrap_or_else(|e| panic!("{family:?} {mode:?}: {e:#}"));
-                assert!(!animation.frames.is_empty());
-                assert!(
-                    animation
-                        .frames
-                        .iter()
-                        .all(|frame| frame.len() == usize::from(led_count)),
-                    "{family:?} {mode:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn sync_configuration_rejects_duplicate_devices_and_invalid_controls() {
-        let mut sync = MergeLightingConfig {
-            enabled: true,
-            device_order: vec!["a".into(), "a".into()],
-            ..Default::default()
-        };
-        assert!(validate_settings(&sync).is_err());
-        sync.device_order.pop();
-        assert!(validate_settings(&sync).is_ok());
-        sync.effect.brightness = 5;
-        assert!(validate_settings(&sync).is_err());
-        sync.effect.brightness = 255;
-        assert!(validate_settings(&sync).is_ok());
-        sync.effect.mode = RgbMode::Voice;
-        assert!(validate_settings(&sync).is_err());
-    }
-}
+#[path = "sync_plan_tests.rs"]
+mod tests;

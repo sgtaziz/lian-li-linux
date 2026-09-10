@@ -59,7 +59,6 @@ impl RgbController {
         }
         if let Err(error) = self.apply_sync(config) {
             warn!("Failed to apply RGB synchronization: {error:#}");
-            return;
         }
 
         let removed: Vec<_> = self

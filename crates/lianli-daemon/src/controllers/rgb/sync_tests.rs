@@ -132,3 +132,54 @@ fn openrgb_release_restores_sync_without_individual_animation_upload() {
     assert!(received.recv_timeout(Duration::from_millis(80)).is_err());
     controller.stop();
 }
+
+struct UnavailableDevice;
+
+impl RgbDevice for UnavailableDevice {
+    fn device_name(&self) -> String {
+        "unavailable".into()
+    }
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![RgbMode::Static]
+    }
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        vec![RgbZoneInfo {
+            name: "zone".into(),
+            led_count: 1,
+        }]
+    }
+    fn set_zone_effect(&self, _: u8, _: &RgbEffect) -> anyhow::Result<()> {
+        anyhow::bail!("device disappeared")
+    }
+}
+
+#[test]
+fn one_failed_sync_device_does_not_block_other_participants_or_restoration() {
+    let (mut controller, mut config, restored) = setup();
+    controller.apply_config(&config, &[]);
+    restored.recv_timeout(Duration::from_secs(1)).unwrap();
+    let (sender, participating) = mpsc::channel();
+    controller
+        .wired
+        .insert("unavailable".into(), Arc::new(UnavailableDevice));
+    controller
+        .wired
+        .insert("participant".into(), Arc::new(Screen(sender)));
+    let sync = config.merge_lighting.as_mut().unwrap();
+    sync.kind = lianli_shared::rgb::RgbSyncKind::Matched;
+    sync.device_order = vec!["unavailable".into(), "participant".into()];
+    controller.apply_config(&config, &[]);
+    assert!(participating
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap()
+        .iter()
+        .all(|rgb| rgb[0] == 0 && rgb[1] > 0));
+    assert!(restored
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap()
+        .iter()
+        .all(|rgb| rgb[0] > 0 && rgb[1] == 0));
+    assert!(controller.sync_active.contains("unavailable"));
+    assert!(controller.sync_signature.is_none());
+    controller.stop();
+}

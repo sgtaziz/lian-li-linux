@@ -20,55 +20,73 @@ impl RgbController {
             .collect();
         self.sync_clock.configure(clocks, self.wireless.clone());
         self.sync_active = ids;
-        for item in plan {
-            match item {
-                PreparedSync::Wired {
-                    id,
-                    device,
-                    animation,
-                } => {
-                    let timing = animation.timing();
-                    self.wired_renderer.submit_timed(
-                        &id,
-                        device,
-                        animation.frames,
-                        timing,
-                        Some(self.sync_clock.clock.clone()),
-                    )?;
-                    self.mb_sync_state.insert(id, false);
-                }
-                PreparedSync::Wireless { id, mac, upload } => {
-                    let wireless = self
-                        .wireless
-                        .as_ref()
-                        .expect("prepared wireless RGB controller");
-                    self.upload_worker.submit(
-                        wireless.clone(),
-                        mac,
-                        Command::Upload(upload.clone()),
-                    )?;
-                    self.uploads.insert(id.clone(), upload);
-                    self.mb_sync_state.insert(id, false);
-                }
-                PreparedSync::Hardware { id, device, effect } => {
-                    if device.supports_mb_rgb_sync() {
-                        device.set_mb_rgb_sync(false)?;
-                    }
-                    device.set_all_effects(&effect)?;
-                    self.mb_sync_state.insert(id, false);
-                }
-            }
-        }
-        self.sync_signature = signature;
         for id in previous {
             if self.sync_active.contains(&id) || config.devices.iter().any(|d| d.device_id == id) {
                 continue;
             }
-            if self.software_controlled(&id) {
-                let mut restore = self.render_state(&id)?;
-                self.submit_render(&id, &mut restore)?;
+            let restored = if self.software_controlled(&id) {
+                self.render_state(&id)
+                    .and_then(|mut state| self.submit_render(&id, &mut state))
             } else if let Some(device) = self.wired.get(&id) {
-                device.set_all_effects(&RgbEffect::default())?;
+                device.set_all_effects(&RgbEffect::default())
+            } else {
+                Ok(())
+            };
+            if let Err(error) = restored {
+                warn!("Failed to restore RGB for {id}: {error:#}");
+            }
+        }
+        let mut failure = None;
+        for item in plan {
+            let id = item.id().to_owned();
+            if let Err(error) = self.submit_sync(item) {
+                warn!("Failed to submit RGB sync for {id}: {error:#}");
+                failure = Some(error);
+            }
+        }
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        self.sync_signature = signature;
+        Ok(())
+    }
+
+    fn submit_sync(&mut self, item: PreparedSync) -> Result<()> {
+        match item {
+            PreparedSync::Wired {
+                id,
+                device,
+                animation,
+            } => {
+                let timing = animation.timing();
+                self.wired_renderer.submit_timed(
+                    &id,
+                    device,
+                    animation.frames,
+                    timing,
+                    Some(self.sync_clock.clock.clone()),
+                )?;
+                self.mb_sync_state.insert(id, false);
+            }
+            PreparedSync::Wireless { id, mac, upload } => {
+                let wireless = self
+                    .wireless
+                    .as_ref()
+                    .expect("prepared wireless RGB controller");
+                self.upload_worker.submit(
+                    wireless.clone(),
+                    mac,
+                    Command::Upload(upload.clone()),
+                )?;
+                self.uploads.insert(id.clone(), upload);
+                self.mb_sync_state.insert(id, false);
+            }
+            PreparedSync::Hardware { id, device, effect } => {
+                if device.supports_mb_rgb_sync() {
+                    device.set_mb_rgb_sync(false)?;
+                }
+                device.set_all_effects(&effect)?;
+                self.mb_sync_state.insert(id, false);
             }
         }
         Ok(())

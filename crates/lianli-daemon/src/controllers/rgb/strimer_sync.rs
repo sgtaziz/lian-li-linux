@@ -55,7 +55,7 @@ impl RgbController {
     }
 }
 
-fn matched_interval(
+pub(super) fn matched_interval(
     reference_interval: u32,
     reference_frames: usize,
     target_frames: usize,
