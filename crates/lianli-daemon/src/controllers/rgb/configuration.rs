@@ -3,9 +3,11 @@ use anyhow::Context;
 
 impl RgbController {
     pub fn validate_config(&self, config: &RgbAppConfig) -> anyhow::Result<()> {
+        lianli_shared::rgb::validate_effect_memory(config).map_err(anyhow::Error::msg)?;
         if !config.enabled || config.openrgb_server {
             return Ok(());
         }
+        self.prepare_sync(config)?;
         for device in &config.devices {
             if device.mb_rgb_sync || !self.software_controlled(&device.device_id) {
                 continue;
@@ -55,10 +57,15 @@ impl RgbController {
         if self.thermal_override_active() {
             return;
         }
+        if let Err(error) = self.apply_sync(config) {
+            warn!("Failed to apply RGB synchronization: {error:#}");
+            return;
+        }
 
         let removed: Vec<_> = self
             .rendered
             .keys()
+            .filter(|id| !self.sync_active.contains(*id))
             .filter(|id| !config.devices.iter().any(|d| &d.device_id == *id))
             .cloned()
             .collect();
@@ -83,6 +90,9 @@ impl RgbController {
         let mut ordered: Vec<_> = config.devices.iter().collect();
         ordered.sort_by_key(|device| self.is_short_strimer(&device.device_id));
         for device in ordered {
+            if self.sync_active.contains(&device.device_id) {
+                continue;
+            }
             let result = (|| -> anyhow::Result<()> {
                 if device.mb_rgb_sync {
                     return self.set_mb_rgb_sync(&device.device_id, true);
@@ -206,6 +216,7 @@ mod tests {
             mb_rgb_sync: false,
             active_preset: None,
             regions: None,
+            effect_memory: Vec::new(),
             zones: (0..4)
                 .map(|zone_index| RgbZoneConfig {
                     zone_index,

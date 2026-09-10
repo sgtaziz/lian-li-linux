@@ -8,7 +8,8 @@ import { useConfigStore } from "@/stores/config";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LedStrip from "@/components/rgb/LedStrip.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
-import { RGB_DIRECTIONS, RGB_SCOPES, RGB_BRIGHTNESS, modeLabel } from "@/constants";
+import { recallDeviceEffect, rememberDeviceEffect } from "@/components/rgb/effectMemory";
+import { RGB_DIRECTIONS, RGB_BRIGHTNESS, modeLabel } from "@/constants";
 
 const props = defineProps<{
   deviceId: string;
@@ -110,7 +111,12 @@ function modeOptions() {
 }
 
 function onMode(value: string) {
-  patchEffect({ mode: value, ...(props.cap.software_modes?.includes(value) ? { scope: "All" as const } : {}) });
+  if (effect.value.mode === value) return;
+  const device = config.rgbDeviceConfig(props.deviceId);
+  rememberDeviceEffect(device, props.zoneIndex, effect.value, false);
+  const scope = props.cap.software_modes?.includes(value) ? "All" : effect.value.scope;
+  const remembered = recallDeviceEffect(device, props.zoneIndex, scope, value);
+  patchEffect(remembered?.effect ?? { mode: value, scope });
 }
 
 function onColor(index: number, value: RGB | any) {

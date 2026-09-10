@@ -180,6 +180,7 @@ fn apply_config_and_leds(
                 active_preset: None,
                 zones: Vec::new(),
                 regions: None,
+                effect_memory: Vec::new(),
             });
             rgb_cfg.devices.last_mut().unwrap()
         };

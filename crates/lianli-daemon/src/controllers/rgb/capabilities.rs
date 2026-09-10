@@ -19,6 +19,10 @@ impl RgbController {
             }
             caps.push(RgbDeviceCapabilities {
                 device_id: id.clone(),
+                sync_led_count: self
+                    .sync_layout(id)
+                    .map(|layout| layout.logical_led_count() as u16),
+                sync_effect_parameters: self.sync_parameters(id),
                 device_name: device.device_name(),
                 supported_modes: modes,
                 software_modes,
@@ -72,6 +76,10 @@ impl RgbController {
             supported_modes.push(RgbMode::Direct);
             caps.push(RgbDeviceCapabilities {
                 device_id: id.clone(),
+                sync_led_count: self
+                    .sync_layout(id)
+                    .map(|layout| layout.logical_led_count() as u16),
+                sync_effect_parameters: self.sync_parameters(id),
                 device_name: device.fan_type.display_name().to_owned(),
                 supported_modes,
                 software_modes,
@@ -103,6 +111,35 @@ impl RgbController {
         self.capabilities()
             .into_iter()
             .filter(|c| !c.rf_owned)
+            .collect()
+    }
+
+    pub(super) fn sync_layout(&self, id: &str) -> Option<lianli_media::rgb::sync_layout::Layout> {
+        if self
+            .wireless_state
+            .get(id)
+            .is_some_and(|d| d.fan_type == WirelessFanType::Led88)
+        {
+            return None;
+        }
+        self.software_controlled(id)
+            .then(|| self.render_profile(id))
+            .flatten()
+            .and_then(lianli_media::rgb::sync_layout::Layout::for_profile)
+    }
+
+    fn sync_parameters(&self, id: &str) -> Vec<lianli_shared::rgb::RgbEffectParameters> {
+        if self.sync_layout(id).is_none() {
+            return Vec::new();
+        }
+        lianli_media::rgb::sync_effects::parameters()
+            .into_iter()
+            .filter(|p| {
+                !matches!(p.mode, RgbMode::RainbowMorph | RgbMode::Twinkle)
+                    || self.regional_profile(id).is_some_and(|profile| {
+                        lianli_media::rgb::parameters::modes(profile).contains(&p.mode)
+                    })
+            })
             .collect()
     }
 }

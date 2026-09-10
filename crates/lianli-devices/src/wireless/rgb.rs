@@ -19,6 +19,7 @@ pub struct WirelessRgbUpload {
     interval_fraction: u8,
     effect_index: [u8; 4],
     timing: RgbPlaybackTiming,
+    sync_layout: bool,
 }
 
 impl WirelessRgbUpload {
@@ -139,6 +140,7 @@ impl WirelessRgbUpload {
             interval_fraction,
             effect_index: hash.max(1).to_be_bytes(),
             timing,
+            sync_layout: false,
         })
     }
 
@@ -170,6 +172,32 @@ impl WirelessRgbUpload {
 }
 
 impl WirelessController {
+    pub fn prepare_rgb_sync_animation(
+        &self,
+        mac: &[u8; 6],
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<WirelessRgbUpload> {
+        let device = self.device_by_mac_snapshot(mac)?;
+        let profile = device
+            .fan_type
+            .rgb_render_profile(device.fan_count)
+            .context("unsupported RGB sync layout")?;
+        ensure!(
+            frames
+                .iter()
+                .all(|frame| frame.len() == usize::from(profile.sync_frame_led_count())),
+            "RGB sync frame does not match device layout"
+        );
+        ensure!(
+            !matches!(device.fan_type, WirelessFanType::Led88),
+            "screen RGB sync requires its USB lighting interface"
+        );
+        let mut upload = WirelessRgbUpload::with_timing(frames, timing, None)?;
+        upload.sync_layout = true;
+        Ok(upload)
+    }
+
     pub fn clear_rgb_targets(&self) {
         self.desired_effects.lock().clear();
     }
@@ -241,6 +269,17 @@ impl WirelessController {
             .rgb_zone_led_counts(device.fan_count)
             .iter()
             .sum();
+        let expected = if upload.sync_layout {
+            usize::from(
+                device
+                    .fan_type
+                    .rgb_render_profile(device.fan_count)
+                    .context("RGB sync layout changed")?
+                    .sync_frame_led_count(),
+            )
+        } else {
+            expected
+        };
         ensure!(
             expected == upload.led_count as usize,
             "RGB device layout changed before upload"

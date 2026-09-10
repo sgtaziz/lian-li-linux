@@ -235,6 +235,16 @@ fn handle_request(
         IpcRequest::UnbindAllWireless => super::wireless::unbind_all(tx),
         IpcRequest::GetChannel => super::wireless::get_channel(state),
         IpcRequest::SetMergeLightingConfig { config } => {
+            let mut rgb = state
+                .lock()
+                .config
+                .as_ref()
+                .and_then(|c| c.rgb.clone())
+                .unwrap_or_default();
+            rgb.merge_lighting = Some(config.clone());
+            if let Some(error) = super::rgb::validate_config(state, &rgb) {
+                return error;
+            }
             let mut state = state.lock();
             if let Some(ref mut app_config) = state.config {
                 app_config

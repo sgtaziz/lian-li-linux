@@ -7,6 +7,12 @@ mod playback;
 mod regions;
 mod render;
 mod strimer_sync;
+mod sync_clock;
+mod sync_device;
+mod sync_plan;
+#[cfg(test)]
+mod sync_tests;
+mod synchronization;
 mod upload;
 mod wired;
 
@@ -41,6 +47,9 @@ pub struct RgbController {
     uploads: HashMap<String, Arc<WirelessRgbUpload>>,
     upload_worker: UploadWorker,
     wired_renderer: WiredRenderer,
+    sync_clock: sync_clock::SyncClockWorker,
+    sync_signature: Option<String>,
+    sync_active: std::collections::HashSet<String>,
     config: Option<RgbAppConfig>,
     presets: Vec<RgbPreset>,
     openrgb_active: bool,
@@ -65,6 +74,9 @@ impl RgbController {
             uploads: HashMap::new(),
             upload_worker: UploadWorker::new(),
             wired_renderer: WiredRenderer::new(),
+            sync_clock: sync_clock::SyncClockWorker::new(),
+            sync_signature: None,
+            sync_active: Default::default(),
             config: None,
             presets: Vec::new(),
             openrgb_active: false,
@@ -79,11 +91,15 @@ impl RgbController {
     }
 
     pub fn stop(&mut self) {
+        self.sync_clock.stop();
         self.upload_worker.stop();
         self.wired_renderer.stop();
     }
 
     fn clear_pending(&mut self) {
+        self.sync_clock.clear();
+        self.sync_signature = None;
+        self.sync_active.clear();
         self.upload_worker.clear();
         self.uploads.clear();
         if let Some(wireless) = &self.wireless {
@@ -254,6 +270,8 @@ impl RgbController {
     }
 
     pub fn set_wireless(&mut self, wireless: Option<Arc<WirelessController>>) {
+        self.sync_clock.clear();
+        self.sync_signature = None;
         self.upload_worker.clear();
         if let Some(previous) = &self.wireless {
             previous.clear_rgb_targets();
@@ -267,6 +285,7 @@ impl RgbController {
     }
 
     pub fn replace_wired(&mut self, wired: HashMap<String, Arc<dyn RgbDevice>>) {
+        self.sync_signature = None;
         self.wired = wired;
         self.rendered
             .retain(|id, _| self.wired.contains_key(id) || self.wireless_state.contains_key(id));
@@ -287,6 +306,8 @@ impl RgbController {
         });
         for id in previous {
             if !self.wired.contains_key(&id) {
+                self.sync_signature = None;
+                self.sync_clock.clear();
                 self.wired_renderer.remove(&id);
                 self.applied.remove(&id);
                 self.rendered.remove(&id);
@@ -297,6 +318,7 @@ impl RgbController {
     }
 
     pub fn refresh_wireless_devices(&mut self) {
+        self.sync_signature = None;
         self.thermal_last_color = None;
         let mut devices = HashMap::new();
         if let Some(wireless) = &self.wireless {

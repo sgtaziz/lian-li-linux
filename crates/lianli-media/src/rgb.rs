@@ -15,6 +15,8 @@ pub mod sl_inf;
 pub mod sl_v4;
 pub mod sl_wireless;
 pub mod strimer;
+pub mod sync_effects;
+pub mod sync_layout;
 pub mod tl;
 pub mod universal;
 pub use animation::{Animation, SecondaryTiming};

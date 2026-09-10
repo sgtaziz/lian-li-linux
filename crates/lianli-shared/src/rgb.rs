@@ -77,6 +77,8 @@ pub enum RgbMode {
     HeartBeat,
     HeartBeatRunway,
     Disco,
+    SeaFlow,
+    Echo,
     ColorfulCity,
     Twinkle,
     Groove,
@@ -380,6 +382,8 @@ impl RgbMode {
             Self::HeartBeat => "Heart Beat",
             Self::HeartBeatRunway => "Heart Beat Runway",
             Self::Disco => "Disco",
+            Self::SeaFlow => "Sea Flow",
+            Self::Echo => "Echo",
             Self::ColorfulCity => "Colorful City",
             Self::Twinkle => "Twinkle",
             Self::Groove => "Groove",
@@ -484,6 +488,8 @@ impl RgbMode {
             "Heart Beat" => Self::HeartBeat,
             "Heart Beat Runway" => Self::HeartBeatRunway,
             "Disco" => Self::Disco,
+            "Sea Flow" => Self::SeaFlow,
+            "Echo" => Self::Echo,
             "Colorful City" => Self::ColorfulCity,
             "Twinkle" => Self::Twinkle,
             "Groove" => Self::Groove,
@@ -552,7 +558,7 @@ impl RgbDirection {
 }
 
 /// RGB effect scope (which LEDs are targeted).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum RgbScope {
     #[default]
     All,
@@ -667,6 +673,17 @@ pub struct RgbDeviceConfig {
     pub zones: Vec<RgbZoneConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regions: Option<Vec<RgbRegionConfig>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effect_memory: Vec<RgbEffectMemory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RgbEffectMemory {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<u8>,
+    pub effect: RgbEffect,
+    #[serde(default)]
+    pub flip: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,6 +767,10 @@ pub struct RgbDeviceCapabilities {
     pub supported_modes: Vec<RgbMode>,
     #[serde(default)]
     pub software_modes: Vec<RgbMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_led_count: Option<u16>,
+    #[serde(default)]
+    pub sync_effect_parameters: Vec<RgbEffectParameters>,
     #[serde(default)]
     pub effect_regions: Vec<RgbScope>,
     #[serde(default)]
@@ -795,14 +816,91 @@ pub struct RgbRegionParameters {
     pub effects: Vec<RgbEffectParameters>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RgbSyncKind {
+    #[default]
+    Continuous,
+    Matched,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MergeLightingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub kind: RgbSyncKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effect_memory: Vec<RgbEffect>,
     pub device_order: Vec<String>,
     #[serde(default)]
     pub directions: Vec<RgbDirection>,
     pub effect: RgbEffect,
     #[serde(default)]
     pub disabled_devices: Vec<String>,
+}
+
+pub const MAX_RGB_EFFECT_MEMORY_ENTRIES: usize = 2048;
+pub const MAX_RGB_EFFECT_MEMORY_COLORS: usize = 64;
+
+pub fn validate_effect_memory(config: &RgbAppConfig) -> Result<(), String> {
+    for device in &config.devices {
+        if device.effect_memory.len() > MAX_RGB_EFFECT_MEMORY_ENTRIES {
+            return Err(format!(
+                "RGB device '{}' effect memory exceeds {MAX_RGB_EFFECT_MEMORY_ENTRIES} entries",
+                device.device_id
+            ));
+        }
+        let mut keys = std::collections::HashSet::with_capacity(device.effect_memory.len());
+        for (index, entry) in device.effect_memory.iter().enumerate() {
+            validate_remembered_effect(&entry.effect).map_err(|error| {
+                format!(
+                    "RGB device '{}' effect_memory[{index}] {error}",
+                    device.device_id
+                )
+            })?;
+            if !keys.insert((entry.zone, entry.effect.scope, entry.effect.mode)) {
+                return Err(format!(
+                    "RGB device '{}' has duplicate effect memory for zone {:?}, scope {:?}, mode {:?}",
+                    device.device_id, entry.zone, entry.effect.scope, entry.effect.mode
+                ));
+            }
+        }
+    }
+
+    if let Some(merge) = &config.merge_lighting {
+        if merge.effect_memory.len() > MAX_RGB_EFFECT_MEMORY_ENTRIES {
+            return Err(format!(
+                "merge lighting effect memory exceeds {MAX_RGB_EFFECT_MEMORY_ENTRIES} entries"
+            ));
+        }
+        let mut modes = std::collections::HashSet::with_capacity(merge.effect_memory.len());
+        for (index, effect) in merge.effect_memory.iter().enumerate() {
+            validate_remembered_effect(effect)
+                .map_err(|error| format!("merge lighting effect_memory[{index}] {error}"))?;
+            if !modes.insert(effect.mode) {
+                return Err(format!(
+                    "merge lighting has duplicate effect memory for mode {:?}",
+                    effect.mode
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_remembered_effect(effect: &RgbEffect) -> Result<(), String> {
+    if effect.colors.len() > MAX_RGB_EFFECT_MEMORY_COLORS {
+        return Err(format!(
+            "has more than {MAX_RGB_EFFECT_MEMORY_COLORS} colors"
+        ));
+    }
+    if effect.speed > 4 {
+        return Err("has speed outside 0..=4".to_owned());
+    }
+    if effect.brightness > 4 && !is_brightness_off(effect.brightness) {
+        return Err("has brightness outside 0..=4 or the off sentinel".to_owned());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -816,6 +914,7 @@ mod tests {
         }))
         .unwrap();
         assert!(config.regions.is_none());
+        assert!(config.effect_memory.is_empty());
         let preset: RgbPreset = serde_json::from_value(serde_json::json!({
             "name": "old", "device_id": "tl", "zones": []
         }))
@@ -823,6 +922,58 @@ mod tests {
         assert!(preset.regions.is_none());
         let encoded = serde_json::to_value(config).unwrap();
         assert!(encoded.get("regions").is_none());
+        assert!(encoded.get("effect_memory").is_none());
+    }
+
+    #[test]
+    fn effect_memory_round_trips_and_validation_rejects_ambiguous_or_unsafe_entries() {
+        let mut config: RgbAppConfig = serde_json::from_value(serde_json::json!({
+            "devices": [{
+                "device_id": "tl",
+                "zones": [],
+                "effect_memory": [{
+                    "effect": { "mode": "Static", "colors": [[1, 2, 3]], "brightness": 255 },
+                    "flip": true
+                }]
+            }],
+            "merge_lighting": {
+                "enabled": false,
+                "kind": "Matched",
+                "effect_memory": [{ "mode": "Breathing", "speed": 4 }],
+                "device_order": [],
+                "effect": { "mode": "Static" }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(config.devices[0].effect_memory[0].zone, None);
+        assert!(config.devices[0].effect_memory[0].flip);
+        assert_eq!(
+            config.devices[0].effect_memory[0].effect.colors,
+            [[1, 2, 3]]
+        );
+        assert!(validate_effect_memory(&config).is_ok());
+        let encoded = serde_json::to_value(&config).unwrap();
+        assert_eq!(encoded["devices"][0]["effect_memory"][0]["flip"], true);
+
+        let duplicate = config.devices[0].effect_memory[0].clone();
+        config.devices[0].effect_memory.push(duplicate);
+        assert!(validate_effect_memory(&config)
+            .unwrap_err()
+            .contains("duplicate effect memory"));
+
+        config.devices[0].effect_memory.pop();
+        config.devices[0].effect_memory[0].effect.colors =
+            vec![[0, 0, 0]; MAX_RGB_EFFECT_MEMORY_COLORS + 1];
+        assert!(validate_effect_memory(&config)
+            .unwrap_err()
+            .contains("more than 64 colors"));
+
+        config.devices[0].effect_memory[0].effect.colors.clear();
+        config.devices[0].effect_memory[0].effect.speed = 5;
+        assert!(validate_effect_memory(&config)
+            .unwrap_err()
+            .contains("speed outside 0..=4"));
     }
 
     #[test]
@@ -899,6 +1050,8 @@ mod tests {
         RgbMode::HeartBeat,
         RgbMode::HeartBeatRunway,
         RgbMode::Disco,
+        RgbMode::SeaFlow,
+        RgbMode::Echo,
         RgbMode::ColorfulCity,
         RgbMode::Twinkle,
         RgbMode::Groove,

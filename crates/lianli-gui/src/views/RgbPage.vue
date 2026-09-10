@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import RgbDeviceCard from "@/components/rgb/RgbDeviceCard.vue";
+import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 
 const daemon = useDaemonStore();
@@ -67,6 +68,8 @@ const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
         </p>
       </div>
     </section>
+
+    <RgbSyncEditor />
 
     <!-- Per-device RGB cards -->
     <RgbDeviceCard v-for="cap in rgbCaps" :key="cap.device_id" :cap="cap" />

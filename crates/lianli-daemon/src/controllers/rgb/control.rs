@@ -2,6 +2,7 @@ use super::*;
 
 impl RgbController {
     pub fn set_effect(&mut self, id: &str, zone: u8, effect: &RgbEffect) -> anyhow::Result<()> {
+        self.ensure_individual_control(id)?;
         anyhow::ensure!(
             self.is_openrgb_controlled() || !self.thermal_override_active(),
             "thermal alert currently controls RGB"
@@ -68,6 +69,7 @@ impl RgbController {
         zone: u8,
         colors: &[[u8; 3]],
     ) -> anyhow::Result<()> {
+        self.ensure_individual_control(id)?;
         anyhow::ensure!(
             self.is_openrgb_controlled() || !self.thermal_override_active(),
             "thermal alert currently controls RGB"
@@ -91,6 +93,7 @@ impl RgbController {
         id: &str,
         zones: &HashMap<u8, Vec<[u8; 3]>>,
     ) -> anyhow::Result<()> {
+        self.ensure_individual_control(id)?;
         anyhow::ensure!(
             self.software_controlled(id),
             "device {id} does not support software RGB"
@@ -149,6 +152,7 @@ impl RgbController {
         frames: &[Vec<[u8; 3]>],
         interval_ms: u16,
     ) -> anyhow::Result<()> {
+        self.ensure_individual_control(id)?;
         anyhow::ensure!(
             self.is_openrgb_controlled() || !self.thermal_override_active(),
             "thermal alert currently controls RGB"
@@ -195,6 +199,9 @@ impl RgbController {
     }
 
     pub fn set_mb_rgb_sync(&mut self, id: &str, enabled: bool) -> anyhow::Result<()> {
+        if enabled {
+            self.ensure_individual_control(id)?;
+        }
         anyhow::ensure!(
             !enabled || self.is_openrgb_controlled() || !self.thermal_override_active(),
             "thermal alert currently controls RGB"
@@ -235,6 +242,7 @@ impl RgbController {
         swap_lr: bool,
         swap_tb: bool,
     ) -> anyhow::Result<()> {
+        self.ensure_individual_control(id)?;
         let device = self
             .wired
             .get(id)

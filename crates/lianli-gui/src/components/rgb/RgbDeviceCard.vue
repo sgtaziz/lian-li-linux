@@ -37,6 +37,15 @@ const expanded = ref(true);
 const regional = computed(() => (props.cap.effect_regions?.length ?? 0) > 0);
 const controlTab = ref<"regions" | "direct">("regions");
 const visibleZones = computed(() => devConfig.value.zones.slice(0, props.cap.zones.length));
+const syncActive = computed(() => {
+  const sync = config.ensureRgb().merge_lighting;
+  if (devConfig.value.mb_rgb_sync) return false;
+  if (!sync?.enabled || !sync.device_order.includes(props.cap.device_id)) return false;
+  if (sync.disabled_devices.includes(props.cap.device_id)) return false;
+  return sync.kind === "Continuous"
+    ? props.cap.sync_led_count != null
+    : props.cap.supported_modes.includes(sync.effect.mode);
+});
 
 watch(
   [devConfig, () => props.cap.zones.length],
@@ -154,6 +163,8 @@ const summary = computed(() =>
     </div>
 
     <div v-if="expanded" class="body">
+      <p v-if="syncActive" class="sync-notice">Quick Sync controls this device. Disable it in Quick Sync to edit device lighting.</p>
+      <div class="device-controls" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
       <div v-if="cap.supports_mb_rgb_sync" class="row">
         <n-checkbox v-model:checked="mbSync">Motherboard ARGB Sync</n-checkbox>
       </div>
@@ -214,6 +225,7 @@ const summary = computed(() =>
         </n-button>
       </div>
       </template>
+      </div>
     </div>
   </div>
 </template>
@@ -259,6 +271,20 @@ const summary = computed(() =>
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+.device-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.sync-locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.sync-notice {
+  margin: 0;
+  color: var(--primary-color);
+  font-size: var(--font-size-sm);
 }
 .control-tabs {
   display: flex;

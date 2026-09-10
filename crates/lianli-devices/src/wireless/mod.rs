@@ -12,6 +12,7 @@ mod fan_type;
 mod mb_sync;
 mod opcodes;
 mod rgb;
+mod rgb_clock;
 mod transport;
 mod v2_hid;
 

@@ -317,6 +317,22 @@ pub trait RgbDevice: Send + Sync {
         None
     }
 
+    fn set_sync_animation(&self, frames: &[Vec<[u8; 3]>], timing: RgbPlaybackTiming) -> Result<()> {
+        self.set_software_animation(frames, timing)
+    }
+
+    fn validate_sync_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        self.validate_software_animation(frames, timing)
+    }
+
+    fn set_rgb_clock(&self, _ticks: u32) -> Result<()> {
+        Ok(())
+    }
+
     fn set_software_animation(
         &self,
         frames: &[Vec<[u8; 3]>],
@@ -472,6 +488,19 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
         (**self).software_frame_delivery()
+    }
+    fn set_sync_animation(&self, frames: &[Vec<[u8; 3]>], timing: RgbPlaybackTiming) -> Result<()> {
+        (**self).set_sync_animation(frames, timing)
+    }
+    fn validate_sync_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        (**self).validate_sync_animation(frames, timing)
+    }
+    fn set_rgb_clock(&self, ticks: u32) -> Result<()> {
+        (**self).set_rgb_clock(ticks)
     }
     fn set_software_animation(
         &self,

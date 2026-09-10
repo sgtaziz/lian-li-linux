@@ -192,6 +192,8 @@ export const RGB_MODES: { mode: RgbMode; label: string }[] = [
   { mode: "ColorTransfer", label: "Color Transfer" },
   { mode: "CrossOver", label: "Cross Over" },
   { mode: "Parallel", label: "Parallel" },
+  { mode: "SeaFlow", label: "Sea Flow" },
+  { mode: "Echo", label: "Echo" },
 ];
 
 export function modeLabel(mode: RgbMode): string {

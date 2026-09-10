@@ -5,6 +5,7 @@ import type { RgbDeviceCapabilities, RgbEffect, RgbRegionConfig, RgbScope, RGB, 
 import { useConfigStore } from "@/stores/config";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
+import { recallDeviceEffect, rememberDeviceEffect } from "@/components/rgb/effectMemory";
 import { RGB_BRIGHTNESS, RGB_DIRECTIONS, modeLabel } from "@/constants";
 
 const props = defineProps<{ deviceId: string; cap: RgbDeviceCapabilities }>();
@@ -111,7 +112,7 @@ function touchRegion() {
   config.markDirty();
 }
 
-function patchEffect(patch: Partial<RgbEffect>) {
+function patchEffect(patch: Partial<RgbEffect>, flip?: boolean) {
   if (!current.value) return;
   const seed = current.value;
   ensureExpanded(selected.value);
@@ -124,6 +125,7 @@ function patchEffect(patch: Partial<RgbEffect>) {
   const target = regions.value[regions.value.findIndex((r) => regionScope(r) === selected.value)];
   if (!target) return;
   target.effect = { ...target.effect, ...patch };
+  if (flip !== undefined) target.flip = flip;
   touchRegion();
 }
 function onColor(index: number, value: RGB | RGBA) {
@@ -137,6 +139,13 @@ function removeColor(index: number) {
   patchEffect({ colors: current.value!.effect.colors.filter((_, i) => i !== index) });
 }
 function onMode(mode: string) {
+  if (!current.value || current.value.effect.mode === mode) return;
+  rememberDeviceEffect(devConfig.value, null, current.value.effect, current.value.flip);
+  const remembered = recallDeviceEffect(devConfig.value, null, selected.value, mode);
+  if (remembered) {
+    patchEffect({ ...remembered.effect, scope: selected.value }, remembered.flip);
+    return;
+  }
   const options = scopedParameters.value?.find((p) => p.mode === mode);
   const count = Math.min(options?.max_colors ?? 0, Math.max(options?.min_colors ?? 0, current.value?.effect.colors.length ?? 0));
   const colors = [...(current.value?.effect.colors ?? [])].slice(0, count);

@@ -9,6 +9,7 @@ mod control;
 mod profile;
 mod rgb;
 mod rgb_packets;
+mod sync;
 pub use profile::ReceiverParams;
 use rgb_packets::{checked_frame_count, read_rgb_ack, rgb_flash_header, rgb_timeout};
 #[cfg(test)]

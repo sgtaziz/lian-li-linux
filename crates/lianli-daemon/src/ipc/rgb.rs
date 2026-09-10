@@ -11,6 +11,11 @@ pub fn validate_config(
     state: &SharedState,
     config: &lianli_shared::rgb::RgbAppConfig,
 ) -> Option<IpcResponse> {
+    if let Err(error) = lianli_shared::rgb::validate_effect_memory(config) {
+        return Some(IpcResponse::error(format!(
+            "Invalid RGB configuration: {error}"
+        )));
+    }
     let controller = state.lock().rgb_controller.clone()?;
     let result = controller.lock().validate_config(config);
     result

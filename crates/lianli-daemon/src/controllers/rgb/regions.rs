@@ -261,6 +261,7 @@ mod tests {
             mb_rgb_sync: false,
             active_preset: None,
             regions: None,
+            effect_memory: Vec::new(),
             zones: (0..3)
                 .map(|zone_index| RgbZoneConfig {
                     zone_index,

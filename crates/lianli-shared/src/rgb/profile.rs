@@ -26,6 +26,16 @@ pub struct RgbRenderProfile {
     pub right_attach: bool,
 }
 
+impl RgbRenderProfile {
+    pub fn sync_frame_led_count(self) -> u16 {
+        match self.family {
+            RgbRenderFamily::UniversalScreen => 60,
+            RgbRenderFamily::HydroShiftIIOled => 35,
+            _ => self.led_count,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RgbPlaybackTiming {
     /// Primary interval in hundredths of the vendor's 0.625 ms clock tick.
@@ -63,6 +73,34 @@ mod tests {
             serde_json::from_str::<RgbRenderProfile>(&serde_json::to_string(&right).unwrap())
                 .unwrap(),
             right
+        );
+    }
+
+    #[test]
+    fn sync_frame_counts_match_transmitted_buffers() {
+        let profile = |family, led_count| RgbRenderProfile {
+            family,
+            fan_count: 0,
+            led_count,
+            right_attach: false,
+        };
+
+        assert_eq!(
+            profile(RgbRenderFamily::SlV4, 104).sync_frame_led_count(),
+            104
+        );
+        assert_eq!(profile(RgbRenderFamily::P28, 27).sync_frame_led_count(), 27);
+        assert_eq!(
+            profile(RgbRenderFamily::Strimer, 116).sync_frame_led_count(),
+            116
+        );
+        assert_eq!(
+            profile(RgbRenderFamily::UniversalScreen, 88).sync_frame_led_count(),
+            60
+        );
+        assert_eq!(
+            profile(RgbRenderFamily::HydroShiftIIOled, 45).sync_frame_led_count(),
+            35
         );
     }
 }

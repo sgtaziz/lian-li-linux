@@ -54,11 +54,11 @@ impl WiredReceiverController {
         raw
     }
 
-    fn send_rgb_stream_frame(&self, colors: &[[u8; 3]]) -> Result<()> {
+    pub(super) fn send_rgb_stream_frame(&self, colors: &[[u8; 3]]) -> Result<()> {
         self.send_rgb_stream(&self.ordered_rgb_bytes(colors))
     }
 
-    fn send_rgb_frames_loop(
+    pub(super) fn send_rgb_frames_loop(
         &self,
         frames: &[Vec<[u8; 3]>],
         timing: RgbPlaybackTiming,
@@ -73,25 +73,32 @@ impl WiredReceiverController {
         )
     }
 
-    fn ordered_rgb_frames(&self, frames: &[Vec<[u8; 3]>]) -> Vec<u8> {
+    pub(super) fn ordered_rgb_frames(&self, frames: &[Vec<[u8; 3]>]) -> Vec<u8> {
         let right_attach = *self.is_inf_right_attach.lock();
+        if !right_attach {
+            return Self::rgb_frames_bytes(frames);
+        }
         let leds_per_fan = self.params.leds_per_fan as usize;
         let mut raw = Vec::with_capacity(frames.len() * frames[0].len() * 3);
         for frame in frames {
-            if right_attach {
-                for fan in frame.chunks_exact(leds_per_fan).rev() {
-                    raw.extend(fan.iter().flatten());
-                }
-            } else {
-                raw.extend(frame.iter().flatten());
+            for fan in frame.chunks_exact(leds_per_fan).rev() {
+                raw.extend(fan.iter().flatten());
             }
+        }
+        raw
+    }
+
+    pub(super) fn rgb_frames_bytes(frames: &[Vec<[u8; 3]>]) -> Vec<u8> {
+        let mut raw = Vec::with_capacity(frames.len() * frames[0].len() * 3);
+        for frame in frames {
+            raw.extend(frame.iter().flatten());
         }
         raw
     }
 
     /// P28 V2 / CL V2: stream raw RGB via 0x11 in 20-LED chunks.
     /// Ack is read every 14th frame-terminating chunk to avoid USB contention.
-    fn send_rgb_stream(&self, raw: &[u8]) -> Result<()> {
+    pub(super) fn send_rgb_stream(&self, raw: &[u8]) -> Result<()> {
         let total_leds = raw.len() / 3;
         let transport = self.transport.lock();
         let mut ack_counter = self.stream_ack_counter.lock();
@@ -129,7 +136,7 @@ impl WiredReceiverController {
     }
 
     /// TL Flex: tinyuz-compress, upload via 0x18, commit via 0x19.
-    fn send_rgb_flash_save(
+    pub(super) fn send_rgb_flash_save(
         &self,
         raw: &[u8],
         led_total: usize,
@@ -240,6 +247,30 @@ impl RgbDevice for WiredReceiverController {
         } else {
             Some(crate::traits::RgbFrameDelivery::Streaming)
         }
+    }
+
+    fn set_sync_animation(&self, frames: &[Vec<[u8; 3]>], timing: RgbPlaybackTiming) -> Result<()> {
+        self.send_sync_animation(frames, timing)
+    }
+
+    fn validate_sync_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        self.validate_sync_frames(frames, timing)
+    }
+
+    fn set_rgb_clock(&self, ticks: u32) -> Result<()> {
+        if self.rf_owned() {
+            return Ok(());
+        }
+        let mut packet = [0; PACKET_SIZE];
+        packet[0] = 8;
+        packet[1..5].copy_from_slice(&ticks.to_be_bytes());
+        let response = self.send_and_read(&packet)?;
+        anyhow::ensure!(response[0] == 8, "unexpected RGB clock acknowledgement");
+        Ok(())
     }
 
     fn set_software_animation(

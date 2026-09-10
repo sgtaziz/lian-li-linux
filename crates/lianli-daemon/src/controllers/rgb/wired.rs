@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use tracing::warn;
 
 struct Playback {
+    clock: Option<Arc<super::sync_clock::SyncClock>>,
     device: Arc<dyn RgbDevice>,
     frames: Arc<Vec<Vec<[u8; 3]>>>,
     interval: Duration,
@@ -60,10 +61,16 @@ impl WiredRenderer {
                         let index = if p.device.software_frame_delivery()
                             == Some(RgbFrameDelivery::Streaming)
                         {
-                            Some(
-                                (p.started.elapsed().as_nanos() / p.interval.as_nanos()) as usize
-                                    % p.frames.len(),
-                            )
+                            Some(p.clock.as_ref().map_or_else(
+                                || {
+                                    (p.started.elapsed().as_nanos() / p.interval.as_nanos())
+                                        as usize
+                                        % p.frames.len()
+                                },
+                                |clock| {
+                                    clock.frame_index(p.timing.interval_hundredths, p.frames.len())
+                                },
+                            ))
                         } else {
                             None
                         };
@@ -150,8 +157,19 @@ impl WiredRenderer {
         &self,
         id: &str,
         device: Arc<dyn RgbDevice>,
+        frames: Vec<Vec<[u8; 3]>>,
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        self.submit_timed(id, device, frames, timing, None)
+    }
+
+    pub fn submit_timed(
+        &self,
+        id: &str,
+        device: Arc<dyn RgbDevice>,
         mut frames: Vec<Vec<[u8; 3]>>,
         timing: RgbPlaybackTiming,
+        clock: Option<Arc<super::sync_clock::SyncClock>>,
     ) -> Result<()> {
         ensure!(
             !frames.is_empty() && frames.len() <= 2048,
@@ -182,6 +200,7 @@ impl WiredRenderer {
         state.devices.insert(
             id.to_owned(),
             Playback {
+                clock,
                 device,
                 frames: Arc::new(frames),
                 interval: Duration::from_nanos(u64::from(timing.interval_hundredths) * 6_250),

@@ -5,7 +5,9 @@
 //!
 use crate::traits::{AioDevice, FanDevice, RgbDevice, RgbFrameDelivery};
 use anyhow::{Context, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo};
+use lianli_shared::rgb::{
+    RgbEffect, RgbMode, RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo,
+};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
@@ -204,29 +206,39 @@ impl Hs2OledLedController {
             *dst = *src;
         }
 
+        self.send_rgb_packets(build_rgb_packets(&frame))
+    }
+
+    fn send_rgb_sync_frame(&self, colors: &[[u8; 3]]) -> Result<()> {
+        anyhow::ensure!(colors.len() == 35, "HS2 OLED sync RGB requires 35 LEDs");
+        self.send_rgb_packets(build_rgb_packets(colors))
+    }
+
+    fn send_rgb_packets(&self, packets: [[u8; RGB_PACKET_SIZE]; 3]) -> Result<()> {
         let transport = self.transport.lock();
-        let per_chunk = RGB_LED_COUNT.div_ceil(3);
-        for chunk in 0..3usize {
-            let start = chunk * per_chunk;
-            let this_count = (RGB_LED_COUNT - start).min(per_chunk);
-            let mut packet = [0u8; RGB_PACKET_SIZE];
-            packet[0] = CMD_PUSH_RGB;
-            packet[1] = start as u8;
-            for led in 0..this_count {
-                let led_idx = start + led;
-                let off = 4 + led * 3;
-                packet[off] = frame[led_idx][0];
-                packet[off + 1] = frame[led_idx][1];
-                packet[off + 2] = frame[led_idx][2];
-            }
+        for (chunk, packet) in packets.iter().enumerate() {
             transport
-                .write(&packet, LCD_WRITE_TIMEOUT)
+                .write(packet, LCD_WRITE_TIMEOUT)
                 .with_context(|| format!("HS2 OLED LED: write RGB chunk {chunk}"))?;
             let mut rx = [0u8; PACKET_SIZE];
             let _ = transport.read(&mut rx, LCD_READ_TIMEOUT);
         }
         Ok(())
     }
+}
+
+fn build_rgb_packets(colors: &[[u8; 3]]) -> [[u8; RGB_PACKET_SIZE]; 3] {
+    let mut packets = [[0; RGB_PACKET_SIZE]; 3];
+    for (chunk, packet) in packets.iter_mut().enumerate() {
+        let start = chunk * 15;
+        packet[0] = CMD_PUSH_RGB;
+        packet[1] = start as u8;
+        for (led, color) in colors.iter().skip(start).take(15).enumerate() {
+            let offset = 4 + led * 3;
+            packet[offset..offset + 3].copy_from_slice(color);
+        }
+    }
+    packets
 }
 
 fn scale_brightness([r, g, b]: [u8; 3], brightness: u8) -> [u8; 3] {
@@ -314,6 +326,41 @@ impl RgbDevice for Hs2OledLedController {
         Some(RgbFrameDelivery::Streaming)
     }
 
+    fn set_sync_animation(&self, frames: &[Vec<[u8; 3]>], timing: RgbPlaybackTiming) -> Result<()> {
+        anyhow::ensure!(
+            frames.len() == 1,
+            "HS2 OLED sync accepts one frame at a time"
+        );
+        self.validate_sync_animation(frames, timing)?;
+        self.send_rgb_sync_frame(&frames[0])
+    }
+
+    fn validate_sync_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            !frames.is_empty() && frames.len() <= usize::from(u16::MAX),
+            "invalid HS2 OLED sync frame count"
+        );
+        anyhow::ensure!(
+            frames.iter().all(|frame| frame.len() == 35),
+            "HS2 OLED sync RGB requires 35 LEDs per frame"
+        );
+        anyhow::ensure!(
+            (100..=6_553_599).contains(&timing.interval_hundredths),
+            "invalid HS2 OLED sync playback interval"
+        );
+        anyhow::ensure!(
+            timing.secondary_interval_ticks == 0
+                && timing.secondary_frame_count == 0
+                && !timing.outer_longest,
+            "HS2 OLED sync does not support secondary timing"
+        );
+        Ok(())
+    }
+
     fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], _interval_ms: u16) -> Result<()> {
         if frames.len() != 1 || frames[0].len() != RGB_LED_COUNT {
             anyhow::bail!("HS2 OLED RGB requires one full {RGB_LED_COUNT}-LED frame")
@@ -380,7 +427,7 @@ impl crate::registry::DeviceDriver for Hs2OledLedDriver {
 
 #[cfg(test)]
 mod tests {
-    use super::rpm_to_output;
+    use super::{build_rgb_packets, rpm_to_output, CMD_PUSH_RGB};
 
     #[test]
     fn rpm_table_clamps_low() {
@@ -399,5 +446,20 @@ mod tests {
         // Between 1577→250 and 1608→300: midpoint 1592.5 → ~275
         let v = rpm_to_output(1592);
         assert!((270..=280).contains(&v), "got {v}");
+    }
+
+    #[test]
+    fn sync_rgb_packets_send_fifteen_fifteen_and_five_leds() {
+        let colors: Vec<_> = (0..35).map(|index| [index, index + 1, index + 2]).collect();
+        let packets = build_rgb_packets(&colors);
+
+        for (chunk, packet) in packets.iter().enumerate() {
+            assert_eq!(packet[0], CMD_PUSH_RGB);
+            assert_eq!(packet[1], (chunk * 15) as u8);
+        }
+        assert_eq!(&packets[0][4..49], colors[0..15].as_flattened());
+        assert_eq!(&packets[1][4..49], colors[15..30].as_flattened());
+        assert_eq!(&packets[2][4..19], colors[30..35].as_flattened());
+        assert!(packets[2][19..].iter().all(|byte| *byte == 0));
     }
 }
