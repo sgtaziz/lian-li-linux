@@ -1,5 +1,8 @@
 //! RGB/LED effect types shared between daemon, devices, and GUI.
 
+pub mod profile;
+pub use profile::{RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile};
+
 use crate::device_id::DeviceFamily;
 use serde::{Deserialize, Serialize};
 
@@ -89,6 +92,20 @@ pub enum RgbMode {
     ColorTransfer,
     CrossOver,
     Parallel,
+    Endless,
+    River,
+    Duel,
+    Hourglass,
+    Pioneer,
+    ShuttleRun,
+    GradientRibbon,
+    RainbowWave,
+    ColorfulMeteor,
+    Wing,
+    Drumming,
+    Boomerang,
+    CandyBox,
+    Transformation,
 }
 
 impl RgbMode {
@@ -377,6 +394,20 @@ impl RgbMode {
             Self::ColorTransfer => "Color Transfer",
             Self::CrossOver => "Cross Over",
             Self::Parallel => "Parallel",
+            Self::Endless => "Endless",
+            Self::River => "River",
+            Self::Duel => "Duel",
+            Self::Hourglass => "Hourglass",
+            Self::Pioneer => "Pioneer",
+            Self::ShuttleRun => "Shuttle Run",
+            Self::GradientRibbon => "Gradient Ribbon",
+            Self::RainbowWave => "Rainbow Wave",
+            Self::ColorfulMeteor => "Colorful Meteor",
+            Self::Wing => "Wing",
+            Self::Drumming => "Drumming",
+            Self::Boomerang => "Boomerang",
+            Self::CandyBox => "Candy Box",
+            Self::Transformation => "Transformation",
         }
     }
 
@@ -467,6 +498,20 @@ impl RgbMode {
             "Color Transfer" => Self::ColorTransfer,
             "Cross Over" => Self::CrossOver,
             "Parallel" => Self::Parallel,
+            "Endless" => Self::Endless,
+            "River" => Self::River,
+            "Duel" => Self::Duel,
+            "Hourglass" => Self::Hourglass,
+            "Pioneer" => Self::Pioneer,
+            "Shuttle Run" => Self::ShuttleRun,
+            "Gradient Ribbon" => Self::GradientRibbon,
+            "Rainbow Wave" => Self::RainbowWave,
+            "Colorful Meteor" => Self::ColorfulMeteor,
+            "Wing" => Self::Wing,
+            "Drumming" => Self::Drumming,
+            "Boomerang" => Self::Boomerang,
+            "Candy Box" => Self::CandyBox,
+            "Transformation" => Self::Transformation,
             _ => return None,
         })
     }
@@ -515,6 +560,16 @@ pub enum RgbScope {
     Bottom,
     Inner,
     Outer,
+    Center,
+    Pump,
+    Front,
+    Rear,
+    Segment1,
+    Segment2,
+    Segment3,
+    Segment4,
+    Segment5,
+    Segment6,
 }
 
 /// A complete RGB effect definition.
@@ -610,6 +665,15 @@ pub struct RgbDeviceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_preset: Option<String>,
     pub zones: Vec<RgbZoneConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<Vec<RgbRegionConfig>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RgbRegionConfig {
+    pub effect: RgbEffect,
+    #[serde(default)]
+    pub flip: bool,
 }
 
 /// Top-level RGB configuration section.
@@ -667,6 +731,8 @@ pub struct RgbPreset {
     pub name: String,
     pub device_id: String,
     pub zones: Vec<RgbPresetZone>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<Vec<RgbRegionConfig>>,
 }
 
 /// Information about an RGB zone, reported to GUI/OpenRGB.
@@ -684,6 +750,14 @@ pub struct RgbDeviceCapabilities {
     pub supported_modes: Vec<RgbMode>,
     #[serde(default)]
     pub software_modes: Vec<RgbMode>,
+    #[serde(default)]
+    pub effect_regions: Vec<RgbScope>,
+    #[serde(default)]
+    pub effect_parameters: Vec<RgbEffectParameters>,
+    #[serde(default)]
+    pub region_parameters: Vec<RgbRegionParameters>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_profile: Option<RgbRenderProfile>,
     pub zones: Vec<RgbZoneInfo>,
     /// Whether this device supports per-LED direct color control.
     pub supports_direct: bool,
@@ -705,6 +779,22 @@ pub struct RgbDeviceCapabilities {
     pub rf_owned: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RgbEffectParameters {
+    pub mode: RgbMode,
+    pub min_colors: u8,
+    pub max_colors: u8,
+    pub per_fan_colors: bool,
+    pub directions: Vec<RgbDirection>,
+    pub supports_speed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RgbRegionParameters {
+    pub scope: RgbScope,
+    pub effects: Vec<RgbEffectParameters>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MergeLightingConfig {
     pub device_order: Vec<String>,
@@ -718,6 +808,22 @@ pub struct MergeLightingConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_configs_and_presets_do_not_invent_regional_settings() {
+        let config: RgbDeviceConfig = serde_json::from_value(serde_json::json!({
+            "device_id": "tl", "zones": []
+        }))
+        .unwrap();
+        assert!(config.regions.is_none());
+        let preset: RgbPreset = serde_json::from_value(serde_json::json!({
+            "name": "old", "device_id": "tl", "zones": []
+        }))
+        .unwrap();
+        assert!(preset.regions.is_none());
+        let encoded = serde_json::to_value(config).unwrap();
+        assert!(encoded.get("regions").is_none());
+    }
 
     #[test]
     fn older_capabilities_default_to_no_software_modes() {
@@ -807,6 +913,20 @@ mod tests {
         RgbMode::ColorTransfer,
         RgbMode::CrossOver,
         RgbMode::Parallel,
+        RgbMode::Endless,
+        RgbMode::River,
+        RgbMode::Duel,
+        RgbMode::Hourglass,
+        RgbMode::Pioneer,
+        RgbMode::ShuttleRun,
+        RgbMode::GradientRibbon,
+        RgbMode::RainbowWave,
+        RgbMode::ColorfulMeteor,
+        RgbMode::Wing,
+        RgbMode::Drumming,
+        RgbMode::Boomerang,
+        RgbMode::CandyBox,
+        RgbMode::Transformation,
     ];
 
     #[test]
