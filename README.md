@@ -53,7 +53,7 @@ own were validated against real hardware, others rely on community testing and f
 | Lancool V150 Wireless | Yes | Yes | - | - | - |
 | Universal Screen 8.8" Wireless | - | Yes | - | - | - |
 
-Both V1 (VID 0x0416) and V2 (VID 0x1A86) wireless dongles are supported. Binding devices is supported through the GUI, which reports command completion or failure. Wireless control requires both TX and RX dongles.
+Both V1 (VID 0x0416) and V2 (VID 0x1A86) wireless dongles are supported. Binding devices is supported through the GUI, which reports command completion or failure. Wireless control requires both TX and RX dongles. Saved fan and lighting settings do not automatically bind an unbound group on startup, use the GUI to bind it explicitly.
 
 Wireless SL V3 fans support hardware motherboard PWM sync. Other wireless fans can follow a selected Linux PWM header; if that source is missing or becomes unreadable, they run at full speed until it returns.
 

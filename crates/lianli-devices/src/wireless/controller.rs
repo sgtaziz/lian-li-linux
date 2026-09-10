@@ -544,24 +544,23 @@ impl WirelessController {
             .collect()
     }
 
-    /// MACs eligible for automatic recovery: live masterless devices that
-    /// were not explicitly unbound by the user. Bound devices that drifted
-    /// away must have been masterless for [`REBIND_FOREIGN_AFTER`] first.
-    /// Devices owned by another controller are never candidates.
+    /// Recovery requires ownership confirmed in this runtime and sustained loss of that ownership.
     pub fn rebind_candidates(&self) -> Vec<[u8; 6]> {
         self.device_health
             .lock()
             .iter()
             .filter(|(_, h)| {
-                if h.dead || h.man_unbind || h.observed_master != [0u8; 6] {
+                if h.dead
+                    || h.man_unbind
+                    || !h.bind_intent
+                    || h.observed_master != [0u8; 6]
+                    || h.raw_master != [0u8; 6]
+                    || h.raw_seen.elapsed() > ACK_FRESHNESS
+                {
                     return false;
                 }
-                if h.bind_intent {
-                    h.foreign_since
-                        .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER)
-                } else {
-                    true
-                }
+                h.foreign_since
+                    .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER)
             })
             .map(|(mac, _)| *mac)
             .collect()
@@ -1039,9 +1038,31 @@ mod tests {
     }
 
     #[test]
-    fn masterless_without_intent_is_candidate() {
+    fn masterless_at_startup_is_not_automatically_claimed() {
         let c = controller_with_health(vec![(mac(), entry([0u8; 6]))]);
-        assert_eq!(c.rebind_candidates(), vec![mac()]);
+        assert!(c.rebind_candidates().is_empty());
+        c.device_health
+            .lock()
+            .get_mut(&mac())
+            .unwrap()
+            .foreign_since = Some(Instant::now() - REBIND_FOREIGN_AFTER - Duration::from_secs(1));
+        assert!(c.rebind_candidates().is_empty());
+    }
+
+    #[test]
+    fn recovery_requires_a_fresh_masterless_sighting() {
+        let mut h = entry([0; 6]);
+        h.bind_intent = true;
+        h.foreign_since = Some(Instant::now() - REBIND_FOREIGN_AFTER - Duration::from_secs(1));
+        h.raw_master = [7; 6];
+        let c = controller_with_health(vec![(mac(), h)]);
+        assert!(c.rebind_candidates().is_empty());
+        let mut health = c.device_health.lock();
+        let h = health.get_mut(&mac()).unwrap();
+        h.raw_master = [0; 6];
+        h.raw_seen = Instant::now() - ACK_FRESHNESS - Duration::from_secs(1);
+        drop(health);
+        assert!(c.rebind_candidates().is_empty());
     }
 
     #[test]

@@ -811,25 +811,6 @@ impl ServiceManager {
         configured_ids
     }
 
-    fn auto_rebind_configured_wireless(&mut self) {
-        let configured_ids = self.configured_wireless_device_ids();
-
-        for dev in self.wireless.unbound_devices() {
-            if dev.master_mac != [0u8; 6] {
-                continue;
-            }
-            let device_id = format!("wireless:{}", dev.mac_str());
-            if !configured_ids.contains(&device_id) {
-                continue;
-            }
-
-            info!("Auto-rebinding configured wireless device {device_id}");
-            if let Err(err) = self.wireless.bind_device(&dev.mac) {
-                warn!("Auto-rebind failed for {device_id}: {err}");
-            }
-        }
-    }
-
     pub(super) fn try_wireless(&mut self) {
         if !lianli_devices::wireless::tx_dongle_present() {
             debug!("[wireless] no TX/RX devices found, skipping wireless");
@@ -843,7 +824,6 @@ impl ServiceManager {
             Ok(()) => match self.wireless.start_polling() {
                 Ok(()) => {
                     let _ = self.wireless.send_rx_sequence();
-                    self.auto_rebind_configured_wireless();
                     info!("Wireless links active");
                 }
                 Err(err) => warn!("[wireless] polling start failed: {err}"),

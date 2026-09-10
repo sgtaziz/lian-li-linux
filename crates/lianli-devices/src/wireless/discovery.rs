@@ -630,9 +630,10 @@ fn rebuild_published_vec(
             .filter(|d| !d.bind_intent && d.master_mac != *local)
         {
             info!(
-                "  {} ({}) not bound to this dongle",
+                "  {} ({}) not bound to this dongle; reported master={:02x?}",
                 d.mac_str(),
-                d.fan_type.display_name()
+                d.fan_type.display_name(),
+                d.master_mac
             );
         }
     }
