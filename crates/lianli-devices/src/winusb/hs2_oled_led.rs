@@ -5,7 +5,7 @@
 //!
 use crate::traits::{AioDevice, FanDevice, RgbDevice, RgbFrameDelivery};
 use anyhow::{Context, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use rusb::{Device, GlobalContext};
@@ -299,6 +299,15 @@ impl RgbDevice for Hs2OledLedController {
 
     fn supports_direct(&self) -> bool {
         true
+    }
+
+    fn software_render_profile(&self) -> Option<RgbRenderProfile> {
+        Some(RgbRenderProfile {
+            family: RgbRenderFamily::HydroShiftIIOled,
+            fan_count: 0,
+            led_count: RGB_LED_COUNT as u16,
+            right_attach: false,
+        })
     }
 
     fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {

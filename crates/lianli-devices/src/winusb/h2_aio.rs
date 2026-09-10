@@ -8,7 +8,9 @@ use super::lcd::{PendingCmd, SharedTransport};
 use crate::crypto::PacketBuilder;
 use crate::traits::{AioDevice, FanDevice, RgbDevice, RgbFrameDelivery};
 use anyhow::{Context, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{
+    RgbEffect, RgbMode, RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo,
+};
 use lianli_transport::usb::{LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +22,29 @@ const PUMP_MIN_RPM: u16 = 1600;
 const PUMP_MAX_RPM_CIRCLE: u16 = 2500;
 const PUMP_MAX_RPM_SQUARE: u16 = 3200;
 const RING_LED_COUNT: usize = 24;
+
+fn h2_playback_fields(frame_count: usize, timing: RgbPlaybackTiming) -> Result<(u16, u8)> {
+    anyhow::ensure!(frame_count > 0, "H2 RGB requires at least one frame");
+    let frame_count = u16::try_from(frame_count).context("H2 RGB frame count exceeds protocol")?;
+    anyhow::ensure!(
+        timing.secondary_interval_ticks == 0
+            && timing.secondary_frame_count == 0
+            && !timing.outer_longest,
+        "H2 RGB does not support secondary timing"
+    );
+    anyhow::ensure!(
+        timing.interval_hundredths.is_multiple_of(100),
+        "H2 RGB interval cannot represent fractional ticks"
+    );
+    let interval_ticks = timing.interval_hundredths / 100;
+    let interval_ticks = u8::try_from(interval_ticks)
+        .context("H2 RGB interval exceeds the one-byte protocol field")?;
+    anyhow::ensure!(
+        interval_ticks > 0,
+        "H2 RGB interval must be at least one tick"
+    );
+    Ok((frame_count, interval_ticks))
+}
 
 /// Telemetry parsed from GetH2Params response.
 #[derive(Clone)]
@@ -395,11 +420,13 @@ impl H2AioController {
     }
 
     /// Upload full-ring RGB frames via PushRgbData (0xFC); firmware loops
-    /// them at `interval_ms`.
-    pub fn send_rgb_frames(&self, frames: &[Vec<[u8; 3]>], interval_ms: u8) -> Result<()> {
+    /// them at `interval_ticks`.
+    pub fn send_rgb_frames(&self, frames: &[Vec<[u8; 3]>], interval_ticks: u8) -> Result<()> {
         if frames.is_empty() {
             return Ok(());
         }
+        let total_frames =
+            u16::try_from(frames.len()).context("H2 RGB frame count exceeds protocol")?;
         // Bridged to a wireless AIO: the same 24-LED ring is driven over RF
         // through the pump-head device, as the fan and pump paths already
         // are, so this packet is redundant here and the wired write is
@@ -408,9 +435,7 @@ impl H2AioController {
             debug!("H2: PushRgbData skipped — ring is driven over RF (wireless mode)");
             return Ok(());
         }
-        let total_frames = frames.len();
-
-        let mut raw = Vec::with_capacity(total_frames * RING_LED_COUNT * 3);
+        let mut raw = Vec::with_capacity(usize::from(total_frames) * RING_LED_COUNT * 3);
         for frame in frames {
             for led in 0..RING_LED_COUNT {
                 let c = frame.get(led).copied().unwrap_or([0, 0, 0]);
@@ -422,7 +447,7 @@ impl H2AioController {
         // reload, including LCD media switches. Each write here costs a
         // stop/push/reopen cycle and a second of LCD pause, so an unchanged
         // ring is not resent.
-        let payload_key = (raw.clone(), interval_ms);
+        let payload_key = (raw.clone(), interval_ticks);
         if self.transport.last_ring_payload().as_ref() == Some(&payload_key) {
             debug!("H2: PushRgbData skipped — ring unchanged");
             return Ok(());
@@ -431,9 +456,8 @@ impl H2AioController {
         let compressed = crate::tinyuz::compress(&raw).context("compressing RGB data")?;
 
         let mut payload = compressed;
-        payload.push((total_frames >> 8) as u8);
-        payload.push((total_frames & 0xFF) as u8);
-        payload.push(interval_ms);
+        payload.extend_from_slice(&total_frames.to_be_bytes());
+        payload.push(interval_ticks);
         payload.push(RING_LED_COUNT as u8);
 
         let header = self
@@ -678,24 +702,54 @@ impl RgbDevice for H2AioController {
         true
     }
 
+    fn software_render_profile(&self) -> Option<RgbRenderProfile> {
+        Some(RgbRenderProfile {
+            family: RgbRenderFamily::HydroShiftII,
+            fan_count: 0,
+            led_count: RING_LED_COUNT as u16,
+            right_attach: false,
+        })
+    }
+
     fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
         (!self.rf_owned()).then_some(RgbFrameDelivery::LoopUpload)
     }
 
     fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], interval_ms: u16) -> Result<()> {
+        let interval_hundredths = u32::from(interval_ms) * 160;
+        let rounded_timing = RgbPlaybackTiming {
+            interval_hundredths: interval_hundredths.div_ceil(100) * 100,
+            ..RgbPlaybackTiming::default()
+        };
+        self.set_software_animation(frames, rounded_timing)
+    }
+
+    fn set_software_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
         if self.rf_owned() {
             anyhow::bail!("H2 RGB ring is owned by the wireless bridge")
         }
-        if frames.is_empty() || frames.len() > 120 {
-            anyhow::bail!("H2 RGB requires 1-120 frames")
-        }
-        if interval_ms == 0 || interval_ms > u8::MAX as u16 {
-            anyhow::bail!("H2 RGB interval exceeds device limit")
-        }
+        let (_, interval_ticks) = h2_playback_fields(frames.len(), timing)?;
         if frames.iter().any(|frame| frame.len() != RING_LED_COUNT) {
             anyhow::bail!("H2 RGB requires exactly {RING_LED_COUNT} LEDs per frame")
         }
-        self.send_rgb_frames(frames, interval_ms as u8)
+        self.send_rgb_frames(frames, interval_ticks)
+    }
+
+    fn validate_software_animation(
+        &self,
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+    ) -> Result<()> {
+        h2_playback_fields(frames.len(), timing)?;
+        anyhow::ensure!(
+            frames.iter().all(|frame| frame.len() == RING_LED_COUNT),
+            "H2 RGB requires exactly 24 LEDs per frame"
+        );
+        Ok(())
     }
 
     fn rf_owned(&self) -> bool {
@@ -721,5 +775,48 @@ impl RgbDevice for H2AioController {
             anyhow::bail!("H2 RGB: zone {zone} out of range (only zone 0)");
         }
         self.send_rgb_frames(&[colors.to_vec()], 100)
+    }
+}
+
+#[cfg(test)]
+mod playback_tests {
+    use super::h2_playback_fields;
+    use lianli_shared::rgb::RgbPlaybackTiming;
+
+    #[test]
+    fn uses_full_frame_count_and_one_byte_tick_fields() {
+        let timing = RgbPlaybackTiming {
+            interval_hundredths: 2_000,
+            ..RgbPlaybackTiming::default()
+        };
+        assert_eq!(h2_playback_fields(120, timing).unwrap(), (120, 20));
+        assert_eq!(
+            h2_playback_fields(u16::MAX as usize, timing).unwrap(),
+            (u16::MAX, 20)
+        );
+        assert!(h2_playback_fields(0, timing).is_err());
+        assert!(h2_playback_fields(u16::MAX as usize + 1, timing).is_err());
+    }
+
+    #[test]
+    fn rejects_timing_the_h2_footer_cannot_encode() {
+        let fractional = RgbPlaybackTiming {
+            interval_hundredths: 2_050,
+            ..RgbPlaybackTiming::default()
+        };
+        assert!(h2_playback_fields(1, fractional).is_err());
+
+        let secondary = RgbPlaybackTiming {
+            interval_hundredths: 2_000,
+            secondary_interval_ticks: 1,
+            ..RgbPlaybackTiming::default()
+        };
+        assert!(h2_playback_fields(1, secondary).is_err());
+
+        let too_slow = RgbPlaybackTiming {
+            interval_hundredths: 25_600,
+            ..RgbPlaybackTiming::default()
+        };
+        assert!(h2_playback_fields(1, too_slow).is_err());
     }
 }

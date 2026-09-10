@@ -10,7 +10,7 @@
 
 use crate::traits::{RgbDevice, RgbFrameDelivery};
 use anyhow::{bail, Context, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use lianli_transport::TransportError;
 use parking_lot::Mutex;
@@ -147,6 +147,15 @@ impl RgbDevice for WinUsbLedDevice {
 
     fn supports_direct(&self) -> bool {
         true
+    }
+
+    fn software_render_profile(&self) -> Option<RgbRenderProfile> {
+        Some(RgbRenderProfile {
+            family: RgbRenderFamily::UniversalScreen,
+            fan_count: 0,
+            led_count: self.led_count,
+            right_attach: false,
+        })
     }
 
     fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {

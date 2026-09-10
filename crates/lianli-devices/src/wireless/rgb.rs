@@ -1,13 +1,14 @@
 use super::controller::WirelessController;
 use super::{WirelessFanType, RF_DATA_SIZE, RF_SELECT, RF_SET_RGB};
 use anyhow::{ensure, Context, Result};
+use lianli_shared::rgb::RgbPlaybackTiming;
 use std::thread;
 use std::time::{Duration, Instant};
 
 // MasterDevice.LzoMaxRgbDataLen and lzo_rgb_rf_valid_len in the vendor RF uploader.
 const MAX_COMPRESSED_BYTES: usize = 12_288;
 const CHUNK_BYTES: usize = 220;
-const MAX_FRAMES: usize = 512;
+const MAX_FRAMES: usize = 2048;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WirelessRgbUpload {
@@ -17,11 +18,16 @@ pub struct WirelessRgbUpload {
     interval_ticks: u16,
     interval_fraction: u8,
     effect_index: [u8; 4],
+    timing: RgbPlaybackTiming,
 }
 
 impl WirelessRgbUpload {
     pub fn frame_count(&self) -> u16 {
         self.frame_count
+    }
+
+    pub fn effect_index(&self) -> [u8; 4] {
+        self.effect_index
     }
     pub fn new(
         frames: &[Vec<[u8; 3]>],
@@ -41,6 +47,22 @@ impl WirelessRgbUpload {
         interval_hundredths: u32,
         reverse_fan_leds: Option<usize>,
     ) -> Result<Self> {
+        Self::with_timing(
+            frames,
+            RgbPlaybackTiming {
+                interval_hundredths,
+                ..Default::default()
+            },
+            reverse_fan_leds,
+        )
+    }
+
+    pub fn with_timing(
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
+        reverse_fan_leds: Option<usize>,
+    ) -> Result<Self> {
+        let interval_hundredths = timing.interval_hundredths;
         ensure!(
             !frames.is_empty() && frames.len() <= MAX_FRAMES,
             "RGB upload requires 1..={MAX_FRAMES} frames"
@@ -57,6 +79,15 @@ impl WirelessRgbUpload {
         ensure!(
             (100..=6_553_599).contains(&interval_hundredths),
             "RGB interval must be 1..=65535.99 RF ticks"
+        );
+        ensure!(
+            if timing.secondary_frame_count == 0 {
+                timing.secondary_interval_ticks == 0 && !timing.outer_longest
+            } else {
+                timing.secondary_interval_ticks > 0
+                    && usize::from(timing.secondary_frame_count) <= frames.len()
+            },
+            "invalid secondary RGB region timing"
         );
         if let Some(count) = reverse_fan_leds {
             ensure!(
@@ -94,6 +125,9 @@ impl WirelessRgbUpload {
             .chain([interval_fraction])
             .chain(frame_count.to_be_bytes())
             .chain([led_count as u8])
+            .chain(timing.secondary_interval_ticks.to_be_bytes())
+            .chain(timing.secondary_frame_count.to_be_bytes())
+            .chain([u8::from(timing.outer_longest)])
         {
             hash = (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193);
         }
@@ -104,6 +138,7 @@ impl WirelessRgbUpload {
             interval_ticks,
             interval_fraction,
             effect_index: hash.max(1).to_be_bytes(),
+            timing,
         })
     }
 
@@ -122,6 +157,9 @@ impl WirelessRgbUpload {
             packet[27] = self.led_count;
             packet[32..34].copy_from_slice(&self.interval_ticks.to_be_bytes());
             packet[34] = self.interval_fraction;
+            packet[35..37].copy_from_slice(&self.timing.secondary_interval_ticks.to_be_bytes());
+            packet[37] = u8::from(self.timing.outer_longest);
+            packet[38..40].copy_from_slice(&self.timing.secondary_frame_count.to_be_bytes());
         } else {
             let offset = (index - 1) * CHUNK_BYTES;
             let data = &self.compressed[offset..self.compressed.len().min(offset + CHUNK_BYTES)];
@@ -132,11 +170,31 @@ impl WirelessRgbUpload {
 }
 
 impl WirelessController {
+    pub fn clear_rgb_targets(&self) {
+        self.desired_effects.lock().clear();
+    }
+
+    pub fn forget_rgb_target(&self, mac: &[u8; 6], effect_index: [u8; 4]) {
+        let mut targets = self.desired_effects.lock();
+        if targets.get(mac) == Some(&effect_index) {
+            targets.remove(mac);
+        }
+    }
+
     pub fn prepare_rgb_upload(
         &self,
         mac: &[u8; 6],
         frames: &[Vec<[u8; 3]>],
         interval_ms: u16,
+    ) -> Result<WirelessRgbUpload> {
+        self.prepare_rgb_animation(mac, frames, RgbPlaybackTiming::from_millis(interval_ms))
+    }
+
+    pub fn prepare_rgb_animation(
+        &self,
+        mac: &[u8; 6],
+        frames: &[Vec<[u8; 3]>],
+        timing: RgbPlaybackTiming,
     ) -> Result<WirelessRgbUpload> {
         let device = self.device_by_mac_snapshot(mac)?;
         ensure!(
@@ -159,7 +217,7 @@ impl WirelessController {
                 WirelessFanType::SlInf | WirelessFanType::SlInfV3 { .. }
             ))
         .then_some(device.fan_type.leds_per_fan() as usize);
-        WirelessRgbUpload::new(frames, interval_ms, reverse)
+        WirelessRgbUpload::with_timing(frames, timing, reverse)
     }
 
     pub fn send_rgb_upload(
@@ -187,11 +245,12 @@ impl WirelessController {
             expected == upload.led_count as usize,
             "RGB device layout changed before upload"
         );
-        if device.is_sync_mb_light && device.fan_type.supports_mb_rgb_sync() {
-            self.set_mb_rgb_sync(mac, false)?;
-        }
+        ensure!(
+            self.mb_rgb_ready_for_upload(mac)?,
+            "waiting for motherboard RGB sync to disable"
+        );
         let started = Instant::now();
-        tracing::debug!(
+        tracing::trace!(
             mac = ?mac,
             frames = upload.frame_count,
             leds = upload.led_count,
@@ -278,6 +337,56 @@ impl WirelessFanType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canceling_an_old_upload_does_not_forget_a_newer_target() {
+        let controller = WirelessController::new();
+        controller.desired_effects.lock().insert([1; 6], [2; 4]);
+        controller.forget_rgb_target(&[1; 6], [1; 4]);
+        assert_eq!(
+            controller.desired_effects.lock().get(&[1; 6]),
+            Some(&[2; 4])
+        );
+        controller.forget_rgb_target(&[1; 6], [2; 4]);
+        assert!(controller.desired_effects.lock().is_empty());
+        controller.desired_effects.lock().insert([3; 6], [4; 4]);
+        controller.clear_rgb_targets();
+        assert!(controller.desired_effects.lock().is_empty());
+    }
+
+    #[test]
+    fn secondary_region_timing_is_transmitted_and_changes_identity() {
+        let frames = vec![vec![[20, 30, 40]; 120]; 30];
+        let timing = RgbPlaybackTiming {
+            interval_hundredths: 5_775,
+            secondary_interval_ticks: 63,
+            secondary_frame_count: 28,
+            outer_longest: true,
+        };
+        let upload = WirelessRgbUpload::with_timing(&frames, timing, None).unwrap();
+        let header = upload.packet(&[1; 6], &[2; 6], 0);
+        assert_eq!(&header[32..40], &[0, 57, 75, 0, 63, 1, 0, 28]);
+        let changed = WirelessRgbUpload::with_timing(
+            &frames,
+            RgbPlaybackTiming {
+                secondary_frame_count: 29,
+                ..timing
+            },
+            None,
+        )
+        .unwrap();
+        assert_ne!(upload.effect_index(), changed.effect_index());
+    }
+
+    #[test]
+    fn accepts_long_native_loops_without_decimating_frames() {
+        let frames = vec![vec![[5, 6, 7]; 174]; 2048];
+        let upload = WirelessRgbUpload::new(&frames, 50, None).unwrap();
+        assert_eq!(upload.frame_count(), 2048);
+        let header = upload.packet(&[1; 6], &[2; 6], 0);
+        assert_eq!(&header[25..27], &[8, 0]);
+        assert!(WirelessRgbUpload::new(&vec![vec![[0; 3]; 1]; 2049], 50, None).is_err());
+    }
 
     #[test]
     fn header_and_chunks_describe_exact_payload() {

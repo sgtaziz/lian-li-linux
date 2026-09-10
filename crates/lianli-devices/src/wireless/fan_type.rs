@@ -1,3 +1,5 @@
+use lianli_shared::rgb::{RgbRenderFamily, RgbRenderProfile};
+
 /// Wireless fan device type, determines minimum duty and RPM curves.
 ///
 /// Byte ranges for classifying fan type:
@@ -60,6 +62,52 @@ pub enum WirelessFanType {
 }
 
 impl WirelessFanType {
+    pub fn rgb_render_profile(self, fan_count: u8) -> Option<RgbRenderProfile> {
+        let per_fan = |family, leds_per_fan| {
+            (1..=4).contains(&fan_count).then_some(RgbRenderProfile {
+                family,
+                fan_count,
+                led_count: u16::from(fan_count) * leds_per_fan,
+                right_attach: false,
+            })
+        };
+        let fixed = |family, led_count| RgbRenderProfile {
+            family,
+            fan_count: 0,
+            led_count,
+            right_attach: false,
+        };
+
+        match self {
+            Self::Tlv2Lcd | Self::Tlv2Led | Self::TlV3 { .. } => per_fan(RgbRenderFamily::Tl, 26),
+            Self::Slv3Led | Self::Slv3Lcd => per_fan(RgbRenderFamily::Sl, 40),
+            Self::SlInf => per_fan(RgbRenderFamily::SlInf, 44),
+            Self::SlInfV3 { .. } => per_fan(RgbRenderFamily::SlInfV3, 44),
+            Self::SlV4 => per_fan(RgbRenderFamily::SlV4, 52),
+            Self::Clv1 | Self::ClV2 { .. } => per_fan(RgbRenderFamily::Cl, 24),
+            Self::P28V2 => per_fan(RgbRenderFamily::P28, 9),
+            Self::WaterBlock | Self::WaterBlock2 if fan_count <= 4 => Some(RgbRenderProfile {
+                family: RgbRenderFamily::HydroShiftII,
+                fan_count,
+                led_count: u16::from(fan_count + 1) * 24,
+                right_attach: false,
+            }),
+            Self::Strimer(_) => self
+                .total_led_count_override()
+                .filter(|&count| count > 0)
+                .map(|count| fixed(RgbRenderFamily::Strimer, count)),
+            Self::Lc217 => Some(fixed(RgbRenderFamily::Lancool217, 96)),
+            Self::Led88 => Some(fixed(RgbRenderFamily::UniversalScreen, 88)),
+            Self::V150 if fan_count <= 4 => Some(RgbRenderProfile {
+                family: RgbRenderFamily::LancoolV150,
+                fan_count,
+                led_count: 88,
+                right_attach: false,
+            }),
+            Self::WaterBlock | Self::WaterBlock2 | Self::V150 | Self::Unknown => None,
+        }
+    }
+
     /// Minimum duty percentage for this fan type.
     pub fn min_duty_percent(self) -> u8 {
         match self {
@@ -169,7 +217,8 @@ impl WirelessFanType {
                 1 => 116,
                 2 => 132,
                 3 => 174,
-                _ => 88,
+                4 => 88,
+                _ => 0,
             }),
             Self::Lc217 => Some(96),
             Self::Led88 => Some(88),
@@ -205,6 +254,20 @@ impl WirelessFanType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strimer_profiles_require_a_known_physical_layout() {
+        for (device_type, led_count) in [(1, 116), (2, 132), (3, 174), (4, 88)] {
+            let kind = WirelessFanType::Strimer(device_type);
+            assert_eq!(kind.rgb_render_profile(0).unwrap().led_count, led_count);
+            assert_eq!(kind.total_led_count_override(), Some(led_count));
+        }
+        for device_type in 5..=9 {
+            let kind = WirelessFanType::Strimer(device_type);
+            assert!(kind.rgb_render_profile(0).is_none());
+            assert_eq!(kind.total_led_count_override(), Some(0));
+        }
+    }
 
     #[test]
     fn slinfv3_byte_classification() {
@@ -350,5 +413,84 @@ mod tests {
                 assert_ne!(names[i], names[j], "duplicate display name");
             }
         }
+    }
+
+    #[test]
+    fn render_profiles_follow_each_wireless_renderer_layout() {
+        let cases = [
+            (WirelessFanType::Tlv2Led, 3, RgbRenderFamily::Tl, 78),
+            (WirelessFanType::Slv3Lcd, 2, RgbRenderFamily::Sl, 80),
+            (WirelessFanType::SlInf, 4, RgbRenderFamily::SlInf, 176),
+            (
+                WirelessFanType::SlInfV3 { lcd: false },
+                4,
+                RgbRenderFamily::SlInfV3,
+                176,
+            ),
+            (
+                WirelessFanType::SlInfV3 { lcd: true },
+                3,
+                RgbRenderFamily::SlInfV3,
+                132,
+            ),
+            (WirelessFanType::SlV4, 4, RgbRenderFamily::SlV4, 208),
+            (
+                WirelessFanType::ClV2 { reverse: true },
+                3,
+                RgbRenderFamily::Cl,
+                72,
+            ),
+            (WirelessFanType::P28V2, 4, RgbRenderFamily::P28, 36),
+            (
+                WirelessFanType::WaterBlock2,
+                3,
+                RgbRenderFamily::HydroShiftII,
+                96,
+            ),
+            (
+                WirelessFanType::Strimer(3),
+                0,
+                RgbRenderFamily::Strimer,
+                174,
+            ),
+            (WirelessFanType::Lc217, 0, RgbRenderFamily::Lancool217, 96),
+            (
+                WirelessFanType::Led88,
+                0,
+                RgbRenderFamily::UniversalScreen,
+                88,
+            ),
+            (WirelessFanType::V150, 4, RgbRenderFamily::LancoolV150, 88),
+        ];
+
+        for (fan_type, fan_count, family, led_count) in cases {
+            assert_eq!(
+                fan_type.rgb_render_profile(fan_count),
+                Some(RgbRenderProfile {
+                    family,
+                    fan_count: if matches!(
+                        fan_type,
+                        WirelessFanType::Strimer(_)
+                            | WirelessFanType::Lc217
+                            | WirelessFanType::Led88
+                    ) {
+                        0
+                    } else {
+                        fan_count
+                    },
+                    led_count,
+                    right_attach: false,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn render_profiles_reject_unrenderable_wireless_layouts() {
+        assert_eq!(WirelessFanType::Unknown.rgb_render_profile(1), None);
+        assert_eq!(WirelessFanType::SlV4.rgb_render_profile(0), None);
+        assert_eq!(WirelessFanType::SlV4.rgb_render_profile(5), None);
+        assert_eq!(WirelessFanType::WaterBlock.rgb_render_profile(5), None);
+        assert_eq!(WirelessFanType::V150.rgb_render_profile(5), None);
     }
 }
