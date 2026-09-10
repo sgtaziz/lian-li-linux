@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use lianli_transport::usb::RusbBulk;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -38,6 +39,7 @@ pub(super) fn with_transport_recovery<F, R>(
     arc: &Arc<Mutex<RusbBulk>>,
     ids: &[(u16, u16)],
     name: &str,
+    stop: Option<&AtomicBool>,
     mut op: F,
 ) -> Result<R>
 where
@@ -45,6 +47,10 @@ where
 {
     let first = {
         let handle = arc.lock();
+        anyhow::ensure!(
+            !stop.is_some_and(|flag| flag.load(Ordering::Acquire)),
+            "wireless controller is stopping"
+        );
         op(&handle)
     };
     match first {
@@ -53,7 +59,9 @@ where
             // Failures are expected once shutdown starts, since new
             // transfers are refused. Do not warn or attempt a reopen, the
             // caller is about to be joined anyway.
-            if lianli_transport::usb::shutting_down() {
+            if lianli_transport::usb::shutting_down()
+                || stop.is_some_and(|flag| flag.load(Ordering::Acquire))
+            {
                 debug!("{name} transport op failed ({e}) while shutting down, not reopening");
                 return Err(e).context("shutting down");
             }
@@ -61,6 +69,10 @@ where
             reopen_transport(arc, ids, name).context("reopen after stale handle")?;
             info!("{name} transport reopened, retrying");
             let handle = arc.lock();
+            anyhow::ensure!(
+                !stop.is_some_and(|flag| flag.load(Ordering::Acquire)),
+                "wireless controller is stopping"
+            );
             op(&handle)
         }
     }

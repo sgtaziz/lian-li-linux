@@ -108,10 +108,12 @@ pub enum DaemonEvent {
     }, // Desktop→LCD. Handled by main event loop.
     Bind {
         mac_address: String,
-    }, // MAC address pending wireless device bind. Handled by main event loop.
+        operation_id: String,
+    },
     Unbind {
         mac_address: String,
-    }, // MAC address pending wireless device unbind. Handled by main event loop.
+        operation_id: String,
+    },
     SetEne6k77FanQuantity {
         device_id: String,
         quantity: u8,
@@ -661,28 +663,38 @@ impl ServiceManager {
                     self.handle_display_switch_to_lcd(&device_id, pid);
                 }
                 DaemonEvent::Bind {
-                    mac_address: mac_str,
+                    mac_address,
+                    operation_id,
                 } => {
-                    if let Some(mac) = parse_mac_str(&mac_str) {
-                        if let Err(e) = self.wireless.bind_device(&mac) {
-                            warn!("Failed to bind wireless device {mac_str}: {e}");
-                        }
-                        self.device_poll();
-                    } else {
-                        warn!("Invalid MAC address for bind: {mac_str}");
+                    let result = parse_mac_str(&mac_address)
+                        .ok_or_else(|| anyhow::anyhow!("invalid wireless MAC address"))
+                        .and_then(|mac| self.wireless.bind_device(&mac));
+                    if let Err(error) = &result {
+                        warn!("Failed to bind wireless device {mac_address}: {error:#}");
                     }
+                    self.ipc
+                        .state
+                        .lock()
+                        .wireless_operations
+                        .complete(&operation_id, result);
+                    self.device_poll();
                 }
                 DaemonEvent::Unbind {
-                    mac_address: mac_str,
+                    mac_address,
+                    operation_id,
                 } => {
-                    if let Some(mac) = parse_mac_str(&mac_str) {
-                        if let Err(e) = self.wireless.unbind_device(&mac) {
-                            warn!("Failed to unbind wireless device {mac_str}: {e}");
-                        }
-                        self.device_poll();
-                    } else {
-                        warn!("Invalid MAC address for unbind: {mac_str}");
+                    let result = parse_mac_str(&mac_address)
+                        .ok_or_else(|| anyhow::anyhow!("invalid wireless MAC address"))
+                        .and_then(|mac| self.wireless.unbind_device(&mac));
+                    if let Err(error) = &result {
+                        warn!("Failed to unbind wireless device {mac_address}: {error:#}");
                     }
+                    self.ipc
+                        .state
+                        .lock()
+                        .wireless_operations
+                        .complete(&operation_id, result);
+                    self.device_poll();
                 }
                 DaemonEvent::SetEne6k77FanQuantity {
                     device_id,

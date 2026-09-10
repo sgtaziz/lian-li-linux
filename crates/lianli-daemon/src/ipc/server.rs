@@ -28,6 +28,7 @@ pub struct DaemonState {
     pub presets_path: PathBuf,
     pub devices: Vec<DeviceInfo>,
     pub telemetry: TelemetrySnapshot,
+    pub wireless_operations: super::wireless::WirelessOperations,
     /// RGB controller, set once devices are opened.
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
     pub user_templates: Vec<LcdTemplate>,
@@ -47,6 +48,7 @@ impl DaemonState {
             presets_path,
             devices: Vec::new(),
             telemetry: TelemetrySnapshot::default(),
+            wireless_operations: Default::default(),
             rgb_controller: None,
             user_templates: Vec::new(),
             rgb_presets,
@@ -225,8 +227,11 @@ fn handle_request(
             super::lcd::switch_display_mode(state, tx, device_id)
         }
 
-        IpcRequest::BindWirelessDevice { mac } => super::wireless::bind(tx, mac),
-        IpcRequest::UnbindWirelessDevice { mac } => super::wireless::unbind(tx, mac),
+        IpcRequest::GetWirelessOperation { operation_id } => {
+            super::wireless::operation(state, operation_id)
+        }
+        IpcRequest::BindWirelessDevice { mac } => super::wireless::bind(state, tx, mac),
+        IpcRequest::UnbindWirelessDevice { mac } => super::wireless::unbind(state, tx, mac),
         IpcRequest::RebootWirelessLcd { device_id } => super::wireless::reboot_lcd(tx, device_id),
         IpcRequest::DisableLc217Wifi { device_id, disable } => {
             super::wireless::disable_lc217_wifi(tx, device_id, disable)

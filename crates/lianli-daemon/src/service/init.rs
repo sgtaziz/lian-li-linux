@@ -835,6 +835,10 @@ impl ServiceManager {
             debug!("[wireless] no TX/RX devices found, skipping wireless");
             return;
         }
+        let restart_controllers = self.controllers.fan.is_some() || self.controllers.aio.is_some();
+        if let Some(rgb) = &self.controllers.rgb {
+            rgb.lock().set_wireless(None);
+        }
         match self.wireless.connect() {
             Ok(()) => match self.wireless.start_polling() {
                 Ok(()) => {
@@ -847,6 +851,11 @@ impl ServiceManager {
             Err(_) => {
                 debug!("[wireless] no TX/RX devices found, skipping wireless");
             }
+        }
+        if restart_controllers {
+            self.start_fan_control();
+            self.start_aio_control();
+            self.rebuild_rgb_controller();
         }
     }
 

@@ -1,6 +1,6 @@
 use super::controller::WirelessController;
 use super::convergence::AckSignal;
-use super::{RF_DATA_SIZE, RF_MB_LIGHT_SYNC, RF_PWM_CMD, RF_SELECT};
+use super::{RF_DATA_SIZE, RF_MB_LIGHT_SYNC, RF_SELECT};
 use anyhow::{bail, Result};
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -168,56 +168,6 @@ impl WirelessController {
         {
             targets.remove(mac);
         }
-    }
-
-    pub fn set_mb_pwm_sync(&self, enabled: bool) -> Result<()> {
-        let devices = self.discovered_devices.lock();
-        let master_mac = *self.master_mac.lock();
-        let master_ch = *self.master_channel.lock();
-
-        let e1_devices: Vec<_> = devices
-            .iter()
-            .filter(|d| d.master_mac == master_mac && d.mac[5] == 0xE1)
-            .cloned()
-            .collect();
-        drop(devices);
-
-        if e1_devices.is_empty() {
-            return Ok(());
-        }
-
-        for device in &e1_devices {
-            let target_cmd_seq = self.bump_target_cmd_seq(&device.mac, device.cmd_seq);
-
-            let mut rf_data = vec![0u8; RF_DATA_SIZE];
-            rf_data[0] = RF_SELECT;
-            rf_data[1] = RF_PWM_CMD;
-            rf_data[2..8].copy_from_slice(&device.mac);
-            rf_data[8..14].copy_from_slice(&master_mac);
-            rf_data[14] = device.rx_type;
-            rf_data[15] = master_ch;
-            rf_data[17] = target_cmd_seq;
-
-            if enabled {
-                rf_data[20..24].copy_from_slice(&[6, 6, 6, 6]);
-            } else {
-                rf_data[20..24].copy_from_slice(&device.current_pwm);
-            }
-
-            self.enqueue_rf_command(
-                device,
-                rf_data,
-                AckSignal::Pwm(if enabled { [6; 4] } else { device.current_pwm }),
-                format!("MB PWM sync {}", if enabled { "on" } else { "off" }),
-            )?;
-        }
-
-        debug!(
-            "MB PWM sync {}: {} companion device(s)",
-            if enabled { "enabled" } else { "disabled" },
-            e1_devices.len(),
-        );
-        Ok(())
     }
 
     pub fn has_mb_pwm_companion(&self) -> bool {

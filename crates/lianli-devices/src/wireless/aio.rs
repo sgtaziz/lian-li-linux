@@ -1,43 +1,42 @@
 use super::controller::WirelessController;
+use super::convergence::AckSignal;
 use super::discovery::DiscoveredDevice;
+use super::discovery::ACK_FRESHNESS;
 use super::fan_type::WirelessFanType;
-use super::{
-    AIO_PARAM_LEN, RF_AIO_PARAMS, RF_AIO_SWITCH_WIRELESS, RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE,
-    RF_SELECT, USB_CMD_SEND_RF,
-};
-use anyhow::{Context, Result};
-use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
-use std::thread;
-use std::time::Duration;
+use super::{AIO_PARAM_LEN, RF_AIO_PARAMS, RF_AIO_SWITCH_WIRELESS, RF_DATA_SIZE, RF_SELECT};
+use anyhow::Result;
+use std::time::Instant;
 use tracing::debug;
 
 impl WirelessController {
-    /// Signal an AIO device to start honouring RF-driven theme / pump state.
-    /// Must be sent once per AIO MAC after discovery, before the first `set_aio_params`.
-    /// Idempotent — safe to re-invoke on reconnects.
-    pub fn switch_to_wireless_theme(&self, mac: &[u8; 6]) -> Result<()> {
+    pub fn switch_to_wireless_theme(&self, mac: &[u8; 6]) -> Result<u8> {
         let device = self.device_by_mac_snapshot(mac)?;
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
 
-        let mut rf_data = vec![0u8; RF_DATA_SIZE];
-        rf_data[0] = RF_SELECT;
-        rf_data[1] = RF_AIO_SWITCH_WIRELESS;
-        rf_data[2..8].copy_from_slice(&device.mac);
-        rf_data[8..14].copy_from_slice(&master_mac);
-        rf_data[14] = device.rx_type;
-        rf_data[15] = master_ch;
+        let sequence = self.bump_target_cmd_seq(mac, device.cmd_seq);
+        let rf_data = wireless_theme_packet(
+            &device,
+            &master_mac,
+            master_ch,
+            self.next_slot_index(&device),
+            sequence,
+        );
+        self.enqueue_rf_command(
+            &device,
+            rf_data,
+            AckSignal::CmdSeq(sequence),
+            "AIO wireless theme",
+        )?;
+        Ok(sequence)
+    }
 
-        self.tx_recover(|handle| {
-            for _ in 0..10 {
-                send_rf_frame_via(handle, &device, &rf_data)?;
-                thread::sleep(Duration::from_millis(2));
-            }
-            Ok(())
-        })?;
-
-        debug!("switch_to_wireless_theme sent to {}", device.mac_str());
-        Ok(())
+    pub fn wireless_theme_acked(&self, mac: &[u8; 6], sequence: u8, sent_at: Instant) -> bool {
+        self.device_health.lock().get(mac).is_some_and(|health| {
+            health.raw_seen >= sent_at
+                && health.raw_seen.elapsed() <= ACK_FRESHNESS
+                && health.published.cmd_seq == sequence
+        })
     }
 
     /// Send the 32-byte aio_param block. Carries pump speed, on-screen sensor
@@ -59,7 +58,7 @@ impl WirelessController {
         rf_data[16] = slot_index;
         rf_data[18..18 + AIO_PARAM_LEN].copy_from_slice(aio_param);
 
-        self.tx_recover(|handle| send_rf_frame_via(handle, &device, &rf_data))?;
+        self.tx_recover(|handle| self.send_rf_packet(handle, &device, &rf_data))?;
 
         debug!(
             "set_aio_params sent to {} (pump_timer={}, theme={})",
@@ -71,25 +70,23 @@ impl WirelessController {
     }
 }
 
-fn send_rf_frame_via(handle: &RusbBulk, device: &DiscoveredDevice, rf_data: &[u8]) -> Result<()> {
-    assert_eq!(rf_data.len(), RF_DATA_SIZE);
-    for chunk_idx in 0..RF_CHUNKS as u8 {
-        let mut packet = vec![0u8; 64];
-        packet[0] = USB_CMD_SEND_RF;
-        packet[1] = chunk_idx;
-        packet[2] = device.channel;
-        packet[3] = device.rx_type;
-
-        let start = chunk_idx as usize * RF_CHUNK_SIZE;
-        let end = start + RF_CHUNK_SIZE;
-        packet[4..64].copy_from_slice(&rf_data[start..end]);
-
-        handle
-            .write(&packet, USB_TIMEOUT)
-            .context("sending RF packet chunk")?;
-        thread::sleep(Duration::from_millis(1));
-    }
-    Ok(())
+fn wireless_theme_packet(
+    device: &DiscoveredDevice,
+    master_mac: &[u8; 6],
+    channel: u8,
+    slot: u8,
+    sequence: u8,
+) -> Vec<u8> {
+    let mut packet = vec![0; RF_DATA_SIZE];
+    packet[0] = RF_SELECT;
+    packet[1] = RF_AIO_SWITCH_WIRELESS;
+    packet[2..8].copy_from_slice(&device.mac);
+    packet[8..14].copy_from_slice(master_mac);
+    packet[14] = device.rx_type;
+    packet[15] = channel;
+    packet[16] = slot;
+    packet[17] = sequence;
+    packet
 }
 
 /// Map pump target RPM → firmware PWM timer value for the given AIO variant.
@@ -145,6 +142,47 @@ fn square_pump_timer(rpm: u32) -> u16 {
 #[cfg(test)]
 mod aio_tests {
     use super::*;
+
+    #[test]
+    fn wireless_theme_packet_carries_slot_sequence_and_requires_fresh_ack() {
+        let mut record = [0; 42];
+        record[..6].copy_from_slice(&[1, 2, 3, 4, 5, 6]);
+        record[13] = 2;
+        record[18] = 10;
+        record[41] = 0x1c;
+        let device = super::super::discovery::parse_device_record(&record, 0).unwrap();
+        let packet = wireless_theme_packet(&device, &[9; 6], 8, 3, 7);
+        assert_eq!(
+            &packet[..18],
+            &[0x12, 0x19, 1, 2, 3, 4, 5, 6, 9, 9, 9, 9, 9, 9, 2, 8, 3, 7]
+        );
+        assert_eq!(packet.len(), 240);
+        assert!(packet[18..].iter().all(|&byte| byte == 0));
+
+        let controller = WirelessController::new();
+        let mac = device.mac;
+        let mut health = super::super::discovery::DeviceHealth::new(device);
+        health.published.cmd_seq = 7;
+        let sent_at = Instant::now();
+        health.raw_seen = sent_at - std::time::Duration::from_millis(1);
+        controller.device_health.lock().insert(mac, health);
+        assert!(!controller.wireless_theme_acked(&mac, 7, sent_at));
+        controller
+            .device_health
+            .lock()
+            .get_mut(&mac)
+            .unwrap()
+            .raw_seen = Instant::now();
+        assert!(controller.wireless_theme_acked(&mac, 7, sent_at));
+        assert!(!controller.wireless_theme_acked(&mac, 8, sent_at));
+        controller
+            .device_health
+            .lock()
+            .get_mut(&mac)
+            .unwrap()
+            .raw_seen = sent_at - ACK_FRESHNESS;
+        assert!(!controller.wireless_theme_acked(&mac, 7, sent_at - ACK_FRESHNESS));
+    }
 
     #[test]
     fn circle_curve_clamps_to_range() {

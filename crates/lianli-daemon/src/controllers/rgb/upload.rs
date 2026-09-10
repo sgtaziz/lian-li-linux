@@ -194,7 +194,7 @@ impl UploadWorker {
                 }
                 job.attempts = 0;
                 if pending.jobs.len() < MAX_PENDING_DEVICES {
-                    job.ready = Instant::now() + Duration::from_millis(30);
+                    job.ready = Instant::now() + Duration::from_millis(130);
                     pending.jobs.push_back(job);
                 }
             }

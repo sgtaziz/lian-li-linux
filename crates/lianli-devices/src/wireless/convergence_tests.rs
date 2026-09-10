@@ -92,3 +92,47 @@ fn full_queue_accepts_replacement_but_rejects_another_command_without_losing_wor
         AckSignal::Pwm([255, 255, 255, 255])
     ));
 }
+
+#[test]
+fn low_pwm_and_hardware_sync_acknowledgements_require_exact_values() {
+    assert!(!pwm_acked(&[1; 4], &[6; 4]));
+    assert!(!pwm_acked(&[6; 4], &[0; 4]));
+    assert!(pwm_acked(&[6; 4], &[6; 4]));
+    assert!(pwm_acked(&[105; 4], &[100; 4]));
+    assert!(!pwm_acked(&[106; 4], &[100; 4]));
+}
+
+#[test]
+fn binding_pause_blocks_only_target_device_and_manual_unbind_keeps_it_blocked() {
+    let controller = WirelessController::new();
+    let mac = [1; 6];
+    *controller.binding_mac.lock() = Some(mac);
+    assert!(binding_blocks_control(
+        &controller.binding_mac,
+        &controller.device_health,
+        &mac
+    ));
+    assert!(!binding_blocks_control(
+        &controller.binding_mac,
+        &controller.device_health,
+        &[2; 6]
+    ));
+    *controller.binding_mac.lock() = None;
+    assert!(!binding_blocks_control(
+        &controller.binding_mac,
+        &controller.device_health,
+        &mac
+    ));
+    let mut record = [0; 42];
+    record[..6].copy_from_slice(&mac);
+    record[41] = 0x1c;
+    let device = super::super::discovery::parse_device_record(&record, 0).unwrap();
+    let mut health = super::super::discovery::DeviceHealth::new(device);
+    health.man_unbind = true;
+    controller.device_health.lock().insert(mac, health);
+    assert!(binding_blocks_control(
+        &controller.binding_mac,
+        &controller.device_health,
+        &mac
+    ));
+}

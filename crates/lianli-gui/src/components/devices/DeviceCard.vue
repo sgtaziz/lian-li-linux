@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useDialog } from "naive-ui";
+import { useDialog, useMessage } from "naive-ui";
 import { Monitor, Fan, Droplet, Palette, Loader2, Locate } from "lucide-vue-next";
 import type { DeviceInfo } from "@/types";
 import { useDevicesStore } from "@/stores/devices";
@@ -15,6 +15,7 @@ import {
   familyIsDesktopMode,
 } from "@/constants";
 
+const message = useMessage();
 const props = defineProps<{ device: DeviceInfo }>();
 
 const devices = useDevicesStore();
@@ -125,18 +126,32 @@ async function onBind() {
     });
     if (!ok) return;
   }
-  devices.pending.set(d.value.device_id, "bind");
-  await aio.bindWireless(mac);
-  await refreshSoon();
+  const pendingId = d.value.device_id;
+  devices.pending.set(pendingId, "bind", true);
+  try {
+    await aio.bindWireless(mac);
+  } catch (error) {
+    message.error(String(error));
+  } finally {
+    devices.pending.clear(pendingId);
+    await refreshSoon();
+  }
 }
 
 async function onUnbind() {
   const mac = d.value.device_id.startsWith("wireless:")
     ? d.value.device_id.slice("wireless:".length)
     : d.value.device_id;
-  devices.pending.set(d.value.device_id, "unbind");
-  await aio.unbindWireless(mac);
-  await refreshSoon();
+  const pendingId = d.value.device_id;
+  devices.pending.set(pendingId, "unbind", true);
+  try {
+    await aio.unbindWireless(mac);
+  } catch (error) {
+    message.error(String(error));
+  } finally {
+    devices.pending.clear(pendingId);
+    await refreshSoon();
+  }
 }
 
 async function refreshSoon() {

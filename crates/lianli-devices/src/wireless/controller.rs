@@ -1,7 +1,7 @@
 use super::convergence::{PendingQueue, TargetSeqMap};
 use super::discovery::{
-    poll_and_discover, DeviceHealthMap, DiscoveredDevice, MasterEntryMap, ACK_FRESHNESS,
-    REBIND_FOREIGN_AFTER,
+    poll_and_discover, DeviceHealthMap, DiscoveredDevice, MasterEntryMap, ReceiverState,
+    ACK_FRESHNESS, REBIND_FOREIGN_AFTER,
 };
 use super::mb_sync::MbRgbTargetMap;
 use super::transport::{open_any, with_transport_recovery};
@@ -12,7 +12,7 @@ use super::{
 use anyhow::{bail, Context, Result};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -23,6 +23,8 @@ const TX_FAILURE_THRESHOLD: u32 = 5;
 pub struct WirelessController {
     pub(super) tx: Option<Arc<Mutex<RusbBulk>>>,
     pub(super) rx: Option<Arc<Mutex<RusbBulk>>>,
+    pub(super) receiver_state: Arc<ReceiverState>,
+    pub(super) rx_running: Arc<AtomicBool>,
     pub(super) poll_stop: Arc<AtomicBool>,
     pub(super) poll_thread: Option<JoinHandle<()>>,
     pub(super) video_mode_active: Arc<AtomicBool>,
@@ -32,14 +34,12 @@ pub struct WirelessController {
     pub(super) device_health: DeviceHealthMap,
     pub(super) master_entries: MasterEntryMap,
     pub(super) clock_init_sent: Arc<AtomicBool>,
-    /// Motherboard PWM duty cycle (0-255) extracted from RX GetDev response bytes [2:3].
-    /// 0xFFFF means unavailable/not yet read.
-    pub(super) mobo_pwm: Arc<AtomicU16>,
     pub(super) fg_sync: Arc<AtomicBool>,
     pub(super) tx_failures: Arc<AtomicU32>,
     pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
     pub(super) mb_rgb_targets: MbRgbTargetMap,
     pub(super) command_order: Arc<Mutex<()>>,
+    pub(super) binding_mac: Arc<Mutex<Option<[u8; 6]>>>,
     /// Pending commands awaiting device ack, drained by the convergence loop.
     pub(super) pending_commands: Option<PendingQueue>,
     /// Per-device target `cmd_seq`; incremented per state-changing command.
@@ -52,6 +52,8 @@ impl Clone for WirelessController {
         Self {
             tx: self.tx.clone(),
             rx: self.rx.clone(),
+            receiver_state: Arc::clone(&self.receiver_state),
+            rx_running: Arc::clone(&self.rx_running),
             poll_stop: Arc::clone(&self.poll_stop),
             poll_thread: None,
             video_mode_active: Arc::clone(&self.video_mode_active),
@@ -61,12 +63,12 @@ impl Clone for WirelessController {
             device_health: Arc::clone(&self.device_health),
             master_entries: Arc::clone(&self.master_entries),
             clock_init_sent: Arc::clone(&self.clock_init_sent),
-            mobo_pwm: Arc::clone(&self.mobo_pwm),
             fg_sync: Arc::clone(&self.fg_sync),
             tx_failures: Arc::clone(&self.tx_failures),
             desired_effects: Arc::clone(&self.desired_effects),
             mb_rgb_targets: Arc::clone(&self.mb_rgb_targets),
             command_order: Arc::clone(&self.command_order),
+            binding_mac: Arc::clone(&self.binding_mac),
             pending_commands: self.pending_commands.clone(),
             target_cmd_seqs: self.target_cmd_seqs.clone(),
             convergence_thread: None,
@@ -81,6 +83,8 @@ impl WirelessController {
         Self {
             tx: None,
             rx: None,
+            receiver_state: Arc::new(ReceiverState::default()),
+            rx_running: Arc::new(AtomicBool::new(false)),
             poll_stop: Arc::new(AtomicBool::new(false)),
             poll_thread: None,
             video_mode_active: Arc::new(AtomicBool::new(false)),
@@ -90,12 +94,12 @@ impl WirelessController {
             device_health: Arc::new(Mutex::new(Default::default())),
             master_entries: Arc::new(Mutex::new(Default::default())),
             clock_init_sent: Arc::new(AtomicBool::new(false)),
-            mobo_pwm: Arc::new(AtomicU16::new(0xFFFF)),
             fg_sync: Arc::new(AtomicBool::new(false)),
             tx_failures: Arc::new(AtomicU32::new(0)),
             desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
             mb_rgb_targets: Arc::new(Mutex::new(Default::default())),
             command_order: Arc::new(Mutex::new(())),
+            binding_mac: Arc::new(Mutex::new(None)),
             pending_commands: Some(pending_commands),
             target_cmd_seqs: Some(target_cmd_seqs),
             convergence_thread: None,
@@ -103,7 +107,9 @@ impl WirelessController {
     }
 
     pub fn connect(&mut self) -> Result<()> {
-        self.mb_rgb_targets.lock().clear();
+        self.stop();
+        self.poll_stop = Arc::new(AtomicBool::new(false));
+        self.receiver_state.pages.store(1, Ordering::Relaxed);
         let mut tx = None;
         let max_retries = 3;
 
@@ -127,23 +133,17 @@ impl WirelessController {
         tx.detach_and_configure("TX")?;
         let tx_arc = Arc::new(Mutex::new(tx));
 
-        let rx_arc = match open_any(&RX_IDS) {
-            Ok(mut rx) => {
-                rx.detach_and_configure("RX")?;
-                rx.read_flush();
-                Some(Arc::new(Mutex::new(rx)))
-            }
-            Err(_) => {
-                warn!("RX dongle not found – telemetry disabled");
-                None
-            }
-        };
-
+        let mut rx = open_any(&RX_IDS).context("opening wireless RX dongle")?;
+        rx.detach_and_configure("RX")?;
+        rx.read_flush();
         self.tx = Some(tx_arc);
-        self.rx = rx_arc;
+        self.rx = Some(Arc::new(Mutex::new(rx)));
         self.tx_failures.store(0, Ordering::Relaxed);
 
-        self.discover_master_mac()?;
+        if let Err(error) = self.discover_master_mac() {
+            self.stop();
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -179,7 +179,7 @@ impl WirelessController {
             };
             drop(handle);
 
-            if len >= 7 && response[0] == USB_CMD_GET_MAC {
+            if valid_master_response(&response[..len]) {
                 let mut mac = self.master_mac.lock();
                 mac.copy_from_slice(&response[1..7]);
                 if mac.iter().any(|&b| b != 0) {
@@ -201,6 +201,10 @@ impl WirelessController {
     }
 
     pub fn start_polling(&mut self) -> Result<()> {
+        anyhow::ensure!(
+            self.poll_thread.is_none() && self.convergence_thread.is_none(),
+            "wireless workers already started"
+        );
         let tx = self
             .tx
             .as_ref()
@@ -229,10 +233,12 @@ impl WirelessController {
         let discovered_devices = Arc::clone(&self.discovered_devices);
         let device_health = Arc::clone(&self.device_health);
         let master_entries = Arc::clone(&self.master_entries);
-        let mobo_pwm = Arc::clone(&self.mobo_pwm);
+        let receiver_state = Arc::clone(&self.receiver_state);
         let fg_sync = Arc::clone(&self.fg_sync);
         let master_mac = Arc::clone(&self.master_mac);
         let retarget_ctrl = self.clone();
+        let rx_running = Arc::clone(&self.rx_running);
+        rx_running.store(true, Ordering::Release);
 
         let discovery_done = Arc::new(AtomicBool::new(false));
         let discovery_signal = discovery_done.clone();
@@ -250,7 +256,7 @@ impl WirelessController {
                     &discovered_devices,
                     &device_health,
                     &master_entries,
-                    &mobo_pwm,
+                    &receiver_state,
                     &fg_sync,
                     &master_mac,
                 ) {
@@ -277,7 +283,7 @@ impl WirelessController {
                             let _ = handle.read(&mut resp, Duration::from_millis(2000));
                         }
                         drop(handle);
-                        thread::sleep(Duration::from_millis(500));
+                        wait_for_poll(&stop_flag, Duration::from_millis(500));
                         consecutive_errors = 0;
                         continue;
                     }
@@ -288,7 +294,7 @@ impl WirelessController {
                     } else {
                         Duration::from_secs((1 << consecutive_errors.min(5)).min(30))
                     };
-                    thread::sleep(backoff);
+                    wait_for_poll(&stop_flag, backoff);
                     continue;
                 }
                 consecutive_errors = 0;
@@ -304,8 +310,9 @@ impl WirelessController {
                     last_retarget = Instant::now();
                     retarget_ctrl.retarget_mischannelled_devices();
                 }
-                thread::sleep(Duration::from_millis(500));
+                wait_for_poll(&stop_flag, Duration::from_millis(500));
             }
+            rx_running.store(false, Ordering::Release);
         }));
 
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -329,6 +336,7 @@ impl WirelessController {
                 queue,
                 device_health,
                 Arc::clone(&self.desired_effects),
+                Arc::clone(&self.binding_mac),
                 conv_stop,
             ));
         }
@@ -421,7 +429,7 @@ impl WirelessController {
                 (&*CMD_RX_QUERY_37, true),
                 (&*CMD_RX_LCD_MODE, false),
             ] {
-                with_transport_recovery(rx, &RX_IDS, "RX", |handle| {
+                with_transport_recovery(rx, &RX_IDS, "RX", Some(&self.poll_stop), |handle| {
                     handle
                         .write(cmd, USB_TIMEOUT)
                         .context("sending RX command")?;
@@ -465,7 +473,11 @@ impl WirelessController {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.tx.is_some() && self.tx_failures.load(Ordering::Relaxed) < TX_FAILURE_THRESHOLD
+        self.tx.is_some()
+            && self.rx.is_some()
+            && !self.poll_stop.load(Ordering::Acquire)
+            && self.rx_running.load(Ordering::Acquire)
+            && self.tx_failures.load(Ordering::Relaxed) < TX_FAILURE_THRESHOLD
     }
 
     /// Returns true if any wireless device's currently-running effect_index
@@ -488,7 +500,7 @@ impl WirelessController {
         F: FnMut(&RusbBulk) -> Result<R>,
     {
         let tx = self.tx.as_ref().context("TX device not connected")?;
-        let result = with_transport_recovery(tx, &TX_IDS, "TX", op);
+        let result = with_transport_recovery(tx, &TX_IDS, "TX", Some(&self.poll_stop), op);
         match &result {
             Ok(_) => self.tx_failures.store(0, Ordering::Relaxed),
             Err(_) => {
@@ -555,26 +567,24 @@ impl WirelessController {
             .collect()
     }
 
-    pub(super) fn set_bind_intent(&self, mac: &[u8; 6], intent: bool) {
-        {
-            let mut health = self.device_health.lock();
-            if let Some(h) = health.get_mut(mac) {
-                h.bind_intent = intent;
-                if intent {
-                    h.man_unbind = false;
-                } else {
-                    h.man_unbind = true;
-                    h.foreign_since = None;
-                }
-            }
-        }
-        if let Some(d) = self
+    pub(super) fn confirm_binding(&self, mac: &[u8; 6], intent: bool) {
+        let mut health = self.device_health.lock();
+        let Some(h) = health.get_mut(mac) else { return };
+        h.bind_intent = intent;
+        h.man_unbind = !intent;
+        h.foreign_since = None;
+        h.observed_master = h.raw_master;
+        h.published.bind_intent = intent;
+        h.published.master_mac = h.raw_master;
+        h.published.rx_type = h.raw_rx;
+        h.published.channel = h.raw_channel;
+        if let Some(device) = self
             .discovered_devices
             .lock()
             .iter_mut()
             .find(|d| d.mac == *mac)
         {
-            d.bind_intent = intent;
+            *device = h.published.clone();
         }
     }
 
@@ -660,6 +670,9 @@ impl WirelessController {
     /// the master channel. Vendor firmware applies the channel from these
     /// packets lazily, so this runs on the poll cadence without a deadline.
     pub(super) fn retarget_mischannelled_devices(&self) {
+        if self.binding_mac.lock().is_some() {
+            return;
+        }
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
         let targets: Vec<([u8; 6], u8)> = {
@@ -694,7 +707,7 @@ impl WirelessController {
     /// Current motherboard PWM duty cycle (0-255), or `None` if unavailable.
     /// Extracted from RX GetDev response bytes [2:3] during polling.
     pub fn motherboard_pwm(&self) -> Option<u8> {
-        match self.mobo_pwm.load(Ordering::Relaxed) {
+        match self.receiver_state.pwm.load(Ordering::Relaxed) {
             0xFFFF => None,
             v => Some(v as u8),
         }
@@ -744,12 +757,17 @@ impl WirelessController {
     pub(super) fn next_slot_index(&self, device: &DiscoveredDevice) -> u8 {
         let devices = self.discovered_devices.lock();
         let master_mac = *self.master_mac.lock();
-        devices
+        let mut next_slot = 1u8;
+        for bound in devices
             .iter()
             .filter(|d| (d.bind_intent || d.master_mac == master_mac) && d.device_type != 0xFF)
-            .position(|d| d.mac == device.mac)
-            .map(|i| (i + 1) as u8)
-            .unwrap_or(1)
+        {
+            if bound.mac == device.mac {
+                return next_slot;
+            }
+            next_slot = next_slot.saturating_add(1);
+        }
+        next_slot
     }
 
     pub(super) fn device_by_mac_snapshot(&self, mac: &[u8; 6]) -> Result<DiscoveredDevice> {
@@ -770,11 +788,23 @@ impl WirelessController {
         let owns_runtime = self.poll_thread.is_some() || self.convergence_thread.is_some();
         if owns_runtime {
             self.mb_rgb_targets.lock().clear();
-        }
-        if self.poll_thread.is_some() {
             self.poll_stop.store(true, Ordering::SeqCst);
+            for handle in [&self.poll_thread, &self.convergence_thread]
+                .into_iter()
+                .flatten()
+            {
+                handle.thread().unpark();
+            }
             if let Some(handle) = self.poll_thread.take() {
                 let _ = handle.join();
+            }
+            if let Some(handle) = self.convergence_thread.take() {
+                let _ = handle.join();
+            }
+            self.rx_running.store(false, Ordering::Release);
+            self.receiver_state.pwm.store(0xFFFF, Ordering::Relaxed);
+            if let Some(queue) = &self.pending_commands {
+                queue.lock().clear();
             }
         }
         self.tx.take();
@@ -792,6 +822,24 @@ impl WirelessController {
                 && health.published.effect_index == effect_index
         });
         observed && !self.has_pending_mb_rgb_transition(mac)
+    }
+}
+
+fn valid_master_response(response: &[u8]) -> bool {
+    response.len() >= 13
+        && response[0] == USB_CMD_GET_MAC
+        && response[1..7].iter().any(|&b| b != 0)
+        && u32::from_be_bytes(response[7..11].try_into().unwrap()) > 1
+}
+
+fn wait_for_poll(stop: &AtomicBool, duration: Duration) {
+    let deadline = Instant::now() + duration;
+    while !stop.load(Ordering::Acquire) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        thread::park_timeout(remaining);
     }
 }
 
@@ -813,6 +861,73 @@ mod tests {
     use crate::wireless::discovery::{DeviceHealth, DiscoveredDevice};
     use crate::wireless::WirelessFanType;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn new_binding_uses_next_slot_without_claiming_ownership_first() {
+        let controller = WirelessController::new();
+        *controller.master_mac.lock() = [9; 6];
+        let first = entry([9; 6]).published;
+        let mut second = first.clone();
+        second.mac = [2; 6];
+        let mut unbound = entry([0; 6]).published;
+        unbound.mac = [3; 6];
+        *controller.discovered_devices.lock() =
+            vec![first.clone(), second.clone(), unbound.clone()];
+        assert_eq!(controller.next_slot_index(&first), 1);
+        assert_eq!(controller.next_slot_index(&second), 2);
+        assert_eq!(controller.next_slot_index(&unbound), 3);
+        assert!(!unbound.bind_intent);
+    }
+
+    #[test]
+    fn stop_joins_both_workers_and_clone_drop_does_not_stop_owner() {
+        let mut controller = WirelessController::new();
+        let finished = Arc::new(AtomicU32::new(0));
+        for slot in [
+            &mut controller.poll_thread,
+            &mut controller.convergence_thread,
+        ] {
+            let stop = Arc::clone(&controller.poll_stop);
+            let finished = Arc::clone(&finished);
+            *slot = Some(thread::spawn(move || {
+                wait_for_poll(&stop, Duration::from_secs(30));
+                finished.fetch_add(1, Ordering::Release);
+            }));
+        }
+        drop(controller.clone());
+        assert!(!controller.poll_stop.load(Ordering::Acquire));
+        controller.stop();
+        assert_eq!(finished.load(Ordering::Acquire), 2);
+        assert!(controller.poll_thread.is_none());
+        assert!(controller.convergence_thread.is_none());
+        controller.stop();
+    }
+
+    #[test]
+    fn convergence_only_runtime_is_stopped_and_joined() {
+        let mut controller = WirelessController::new();
+        let stop = Arc::clone(&controller.poll_stop);
+        controller.convergence_thread = Some(thread::spawn(move || {
+            wait_for_poll(&stop, Duration::from_secs(30));
+        }));
+        controller.stop();
+        assert!(controller.poll_stop.load(Ordering::Acquire));
+        assert!(controller.convergence_thread.is_none());
+    }
+
+    #[test]
+    fn master_discovery_rejects_missing_clock_and_truncated_identity() {
+        let mut response = [0x11, 1, 2, 3, 4, 5, 6, 0, 0, 0, 2, 1, 2];
+        assert!(valid_master_response(&response));
+        assert!(!valid_master_response(&response[..7]));
+        response[10] = 0;
+        assert!(!valid_master_response(&response));
+        response[10] = 1;
+        assert!(!valid_master_response(&response));
+        response[10] = 2;
+        response[1..7].fill(0);
+        assert!(!valid_master_response(&response));
+    }
 
     fn entry(master: [u8; 6]) -> DeviceHealth {
         let rec = DiscoveredDevice {
