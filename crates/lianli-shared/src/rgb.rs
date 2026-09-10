@@ -560,6 +560,7 @@ impl RgbDirection {
 /// RGB effect scope (which LEDs are targeted).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum RgbScope {
+    Fan,
     #[default]
     All,
     Top,
@@ -762,6 +763,10 @@ pub struct RgbZoneInfo {
 /// RGB capabilities reported per device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RgbDeviceCapabilities {
+    #[serde(default)]
+    pub group_effect_modes: Vec<RgbMode>,
+    #[serde(default)]
+    pub zone_effect_modes: Vec<RgbMode>,
     pub device_id: String,
     pub device_name: String,
     pub supported_modes: Vec<RgbMode>,

@@ -18,6 +18,8 @@ impl RgbController {
                 }
             }
             caps.push(RgbDeviceCapabilities {
+                group_effect_modes: device.group_effect_modes(),
+                zone_effect_modes: device.zone_effect_modes(),
                 device_id: id.clone(),
                 sync_led_count: self
                     .sync_layout(id)
@@ -75,6 +77,8 @@ impl RgbController {
             let mut supported_modes = software_modes.clone();
             supported_modes.push(RgbMode::Direct);
             caps.push(RgbDeviceCapabilities {
+                group_effect_modes: Vec::new(),
+                zone_effect_modes: Vec::new(),
                 device_id: id.clone(),
                 sync_led_count: self
                     .sync_layout(id)

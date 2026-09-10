@@ -135,6 +135,76 @@ fn openrgb_release_restores_sync_without_individual_animation_upload() {
 
 struct UnavailableDevice;
 
+struct SharedPort {
+    port: usize,
+    colors: Arc<parking_lot::Mutex<[[u8; 3]; 2]>>,
+}
+
+impl RgbDevice for SharedPort {
+    fn device_name(&self) -> String {
+        format!("port {}", self.port)
+    }
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![RgbMode::Static]
+    }
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        vec![RgbZoneInfo {
+            name: "fan".into(),
+            led_count: 1,
+        }]
+    }
+    fn set_zone_effect(&self, _: u8, effect: &RgbEffect) -> anyhow::Result<()> {
+        self.colors.lock()[self.port] = effect.colors[0];
+        Ok(())
+    }
+    fn supports_mb_rgb_sync(&self) -> bool {
+        true
+    }
+    fn set_mb_rgb_sync(&self, _: bool) -> anyhow::Result<()> {
+        self.colors.lock().fill([0; 3]);
+        Ok(())
+    }
+}
+
+#[test]
+fn sync_resets_shared_controller_before_applying_either_port() {
+    for order in [
+        vec!["port0".into(), "port1".into()],
+        vec!["port1".into(), "port0".into()],
+    ] {
+        let colors = Arc::new(parking_lot::Mutex::new([[0; 3]; 2]));
+        let ports = (0..2)
+            .map(|port| {
+                (
+                    format!("port{port}"),
+                    Arc::new(SharedPort {
+                        port,
+                        colors: colors.clone(),
+                    }) as Arc<dyn RgbDevice>,
+                )
+            })
+            .collect();
+        let mut controller = RgbController::new(ports, None);
+        let config = RgbAppConfig {
+            enabled: true,
+            merge_lighting: Some(MergeLightingConfig {
+                enabled: true,
+                kind: lianli_shared::rgb::RgbSyncKind::Matched,
+                device_order: order,
+                effect: RgbEffect {
+                    colors: vec![[17, 38, 59]],
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        controller.apply_config(&config, &[]);
+        assert_eq!(*colors.lock(), [[17, 38, 59]; 2]);
+        controller.stop();
+    }
+}
+
 impl RgbDevice for UnavailableDevice {
     fn device_name(&self) -> String {
         "unavailable".into()

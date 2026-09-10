@@ -17,6 +17,8 @@ const props = defineProps<{
   zoneIndex: number;
   zone: RgbZoneConfig;
   directOnly?: boolean;
+  groupEffects?: boolean;
+  perFanOnly?: boolean;
 }>();
 
 const rgb = useRgbStore();
@@ -54,7 +56,7 @@ watch(
 const supportedScopes = computed(
   () => props.cap.supported_scopes?.[props.zoneIndex] ?? [],
 );
-const showScope = computed(() => !isSoftware.value && supportedScopes.value.length > 0);
+const showScope = computed(() => !props.perFanOnly && !isSoftware.value && supportedScopes.value.length > 0);
 const showDirection = computed(() => (isSoftware.value && isAnimated.value) || props.cap.supports_direction);
 
 const propagateChoice = ref<"ask" | "yes" | "no">("ask");
@@ -67,9 +69,19 @@ function propagateToZones() {
 }
 
 function patchEffect(p: Partial<RgbEffect>) {
+  if (props.perFanOnly) {
+    const device = config.rgbDeviceConfig(props.deviceId);
+    for (const zone of device.zones) {
+      zone.effect = { ...zone.effect, scope: "Fan", mode: props.cap.zone_effect_modes?.includes(zone.effect.mode) ? zone.effect.mode : "Static" };
+    }
+    p.scope = "Fan";
+  }
+  if (props.groupEffects && effect.value.scope === "Fan") p.scope ??= "All";
   Object.assign(effect.value, p);
 
-  if (props.zoneIndex === 0 && !hasSoftwareRenderer.value) {
+  if (props.groupEffects) propagateToZones();
+
+  if (props.zoneIndex === 0 && !hasSoftwareRenderer.value && !props.groupEffects && !props.perFanOnly) {
     const isPerFan =
       (effect.value.mode === "Off" ||
         effect.value.mode === "Static" ||
@@ -103,7 +115,7 @@ function patchEffect(p: Partial<RgbEffect>) {
 }
 
 function modeOptions() {
-  const modes = props.directOnly ? ["Direct"] : props.cap.supported_modes;
+  const modes = props.directOnly ? ["Direct"] : props.groupEffects ? props.cap.group_effect_modes ?? [] : props.perFanOnly ? props.cap.zone_effect_modes ?? [] : props.cap.supported_modes;
   return modes.map((m) => ({
     label: modeLabel(m),
     value: m,
@@ -111,11 +123,12 @@ function modeOptions() {
 }
 
 function onMode(value: string) {
-  if (effect.value.mode === value) return;
+  if (effect.value.mode === value && (!props.perFanOnly || effect.value.scope === "Fan") && (!props.groupEffects || effect.value.scope !== "Fan")) return;
   const device = config.rgbDeviceConfig(props.deviceId);
-  rememberDeviceEffect(device, props.zoneIndex, effect.value, false);
-  const scope = props.cap.software_modes?.includes(value) ? "All" : effect.value.scope;
-  const remembered = recallDeviceEffect(device, props.zoneIndex, scope, value);
+  const memoryZone = props.groupEffects ? null : props.zoneIndex;
+  rememberDeviceEffect(device, memoryZone, effect.value, false);
+  const scope = props.perFanOnly ? "Fan" : props.cap.software_modes?.includes(value) || (props.groupEffects && effect.value.scope === "Fan") ? "All" : effect.value.scope;
+  const remembered = recallDeviceEffect(device, memoryZone, scope, value);
   patchEffect(remembered?.effect ?? { mode: value, scope });
 }
 
@@ -215,7 +228,7 @@ function clearAll() {
 }
 
 const zoneLabel = computed(
-  () => props.cap.zones[props.zoneIndex]?.name ?? `Zone ${props.zoneIndex}`,
+  () => props.groupEffects ? "Port effects" : props.cap.zones[props.zoneIndex]?.name ?? `Zone ${props.zoneIndex}`,
 );
 </script>
 
@@ -238,7 +251,9 @@ const zoneLabel = computed(
         />
       </div>
 
-      <p v-if="directOnly" class="muted">
+      <p v-if="groupEffects" class="muted">Changes apply to every fan in this port. Save changes to apply lighting.</p>
+      <p v-else-if="perFanOnly" class="muted">Individual fan effects replace the port's group effect when edited. Save changes to apply lighting.</p>
+      <p v-else-if="directOnly" class="muted">
         Applying direct colors replaces the group's animation with direct LED control.
       </p>
       <p v-else-if="hasSoftwareRenderer" class="muted">
@@ -313,14 +328,14 @@ const zoneLabel = computed(
           <label class="muted">Scope</label>
           <n-select
             size="small"
-            :value="effect.scope"
+            :value="groupEffects && effect.scope === 'Fan' ? 'All' : effect.scope"
             :options="supportedScopes.map((s) => ({ label: s, value: s }))"
             @update:value="onScope"
           />
         </div>
       </div>
 
-      <div v-if="cap.supports_direction" class="checkboxes">
+      <div v-if="cap.supports_direction && !groupEffects" class="checkboxes">
         <n-checkbox :checked="zone.swap_lr" @update:checked="onSwapLr">Swap L/R</n-checkbox>
         <n-checkbox :checked="zone.swap_tb" @update:checked="onSwapTb">Swap T/B</n-checkbox>
       </div>

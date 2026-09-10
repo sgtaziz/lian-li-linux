@@ -232,7 +232,7 @@ export interface FanConfig {
 // ─── RGB ────────────────────────────────────────────────────────────────────
 export type RgbMode = string;
 export type RgbDirection = "Clockwise" | "CounterClockwise" | "Up" | "Down" | "Spread" | "Gather";
-export type RgbScope = "All" | "Top" | "Bottom" | "Inner" | "Outer" | "Center" | "Pump" | "Front" | "Rear"
+export type RgbScope = "All" | "Fan" | "Top" | "Bottom" | "Inner" | "Outer" | "Center" | "Pump" | "Front" | "Rear"
   | "Segment1" | "Segment2" | "Segment3" | "Segment4" | "Segment5" | "Segment6";
 
 export interface RgbEffect {
@@ -307,6 +307,8 @@ export interface RgbEffectParameters {
 }
 
 export interface RgbDeviceCapabilities {
+  group_effect_modes?: string[];
+  zone_effect_modes?: string[];
   device_id: string;
   device_name: string;
   supported_modes: RgbMode[];

@@ -35,7 +35,11 @@ const device = computed(() => devices.byId(props.cap.device_id));
 
 const expanded = ref(true);
 const regional = computed(() => (props.cap.effect_regions?.length ?? 0) > 0);
+const portGroups = computed(() => (props.cap.group_effect_modes?.length ?? 0) > 0);
 const controlTab = ref<"regions" | "direct">("regions");
+watch(() => devConfig.value.zones[0]?.effect.scope, (scope) => {
+  if (portGroups.value) controlTab.value = scope === "Fan" ? "direct" : "regions";
+}, { immediate: true });
 const visibleZones = computed(() => devConfig.value.zones.slice(0, props.cap.zones.length));
 const syncActive = computed(() => {
   const sync = config.ensureRgb().merge_lighting;
@@ -171,12 +175,13 @@ const summary = computed(() =>
 
       <!-- When MB sync is active, hide zone config — the motherboard controls RGB -->
       <template v-if="!mbSync">
-        <div v-if="regional" class="control-tabs">
+        <div v-if="regional || portGroups" class="control-tabs">
           <n-button size="small" :type="controlTab === 'regions' ? 'primary' : 'default'" @click="controlTab = 'regions'">Group effects</n-button>
-          <n-button v-if="cap.supports_direct" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">Direct / zones</n-button>
+          <n-button v-if="cap.supports_direct || portGroups" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">Direct / zones</n-button>
         </div>
         <RgbRegionEditor v-if="regional && controlTab === 'regions'" :device-id="cap.device_id" :cap="cap" />
-        <div v-if="!regional || controlTab === 'direct'" class="zones">
+        <RgbZoneEditor v-else-if="portGroups && controlTab === 'regions' && visibleZones[0]" :device-id="cap.device_id" :cap="cap" :zone-index="0" :zone="visibleZones[0]" group-effects />
+        <div v-if="(!regional && !portGroups) || controlTab === 'direct'" class="zones">
           <RgbZoneEditor
             v-for="(z, i) in visibleZones"
             :key="i"
@@ -185,10 +190,11 @@ const summary = computed(() =>
             :zone-index="i"
             :zone="z"
             :direct-only="regional && controlTab === 'direct'"
+            :per-fan-only="portGroups && controlTab === 'direct'"
           />
         </div>
 
-        <div v-if="!regional" class="actions">
+        <div v-if="!regional && !portGroups" class="actions">
           <n-button size="small" @click="applyToAllZones">Apply to All Zones</n-button>
         </div>
 

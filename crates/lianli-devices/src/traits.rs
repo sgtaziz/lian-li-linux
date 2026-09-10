@@ -270,6 +270,14 @@ pub trait RgbDevice: Send + Sync {
     /// Supported LED effect modes for this device.
     fn supported_modes(&self) -> Vec<RgbMode>;
 
+    fn group_effect_modes(&self) -> Vec<RgbMode> {
+        Vec::new()
+    }
+
+    fn zone_effect_modes(&self) -> Vec<RgbMode> {
+        self.supported_modes()
+    }
+
     /// Information about each independently controllable LED zone.
     fn zone_info(&self) -> Vec<RgbZoneInfo>;
 
@@ -461,6 +469,12 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn supported_modes(&self) -> Vec<RgbMode> {
         (**self).supported_modes()
+    }
+    fn group_effect_modes(&self) -> Vec<RgbMode> {
+        (**self).group_effect_modes()
+    }
+    fn zone_effect_modes(&self) -> Vec<RgbMode> {
+        (**self).zone_effect_modes()
     }
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         (**self).zone_info()

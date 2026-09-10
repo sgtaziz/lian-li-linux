@@ -12,6 +12,18 @@ impl RgbController {
         let plan = self.prepare_sync(config)?;
         let previous = self.sync_active.clone();
         self.clear_pending();
+        // A port's motherboard-sync reset can clear every port on its controller.
+        let mut reset_failures = std::collections::HashSet::new();
+        for item in &plan {
+            if let PreparedSync::Hardware { id, device, .. } = item {
+                if device.supports_mb_rgb_sync() {
+                    if let Err(error) = device.set_mb_rgb_sync(false) {
+                        warn!("Failed to leave motherboard RGB sync for {id}: {error:#}");
+                        reset_failures.insert(id.clone());
+                    }
+                }
+            }
+        }
         let ids: std::collections::HashSet<_> =
             plan.iter().map(|item| item.id().to_owned()).collect();
         let clocks = ids
@@ -39,6 +51,12 @@ impl RgbController {
         let mut failure = None;
         for item in plan {
             let id = item.id().to_owned();
+            if reset_failures.contains(&id) {
+                failure = Some(anyhow::anyhow!(
+                    "failed to leave motherboard RGB sync for {id}"
+                ));
+                continue;
+            }
             if let Err(error) = self.submit_sync(item) {
                 warn!("Failed to submit RGB sync for {id}: {error:#}");
                 failure = Some(error);
@@ -82,9 +100,6 @@ impl RgbController {
                 self.mb_sync_state.insert(id, false);
             }
             PreparedSync::Hardware { id, device, effect } => {
-                if device.supports_mb_rgb_sync() {
-                    device.set_mb_rgb_sync(false)?;
-                }
                 device.set_all_effects(&effect)?;
                 self.mb_sync_state.insert(id, false);
             }
