@@ -20,7 +20,26 @@ use tracing::{debug, error, info, warn};
 
 const TX_FAILURE_THRESHOLD: u32 = 5;
 
+struct RuntimeClaim(Arc<AtomicBool>);
+
+impl RuntimeClaim {
+    fn acquire(claimed: &Arc<AtomicBool>) -> Result<Self> {
+        claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| anyhow::anyhow!("wireless runtime already claimed"))?;
+        Ok(Self(Arc::clone(claimed)))
+    }
+}
+
+impl Drop for RuntimeClaim {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 pub struct WirelessController {
+    runtime_claimed: Arc<AtomicBool>,
+    runtime_claim: Option<RuntimeClaim>,
     pub(super) tx: Option<Arc<Mutex<RusbBulk>>>,
     pub(super) rx: Option<Arc<Mutex<RusbBulk>>>,
     pub(super) receiver_state: Arc<ReceiverState>,
@@ -49,6 +68,8 @@ pub struct WirelessController {
 impl Clone for WirelessController {
     fn clone(&self) -> Self {
         Self {
+            runtime_claimed: Arc::clone(&self.runtime_claimed),
+            runtime_claim: None,
             tx: self.tx.clone(),
             rx: self.rx.clone(),
             receiver_state: Arc::clone(&self.receiver_state),
@@ -79,6 +100,8 @@ impl WirelessController {
         let pending_commands: PendingQueue = Arc::new(Mutex::new(Default::default()));
         let target_cmd_seqs: TargetSeqMap = Arc::new(Mutex::new(Default::default()));
         Self {
+            runtime_claimed: Arc::new(AtomicBool::new(false)),
+            runtime_claim: None,
             tx: None,
             rx: None,
             receiver_state: Arc::new(ReceiverState::default()),
@@ -105,6 +128,7 @@ impl WirelessController {
 
     pub fn connect(&mut self) -> Result<()> {
         self.stop();
+        let _claim = RuntimeClaim::acquire(&self.runtime_claimed)?;
         self.poll_stop = Arc::new(AtomicBool::new(false));
         self.receiver_state.pages.store(1, Ordering::Relaxed);
         let mut tx = None;
@@ -202,6 +226,25 @@ impl WirelessController {
             self.poll_thread.is_none() && self.convergence_thread.is_none(),
             "wireless workers already started"
         );
+        let claim = RuntimeClaim::acquire(&self.runtime_claimed)?;
+        anyhow::ensure!(
+            !self.poll_stop.load(Ordering::Acquire),
+            "wireless connection stopped; reconnect before polling"
+        );
+        match self.start_workers() {
+            Ok(()) => {
+                self.runtime_claim = Some(claim);
+                Ok(())
+            }
+            Err(error) => {
+                self.stop();
+                self.rx_running.store(false, Ordering::Release);
+                Err(error)
+            }
+        }
+    }
+
+    fn start_workers(&mut self) -> Result<()> {
         let tx = self
             .tx
             .as_ref()
@@ -223,7 +266,6 @@ impl WirelessController {
         thread::sleep(Duration::from_millis(500));
 
         self.video_mode_active.store(false, Ordering::Release);
-        self.poll_stop.store(false, Ordering::SeqCst);
         self.clock_init_sent.store(false, Ordering::Release);
 
         let stop_flag = self.poll_stop.clone();
@@ -239,7 +281,8 @@ impl WirelessController {
         let discovery_done = Arc::new(AtomicBool::new(false));
         let discovery_signal = discovery_done.clone();
 
-        self.poll_thread = Some(thread::spawn(move || {
+        let poll_worker = thread::Builder::new().name("wireless-discovery".into());
+        self.poll_thread = Some(poll_worker.spawn(move || {
             let mut found_devices = false;
             let mut consecutive_errors = 0u32;
             let mut consecutive_successes = 0u32;
@@ -315,7 +358,7 @@ impl WirelessController {
                 wait_for_poll(&stop_flag, Duration::from_millis(500));
             }
             rx_running.store(false, Ordering::Release);
-        }));
+        }).context("spawning wireless discovery thread")?);
 
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
@@ -340,7 +383,7 @@ impl WirelessController {
                 Arc::clone(&self.desired_effects),
                 Arc::clone(&self.binding_mac),
                 conv_stop,
-            ));
+            )?);
         }
 
         Ok(())
@@ -812,6 +855,7 @@ impl WirelessController {
         }
         self.tx.take();
         self.rx.take();
+        self.runtime_claim.take();
     }
 
     pub fn rgb_upload_applied(&self, mac: &[u8; 6], effect_index: [u8; 4]) -> bool {
@@ -864,6 +908,110 @@ mod tests {
     use crate::wireless::discovery::{DeviceHealth, DiscoveredDevice};
     use crate::wireless::WirelessFanType;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn clones_cannot_start_or_connect_while_runtime_is_claimed() {
+        let mut owner = WirelessController::new();
+        owner.runtime_claim = Some(RuntimeClaim::acquire(&owner.runtime_claimed).unwrap());
+        owner.poll_stop.store(true, Ordering::Release);
+        owner.clock_init_sent.store(true, Ordering::Release);
+        let mut clone = owner.clone();
+
+        assert!(clone
+            .start_polling()
+            .unwrap_err()
+            .to_string()
+            .contains("already claimed"));
+        assert!(clone
+            .connect()
+            .unwrap_err()
+            .to_string()
+            .contains("already claimed"));
+        drop(clone);
+        assert!(owner.runtime_claimed.load(Ordering::Acquire));
+        assert!(owner.poll_stop.load(Ordering::Acquire));
+        assert!(owner.clock_init_sent.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn failed_start_releases_runtime_claim() {
+        let mut controller = WirelessController::new();
+        assert!(controller
+            .start_polling()
+            .unwrap_err()
+            .to_string()
+            .contains("TX device"));
+        assert!(!controller.runtime_claimed.load(Ordering::Acquire));
+        let mut clone = controller.clone();
+        assert!(clone
+            .start_polling()
+            .unwrap_err()
+            .to_string()
+            .contains("TX device"));
+    }
+
+    #[test]
+    fn stopped_clone_cannot_restart_old_connection() {
+        let controller = WirelessController::new();
+        let mut clone = controller.clone();
+        controller.poll_stop.store(true, Ordering::Release);
+        assert!(clone
+            .start_polling()
+            .unwrap_err()
+            .to_string()
+            .contains("reconnect"));
+        assert!(controller.poll_stop.load(Ordering::Acquire));
+        assert!(!controller.runtime_claimed.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn runtime_claim_is_exclusive_across_concurrent_callers() {
+        let claimed = Arc::new(AtomicBool::new(false));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let claimed = Arc::clone(&claimed);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    let claim = RuntimeClaim::acquire(&claimed);
+                    barrier.wait();
+                    claim.is_ok()
+                })
+            })
+            .collect();
+        let winners = workers
+            .into_iter()
+            .map(|worker| usize::from(worker.join().unwrap()))
+            .sum::<usize>();
+        assert_eq!(winners, 1);
+        assert!(RuntimeClaim::acquire(&claimed).is_ok());
+    }
+
+    #[test]
+    fn ownership_outlives_poll_exit_and_is_released_after_convergence_join() {
+        let mut controller = WirelessController::new();
+        controller.runtime_claim =
+            Some(RuntimeClaim::acquire(&controller.runtime_claimed).unwrap());
+        controller.poll_thread = Some(thread::spawn(|| {}));
+        let stop = Arc::clone(&controller.poll_stop);
+        let claimed = Arc::clone(&controller.runtime_claimed);
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        controller.convergence_thread = Some(thread::spawn(move || {
+            wait_for_poll(&stop, Duration::from_secs(30));
+            result_tx.send(claimed.load(Ordering::Acquire)).unwrap();
+        }));
+        let mut clone = controller.clone();
+        assert!(!controller.rx_running.load(Ordering::Acquire));
+        assert!(clone
+            .start_polling()
+            .unwrap_err()
+            .to_string()
+            .contains("already claimed"));
+        controller.stop();
+        assert!(result_rx.recv().unwrap());
+        assert!(!controller.runtime_claimed.load(Ordering::Acquire));
+    }
 
     #[test]
     fn new_binding_uses_next_slot_without_claiming_ownership_first() {

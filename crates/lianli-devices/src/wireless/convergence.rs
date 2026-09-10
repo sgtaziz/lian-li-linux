@@ -132,7 +132,7 @@ impl WirelessController {
         rgb_targets: RgbTargets,
         binding_mac: BindingMac,
         stop: Arc<AtomicBool>,
-    ) -> thread::JoinHandle<()> {
+    ) -> Result<thread::JoinHandle<()>> {
         thread::Builder::new()
             .name("wireless-convergence".into())
             .spawn(move || {
@@ -149,7 +149,7 @@ impl WirelessController {
                 }
                 debug!("wireless convergence loop stopped");
             })
-            .expect("spawning convergence thread")
+            .context("spawning wireless convergence thread")
     }
 }
 
