@@ -1,18 +1,21 @@
+mod arcs;
 mod basic;
+mod color_cycles;
+mod color_sweeps;
+mod colored_meteors;
 mod effect_patterns;
 mod electric_patterns;
 mod engine;
-mod modes_15_18;
-mod modes_19_23;
-mod modes_24_27;
-mod modes_29_30_34;
-mod modes_31_33;
-mod modes_9_14;
+mod lottery;
+mod meteor_trails;
 mod movement;
 #[cfg(test)]
 mod native_tests;
 pub mod parameters;
+mod pulses;
+mod reflections;
 mod twinkle;
+mod wing;
 
 use super::Animation;
 use anyhow::{bail, ensure, Result};
@@ -153,32 +156,32 @@ fn render_region(
         RgbMode::Meteor => movement::meteor(effect, fans, plane, pn),
         RgbMode::Twinkle => twinkle::twinkle(effect, fans),
         RgbMode::TaiChi => movement::tai_chi(effect, fans, plane, pn),
-        RgbMode::ColorCycle => modes_9_14::color_cycle(effect, fans, plane, pn),
-        RgbMode::MopUp => modes_9_14::mop_up(effect, fans, plane, pn),
-        RgbMode::MeteorRainbow => modes_9_14::meteor_rainbow(effect, fans, plane, pn),
-        RgbMode::ColorfulMeteor => modes_9_14::colorful_meteor(effect, fans, plane, pn),
-        RgbMode::Lottery => modes_9_14::lottery(effect, fans, plane, pn),
-        RgbMode::Warning => modes_9_14::warning(effect, fans, plane, pn),
-        RgbMode::Voice => modes_15_18::voice(effect, fans, plane, pn),
-        RgbMode::Mixing => modes_15_18::mixing(effect, fans, plane, pn),
-        RgbMode::Tide => modes_15_18::tide(effect, fans, plane, pn),
-        RgbMode::Scan => modes_15_18::scan(effect, fans, plane, pn),
-        RgbMode::DoubleMeteor => modes_19_23::double_meteor(effect, fans, plane, pn),
-        RgbMode::MeteorContest => modes_19_23::meteor_contest(effect, fans, plane, pn),
-        RgbMode::MeteorMix => modes_19_23::meteor_mix(effect, fans, plane, pn),
-        RgbMode::ReturnArc => modes_19_23::return_arc(effect, fans, plane, pn),
-        RgbMode::DoubleArc => modes_19_23::double_arc(effect, fans, plane, pn),
-        RgbMode::Door => modes_24_27::door(effect, fans, plane, pn),
-        RgbMode::HeartBeat => modes_24_27::heart_beat(effect, fans, plane, pn),
-        RgbMode::HeartBeatRunway => modes_24_27::heart_beat_runway(effect, fans, plane, pn),
-        RgbMode::Disco => modes_24_27::disco(effect, fans, plane, pn),
-        RgbMode::ElectricCurrent => modes_24_27::electric_current(effect, fans, plane, pn),
-        RgbMode::Reflect => modes_29_30_34::reflect(effect, fans, plane, pn),
-        RgbMode::GradientRibbon => modes_29_30_34::gradient_ribbon(effect, fans, plane, pn),
-        RgbMode::Wing => modes_31_33::wing(effect, fans, plane, pn),
-        RgbMode::Drumming => modes_31_33::drumming(effect, fans, plane, pn),
-        RgbMode::Boomerang => modes_31_33::boomerang(effect, fans, plane, pn),
-        RgbMode::CandyBox => modes_29_30_34::candy_box(effect, fans, plane, pn),
+        RgbMode::ColorCycle => color_cycles::color_cycle(effect, fans, plane, pn),
+        RgbMode::MopUp => color_cycles::mop_up(effect, fans, plane, pn),
+        RgbMode::MeteorRainbow => colored_meteors::meteor_rainbow(effect, fans, plane, pn),
+        RgbMode::ColorfulMeteor => colored_meteors::colorful_meteor(effect, fans, plane, pn),
+        RgbMode::Lottery => lottery::lottery(effect, fans, plane, pn),
+        RgbMode::Warning => pulses::warning(effect, fans, plane, pn),
+        RgbMode::Voice => pulses::voice(effect, fans, plane, pn),
+        RgbMode::Mixing => color_sweeps::mixing(effect, fans, plane, pn),
+        RgbMode::Tide => color_sweeps::tide(effect, fans, plane, pn),
+        RgbMode::Scan => color_sweeps::scan(effect, fans, plane, pn),
+        RgbMode::DoubleMeteor => meteor_trails::double_meteor(effect, fans, plane, pn),
+        RgbMode::MeteorContest => meteor_trails::meteor_contest(effect, fans, plane, pn),
+        RgbMode::MeteorMix => meteor_trails::meteor_mix(effect, fans, plane, pn),
+        RgbMode::ReturnArc => arcs::return_arc(effect, fans, plane, pn),
+        RgbMode::DoubleArc => arcs::double_arc(effect, fans, plane, pn),
+        RgbMode::Door => color_sweeps::door(effect, fans, plane, pn),
+        RgbMode::HeartBeat => pulses::heart_beat(effect, fans, plane, pn),
+        RgbMode::HeartBeatRunway => pulses::heart_beat_runway(effect, fans, plane, pn),
+        RgbMode::Disco => pulses::disco(effect, fans, plane, pn),
+        RgbMode::ElectricCurrent => reflections::electric_current(effect, fans, plane, pn),
+        RgbMode::Reflect => reflections::reflect(effect, fans, plane, pn),
+        RgbMode::GradientRibbon => color_cycles::gradient_ribbon(effect, fans, plane, pn),
+        RgbMode::Wing => wing::wing(effect, fans, plane, pn),
+        RgbMode::Drumming => pulses::drumming(effect, fans, plane, pn),
+        RgbMode::Boomerang => arcs::boomerang(effect, fans, plane, pn),
+        RgbMode::CandyBox => color_cycles::candy_box(effect, fans, plane, pn),
         _ => unreachable!(),
     };
     let interval_base = match effect.mode {

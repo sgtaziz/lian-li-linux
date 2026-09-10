@@ -1,14 +1,22 @@
-use super::engine::{frame, range, scale, Color, Frame};
+use super::{
+    palette::{scale, Color, Frame},
+    Layout,
+};
 use lianli_shared::rgb::RgbScope;
 
-pub(super) fn runway(scope: RgbScope, colors: &[Color; 4], brightness: u8) -> Vec<Frame> {
-    let active = range(scope);
+pub(crate) fn runway(
+    layout: Layout,
+    scope: RgbScope,
+    colors: &[Color; 4],
+    brightness: u8,
+) -> Vec<Frame> {
+    let active = layout.range(scope);
     let width = active.len();
     let head = if scope == RgbScope::Front { 10 } else { 3 };
     let mut frames = Vec::with_capacity(2 * (width + head));
     for reverse in [false, true] {
         for step in 0..width + head {
-            let mut output = frame();
+            let mut output = layout.frame();
             for position in 0..width {
                 let color = if position <= step && position + head > step {
                     colors[1]
@@ -30,28 +38,33 @@ pub(super) fn runway(scope: RgbScope, colors: &[Color; 4], brightness: u8) -> Ve
         for _ in 0..3 {
             source.extend(frames.iter().cloned());
         }
-        (0..164)
-            .map(|index| source[(index as f32 / (164.0f32 / source.len() as f32)) as usize].clone())
+        (0..layout.rear_runway_frames)
+            .map(|index| {
+                source[(index as f32 / (layout.rear_runway_frames as f32 / source.len() as f32))
+                    as usize]
+                    .clone()
+            })
             .collect()
     } else {
         frames
     }
 }
 
-pub(super) fn meteor(
+pub(crate) fn meteor(
+    layout: Layout,
     scope: RgbScope,
     colors: &[Color; 4],
     brightness: u8,
     counter_clockwise: bool,
 ) -> Vec<Frame> {
     const TAIL: [u8; 12] = [6, 8, 16, 24, 32, 48, 64, 96, 120, 150, 200, 255];
-    let active = range(scope);
+    let active = layout.range(scope);
     let width = active.len();
     let head = if scope == RgbScope::Front { 10 } else { 8 };
     let mut frames = Vec::with_capacity(4 * (width + head));
     for &color in colors {
         for step in 0..width + head {
-            let mut output = frame();
+            let mut output = layout.frame();
             let mut tail_index = 0;
             for position in 0..width {
                 let pixel = if position <= step && position + head > step {

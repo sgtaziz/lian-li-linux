@@ -1,7 +1,7 @@
+mod classic;
+mod color_chases;
 mod engine;
-mod modes_16_22;
-mod modes_1_6;
-mod modes_7_12;
+mod pulses_waves;
 #[cfg(test)]
 mod reference_tests;
 
@@ -95,7 +95,7 @@ pub fn render(effect: &RgbEffect, logical_leds: usize) -> Result<Animation> {
     }
     if effect.mode == RgbMode::Stack {
         ensure!(
-            modes_7_12::stack_frame_count(logical_leds)
+            color_chases::stack_frame_count(logical_leds)
                 <= lianli_shared::rgb::MAX_RGB_ANIMATION_FRAMES,
             "sync lighting Stack exceeds the source 4096-frame buffer"
         );
@@ -122,23 +122,25 @@ pub fn render(effect: &RgbEffect, logical_leds: usize) -> Result<Animation> {
     let bright = engine::brightness(effect);
     let reverse = matches!(effect.direction, RgbDirection::CounterClockwise);
     let frames = match effect.mode {
-        RgbMode::Rainbow => modes_1_6::rainbow(logical_leds, bright, reverse),
-        RgbMode::Static => modes_1_6::static_color(logical_leds, colors[0], bright),
-        RgbMode::Breathing => modes_1_6::breathing(logical_leds, colors[0], bright),
-        RgbMode::Runway => modes_1_6::runway(logical_leds, &colors, bright),
-        RgbMode::Meteor => modes_1_6::meteor(logical_leds, colors[0], bright, reverse),
-        RgbMode::Stack => modes_7_12::stack(logical_leds, colors[0], bright, reverse),
-        RgbMode::ColorCycle => modes_7_12::color_cycle(logical_leds, &colors, bright, reverse),
-        RgbMode::CoverCycle => modes_7_12::cover_cycle(logical_leds, &colors, bright, reverse),
-        RgbMode::Wave => modes_7_12::wave(logical_leds, colors[0], bright, reverse),
-        RgbMode::MeteorShower => modes_7_12::meteor_shower(logical_leds, &colors, bright, reverse),
-        RgbMode::Disco => modes_16_22::disco(logical_leds, &colors, bright, reverse),
-        RgbMode::BlowUp => modes_16_22::blow_up(logical_leds, &colors, bright),
-        RgbMode::HeartBeat => modes_16_22::heart_beat(logical_leds, &colors, bright),
-        RgbMode::Warning => modes_16_22::warning(logical_leds, &colors, bright),
-        RgbMode::SeaFlow => modes_16_22::sea_flow(logical_leds, colors[0], bright, reverse),
-        RgbMode::Ripple => modes_16_22::ripple(logical_leds, &colors, bright),
-        RgbMode::Echo => modes_16_22::echo(logical_leds, &colors, bright),
+        RgbMode::Rainbow => classic::rainbow(logical_leds, bright, reverse),
+        RgbMode::Static => classic::static_color(logical_leds, colors[0], bright),
+        RgbMode::Breathing => classic::breathing(logical_leds, colors[0], bright),
+        RgbMode::Runway => classic::runway(logical_leds, &colors, bright),
+        RgbMode::Meteor => classic::meteor(logical_leds, colors[0], bright, reverse),
+        RgbMode::Stack => color_chases::stack(logical_leds, colors[0], bright, reverse),
+        RgbMode::ColorCycle => color_chases::color_cycle(logical_leds, &colors, bright, reverse),
+        RgbMode::CoverCycle => color_chases::cover_cycle(logical_leds, &colors, bright, reverse),
+        RgbMode::Wave => color_chases::wave(logical_leds, colors[0], bright, reverse),
+        RgbMode::MeteorShower => {
+            color_chases::meteor_shower(logical_leds, &colors, bright, reverse)
+        }
+        RgbMode::Disco => pulses_waves::disco(logical_leds, &colors, bright, reverse),
+        RgbMode::BlowUp => pulses_waves::blow_up(logical_leds, &colors, bright),
+        RgbMode::HeartBeat => pulses_waves::heart_beat(logical_leds, &colors, bright),
+        RgbMode::Warning => pulses_waves::warning(logical_leds, &colors, bright),
+        RgbMode::SeaFlow => pulses_waves::sea_flow(logical_leds, colors[0], bright, reverse),
+        RgbMode::Ripple => pulses_waves::ripple(logical_leds, &colors, bright),
+        RgbMode::Echo => pulses_waves::echo(logical_leds, &colors, bright),
         _ => unreachable!(),
     };
     Ok(Animation {

@@ -1,24 +1,24 @@
 mod classic;
+mod color_blending;
+mod color_fades;
+mod color_ribbons;
+mod contest;
+mod crossing_trails;
 mod engine;
-mod mode_13;
-mod mode_14;
-mod mode_3;
-mod mode_34;
-mod mode_6;
-mod mode_7;
-mod mode_8;
-mod modes_11_12;
-mod modes_15_17;
-mod modes_16_21;
-mod modes_18_19;
-mod modes_1_2;
-mod modes_20_22;
-mod modes_23_27;
-mod modes_4_5;
-mod modes_9_10;
+mod flowing_trails;
+mod hourglass_current;
+mod movement;
 #[cfg(test)]
 mod native_tests;
+mod parallel;
 pub(crate) mod parameters;
+mod pioneer_snooker;
+mod ripple_voice;
+mod river;
+mod shock_wave;
+mod shuttle_run;
+mod stack;
+mod twinkle;
 
 use anyhow::{bail, ensure, Result};
 use engine::{frame, geometry, lane, Frame, Geometry};
@@ -226,73 +226,82 @@ fn render_all(effect: &RgbEffect, geometry: Geometry) -> Result<Animation> {
             RgbMode::RainbowMorph => (classic::morph(geometry, brightness, false), 1_100),
             RgbMode::Paint => (classic::paint(geometry, &colors, brightness), 1_100),
             RgbMode::ColorTransfer => (
-                modes_1_2::color_transfer(geometry, &colors, brightness, reverse),
+                color_fades::color_transfer(geometry, &colors, brightness, reverse),
                 2_400,
             ),
-            RgbMode::FadeOut => (modes_1_2::fade_out(geometry, &colors, brightness), 1_100),
+            RgbMode::FadeOut => (color_fades::fade_out(geometry, &colors, brightness), 1_100),
             RgbMode::Contest => (
-                mode_3::contest(geometry, &colors, brightness, reverse),
+                contest::contest(geometry, &colors, brightness, reverse),
                 1_100,
             ),
             RgbMode::CrossOver => (
-                modes_4_5::cross_over(geometry, &colors, brightness, reverse),
+                crossing_trails::cross_over(geometry, &colors, brightness, reverse),
                 1_100,
             ),
             RgbMode::BulletStack => (
-                modes_4_5::bullet_stack(geometry, &colors, brightness, reverse),
+                crossing_trails::bullet_stack(geometry, &colors, brightness, reverse),
                 1_130,
             ),
-            RgbMode::Twinkle => (mode_6::twinkle(geometry, &colors, brightness), 1_100),
+            RgbMode::Twinkle => (twinkle::twinkle(geometry, &colors, brightness), 1_100),
             RgbMode::Parallel => (
-                mode_7::parallel(geometry, &colors, brightness, reverse),
+                parallel::parallel(geometry, &colors, brightness, reverse),
                 1_100,
             ),
             RgbMode::ShockWave => (
-                mode_8::shock_wave(geometry, &colors, brightness, reverse),
+                shock_wave::shock_wave(geometry, &colors, brightness, reverse),
                 1_100,
             ),
-            RgbMode::Ripple => (modes_9_10::ripple(geometry, &colors, brightness), 1_100),
-            RgbMode::Voice => (modes_9_10::voice(geometry, &colors, brightness), 1_100),
+            RgbMode::Ripple => (ripple_voice::ripple(geometry, &colors, brightness), 1_100),
+            RgbMode::Voice => (ripple_voice::voice(geometry, &colors, brightness), 1_100),
             RgbMode::Transformation => (
-                modes_18_19::transformation(geometry, &colors, brightness, reverse),
+                color_ribbons::transformation(geometry, &colors, brightness, reverse),
                 1_100,
             ),
             RgbMode::GradientRibbon => (
-                modes_18_19::gradient_ribbon(geometry, brightness, reverse),
+                color_ribbons::gradient_ribbon(geometry, brightness, reverse),
                 1_100,
             ),
-            RgbMode::Pioneer => (modes_16_21::pioneer(geometry, colors[0], brightness), 1_100),
-            RgbMode::Snooker => (modes_16_21::snooker(geometry, &colors, brightness), 1_100),
+            RgbMode::Pioneer => (
+                pioneer_snooker::pioneer(geometry, colors[0], brightness),
+                1_100,
+            ),
+            RgbMode::Snooker => (
+                pioneer_snooker::snooker(geometry, &colors, brightness),
+                1_100,
+            ),
             RgbMode::RainbowWave => (
-                modes_20_22::rainbow_wave(geometry, brightness, reverse),
+                color_blending::rainbow_wave(geometry, brightness, reverse),
                 1_100,
             ),
-            RgbMode::Mixing => (modes_20_22::mixing(geometry, &colors, brightness), 850),
-            RgbMode::PingPong => (modes_23_27::ping_pong(geometry, &colors, brightness), 1_200),
-            RgbMode::Runway => (modes_23_27::runway(geometry, &colors, brightness), 1_200),
-            RgbMode::Tide => (modes_23_27::tide(geometry, &colors, brightness), 1_100),
-            RgbMode::BlowUp => (modes_23_27::blow_up(geometry, &colors, brightness), 1_550),
+            RgbMode::Mixing => (color_blending::mixing(geometry, &colors, brightness), 850),
+            RgbMode::PingPong => (movement::ping_pong(geometry, &colors, brightness), 1_200),
+            RgbMode::Runway => (movement::runway(geometry, &colors, brightness), 1_200),
+            RgbMode::Tide => (movement::tide(geometry, &colors, brightness), 1_100),
+            RgbMode::BlowUp => (movement::blow_up(geometry, &colors, brightness), 1_550),
             RgbMode::Meteor => (
-                modes_23_27::meteor(geometry, &colors, brightness, reverse),
+                movement::meteor(geometry, &colors, brightness, reverse),
                 1_500,
             ),
-            RgbMode::Stack => (
-                mode_34::stack(geometry, &colors, brightness, reverse),
-                1_100,
-            ),
+            RgbMode::Stack => (stack::stack(geometry, &colors, brightness, reverse), 1_100),
             RgbMode::Drizzling => (
-                modes_11_12::drizzling(geometry, &colors, brightness, reverse),
+                flowing_trails::drizzling(geometry, &colors, brightness, reverse),
                 1_100,
             ),
-            RgbMode::Endless => (modes_11_12::endless(geometry, &colors, brightness), 1_100),
-            RgbMode::River => (
-                mode_14::river(geometry, &colors, brightness, reverse),
+            RgbMode::Endless => (
+                flowing_trails::endless(geometry, &colors, brightness),
                 1_100,
             ),
-            RgbMode::ShuttleRun => (mode_13::shuttle_run(geometry, &colors, brightness), 1_100),
-            RgbMode::Hourglass => (modes_15_17::hourglass(geometry, &colors, brightness), 1_100),
+            RgbMode::River => (river::river(geometry, &colors, brightness, reverse), 1_100),
+            RgbMode::ShuttleRun => (
+                shuttle_run::shuttle_run(geometry, &colors, brightness),
+                1_100,
+            ),
+            RgbMode::Hourglass => (
+                hourglass_current::hourglass(geometry, &colors, brightness),
+                1_100,
+            ),
             RgbMode::ElectricCurrent => (
-                modes_15_17::electric_current(geometry, &colors, brightness),
+                hourglass_current::electric_current(geometry, &colors, brightness),
                 1_100,
             ),
             _ => bail!("unsupported whole-Strimer RGB mode: {:?}", effect.mode),

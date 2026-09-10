@@ -1,43 +1,5 @@
 use super::engine::{brightness, center_order, mixed_color, palette, place, scale, Color, Plane};
-use lianli_shared::rgb::{RgbDirection, RgbEffect};
-
-pub(super) fn voice(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec<Vec<Color>> {
-    let colors = palette(effect, plane).map(|color| scale(color, brightness(effect)));
-    let len = fans * plane.track_len();
-    let reverse = matches!(effect.direction, RgbDirection::CounterClockwise);
-    let bands = [len, len * 2 / 3, len / 3];
-    let mut source = Vec::with_capacity(8 * bands.iter().sum::<usize>());
-    for color in colors {
-        for band in bands {
-            for pass in 0..2 {
-                for step in 0..band {
-                    let mut track = vec![[0; 3]; len];
-                    for position in 0..len {
-                        let logical = if reverse {
-                            len - position - 1
-                        } else {
-                            position
-                        };
-                        let target = if plane == Plane::Center {
-                            center_order(logical, pn)
-                        } else {
-                            logical
-                        };
-                        let dim =
-                            (pass == 0 && position > step) || (pass == 1 && position > band - step);
-                        track[target] = if dim {
-                            color.map(|channel| channel / 16)
-                        } else {
-                            color
-                        };
-                    }
-                    source.push(place(&track, plane, fans, pn, plane != Plane::Center));
-                }
-            }
-        }
-    }
-    source.into_iter().step_by(2).collect()
-}
+use lianli_shared::rgb::RgbEffect;
 
 pub(super) fn mixing(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec<Vec<Color>> {
     let colors = palette(effect, plane);
@@ -143,4 +105,74 @@ pub(super) fn scan(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec
         }
     }
     frames
+}
+
+pub(super) fn door(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec<Vec<Color>> {
+    let colors = palette(effect, plane).map(|color| scale(color, brightness(effect)));
+    let outer_half = 4 * fans;
+    let inner_half = 5 * fans;
+    let mut frames = Vec::with_capacity(32 * fans);
+    for color in colors {
+        for pass in 0..2 {
+            let mut inner_step = 0;
+            for step in 0..outer_half {
+                let track = match plane {
+                    Plane::Center => {
+                        let mut track = vec![[0; 3]; outer_half * 2];
+                        let pattern = door_pattern(fans, pn);
+                        let row = pass * outer_half + step;
+                        let track_len = track.len();
+                        for (position, target) in track.iter_mut().enumerate() {
+                            let bit = row * track_len + position;
+                            if pattern[bit / 8] & (1 << (bit % 8)) != 0 {
+                                *target = color;
+                            }
+                        }
+                        track
+                    }
+                    Plane::Outer => symmetric_door_track(outer_half, step, pass, color),
+                    Plane::Inner => {
+                        if step % 4 == 2 {
+                            inner_step += 1;
+                        }
+                        let track = symmetric_door_track(inner_half, inner_step, pass, color);
+                        inner_step += 1;
+                        track
+                    }
+                };
+                frames.push(place(&track, plane, fans, pn, plane != Plane::Center));
+            }
+        }
+    }
+    frames
+}
+
+fn door_pattern(fans: usize, pn: u8) -> &'static [u8] {
+    use super::effect_patterns::{DOOR_3, DOOR_4, DOOR_5, DOOR_6, DOOR_7, DOOR_8, DOOR_9};
+    match (fans, pn) {
+        (1, _) => DOOR_3,
+        (2, 0) => DOOR_4,
+        (2, _) => DOOR_5,
+        (3, 0) => DOOR_6,
+        (3, _) => DOOR_7,
+        (4, 0) => DOOR_8,
+        (4, _) => DOOR_9,
+        _ => unreachable!(),
+    }
+}
+
+fn symmetric_door_track(half: usize, step: usize, pass: usize, color: Color) -> Vec<Color> {
+    let mut track = vec![[0; 3]; half * 2];
+    for position in 0..half {
+        let lit = if pass == 0 {
+            position < step
+        } else {
+            position <= half.saturating_sub(step + 1)
+        };
+        if lit {
+            track[position] = color;
+            track[half * 2 - position - 1] = color;
+        }
+    }
+    track
 }

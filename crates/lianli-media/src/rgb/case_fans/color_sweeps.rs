@@ -1,13 +1,20 @@
-use super::engine::{frame, scale, Color, Frame};
+use super::{
+    palette::{scale, Color, Frame},
+    Layout,
+};
 use lianli_shared::rgb::RgbScope;
 
-pub(super) fn warning(palettes: &[[Color; 4]; 4], brightness: u8) -> Vec<Frame> {
+pub(crate) fn warning(layout: Layout, palettes: &[[Color; 4]; 4], brightness: u8) -> Vec<Frame> {
     let mut frames = Vec::with_capacity(64);
     for colors in (0..4).map(|index| [palettes[0][index], palettes[1][index]]) {
         for (side, &color) in colors.iter().enumerate() {
             for _ in 0..8 {
-                let mut output = frame();
-                let active = if side == 0 { 0..80 } else { 80..96 };
+                let mut output = layout.frame();
+                let active = if side == 0 {
+                    0..layout.front_leds
+                } else {
+                    layout.front_leds..layout.led_count()
+                };
                 for led in active {
                     output[led] = scale(color, brightness);
                 }
@@ -18,10 +25,15 @@ pub(super) fn warning(palettes: &[[Color; 4]; 4], brightness: u8) -> Vec<Frame> 
     frames
 }
 
-pub(super) fn mixing(scope: RgbScope, palettes: &[[Color; 4]; 4], brightness: u8) -> Vec<Frame> {
+pub(crate) fn mixing(
+    layout: Layout,
+    scope: RgbScope,
+    palettes: &[[Color; 4]; 4],
+    brightness: u8,
+) -> Vec<Frame> {
     let side = usize::from(scope == RgbScope::Rear);
-    let half = if side == 0 { 40 } else { 8 };
-    let start = if side == 0 { 0 } else { 80 };
+    let half = if side == 0 { layout.front_leds / 2 } else { 8 };
+    let start = if side == 0 { 0 } else { layout.front_leds };
     let head = if side == 0 { 16 } else { 2 };
     let colors = palettes[side];
     let mut mixed =
@@ -33,7 +45,7 @@ pub(super) fn mixing(scope: RgbScope, palettes: &[[Color; 4]; 4], brightness: u8
     for phase in 0..3 {
         let mut step = 0;
         while step < half + head - 1 {
-            let mut output = frame();
+            let mut output = layout.frame();
             for position in 0..half {
                 let completed =
                     (phase == 1 && position < step) || (phase == 2 && position + head > step);
@@ -72,17 +84,22 @@ pub(super) fn mixing(scope: RgbScope, palettes: &[[Color; 4]; 4], brightness: u8
     frames
 }
 
-pub(super) fn tide(scope: RgbScope, palettes: &[[Color; 4]; 4], brightness: u8) -> Vec<Frame> {
+pub(crate) fn tide(
+    layout: Layout,
+    scope: RgbScope,
+    palettes: &[[Color; 4]; 4],
+    brightness: u8,
+) -> Vec<Frame> {
     let side = usize::from(scope == RgbScope::Rear);
-    let half = if side == 0 { 40 } else { 8 };
-    let start = if side == 0 { 0 } else { 80 };
+    let half = if side == 0 { layout.front_leds / 2 } else { 8 };
+    let start = if side == 0 { 0 } else { layout.front_leds };
     let head = if side == 0 { 16 } else { 2 };
     let colors = palettes[side];
     let mut frames = Vec::with_capacity(4 * (half + head - 1));
     for (color_index, &color) in colors.iter().enumerate() {
         let previous = if color_index == 0 { 3 } else { color_index - 1 };
         for step in 0..half + head - 1 {
-            let mut output = frame();
+            let mut output = layout.frame();
             for position in 0..half {
                 let pixel = scale(
                     if position <= step {
@@ -101,20 +118,21 @@ pub(super) fn tide(scope: RgbScope, palettes: &[[Color; 4]; 4], brightness: u8) 
     frames
 }
 
-pub(super) fn double_meteor(
+pub(crate) fn double_meteor(
+    layout: Layout,
     scope: RgbScope,
     palettes: &[[Color; 4]; 4],
     brightness: u8,
 ) -> Vec<Frame> {
     let side = usize::from(scope == RgbScope::Rear);
-    let half = if side == 0 { 40 } else { 8 };
-    let start = if side == 0 { 0 } else { 80 };
+    let half = if side == 0 { layout.front_leds / 2 } else { 8 };
+    let start = if side == 0 { 0 } else { layout.front_leds };
     let head = if side == 0 { 8 } else { 1 };
     let colors = palettes[side];
     let mut frames = Vec::with_capacity(4 * half);
     for (color_index, &color) in colors.iter().enumerate() {
         for step in 0..half {
-            let mut output = frame();
+            let mut output = layout.frame();
             for position in 0..half {
                 let pixel = if position <= step && position + head > step {
                     scale(color, brightness)

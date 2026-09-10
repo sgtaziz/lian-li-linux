@@ -1,17 +1,18 @@
 mod basic;
 pub mod capabilities;
+mod chase_patterns;
+mod collisions;
 mod engine;
+mod fills;
+mod flow_patterns;
 mod integration;
-mod modes_10_13;
-mod modes_14_17;
-mod modes_18_21;
-mod modes_22_25;
 mod movement;
 #[cfg(test)]
 mod native_all_tests;
 #[cfg(test)]
 mod native_tests;
 mod patterns;
+mod twinkle;
 
 use super::{Animation, SecondaryTiming};
 use anyhow::{bail, ensure, Result};
@@ -165,22 +166,22 @@ fn render_region(effect: &RgbEffect, fans: usize, side: Side) -> Result<Regional
         (RgbMode::ColorCycle, _) => movement::color_cycle(effect, fans, side),
         (RgbMode::Staggered, _) => patterns::staggered(effect, fans, side),
         (RgbMode::Tide, _) => patterns::tide(effect, fans, side),
-        (RgbMode::Mixing, _) => modes_10_13::mixing(effect, fans, side),
-        (RgbMode::Render, _) => modes_10_13::render_effect(effect, fans, side),
-        (RgbMode::PingPong, _) => modes_10_13::ping_pong(effect, fans, side),
-        (RgbMode::Stack, _) => modes_10_13::stack(effect, fans, side),
-        (RgbMode::Ripple, _) => modes_14_17::ripple(effect, fans, side),
-        (RgbMode::Collide, _) => modes_14_17::collide(effect, fans, side),
-        (RgbMode::Reflect, _) => modes_14_17::reflect(effect, fans, side),
-        (RgbMode::ElectricCurrent, _) => modes_14_17::electric_current(effect, fans, side),
-        (RgbMode::Endless, _) => modes_18_21::endless(effect, fans, side),
-        (RgbMode::River, _) => modes_18_21::river(effect, fans, side),
-        (RgbMode::Duel, _) => modes_18_21::duel(effect, fans, side),
-        (RgbMode::Hourglass, _) => modes_18_21::hourglass(effect, fans, side),
-        (RgbMode::Pioneer, _) => modes_22_25::pioneer(effect, fans, side),
-        (RgbMode::ShuttleRun, _) => modes_22_25::shuttle_run(effect, fans, side),
-        (RgbMode::GradientRibbon, _) => modes_22_25::gradient_ribbon(effect, fans, side),
-        (RgbMode::Twinkle, _) => modes_22_25::twinkle(effect, fans, side),
+        (RgbMode::Mixing, _) => fills::mixing(effect, fans, side),
+        (RgbMode::Render, _) => fills::render_effect(effect, fans, side),
+        (RgbMode::PingPong, _) => fills::ping_pong(effect, fans, side),
+        (RgbMode::Stack, _) => fills::stack(effect, fans, side),
+        (RgbMode::Ripple, _) => collisions::ripple(effect, fans, side),
+        (RgbMode::Collide, _) => collisions::collide(effect, fans, side),
+        (RgbMode::Reflect, _) => collisions::reflect(effect, fans, side),
+        (RgbMode::ElectricCurrent, _) => collisions::electric_current(effect, fans, side),
+        (RgbMode::Endless, _) => flow_patterns::endless(effect, fans, side),
+        (RgbMode::River, _) => flow_patterns::river(effect, fans, side),
+        (RgbMode::Duel, _) => flow_patterns::duel(effect, fans, side),
+        (RgbMode::Hourglass, _) => flow_patterns::hourglass(effect, fans, side),
+        (RgbMode::Pioneer, _) => chase_patterns::pioneer(effect, fans, side),
+        (RgbMode::ShuttleRun, _) => chase_patterns::shuttle_run(effect, fans, side),
+        (RgbMode::GradientRibbon, _) => chase_patterns::gradient_ribbon(effect, fans, side),
+        (RgbMode::Twinkle, _) => twinkle::render(effect, fans, side),
         _ => unreachable!(),
     };
     Ok(RegionalAnimation {

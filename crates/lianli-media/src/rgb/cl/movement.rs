@@ -2,68 +2,21 @@ use super::engine::{brightness, palette, place, scale, Color, Plane};
 use lianli_shared::rgb::{RgbDirection, RgbEffect};
 
 pub(super) fn runway(effect: &RgbEffect, fans: usize, plane: Plane) -> Vec<Vec<Color>> {
-    let colors = palette(effect, plane);
-    let bright = brightness(effect);
-    let len = fans * 8;
-    let mut frames = Vec::with_capacity(2 * (len + 2 * fans - 1));
-    for pass in 0..2 {
-        for step in 0..len + 2 * fans - 1 {
-            let track = (0..len)
-                .map(|position| {
-                    let color = if position <= step && position + 2 * fans > step {
-                        colors[0]
-                    } else {
-                        colors[1]
-                    };
-                    scale(color, bright)
-                })
-                .collect::<Vec<_>>();
-            let track = if pass == 1 {
-                track.into_iter().rev().collect::<Vec<_>>()
-            } else {
-                track
-            };
-            frames.push(place(&track, plane, fans));
-        }
-    }
-    frames
+    let colors = palette(effect, plane).map(|color| scale(color, brightness(effect)));
+    crate::rgb::track_effects::runway(fans * 8, 2 * fans, [colors[0], colors[1]], |track| {
+        place(track, plane, fans)
+    })
 }
 
 pub(super) fn meteor(effect: &RgbEffect, fans: usize, plane: Plane) -> Vec<Vec<Color>> {
-    const TAILS: [[u8; 8]; 4] = [
-        [32, 255, 0, 0, 0, 0, 0, 0],
-        [16, 64, 128, 255, 0, 0, 0, 0],
-        [8, 16, 32, 64, 128, 255, 0, 0],
-        [6, 10, 16, 32, 64, 96, 168, 255],
-    ];
-    let colors = palette(effect, plane);
-    let bright = brightness(effect);
-    let len = fans * 8;
-    let reverse = matches!(effect.direction, RgbDirection::CounterClockwise);
-    let mut frames = Vec::with_capacity(4 * (len + 2 * fans - 1));
-    for color in colors {
-        for step in 0..len + 2 * fans - 1 {
-            let mut intensity = 0;
-            let mut track = vec![[0; 3]; len];
-            for position in 0..len {
-                let value = if position <= step && position + 2 * fans > step {
-                    let value = TAILS[fans - 1][intensity];
-                    intensity += 1;
-                    value
-                } else {
-                    0
-                };
-                let target = if reverse {
-                    len - position - 1
-                } else {
-                    position
-                };
-                track[target] = scale(scale(color, u16::from(value)), bright);
-            }
-            frames.push(place(&track, plane, fans));
-        }
-    }
-    frames
+    crate::rgb::track_effects::meteor(
+        fans * 8,
+        &palette(effect, plane),
+        crate::rgb::track_effects::METEOR_TAILS[fans - 1],
+        brightness(effect),
+        matches!(effect.direction, RgbDirection::CounterClockwise),
+        |track| place(track, plane, fans),
+    )
 }
 
 pub(super) fn tai_chi(effect: &RgbEffect, fans: usize, plane: Plane) -> Vec<Vec<Color>> {

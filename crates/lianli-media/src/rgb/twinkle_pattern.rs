@@ -1,16 +1,7 @@
-use super::engine::{frame, scale, Color, Frame, Geometry};
-
-const COLOR_INDEX: [usize; 174] = [
-    1, 0, 5, 3, 4, 2, 1, 0, 2, 5, 0, 3, 1, 5, 4, 2, 0, 2, 1, 5, 3, 4, 3, 0, 1, 4, 2, 0, 1, 5, 1, 4,
-    3, 4, 2, 1, 0, 4, 5, 2, 0, 2, 0, 1, 3, 4, 2, 5, 1, 0, 4, 2, 5, 0, 5, 2, 1, 3, 4, 3, 5, 1, 0, 5,
-    4, 2, 1, 5, 3, 0, 1, 5, 0, 3, 2, 5, 4, 1, 2, 3, 0, 4, 2, 1, 3, 5, 4, 0, 1, 3, 2, 4, 2, 1, 0, 1,
-    3, 5, 1, 4, 2, 3, 0, 5, 3, 0, 4, 3, 4, 5, 0, 0, 4, 1, 5, 4, 0, 4, 2, 3, 4, 2, 1, 5, 0, 5, 4, 0,
-    1, 3, 4, 2, 3, 1, 4, 0, 5, 4, 3, 2, 1, 5, 0, 4, 5, 0, 1, 5, 1, 2, 3, 2, 4, 2, 5, 0, 1, 3, 5, 2,
-    0, 1, 3, 5, 1, 3, 2, 0, 1, 3, 5, 2, 4, 0,
-];
-const PULSE: [u8; 19] = [
+const PULSE: [u16; 19] = [
     5, 30, 55, 80, 105, 130, 160, 190, 220, 255, 220, 190, 160, 130, 105, 80, 55, 30, 5,
 ];
+
 const PULSE_STARTS: &[(usize, i16)] = &[
     (0, 54),
     (0, 129),
@@ -192,10 +183,10 @@ const PULSE_STARTS: &[(usize, i16)] = &[
     (171, 0),
     (171, 100),
     (172, 181),
-    (172, 199),
     (173, 18),
     (173, 121),
 ];
+
 const SINGLE_SPARKS: &[(usize, usize)] = &[
     (9, 64),
     (48, 0),
@@ -205,24 +196,60 @@ const SINGLE_SPARKS: &[(usize, usize)] = &[
     (164, 93),
 ];
 
-pub(super) fn twinkle(geometry: Geometry, colors: &[Color; 6], brightness: u8) -> Vec<Frame> {
-    let mut frames = (0..200).map(|_| frame(geometry)).collect::<Vec<_>>();
-    for &(led, start) in PULSE_STARTS {
-        if led >= geometry.led_count {
-            continue;
-        }
-        for (offset, intensity) in PULSE.into_iter().enumerate() {
-            let frame_index = start + offset as i16;
-            if (0..200).contains(&frame_index) {
-                frames[frame_index as usize][led] =
-                    scale(scale(colors[COLOR_INDEX[led]], intensity), brightness);
+pub(super) const FAN_COLORS: [usize; 174] = [
+    1, 0, 2, 3, 1, 2, 1, 0, 2, 3, 0, 3, 1, 0, 1, 2, 0, 2, 1, 0, 3, 1, 3, 0, 1, 0, 2, 0, 1, 3, 1, 2,
+    3, 1, 2, 1, 0, 2, 1, 2, 0, 2, 0, 1, 3, 0, 2, 3, 1, 0, 1, 2, 3, 0, 1, 2, 1, 3, 0, 3, 2, 1, 0, 3,
+    0, 2, 1, 0, 3, 0, 1, 2, 0, 3, 2, 1, 0, 1, 2, 3, 0, 1, 2, 1, 3, 2, 1, 0, 1, 3, 2, 0, 2, 1, 0, 1,
+    3, 2, 1, 0, 2, 3, 0, 1, 3, 0, 2, 3, 1, 2, 0, 3, 1, 2, 3, 2, 0, 1, 2, 3, 1, 2, 1, 2, 0, 1, 2, 0,
+    1, 3, 0, 2, 3, 1, 2, 0, 1, 2, 3, 2, 1, 2, 0, 1, 3, 0, 1, 2, 1, 2, 3, 2, 0, 2, 3, 0, 1, 3, 0, 2,
+    0, 1, 3, 0, 1, 3, 2, 0, 1, 3, 0, 2, 1, 0,
+];
+
+pub(super) const STRIMER_COLORS: [usize; 174] = [
+    1, 0, 5, 3, 4, 2, 1, 0, 2, 5, 0, 3, 1, 5, 4, 2, 0, 2, 1, 5, 3, 4, 3, 0, 1, 4, 2, 0, 1, 5, 1, 4,
+    3, 4, 2, 1, 0, 4, 5, 2, 0, 2, 0, 1, 3, 4, 2, 5, 1, 0, 4, 2, 5, 0, 5, 2, 1, 3, 4, 3, 5, 1, 0, 5,
+    4, 2, 1, 5, 3, 0, 1, 5, 0, 3, 2, 5, 4, 1, 2, 3, 0, 4, 2, 1, 3, 5, 4, 0, 1, 3, 2, 4, 2, 1, 0, 1,
+    3, 5, 1, 4, 2, 3, 0, 5, 3, 0, 4, 3, 4, 5, 0, 0, 4, 1, 5, 4, 0, 4, 2, 3, 4, 2, 1, 5, 0, 5, 4, 0,
+    1, 3, 4, 2, 3, 1, 4, 0, 5, 4, 3, 2, 1, 5, 0, 4, 5, 0, 1, 5, 1, 2, 3, 2, 4, 2, 5, 0, 1, 3, 5, 2,
+    0, 1, 3, 5, 1, 3, 2, 0, 1, 3, 5, 2, 4, 0,
+];
+
+pub(super) fn render(
+    led_count: usize,
+    colors: &[[u8; 3]],
+    color_indices: &[usize],
+    brightness: u16,
+    extra_pulses: &[(usize, i16)],
+    targets: impl Fn(usize) -> [Option<usize>; 2],
+) -> Vec<Vec<[u8; 3]>> {
+    let mut frames = vec![vec![[0; 3]; led_count]; 200];
+    for &(led, start) in PULSE_STARTS.iter().chain(extra_pulses) {
+        for target in targets(led)
+            .into_iter()
+            .flatten()
+            .filter(|&target| target < led_count)
+        {
+            for (offset, intensity) in PULSE.into_iter().enumerate() {
+                let index = start + offset as i16;
+                if (0..200).contains(&index) {
+                    frames[index as usize][target] =
+                        scale(scale(colors[color_indices[led]], intensity), brightness);
+                }
             }
         }
     }
-    for &(led, frame_index) in SINGLE_SPARKS {
-        if led < geometry.led_count {
-            frames[frame_index][led] = scale(scale(colors[COLOR_INDEX[led]], 5), brightness);
+    for &(led, index) in SINGLE_SPARKS {
+        for target in targets(led)
+            .into_iter()
+            .flatten()
+            .filter(|&target| target < led_count)
+        {
+            frames[index][target] = scale(scale(colors[color_indices[led]], 5), brightness);
         }
     }
     frames
+}
+
+fn scale(color: [u8; 3], level: u16) -> [u8; 3] {
+    color.map(|channel| ((u16::from(channel) * level) >> 8) as u8)
 }

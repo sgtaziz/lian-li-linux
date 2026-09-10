@@ -1,14 +1,13 @@
-mod classic;
-mod composition;
+pub(crate) use super::case_fans::parameters;
+use super::case_fans::{color_sweeps, composition, paths, twinkle};
+use engine::LAYOUT;
+mod rainbow;
+use super::case_fans::classic;
+mod color_chases;
 mod engine;
 #[cfg(test)]
 mod native_tests;
-pub(crate) mod parameters;
-mod paths;
-mod paths_13_16;
-mod paths_17_22;
-mod paths_7_12;
-mod twinkle;
+mod pulse_patterns;
 
 use crate::rgb::Animation;
 use anyhow::{bail, ensure, Result};
@@ -81,7 +80,7 @@ pub fn render(regions: &[RgbRegionConfig], led_count: usize) -> Result<Animation
         }
     }
     match (front, rear) {
-        (Some(front), Some(rear)) => Ok(composition::combine(front, rear)),
+        (Some(front), Some(rear)) => Ok(composition::combine(LAYOUT, front, rear)),
         (Some(region), None) | (None, Some(region)) => Ok(Animation {
             frames: region.frames,
             interval_hundredths: region.interval_hundredths,
@@ -117,49 +116,63 @@ fn render_region(effect: &RgbEffect, scope: RgbScope) -> Result<RegionAnimation>
         (vec![engine::frame()], 11)
     } else {
         match effect.mode {
-            RgbMode::Rainbow => (classic::rainbow(scope, brightness, reverse), 11),
-            RgbMode::RainbowMorph => (classic::morph(scope, brightness), 11),
-            RgbMode::Static => (classic::solid(scope, colors[0], brightness), 11),
-            RgbMode::Breathing => (classic::breathing(scope, &colors, brightness), 11),
-            RgbMode::Runway => (paths::runway(scope, &colors, brightness), 9),
-            RgbMode::Meteor => (paths::meteor(scope, &colors, brightness, reverse), 9),
+            RgbMode::Rainbow => (rainbow::render(scope, brightness, reverse), 11),
+            RgbMode::RainbowMorph => (classic::morph(LAYOUT, scope, brightness), 11),
+            RgbMode::Static => (classic::solid(LAYOUT, scope, colors[0], brightness), 11),
+            RgbMode::Breathing => (classic::breathing(LAYOUT, scope, &colors, brightness), 11),
+            RgbMode::Runway => (paths::runway(LAYOUT, scope, &colors, brightness), 9),
+            RgbMode::Meteor => (
+                paths::meteor(LAYOUT, scope, &colors, brightness, reverse),
+                9,
+            ),
             RgbMode::ColorCycle => (
-                paths_7_12::color_cycle(scope, &colors, brightness, reverse),
+                color_chases::color_cycle(scope, &colors, brightness, reverse),
                 15,
             ),
             RgbMode::CoverCycle => (
-                paths_7_12::cover_cycle(scope, &colors, brightness, reverse),
+                color_chases::cover_cycle(scope, &colors, brightness, reverse),
                 11,
             ),
-            RgbMode::Wave => (paths_7_12::wave(scope, colors[0], brightness, reverse), 16),
+            RgbMode::Wave => (
+                color_chases::wave(scope, colors[0], brightness, reverse),
+                16,
+            ),
             RgbMode::MeteorShower => (
-                paths_7_12::meteor_shower(scope, &colors, brightness, reverse),
+                color_chases::meteor_shower(scope, &colors, brightness, reverse),
                 11,
             ),
-            RgbMode::Twinkle => (twinkle::render(&colors, brightness), 11),
+            RgbMode::Twinkle => (twinkle::render(LAYOUT, &colors, brightness), 11),
             RgbMode::TaiChi => (
-                paths_7_12::tai_chi(scope, &palettes, brightness, reverse),
+                color_chases::tai_chi(scope, &palettes, brightness, reverse),
                 11,
             ),
-            RgbMode::Warning => (paths_13_16::warning(&palettes, brightness), 16),
-            RgbMode::Mixing => (paths_13_16::mixing(scope, &palettes, brightness), 14),
-            RgbMode::Tide => (paths_13_16::tide(scope, &palettes, brightness), 14),
-            RgbMode::DoubleMeteor => (paths_13_16::double_meteor(scope, &palettes, brightness), 14),
+            RgbMode::Warning => (color_sweeps::warning(LAYOUT, &palettes, brightness), 16),
+            RgbMode::Mixing => (
+                color_sweeps::mixing(LAYOUT, scope, &palettes, brightness),
+                14,
+            ),
+            RgbMode::Tide => (color_sweeps::tide(LAYOUT, scope, &palettes, brightness), 14),
+            RgbMode::DoubleMeteor => (
+                color_sweeps::double_meteor(LAYOUT, scope, &palettes, brightness),
+                14,
+            ),
             RgbMode::MeteorContest => (
-                paths_17_22::meteor_contest(scope, &palettes, brightness, reverse),
+                pulse_patterns::meteor_contest(scope, &palettes, brightness, reverse),
                 11,
             ),
             RgbMode::ReturnArc => (
-                paths_17_22::return_arc(scope, &palettes, brightness, reverse),
+                pulse_patterns::return_arc(scope, &palettes, brightness, reverse),
                 11,
             ),
-            RgbMode::HeartBeat => (paths_17_22::heartbeat(scope, &palettes, brightness), 11),
-            RgbMode::HeartBeatRunway => (paths_17_22::heartbeat_runway(&palettes, brightness), 11),
+            RgbMode::HeartBeat => (pulse_patterns::heartbeat(scope, &palettes, brightness), 11),
+            RgbMode::HeartBeatRunway => {
+                (pulse_patterns::heartbeat_runway(&palettes, brightness), 11)
+            }
             RgbMode::Disco => (
-                paths_17_22::disco(scope, &palettes, brightness, reverse),
+                pulse_patterns::disco(scope, &palettes, brightness, reverse),
                 14,
             ),
-            RgbMode::CandyBox => (paths_17_22::candy_box(brightness), 11),
+            RgbMode::CandyBox => (pulse_patterns::candy_box(brightness), 11),
             _ => bail!("unsupported LANCOOL V150 RGB mode: {:?}", effect.mode),
         }
     };

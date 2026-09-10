@@ -1,4 +1,4 @@
-use super::engine::{brightness, center_order, mixed_color, palette, place, scale, Color, Plane};
+use super::engine::{brightness, mixed_color, palette, place, scale, Color, Plane};
 use lianli_shared::rgb::{RgbDirection, RgbEffect};
 
 pub(super) fn double_meteor(
@@ -137,54 +137,6 @@ pub(super) fn meteor_mix(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) 
                 pn,
                 plane != Plane::Center,
             ));
-        }
-    }
-    frames
-}
-
-pub(super) fn return_arc(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec<Vec<Color>> {
-    arc(effect, fans, plane, pn, false)
-}
-
-pub(super) fn double_arc(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec<Vec<Color>> {
-    arc(effect, fans, plane, pn, true)
-}
-
-fn arc(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8, double: bool) -> Vec<Vec<Color>> {
-    let colors = palette(effect, plane).map(|color| scale(color, brightness(effect)));
-    let width = plane.track_len();
-    let reverse = matches!(effect.direction, RgbDirection::CounterClockwise);
-    let mut frames = Vec::with_capacity(8 * width);
-    for color in colors {
-        for pass in 0..2 {
-            for step in 0..width {
-                let mut segment = vec![[0; 3]; width];
-                for position in 0..width {
-                    let lit =
-                        (pass == 0 && position < step) || (pass == 1 && position < width - step);
-                    let logical = if reverse {
-                        width - position - 1
-                    } else {
-                        position
-                    };
-                    let target = if double && plane == Plane::Center {
-                        center_order(logical, pn)
-                    } else {
-                        logical
-                    };
-                    segment[target] = if lit { color } else { [0; 3] };
-                }
-                let track = (0..fans)
-                    .flat_map(|_| segment.iter().copied())
-                    .collect::<Vec<_>>();
-                frames.push(place(
-                    &track,
-                    plane,
-                    fans,
-                    pn,
-                    !double || plane != Plane::Center,
-                ));
-            }
         }
     }
     frames

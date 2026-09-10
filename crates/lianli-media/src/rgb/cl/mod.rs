@@ -1,15 +1,17 @@
+mod arcs;
 mod basic;
+mod color_cycles;
+mod color_sweeps;
+mod colored_meteors;
 pub(crate) mod engine;
-mod modes_11_14;
-mod modes_15_18;
-mod modes_19_23;
-mod modes_24_26;
-mod modes_27_30;
-mod modes_31;
-mod modes_32_34;
+mod lottery;
+mod meteor_trails;
 mod movement;
 pub(crate) mod parameters;
+mod pulses;
+mod reflections;
 mod twinkle;
+mod wing;
 
 use super::Animation;
 use anyhow::{bail, ensure, Result};
@@ -109,30 +111,30 @@ pub(crate) fn render_plane(
         RgbMode::TaiChi => (movement::tai_chi(effect, fans, plane), 20),
         RgbMode::ColorCycle => (movement::color_cycle(effect, fans, plane), 20),
         RgbMode::MopUp => (movement::mop_up(effect, fans, plane), 20),
-        RgbMode::MeteorRainbow => (modes_11_14::meteor_rainbow(effect, fans, plane), 20),
-        RgbMode::ColorfulMeteor => (modes_11_14::colorful_meteor(effect, fans, plane), 20),
-        RgbMode::Lottery => (modes_11_14::lottery(effect, fans, plane), 20),
-        RgbMode::Warning => (modes_11_14::warning(effect, fans, plane), 20),
-        RgbMode::Voice => (modes_15_18::voice(effect, fans, plane), 20),
-        RgbMode::Mixing => (modes_15_18::mixing(effect, fans, plane), 20),
-        RgbMode::Tide => (modes_15_18::tide(effect, fans, plane), 20),
-        RgbMode::Scan => (modes_15_18::scan(effect, fans, plane), 20),
-        RgbMode::DoubleMeteor => (modes_19_23::double_meteor(effect, fans, plane), 20),
-        RgbMode::MeteorContest => (modes_19_23::meteor_contest(effect, fans, plane), 25),
-        RgbMode::MeteorMix => (modes_19_23::meteor_mix(effect, fans, plane), 25),
-        RgbMode::ReturnArc => (modes_19_23::return_arc(effect, fans, plane), 20),
-        RgbMode::DoubleArc => (modes_19_23::double_arc(effect, fans, plane), 35),
-        RgbMode::Door => (modes_24_26::door(effect, fans, plane), 25),
-        RgbMode::HeartBeat => (modes_24_26::heart_beat(effect, fans, plane), 20),
-        RgbMode::HeartBeatRunway => (modes_24_26::heart_beat_runway(effect, fans, plane), 10),
-        RgbMode::Disco => (modes_27_30::disco(effect, fans, plane), 20),
-        RgbMode::ElectricCurrent => (modes_27_30::electric_current(effect, fans, plane), 20),
-        RgbMode::Reflect => (modes_27_30::reflect(effect, fans, plane), 20),
-        RgbMode::GradientRibbon => (modes_27_30::gradient_ribbon(effect, fans, plane), 20),
-        RgbMode::Wing => (modes_31::wing(effect, fans, plane), 20),
-        RgbMode::Drumming => (modes_32_34::drumming(effect, fans, plane), 20),
-        RgbMode::Boomerang => (modes_32_34::boomerang(effect, fans, plane), 20),
-        RgbMode::CandyBox => (modes_32_34::candy_box(effect, fans, plane), 20),
+        RgbMode::MeteorRainbow => (colored_meteors::meteor_rainbow(effect, fans, plane), 20),
+        RgbMode::ColorfulMeteor => (colored_meteors::colorful_meteor(effect, fans, plane), 20),
+        RgbMode::Lottery => (lottery::lottery(effect, fans, plane), 20),
+        RgbMode::Warning => (pulses::warning(effect, fans, plane), 20),
+        RgbMode::Voice => (pulses::voice(effect, fans, plane), 20),
+        RgbMode::Mixing => (color_sweeps::mixing(effect, fans, plane), 20),
+        RgbMode::Tide => (color_sweeps::tide(effect, fans, plane), 20),
+        RgbMode::Scan => (color_sweeps::scan(effect, fans, plane), 20),
+        RgbMode::DoubleMeteor => (meteor_trails::double_meteor(effect, fans, plane), 20),
+        RgbMode::MeteorContest => (meteor_trails::meteor_contest(effect, fans, plane), 25),
+        RgbMode::MeteorMix => (meteor_trails::meteor_mix(effect, fans, plane), 25),
+        RgbMode::ReturnArc => (arcs::return_arc(effect, fans, plane), 20),
+        RgbMode::DoubleArc => (arcs::double_arc(effect, fans, plane), 35),
+        RgbMode::Door => (color_sweeps::door(effect, fans, plane), 25),
+        RgbMode::HeartBeat => (pulses::heart_beat(effect, fans, plane), 20),
+        RgbMode::HeartBeatRunway => (pulses::heart_beat_runway(effect, fans, plane), 10),
+        RgbMode::Disco => (pulses::disco(effect, fans, plane), 20),
+        RgbMode::ElectricCurrent => (reflections::electric_current(effect, fans, plane), 20),
+        RgbMode::Reflect => (reflections::reflect(effect, fans, plane), 20),
+        RgbMode::GradientRibbon => (color_cycles::gradient_ribbon(effect, fans, plane), 20),
+        RgbMode::Wing => (wing::wing(effect, fans, plane), 20),
+        RgbMode::Drumming => (pulses::drumming(effect, fans, plane), 20),
+        RgbMode::Boomerang => (arcs::boomerang(effect, fans, plane), 20),
+        RgbMode::CandyBox => (color_cycles::candy_box(effect, fans, plane), 20),
         _ => bail!("unsupported CL RGB mode: {:?}", effect.mode),
     };
     Ok(PlaneAnimation {

@@ -1,4 +1,7 @@
-use super::engine::{frame, scale, Color, Frame};
+use super::{
+    palette::{scale, Color, Frame},
+    Layout,
+};
 
 const COLOR_INDEX: [usize; 96] = [
     1, 0, 2, 3, 1, 2, 1, 0, 2, 3, 0, 3, 1, 0, 1, 2, 0, 2, 1, 0, 3, 1, 3, 0, 1, 0, 2, 0, 1, 3, 1, 2,
@@ -110,10 +113,10 @@ const STARTS: &[(usize, i16)] = &[
     (95, 0),
 ];
 
-pub(super) fn render(colors: &[Color; 4], brightness: u8) -> Vec<Frame> {
-    let mut frames = (0..200).map(|_| frame()).collect::<Vec<_>>();
+pub(crate) fn render(layout: Layout, colors: &[Color; 4], brightness: u8) -> Vec<Frame> {
+    let mut frames = (0..200).map(|_| layout.frame()).collect::<Vec<_>>();
     for &(led, start) in STARTS {
-        if led >= 88 {
+        if led >= layout.led_count() {
             continue;
         }
         for (offset, intensity) in PULSE.into_iter().enumerate() {

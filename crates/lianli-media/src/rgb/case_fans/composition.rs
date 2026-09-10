@@ -1,14 +1,18 @@
-use super::engine::Frame;
+use super::{palette::Frame, Layout};
 use crate::rgb::Animation;
 use lianli_shared::rgb::RgbMode;
 
-pub(super) struct RegionAnimation {
-    pub(super) frames: Vec<Frame>,
-    pub(super) interval_hundredths: u32,
-    pub(super) mode: RgbMode,
+pub(crate) struct RegionAnimation {
+    pub(crate) frames: Vec<Frame>,
+    pub(crate) interval_hundredths: u32,
+    pub(crate) mode: RgbMode,
 }
 
-pub(super) fn combine(mut front: RegionAnimation, mut rear: RegionAnimation) -> Animation {
+pub(crate) fn combine(
+    layout: Layout,
+    mut front: RegionAnimation,
+    mut rear: RegionAnimation,
+) -> Animation {
     if front.mode == RgbMode::Meteor && rear.mode == RgbMode::Meteor {
         rear.frames = stretch_rear_meteor(&rear.frames);
     }
@@ -28,8 +32,9 @@ pub(super) fn combine(mut front: RegionAnimation, mut rear: RegionAnimation) -> 
         } else {
             rear.frames[index].clone()
         };
-        output[..72].copy_from_slice(&front.frames[front_index][..72]);
-        output[72..].copy_from_slice(&rear.frames[rear_index][72..]);
+        output[..layout.front_leds]
+            .copy_from_slice(&front.frames[front_index][..layout.front_leds]);
+        output[layout.front_leds..].copy_from_slice(&rear.frames[rear_index][layout.front_leds..]);
         frames.push(output);
     }
     Animation {

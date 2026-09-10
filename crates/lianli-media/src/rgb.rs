@@ -1,6 +1,7 @@
 pub mod animation;
 #[cfg(test)]
 mod capability_tests;
+mod case_fans;
 pub mod cl;
 pub mod family;
 pub mod h2;
@@ -18,6 +19,8 @@ pub mod strimer;
 pub mod sync_effects;
 pub mod sync_layout;
 pub mod tl;
+mod track_effects;
+mod twinkle_pattern;
 pub mod universal;
 pub use animation::{Animation, SecondaryTiming};
 

@@ -208,6 +208,16 @@ pub(super) fn select_side(frame: &[Color], fans: usize, bottom: bool) -> Vec<Col
     selected
 }
 
+pub(super) fn place_side_track(track: &[Color], fans: usize, bottom: bool) -> Vec<Color> {
+    let mut frame = vec![[0; 3]; fans * LEDS_PER_FAN];
+    let side_offset = usize::from(bottom) * 13;
+    for (fan, colors) in track.chunks_exact(13).enumerate() {
+        let start = fan * LEDS_PER_FAN + side_offset;
+        frame[start..start + 13].copy_from_slice(colors);
+    }
+    frame
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

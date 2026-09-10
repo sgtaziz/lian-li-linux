@@ -1,41 +1,52 @@
-use super::engine::{brightness, center_order, palette, place, place_dual, scale, Color, Plane};
+use super::engine::{brightness, palette, place, place_dual, scale, Color, Plane};
 use lianli_shared::rgb::{RgbDirection, RgbEffect};
 
-pub(super) fn reflect(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec<Vec<Color>> {
-    const TAIL: [u16; 8] = [255, 192, 168, 128, 96, 64, 32, 16];
-    let colors = palette(effect, plane);
-    let bright = brightness(effect);
+pub(super) fn color_cycle(
+    effect: &RgbEffect,
+    fans: usize,
+    plane: Plane,
+    pn: u8,
+) -> Vec<Vec<Color>> {
+    let colors = palette(effect, plane).map(|color| scale(color, brightness(effect)));
+    let reverse = matches!(effect.direction, RgbDirection::CounterClockwise);
     let len = fans * plane.track_len();
-    let half = len / 2;
-    let span = half + 2 * fans - 1;
-    let mut frames = Vec::with_capacity(4 * (span + span.div_ceil(2)));
-    for color in colors {
-        for pass in 0..2 {
-            let increment = if pass == 0 { 1 } else { 2 };
-            for step in (0..span).step_by(increment) {
-                let mut track = vec![[0; 3]; len];
-                if pass == 0 {
-                    for position in 0..half {
-                        if position <= step && position + 2 * fans > step {
-                            let value = scale(scale(color, TAIL[step - position]), bright);
-                            let first = if plane == Plane::Center {
-                                center_order(position, pn)
-                            } else {
-                                position
-                            };
-                            let second_logical = len - position - 1;
-                            let second = if plane == Plane::Center {
-                                center_order(second_logical, pn)
-                            } else {
-                                second_logical
-                            };
-                            track[first] = value;
-                            track[second] = value;
-                        }
-                    }
-                }
-                frames.push(place(&track, plane, fans, pn, plane != Plane::Center));
+    let mut frames = Vec::with_capacity(4 * len);
+    for color in 0..4 {
+        let previous = if color == 0 { 3 } else { color - 1 };
+        for step in 0..len {
+            let mut track = vec![[0; 3]; len];
+            for position in 0..len {
+                let target = if reverse {
+                    len - position - 1
+                } else {
+                    position
+                };
+                track[target] = colors[if position <= step { color } else { previous }];
             }
+            frames.push(place(&track, plane, fans, pn, true));
+        }
+    }
+    frames
+}
+
+pub(super) fn mop_up(effect: &RgbEffect, fans: usize, plane: Plane, pn: u8) -> Vec<Vec<Color>> {
+    let colors = palette(effect, plane).map(|color| scale(color, brightness(effect)));
+    let len = fans * plane.track_len();
+    let mut frames = Vec::with_capacity(4 * (len + 2 * fans));
+    for (color_index, color) in colors.into_iter().enumerate() {
+        for step in 0..len + 2 * fans {
+            let mut track = vec![[0; 3]; len];
+            for position in 0..len {
+                if position <= step && position + 2 * fans > step {
+                    let target = if color_index == 1 || color_index == 3 {
+                        len - position - 1
+                    } else {
+                        position
+                    };
+                    track[target] = color;
+                }
+            }
+            frames.push(place(&track, plane, fans, pn, true));
         }
     }
     frames

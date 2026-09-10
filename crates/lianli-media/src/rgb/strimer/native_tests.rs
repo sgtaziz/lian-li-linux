@@ -1,20 +1,20 @@
 use super::classic;
+use super::color_blending;
+use super::color_fades;
+use super::color_ribbons;
+use super::contest;
+use super::crossing_trails;
 use super::engine::{geometry, Color, Frame};
-use super::mode_13;
-use super::mode_14;
-use super::mode_3;
-use super::mode_34;
-use super::mode_6;
-use super::mode_7;
-use super::mode_8;
-use super::modes_15_17;
-use super::modes_16_21;
-use super::modes_18_19;
-use super::modes_1_2;
-use super::modes_20_22;
-use super::modes_23_27;
-use super::modes_4_5;
-use super::modes_9_10;
+use super::hourglass_current;
+use super::movement;
+use super::parallel;
+use super::pioneer_snooker;
+use super::ripple_voice;
+use super::river;
+use super::shock_wave;
+use super::shuttle_run;
+use super::stack;
+use super::twinkle;
 
 const COLORS: [Color; 6] = [
     [201, 33, 17],
@@ -37,11 +37,11 @@ fn hash_modes_1_2(mode: u8) -> u64 {
             for reverse in [false, true] {
                 let (frames, base_ticks) = if mode == 1 {
                     (
-                        modes_1_2::color_transfer(geometry, &COLORS, brightness, reverse),
+                        color_fades::color_transfer(geometry, &COLORS, brightness, reverse),
                         24u32,
                     )
                 } else {
-                    (modes_1_2::fade_out(geometry, &COLORS, brightness), 11)
+                    (color_fades::fade_out(geometry, &COLORS, brightness), 11)
                 };
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
@@ -68,7 +68,7 @@ fn hash_contest() -> u64 {
         let geometry = geometry(led_count).unwrap();
         for brightness in [64, 255] {
             for reverse in [false, true] {
-                let frames = mode_3::contest(geometry, &COLORS, brightness, reverse);
+                let frames = contest::contest(geometry, &COLORS, brightness, reverse);
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
                 }
@@ -96,12 +96,12 @@ fn hash_modes_4_5(mode: u8) -> u64 {
             for reverse in [false, true] {
                 let (frames, base_hundredths) = if mode == 4 {
                     (
-                        modes_4_5::cross_over(geometry, &COLORS, brightness, reverse),
+                        crossing_trails::cross_over(geometry, &COLORS, brightness, reverse),
                         1_100i32,
                     )
                 } else {
                     (
-                        modes_4_5::bullet_stack(geometry, &COLORS, brightness, reverse),
+                        crossing_trails::bullet_stack(geometry, &COLORS, brightness, reverse),
                         1_130,
                     )
                 };
@@ -131,9 +131,9 @@ fn hash_modes_18_19(mode: u8) -> u64 {
         for brightness in [64, 255] {
             for reverse in [false, true] {
                 let frames = if mode == 18 {
-                    modes_18_19::transformation(geometry, &COLORS, brightness, reverse)
+                    color_ribbons::transformation(geometry, &COLORS, brightness, reverse)
                 } else {
-                    modes_18_19::gradient_ribbon(geometry, brightness, reverse)
+                    color_ribbons::gradient_ribbon(geometry, brightness, reverse)
                 };
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
@@ -161,15 +161,12 @@ fn hash_modes_23_27(mode: u8) -> u64 {
         for brightness in [64, 255] {
             for reverse in [false, true] {
                 let (frames, base_hundredths) = match mode {
-                    23 => (
-                        modes_23_27::ping_pong(geometry, &COLORS, brightness),
-                        1_200i32,
-                    ),
-                    24 => (modes_23_27::runway(geometry, &COLORS, brightness), 1_200),
-                    25 => (modes_23_27::tide(geometry, &COLORS, brightness), 1_100),
-                    26 => (modes_23_27::blow_up(geometry, &COLORS, brightness), 1_550),
+                    23 => (movement::ping_pong(geometry, &COLORS, brightness), 1_200i32),
+                    24 => (movement::runway(geometry, &COLORS, brightness), 1_200),
+                    25 => (movement::tide(geometry, &COLORS, brightness), 1_100),
+                    26 => (movement::blow_up(geometry, &COLORS, brightness), 1_550),
                     27 => (
-                        modes_23_27::meteor(geometry, &COLORS, brightness, reverse),
+                        movement::meteor(geometry, &COLORS, brightness, reverse),
                         1_500,
                     ),
                     _ => unreachable!(),
@@ -199,7 +196,7 @@ fn hash_stack() -> u64 {
         let geometry = geometry(led_count).unwrap();
         for brightness in [64, 255] {
             for reverse in [false, true] {
-                let frames = mode_34::stack(geometry, &COLORS, brightness, reverse);
+                let frames = stack::stack(geometry, &COLORS, brightness, reverse);
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
                 }
@@ -226,10 +223,10 @@ fn hash_modes_9_10_16_21(mode: u8) -> u64 {
         for brightness in [64, 255] {
             for _reverse in [false, true] {
                 let frames = match mode {
-                    9 => modes_9_10::ripple(geometry, &COLORS, brightness),
-                    10 => modes_9_10::voice(geometry, &COLORS, brightness),
-                    16 => modes_16_21::pioneer(geometry, COLORS[0], brightness),
-                    21 => modes_16_21::snooker(geometry, &COLORS, brightness),
+                    9 => ripple_voice::ripple(geometry, &COLORS, brightness),
+                    10 => ripple_voice::voice(geometry, &COLORS, brightness),
+                    16 => pioneer_snooker::pioneer(geometry, COLORS[0], brightness),
+                    21 => pioneer_snooker::snooker(geometry, &COLORS, brightness),
                     _ => unreachable!(),
                 };
                 for byte in (frames.len() as i32).to_le_bytes() {
@@ -258,9 +255,9 @@ fn hash_modes_6_7(mode: u8) -> u64 {
         for brightness in [64, 255] {
             for reverse in [false, true] {
                 let frames = if mode == 6 {
-                    mode_6::twinkle(geometry, &COLORS, brightness)
+                    twinkle::twinkle(geometry, &COLORS, brightness)
                 } else {
-                    mode_7::parallel(geometry, &COLORS, brightness, reverse)
+                    parallel::parallel(geometry, &COLORS, brightness, reverse)
                 };
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
@@ -288,9 +285,9 @@ fn hash_modes_15_17(mode: u8) -> u64 {
         for brightness in [64, 255] {
             for _reverse in [false, true] {
                 let frames = if mode == 15 {
-                    modes_15_17::hourglass(geometry, &COLORS, brightness)
+                    hourglass_current::hourglass(geometry, &COLORS, brightness)
                 } else {
-                    modes_15_17::electric_current(geometry, &COLORS, brightness)
+                    hourglass_current::electric_current(geometry, &COLORS, brightness)
                 };
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
@@ -319,14 +316,14 @@ fn hash_modes_8_20_22(mode: u8) -> u64 {
             for reverse in [false, true] {
                 let (frames, base_hundredths) = match mode {
                     8 => (
-                        mode_8::shock_wave(geometry, &COLORS, brightness, reverse),
+                        shock_wave::shock_wave(geometry, &COLORS, brightness, reverse),
                         1_100i32,
                     ),
                     20 => (
-                        modes_20_22::rainbow_wave(geometry, brightness, reverse),
+                        color_blending::rainbow_wave(geometry, brightness, reverse),
                         1_100,
                     ),
-                    22 => (modes_20_22::mixing(geometry, &COLORS, brightness), 850),
+                    22 => (color_blending::mixing(geometry, &COLORS, brightness), 850),
                     _ => unreachable!(),
                 };
                 for byte in (frames.len() as i32).to_le_bytes() {
@@ -354,7 +351,7 @@ fn hash_river() -> u64 {
         let geometry = geometry(led_count).unwrap();
         for brightness in [64, 255] {
             for reverse in [false, true] {
-                let frames = mode_14::river(geometry, &COLORS, brightness, reverse);
+                let frames = river::river(geometry, &COLORS, brightness, reverse);
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
                 }
@@ -380,7 +377,7 @@ fn hash_shuttle_run() -> u64 {
         let geometry = geometry(led_count).unwrap();
         for brightness in [64, 255] {
             for _reverse in [false, true] {
-                let frames = mode_13::shuttle_run(geometry, &COLORS, brightness);
+                let frames = shuttle_run::shuttle_run(geometry, &COLORS, brightness);
                 for byte in (frames.len() as i32).to_le_bytes() {
                     hash = add(hash, byte);
                 }

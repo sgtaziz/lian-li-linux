@@ -2,66 +2,24 @@ use super::engine::{brightness, palette, place, scale, Color, Side};
 use lianli_shared::rgb::{RgbDirection, RgbEffect};
 
 pub(super) fn runway(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    let len = fans * side.leds_per_track();
-    let span = len + 2 * fans - 1;
     let colors = palette(effect, side).map(|color| scale(color, brightness(effect)));
-    let mut frames = Vec::with_capacity(span * 2);
-    for reverse in [false, true] {
-        for step in 0..span {
-            let mut track = vec![[0; 3]; len];
-            for position in 0..len {
-                let color = if position <= step && position + 2 * fans > step {
-                    colors[0]
-                } else {
-                    colors[1]
-                };
-                track[if reverse {
-                    len - position - 1
-                } else {
-                    position
-                }] = color;
-            }
-            frames.push(place(&track, side, fans));
-        }
-    }
-    frames
+    crate::rgb::track_effects::runway(
+        fans * side.leds_per_track(),
+        2 * fans,
+        [colors[0], colors[1]],
+        |track| place(track, side, fans),
+    )
 }
 
 pub(super) fn meteor(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
-    const TAILS: [[u16; 8]; 4] = [
-        [32, 255, 0, 0, 0, 0, 0, 0],
-        [16, 64, 128, 255, 0, 0, 0, 0],
-        [8, 16, 32, 64, 128, 255, 0, 0],
-        [6, 10, 16, 32, 64, 96, 168, 255],
-    ];
-    let len = fans * side.leds_per_track();
-    let span = len + 2 * fans - 1;
-    let colors = palette(effect, side);
-    let bright = brightness(effect);
-    let reverse = matches!(effect.direction, RgbDirection::CounterClockwise);
-    let mut frames = Vec::with_capacity(span * 4);
-    for color in colors {
-        for step in 0..span {
-            let mut tail_index = 0;
-            let mut track = vec![[0; 3]; len];
-            for position in 0..len {
-                let color = if position <= step && position + 2 * fans > step {
-                    let color = scale(scale(color, TAILS[fans - 1][tail_index]), bright);
-                    tail_index += 1;
-                    color
-                } else {
-                    [0; 3]
-                };
-                track[if reverse {
-                    len - position - 1
-                } else {
-                    position
-                }] = color;
-            }
-            frames.push(place(&track, side, fans));
-        }
-    }
-    frames
+    crate::rgb::track_effects::meteor(
+        fans * side.leds_per_track(),
+        &palette(effect, side),
+        crate::rgb::track_effects::METEOR_TAILS[fans - 1],
+        brightness(effect),
+        matches!(effect.direction, RgbDirection::CounterClockwise),
+        |track| place(track, side, fans),
+    )
 }
 
 pub(super) fn color_cycle(effect: &RgbEffect, fans: usize, side: Side) -> Vec<Vec<Color>> {
