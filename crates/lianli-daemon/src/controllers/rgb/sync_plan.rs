@@ -279,10 +279,22 @@ fn native_animation(
     profile: lianli_shared::rgb::RgbRenderProfile,
     effect: &RgbEffect,
 ) -> Result<Animation> {
-    let region = RgbRegionConfig {
+    let mut region = RgbRegionConfig {
         effect: effect.clone(),
         flip: false,
     };
+    if effect.mode == RgbMode::Runway
+        && matches!(
+            profile.family,
+            lianli_shared::rgb::RgbRenderFamily::UniversalScreen
+                | lianli_shared::rgb::RgbRenderFamily::Lancool217
+                | lianli_shared::rgb::RgbRenderFamily::LancoolV150
+        )
+    {
+        // These native renderers take background first; sync takes the moving color first.
+        region.effect.colors.resize(2, [0; 3]);
+        region.effect.colors.swap(0, 1);
+    }
     let mut regions = if profile.family != lianli_shared::rgb::RgbRenderFamily::HydroShiftII
         && lianli_media::rgb::parameters::for_profile(profile)
             .iter()
@@ -299,7 +311,13 @@ fn native_animation(
                 .iter()
                 .find(|p| p.mode == effect.mode)
         {
-            if parameters.per_fan_colors {
+            if parameters.per_fan_colors
+                || matches!(
+                    effect.mode,
+                    RgbMode::Static | RgbMode::Breathing | RgbMode::Meteor
+                )
+            {
+                // Native fixed palettes otherwise fill unused sync slots with defaults or black.
                 region.effect.colors = vec![
                     effect.colors.first().copied().unwrap_or([0; 3]);
                     usize::from(parameters.max_colors)

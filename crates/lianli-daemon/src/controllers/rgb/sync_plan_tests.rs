@@ -1,6 +1,88 @@
 use super::*;
 use lianli_shared::rgb::{RgbRenderFamily as Family, RgbRenderProfile};
 
+const PROFILES: &[(Family, u8, u16)] = &[
+    (Family::Tl, 3, 78),
+    (Family::Sl, 3, 120),
+    (Family::SlInf, 3, 132),
+    (Family::SlInfV3, 3, 132),
+    (Family::SlV4, 3, 156),
+    (Family::Cl, 3, 72),
+    (Family::P28, 3, 27),
+    (Family::Strimer, 0, 116),
+    (Family::HydroShiftII, 3, 96),
+    (Family::HydroShiftII, 0, 24),
+    (Family::HydroShiftIIOled, 0, 45),
+    (Family::UniversalScreen, 0, 60),
+    (Family::Lancool217, 0, 96),
+    (Family::LancoolV150, 4, 88),
+];
+
+#[test]
+fn native_sync_runway_uses_first_color_for_the_moving_stripe() {
+    for &(family, fan_count, led_count) in PROFILES {
+        for colors in [
+            vec![[255, 0, 0], [0, 255, 0]],
+            vec![[0, 255, 0], [255, 0, 0]],
+        ] {
+            let foreground = usize::from(colors[0][0] == 0);
+            let background = 1 - foreground;
+            let animation = native_animation(
+                RgbRenderProfile {
+                    family,
+                    fan_count,
+                    led_count,
+                    right_attach: false,
+                },
+                &RgbEffect {
+                    mode: RgbMode::Runway,
+                    colors,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let frame = &animation.frames[0];
+            let moving = frame.iter().filter(|color| color[foreground] > 0).count();
+            let resting = frame.iter().filter(|color| color[background] > 0).count();
+            assert!(
+                moving > 0 && moving < resting,
+                "{family:?}: stripe={moving}, background={resting}"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_sync_single_color_modes_do_not_introduce_other_colors() {
+    for &(family, fan_count, led_count) in PROFILES {
+        for mode in [RgbMode::Static, RgbMode::Breathing, RgbMode::Meteor] {
+            let animation = native_animation(
+                RgbRenderProfile {
+                    family,
+                    fan_count,
+                    led_count,
+                    right_attach: false,
+                },
+                &RgbEffect {
+                    mode,
+                    colors: vec![[255, 0, 0]],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let pixels = animation.frames.iter().flatten().collect::<Vec<_>>();
+            assert!(
+                pixels.iter().any(|color| color[0] > 0),
+                "{family:?} {mode:?}: no selected color"
+            );
+            assert!(
+                pixels.iter().all(|color| color[1] == 0 && color[2] == 0),
+                "{family:?} {mode:?}: unexpected palette color"
+            );
+        }
+    }
+}
+
 #[test]
 fn source_capacity_stack_survives_projection_and_upload_preparation() {
     let effect = RgbEffect {
@@ -29,22 +111,7 @@ fn source_capacity_stack_survives_projection_and_upload_preparation() {
 
 #[test]
 fn native_sync_modes_cover_every_software_family() {
-    for (family, fan_count, led_count) in [
-        (Family::Tl, 3, 78),
-        (Family::Sl, 3, 120),
-        (Family::SlInf, 3, 132),
-        (Family::SlInfV3, 3, 132),
-        (Family::SlV4, 3, 156),
-        (Family::Cl, 3, 72),
-        (Family::P28, 3, 27),
-        (Family::Strimer, 0, 116),
-        (Family::HydroShiftII, 3, 96),
-        (Family::HydroShiftII, 0, 24),
-        (Family::HydroShiftIIOled, 0, 45),
-        (Family::UniversalScreen, 0, 60),
-        (Family::Lancool217, 0, 96),
-        (Family::LancoolV150, 4, 88),
-    ] {
+    for &(family, fan_count, led_count) in PROFILES {
         let profile = RgbRenderProfile {
             family,
             fan_count,
@@ -67,6 +134,30 @@ fn native_sync_modes_cover_every_software_family() {
                     .all(|frame| frame.len() == usize::from(led_count)),
                 "{family:?} {mode:?}"
             );
+        }
+    }
+}
+
+#[test]
+fn native_sync_rainbow_modes_ignore_custom_palette() {
+    for &(family, fan_count, led_count) in PROFILES {
+        let profile = RgbRenderProfile {
+            family,
+            fan_count,
+            led_count,
+            right_attach: false,
+        };
+        for mode in [RgbMode::Rainbow, RgbMode::RainbowMorph] {
+            let mut effect = RgbEffect {
+                mode,
+                colors: vec![],
+                ..Default::default()
+            };
+            let expected = native_animation(profile, &effect).unwrap();
+            effect.colors = vec![[255, 0, 0], [0, 255, 0]];
+            let actual = native_animation(profile, &effect).unwrap();
+            assert_eq!(actual.frames, expected.frames, "{family:?} {mode:?}");
+            assert_eq!(actual.interval_hundredths, expected.interval_hundredths);
         }
     }
 }
