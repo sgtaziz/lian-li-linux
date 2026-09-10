@@ -782,6 +782,10 @@ impl WirelessController {
     }
 
     pub fn rgb_upload_applied(&self, mac: &[u8; 6], effect_index: [u8; 4]) -> bool {
+        // A matching firmware index can survive a daemon restart without a local upload.
+        if self.desired_effects.lock().get(mac) != Some(&effect_index) {
+            return false;
+        }
         let observed = self.device_health.lock().get(mac).is_some_and(|health| {
             health.raw_seen.elapsed() <= ACK_FRESHNESS
                 && !health.published.is_sync_mb_light
@@ -840,6 +844,10 @@ mod tests {
     #[test]
     fn matching_effect_is_not_applied_during_motherboard_sync_or_transition() {
         let controller = WirelessController::new();
+        controller
+            .desired_effects
+            .lock()
+            .insert([1, 2, 3, 4, 5, 6], [7; 4]);
         let mut health = entry([9; 6]);
         health.published.effect_index = [7; 4];
         health.published.is_sync_mb_light = true;
@@ -862,6 +870,23 @@ mod tests {
         let now = Instant::now();
         controller.reserve_mb_rgb_transition(&[1, 2, 3, 4, 5, 6], false, true, 0, now);
         assert!(!controller.rgb_upload_applied(&[1, 2, 3, 4, 5, 6], [7; 4]));
+    }
+
+    #[test]
+    fn retained_firmware_effect_requires_an_upload_in_this_session() {
+        let controller = WirelessController::new();
+        let mac = [1, 2, 3, 4, 5, 6];
+        let mut health = entry([9; 6]);
+        health.published.effect_index = [7; 4];
+        health.raw_seen = Instant::now();
+        controller.device_health.lock().insert(mac, health);
+
+        assert!(!controller.rgb_upload_applied(&mac, [7; 4]));
+        controller.desired_effects.lock().insert(mac, [7; 4]);
+        assert!(controller.rgb_upload_applied(&mac, [7; 4]));
+        assert!(!controller.rgb_upload_applied(&mac, [8; 4]));
+        controller.clear_rgb_targets();
+        assert!(!controller.rgb_upload_applied(&mac, [7; 4]));
     }
 
     fn controller_with_health(entries: Vec<([u8; 6], DeviceHealth)>) -> WirelessController {
