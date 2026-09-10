@@ -150,7 +150,7 @@ impl WirelessController {
                 &self.device_health,
                 &self.master_entries,
                 &self.receiver_state,
-                &self.fg_sync,
+                &self.poll_stop,
                 &self.master_mac,
             );
 

@@ -34,7 +34,6 @@ pub struct WirelessController {
     pub(super) device_health: DeviceHealthMap,
     pub(super) master_entries: MasterEntryMap,
     pub(super) clock_init_sent: Arc<AtomicBool>,
-    pub(super) fg_sync: Arc<AtomicBool>,
     pub(super) tx_failures: Arc<AtomicU32>,
     pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
     pub(super) mb_rgb_targets: MbRgbTargetMap,
@@ -63,7 +62,6 @@ impl Clone for WirelessController {
             device_health: Arc::clone(&self.device_health),
             master_entries: Arc::clone(&self.master_entries),
             clock_init_sent: Arc::clone(&self.clock_init_sent),
-            fg_sync: Arc::clone(&self.fg_sync),
             tx_failures: Arc::clone(&self.tx_failures),
             desired_effects: Arc::clone(&self.desired_effects),
             mb_rgb_targets: Arc::clone(&self.mb_rgb_targets),
@@ -94,7 +92,6 @@ impl WirelessController {
             device_health: Arc::new(Mutex::new(Default::default())),
             master_entries: Arc::new(Mutex::new(Default::default())),
             clock_init_sent: Arc::new(AtomicBool::new(false)),
-            fg_sync: Arc::new(AtomicBool::new(false)),
             tx_failures: Arc::new(AtomicU32::new(0)),
             desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
             mb_rgb_targets: Arc::new(Mutex::new(Default::default())),
@@ -234,7 +231,6 @@ impl WirelessController {
         let device_health = Arc::clone(&self.device_health);
         let master_entries = Arc::clone(&self.master_entries);
         let receiver_state = Arc::clone(&self.receiver_state);
-        let fg_sync = Arc::clone(&self.fg_sync);
         let master_mac = Arc::clone(&self.master_mac);
         let retarget_ctrl = self.clone();
         let rx_running = Arc::clone(&self.rx_running);
@@ -257,9 +253,12 @@ impl WirelessController {
                     &device_health,
                     &master_entries,
                     &receiver_state,
-                    &fg_sync,
+                    &stop_flag,
                     &master_mac,
                 ) {
+                    if stop_flag.load(Ordering::Acquire) {
+                        break;
+                    }
                     consecutive_errors += 1;
                     consecutive_successes = 0;
                     info!("RX polling ({consecutive_errors}): {err:#}, continuing");
@@ -276,6 +275,9 @@ impl WirelessController {
                             "5 consecutive RX errors, sending RX reset ({total_resets}/{MAX_RESETS})"
                         );
                         let handle = rx.lock();
+                        if stop_flag.load(Ordering::Acquire) {
+                            break;
+                        }
                         let mut reset_cmd = vec![0u8; 64];
                         reset_cmd[0] = 0x15; // USB_ResetAnother
                         if handle.write(&reset_cmd, USB_TIMEOUT).is_ok() {
@@ -429,7 +431,7 @@ impl WirelessController {
                 (&*CMD_RX_QUERY_37, true),
                 (&*CMD_RX_LCD_MODE, false),
             ] {
-                with_transport_recovery(rx, &RX_IDS, "RX", Some(&self.poll_stop), |handle| {
+                with_transport_recovery(rx, &RX_IDS, "RX", &self.poll_stop, |handle| {
                     handle
                         .write(cmd, USB_TIMEOUT)
                         .context("sending RX command")?;
@@ -500,7 +502,7 @@ impl WirelessController {
         F: FnMut(&RusbBulk) -> Result<R>,
     {
         let tx = self.tx.as_ref().context("TX device not connected")?;
-        let result = with_transport_recovery(tx, &TX_IDS, "TX", Some(&self.poll_stop), op);
+        let result = with_transport_recovery(tx, &TX_IDS, "TX", &self.poll_stop, op);
         match &result {
             Ok(_) => self.tx_failures.store(0, Ordering::Relaxed),
             Err(_) => {
@@ -716,7 +718,9 @@ impl WirelessController {
     /// includes the current fan RPM so the RX dongle can measure motherboard
     /// PWM duty from the FG signal.
     pub fn set_fg_sync(&self, enabled: bool) {
-        self.fg_sync.store(enabled, Ordering::Relaxed);
+        self.receiver_state
+            .fg_sync
+            .store(enabled, Ordering::Relaxed);
     }
 
     /// Send a 240-byte RF packet as 4× 64-byte USB chunks.

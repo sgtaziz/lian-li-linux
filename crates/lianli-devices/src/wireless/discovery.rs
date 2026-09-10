@@ -335,6 +335,7 @@ fn commit_streak<T: Copy + Eq>(cand: &mut Option<(T, u32)>, observed: T) -> Opti
 pub(super) struct ReceiverState {
     pub pwm: AtomicU16,
     pub pages: AtomicU8,
+    pub fg_sync: AtomicBool,
 }
 
 impl Default for ReceiverState {
@@ -342,6 +343,7 @@ impl Default for ReceiverState {
         Self {
             pwm: AtomicU16::new(0xFFFF),
             pages: AtomicU8::new(1),
+            fg_sync: AtomicBool::new(false),
         }
     }
 }
@@ -357,7 +359,7 @@ pub(super) fn poll_and_discover(
     health_map: &DeviceHealthMap,
     master_entries: &MasterEntryMap,
     receiver: &ReceiverState,
-    fg_sync: &Arc<AtomicBool>,
+    stop: &AtomicBool,
     master_mac: &Arc<Mutex<[u8; 6]>>,
 ) -> Result<()> {
     sweep(health_map, discovered_devices, master_mac);
@@ -368,7 +370,7 @@ pub(super) fn poll_and_discover(
     cmd[0] = USB_CMD_SEND_RF;
     cmd[1] = pages;
 
-    if fg_sync.load(Ordering::Relaxed) {
+    if receiver.fg_sync.load(Ordering::Relaxed) {
         let rpm = discovered_devices
             .lock()
             .iter()
@@ -381,7 +383,7 @@ pub(super) fn poll_and_discover(
     }
 
     let mut response = [0u8; 26 * 512];
-    let len = with_transport_recovery(rx, &RX_IDS, "RX", None, |handle| {
+    let len = with_transport_recovery(rx, &RX_IDS, "RX", stop, |handle| {
         handle.read_flush();
         handle
             .write(&cmd, USB_TIMEOUT)

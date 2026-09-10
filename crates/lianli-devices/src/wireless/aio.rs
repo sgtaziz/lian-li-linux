@@ -175,13 +175,14 @@ mod aio_tests {
             .raw_seen = Instant::now();
         assert!(controller.wireless_theme_acked(&mac, 7, sent_at));
         assert!(!controller.wireless_theme_acked(&mac, 8, sent_at));
+        let stale_seen = Instant::now() - ACK_FRESHNESS - std::time::Duration::from_millis(1);
         controller
             .device_health
             .lock()
             .get_mut(&mac)
             .unwrap()
-            .raw_seen = sent_at - ACK_FRESHNESS;
-        assert!(!controller.wireless_theme_acked(&mac, 7, sent_at - ACK_FRESHNESS));
+            .raw_seen = stale_seen;
+        assert!(!controller.wireless_theme_acked(&mac, 7, stale_seen));
     }
 
     #[test]
