@@ -180,7 +180,7 @@ function flipGroup(flip: boolean) {
           <div class="color-list">
             <div v-for="(_, i) in paletteColors" :key="i" class="color-item">
               <span v-if="perFanColors" class="muted">Fan {{ i + 1 }}</span>
-              <ColorPicker :model-value="paletteColors[i]" @update:model-value="(v) => onColor(i, v)" />
+              <ColorPicker class="region-color" :model-value="paletteColors[i]" @update:model-value="(v) => onColor(i, v)" />
               <n-button v-if="!perFanColors && current.effect.colors.length > minColors" quaternary size="small" type="error" @click="removeColor(i)"><Trash2 :size="14" /></n-button>
             </div>
             <n-button v-if="!perFanColors && current.effect.colors.length < maxColors" size="small" quaternary @click="addColor"><Plus :size="14" /></n-button>
@@ -202,6 +202,7 @@ function flipGroup(flip: boolean) {
 .region-tabs, .row, .color-list { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .row { justify-content: space-between; }
 .colors, .field { display: flex; flex-direction: column; gap: var(--space-1); }
-.color-item { display: flex; align-items: center; gap: var(--space-1); }
+.color-item { display: flex; flex-shrink: 0; align-items: center; gap: var(--space-1); }
+.region-color { min-width: 130px; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 </style>
