@@ -17,13 +17,28 @@ pub fn save(
     name: String,
     device_id: String,
 ) -> IpcResponse {
-    let zones = {
+    let (zones, regions) = {
         let state = state.lock();
 
-        let led_colors = state
+        let configured_regions = state
+            .config
+            .as_ref()
+            .and_then(|c| c.rgb.as_ref())
+            .and_then(|r| r.devices.iter().find(|d| d.device_id == device_id))
+            .and_then(|d| d.regions.clone());
+
+        let (led_colors, rendered_regions) = state
             .rgb_controller
             .as_ref()
-            .and_then(|rgb| rgb.lock().get_all_zone_colors(&device_id));
+            .map(|rgb| {
+                let rgb = rgb.lock();
+                (
+                    rgb.get_all_zone_colors(&device_id),
+                    rgb.get_effect_regions(&device_id),
+                )
+            })
+            .unwrap_or_default();
+        let regions = rendered_regions.or(configured_regions);
 
         let zone_configs: Vec<_> = state
             .config
@@ -33,7 +48,9 @@ pub fn save(
             .map(|d| d.zones.clone())
             .unwrap_or_default();
 
-        if let Some(led_zones) = led_colors {
+        let zones = if regions.is_some() {
+            Some(Vec::new())
+        } else if let Some(led_zones) = led_colors {
             let zones: Vec<RgbPresetZone> = led_zones
                 .into_iter()
                 .map(|mut z| {
@@ -64,7 +81,8 @@ pub fn save(
             )
         } else {
             None
-        }
+        };
+        (zones, regions)
     };
     let zones = match zones {
         Some(z) => z,
@@ -72,6 +90,7 @@ pub fn save(
     };
     let preset = RgbPreset {
         name: name.clone(),
+        regions,
         device_id,
         zones,
     };
@@ -160,10 +179,12 @@ fn apply_config_and_leds(
                 mb_rgb_sync: false,
                 active_preset: None,
                 zones: Vec::new(),
+                regions: None,
             });
             rgb_cfg.devices.last_mut().unwrap()
         };
         dev_cfg.active_preset = Some(name.to_string());
+        dev_cfg.regions = preset.regions.clone();
         for zone_entry in &preset.zones {
             if let Some(effect) = &zone_entry.effect {
                 if let Some(z) = dev_cfg

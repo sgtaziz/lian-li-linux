@@ -232,7 +232,8 @@ export interface FanConfig {
 // ─── RGB ────────────────────────────────────────────────────────────────────
 export type RgbMode = string;
 export type RgbDirection = "Clockwise" | "CounterClockwise" | "Up" | "Down" | "Spread" | "Gather";
-export type RgbScope = "All" | "Top" | "Bottom" | "Inner" | "Outer";
+export type RgbScope = "All" | "Top" | "Bottom" | "Inner" | "Outer" | "Center" | "Pump" | "Front" | "Rear"
+  | "Segment1" | "Segment2" | "Segment3" | "Segment4" | "Segment5" | "Segment6";
 
 export interface RgbEffect {
   mode: RgbMode;
@@ -251,11 +252,17 @@ export interface RgbZoneConfig {
   swap_tb: boolean;
 }
 
+export interface RgbRegionConfig {
+  effect: RgbEffect;
+  flip: boolean;
+}
+
 export interface RgbDeviceConfig {
   device_id: string;
   mb_rgb_sync: boolean;
   active_preset?: string | null;
   zones: RgbZoneConfig[];
+  regions?: RgbRegionConfig[] | null;
 }
 
 export interface RgbAppConfig {
@@ -275,6 +282,22 @@ export interface RgbDeviceCapabilities {
   device_name: string;
   supported_modes: RgbMode[];
   software_modes?: RgbMode[];
+  effect_regions?: RgbScope[];
+  region_parameters?: { scope: RgbScope; effects: NonNullable<RgbDeviceCapabilities["effect_parameters"]> }[];
+  effect_parameters?: {
+    mode: RgbMode;
+    min_colors: number;
+    max_colors: number;
+    per_fan_colors: boolean;
+    directions: RgbDirection[];
+    supports_speed: boolean;
+  }[];
+  render_profile?: {
+    family: "Tl" | "Sl" | "SlInf" | "SlInfV3" | "SlV4" | "Cl" | "P28" | "Strimer" | "HydroShiftII" | "HydroShiftIIOled" | "UniversalScreen" | "Lancool217" | "LancoolV150";
+    right_attach?: boolean;
+    fan_count: number;
+    led_count: number;
+  } | null;
   zones: RgbZoneInfo[];
   supports_direct: boolean;
   supports_mb_rgb_sync: boolean;
@@ -296,6 +319,7 @@ export interface RgbPreset {
   name: string;
   device_id: string;
   zones: RgbPresetZone[];
+  regions?: RgbRegionConfig[] | null;
 }
 
 // ─── AIO ──────────────────────────────────────────────────────────────────────

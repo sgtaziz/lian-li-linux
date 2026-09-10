@@ -1,6 +1,5 @@
 use anyhow::{ensure, Context, Result};
-use lianli_media::rgb::{is_animated, render_zone, validate_effect, LOOP_FRAMES};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbPresetZone};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbPresetZone, RgbRegionConfig};
 use std::ops::Range;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -8,13 +7,23 @@ pub(super) struct RenderState {
     pub counts: Vec<usize>,
     pub colors: Vec<[u8; 3]>,
     pub effects: Vec<Option<RgbEffect>>,
+    pub regions: Option<Vec<RgbRegionConfig>>,
 }
 
 impl RenderState {
+    pub fn same_render(&self, other: &Self) -> bool {
+        if self.regions.is_some() && other.regions.is_some() {
+            self.counts == other.counts && self.regions == other.regions
+        } else {
+            self == other
+        }
+    }
+
     pub fn new(counts: Vec<usize>) -> Self {
         Self {
             colors: vec![[0; 3]; counts.iter().sum()],
             effects: vec![None; counts.len()],
+            regions: None,
             counts,
         }
     }
@@ -32,9 +41,33 @@ impl RenderState {
         let range = self.range(zone)?;
         if effect.mode == RgbMode::Direct {
             self.effects[zone as usize] = None;
+            self.regions = None;
         } else {
-            validate_effect(effect)?;
-            render_zone(effect, 0, &mut self.colors[range]);
+            ensure!(
+                matches!(effect.mode, RgbMode::Static | RgbMode::Off),
+                "animated RGB requires a supported device effect engine"
+            );
+            ensure!(
+                effect.scope == lianli_shared::rgb::RgbScope::All,
+                "direct RGB supports only the whole zone"
+            );
+            let brightness = if effect.disabled
+                || effect.mode == RgbMode::Off
+                || lianli_shared::rgb::is_brightness_off(effect.brightness)
+            {
+                0
+            } else {
+                *[0u16, 64, 128, 192, 255]
+                    .get(effect.brightness as usize)
+                    .context("RGB brightness must be 0..=4")?
+            };
+            let color = effect
+                .colors
+                .first()
+                .copied()
+                .unwrap_or([255; 3])
+                .map(|channel| (u16::from(channel) * brightness / 255) as u8);
+            self.colors[range].fill(color);
             self.effects[zone as usize] = Some(effect.clone());
         }
         Ok(())
@@ -48,40 +81,12 @@ impl RenderState {
         );
         self.colors[range.start..range.start + colors.len()].copy_from_slice(colors);
         self.effects[zone as usize] = None;
+        self.regions = None;
         Ok(())
     }
 
     pub fn frames(&self) -> Vec<Vec<[u8; 3]>> {
-        let animated = self.effects.iter().flatten().any(is_animated);
-        (0..if animated { LOOP_FRAMES } else { 1 })
-            .map(|frame| {
-                let mut colors = self.colors.clone();
-                let mut offset = 0;
-                for (count, effect) in self.counts.iter().zip(&self.effects) {
-                    if let Some(effect) = effect {
-                        render_zone(effect, frame, &mut colors[offset..offset + count]);
-                    }
-                    offset += count;
-                }
-                colors
-            })
-            .collect()
-    }
-
-    pub fn upload_frames(&self) -> Result<(Vec<Vec<[u8; 3]>>, u16)> {
-        let frames = self.frames();
-        for stride in [1, 2, 4] {
-            let sampled: Vec<_> = frames.iter().step_by(stride).cloned().collect();
-            let raw: Vec<_> = sampled.iter().flatten().flatten().copied().collect();
-            // Leave room for compression differences after device-specific ordering.
-            if lianli_devices::tinyuz::compress(&raw)?.len() <= 10_240 {
-                return Ok((
-                    sampled,
-                    lianli_media::rgb::FRAME_INTERVAL_MS * stride as u16,
-                ));
-            }
-        }
-        anyhow::bail!("RGB animation exceeds receiver memory; reduce palette or effect complexity")
+        vec![self.colors.clone()]
     }
 
     pub fn preset_zones(&self) -> Vec<RgbPresetZone> {
@@ -109,59 +114,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn advertised_effects_fit_supported_upload_layouts() {
-        use lianli_devices::wireless::{WirelessFanType, WirelessRgbUpload};
-        use lianli_media::rgb::{FRAME_INTERVAL_MS, SOFTWARE_MODES};
-        for family in [
-            WirelessFanType::SlV4,
-            WirelessFanType::SlInf,
-            WirelessFanType::Tlv2Led,
-            WirelessFanType::Slv3Led,
-            WirelessFanType::WaterBlock,
-            WirelessFanType::P28V2,
-            WirelessFanType::Strimer(3),
-            WirelessFanType::Led88,
-            WirelessFanType::Lc217,
-            WirelessFanType::V150,
-        ] {
-            for &mode in SOFTWARE_MODES {
-                let mut state = RenderState::new(family.rgb_zone_led_counts(4));
-                for zone in 0..state.counts.len() {
-                    state
-                        .set_effect(
-                            zone as u8,
-                            &RgbEffect {
-                                mode,
-                                speed: zone as u8,
-                                colors: vec![[255, 0, 0], [0, 255, 0], [0, 0, 255], [127, 63, 199]],
-                                ..Default::default()
-                            },
-                        )
-                        .unwrap();
-                }
-                let (frames, interval) = state
-                    .upload_frames()
-                    .unwrap_or_else(|error| panic!("{family:?} {mode:?}: {error}"));
-                assert!(interval >= FRAME_INTERVAL_MS);
-                WirelessRgbUpload::new(&frames, interval, None)
-                    .unwrap_or_else(|error| panic!("{family:?} {mode:?}: {error}"));
-            }
-        }
+    fn regional_preview_does_not_trigger_another_upload() {
+        let mut desired = RenderState::new(vec![26; 3]);
+        desired.regions = Some(vec![RgbRegionConfig {
+            effect: RgbEffect::default(),
+            flip: false,
+        }]);
+        let mut applied = desired.clone();
+        applied.colors.fill([254, 0, 0]);
+        assert!(desired.same_render(&applied));
+        desired.regions.as_mut().unwrap()[0].effect.speed = 4;
+        assert!(!desired.same_render(&applied));
+        desired.regions = None;
+        applied.regions = None;
+        assert!(!desired.same_render(&applied));
     }
 
     #[test]
-    fn independent_zones_keep_direct_colors_and_animation() {
+    fn three_fan_tl_rainbow_upload_retains_the_native_loop() {
+        use lianli_shared::rgb::{RgbRegionConfig, RgbRenderFamily, RgbRenderProfile};
+        let animation = lianli_media::rgb::family::render(
+            RgbRenderProfile {
+                family: RgbRenderFamily::Tl,
+                fan_count: 3,
+                led_count: 78,
+                right_attach: false,
+            },
+            &[RgbRegionConfig {
+                effect: RgbEffect {
+                    mode: RgbMode::Rainbow,
+                    ..Default::default()
+                },
+                flip: false,
+            }],
+        )
+        .unwrap();
+        assert_eq!(animation.frames.len(), 39);
+        assert!(animation.frames.iter().all(|frame| frame.len() == 78));
+        let upload = lianli_devices::wireless::WirelessRgbUpload::with_timing(
+            &animation.frames,
+            animation.timing(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(upload.frame_count(), 39);
+    }
+
+    #[test]
+    fn direct_zones_preserve_colors_and_reject_generic_animations() {
         let mut state = RenderState::new(vec![24, 26, 44]);
         state.set_direct(0, &[[7, 8, 9]; 24]).unwrap();
-        state
+        assert!(state
             .set_effect(
                 1,
                 &RgbEffect {
                     mode: RgbMode::Rainbow,
                     ..Default::default()
-                },
+                }
             )
-            .unwrap();
+            .is_err());
         state
             .set_effect(
                 2,
@@ -172,16 +183,14 @@ mod tests {
             )
             .unwrap();
         let frames = state.frames();
-        assert_eq!(frames.len(), LOOP_FRAMES);
-        assert!(frames
-            .iter()
-            .all(|f| f.len() == 94 && f[..24] == [[7, 8, 9]; 24] && f[50..] == [[10, 20, 30]; 44]));
-        assert_ne!(frames[0][24..50], frames[1][24..50]);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(&frames[0][..24], &[[7, 8, 9]; 24]);
+        assert_eq!(&frames[0][24..50], &[[0; 3]; 26]);
+        assert_eq!(&frames[0][50..], &[[10, 20, 30]; 44]);
         let zones = state.preset_zones();
-        assert_eq!(zones[1].effect.as_ref().unwrap().mode, RgbMode::Rainbow);
-        assert!(zones[1].colors.is_empty());
-        state.set_direct(1, &[[1; 3]; 26]).unwrap();
-        assert_eq!(state.frames().len(), 1);
+        assert_eq!(zones[0].colors, [[7, 8, 9]; 24]);
+        assert_eq!(zones[2].effect.as_ref().unwrap().mode, RgbMode::Static);
+        assert!(zones[2].colors.is_empty());
         assert!(state.set_direct(3, &[]).is_err());
         assert!(state.set_direct(0, &[[0; 3]; 25]).is_err());
     }

@@ -15,6 +15,7 @@ const props = defineProps<{
   cap: RgbDeviceCapabilities;
   zoneIndex: number;
   zone: RgbZoneConfig;
+  directOnly?: boolean;
 }>();
 
 const rgb = useRgbStore();
@@ -25,7 +26,7 @@ const expanded = ref(true);
 
 const effect = computed(() => props.zone.effect);
 
-const isDirect = computed(() => effect.value.mode === "Direct");
+const isDirect = computed(() => props.directOnly || effect.value.mode === "Direct");
 const hasSoftwareRenderer = computed(() => (props.cap.software_modes?.length ?? 0) > 0);
 const isSoftware = computed(() => props.cap.software_modes?.includes(effect.value.mode) ?? false);
 const isAnimated = computed(() => !["Off", "Static", "Direct"].includes(effect.value.mode));
@@ -101,7 +102,8 @@ function patchEffect(p: Partial<RgbEffect>) {
 }
 
 function modeOptions() {
-  return props.cap.supported_modes.map((m) => ({
+  const modes = props.directOnly ? ["Direct"] : props.cap.supported_modes;
+  return modes.map((m) => ({
     label: modeLabel(m),
     value: m,
   }));
@@ -166,21 +168,29 @@ function setDirectColor(value: RGB | any) {
   directColor.value = value as RGB;
 }
 
+function markDirectChange() {
+  const device = config.rgbDeviceConfig(props.deviceId);
+  device.active_preset = null;
+  if (props.directOnly) {
+    device.regions = null;
+    for (const zone of device.zones) zone.effect.mode = "Direct";
+  }
+  config.markDirty();
+}
+
 function applyDirect() {
   if (selectedLeds.value.length === 0) return;
   for (const i of selectedLeds.value) {
     ledColors.value[i] = directColor.value;
   }
   selectedLeds.value = [];
-  config.rgbDeviceConfig(props.deviceId).active_preset = null;
-  config.markDirty();
+  markDirectChange();
   void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
 }
 
 function fillAll() {
   ledColors.value = Array.from({ length: ledCount.value }, () => directColor.value);
-  config.rgbDeviceConfig(props.deviceId).active_preset = null;
-  config.markDirty();
+  markDirectChange();
   void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
 }
 
@@ -192,8 +202,7 @@ function clearAll() {
     negativeText: "Cancel",
     onPositiveClick: () => {
       ledColors.value = Array.from({ length: ledCount.value }, () => [0, 0, 0]);
-      config.rgbDeviceConfig(props.deviceId).active_preset = null;
-      config.markDirty();
+      markDirectChange();
       void rgb.sendDirect(props.deviceId, props.zoneIndex, ledColors.value);
     },
   });
@@ -216,14 +225,17 @@ const zoneLabel = computed(
         <label class="muted">Mode</label>
         <n-select
           size="small"
-          :value="effect.mode"
+          :value="directOnly ? 'Direct' : effect.mode"
           :options="modeOptions()"
           @update:value="onMode"
           style="width: 200px"
         />
       </div>
 
-      <p v-if="hasSoftwareRenderer" class="muted">
+      <p v-if="directOnly" class="muted">
+        Applying direct colors replaces the group's animation with direct LED control.
+      </p>
+      <p v-else-if="hasSoftwareRenderer" class="muted">
         Each zone can use its own effect. Save changes to apply lighting.
       </p>
 

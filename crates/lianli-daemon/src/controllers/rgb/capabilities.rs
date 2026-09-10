@@ -1,0 +1,108 @@
+use super::*;
+
+impl RgbController {
+    pub fn capabilities(&self) -> Vec<RgbDeviceCapabilities> {
+        let mut caps = Vec::new();
+        for (id, device) in &self.wired {
+            let profile = self.render_profile(id);
+            let software_modes = if self.software_controlled(id) {
+                self.regional_profile(id)
+                    .map_or_else(Vec::new, lianli_media::rgb::parameters::modes)
+            } else {
+                vec![]
+            };
+            let mut modes = device.supported_modes();
+            for &mode in &software_modes {
+                if !modes.contains(&mode) {
+                    modes.push(mode);
+                }
+            }
+            caps.push(RgbDeviceCapabilities {
+                device_id: id.clone(),
+                device_name: device.device_name(),
+                supported_modes: modes,
+                software_modes,
+                effect_regions: self
+                    .regional_profile(id)
+                    .map_or_else(Vec::new, lianli_media::rgb::parameters::scopes),
+                render_profile: profile,
+                region_parameters: profile
+                    .map_or_else(Vec::new, lianli_media::rgb::parameters::for_regions),
+                effect_parameters: profile
+                    .map_or_else(Vec::new, lianli_media::rgb::parameters::for_profile),
+                zones: device.zone_info(),
+                supports_direct: device.supports_direct(),
+                supports_mb_rgb_sync: device.supports_mb_rgb_sync(),
+                total_led_count: device.total_led_count(),
+                supported_scopes: device.supported_scopes(),
+                supports_direction: device.supports_direction(),
+                supports_merge_lighting: device.supports_merge_lighting(),
+                rf_owned: device.rf_owned(),
+            });
+        }
+        for (id, device) in &self.wireless_state {
+            if !self.software_controlled(id) {
+                continue;
+            }
+            let zones: Vec<_> = device
+                .fan_type
+                .rgb_zone_led_counts(device.fan_count)
+                .iter()
+                .enumerate()
+                .map(|(index, &count)| RgbZoneInfo {
+                    name: if device.fan_type.total_led_count_override().is_some() {
+                        match device.fan_type {
+                            WirelessFanType::Lc217 => "Case Ring",
+                            WirelessFanType::Led88 => "Screen Ring",
+                            _ => "LED Strip",
+                        }
+                        .to_owned()
+                    } else if device.fan_type.is_aio() && index == 0 {
+                        "Pump Head".to_owned()
+                    } else {
+                        format!("Fan {}", index + usize::from(!device.fan_type.is_aio()))
+                    },
+                    led_count: count as u16,
+                })
+                .collect();
+            let software_modes = self
+                .regional_profile(id)
+                .map_or_else(Vec::new, lianli_media::rgb::parameters::modes);
+            let mut supported_modes = software_modes.clone();
+            supported_modes.push(RgbMode::Direct);
+            caps.push(RgbDeviceCapabilities {
+                device_id: id.clone(),
+                device_name: device.fan_type.display_name().to_owned(),
+                supported_modes,
+                software_modes,
+                render_profile: self.render_profile(id),
+                region_parameters: self
+                    .render_profile(id)
+                    .map_or_else(Vec::new, lianli_media::rgb::parameters::for_regions),
+                effect_parameters: self
+                    .render_profile(id)
+                    .map_or_else(Vec::new, lianli_media::rgb::parameters::for_profile),
+                effect_regions: self
+                    .regional_profile(id)
+                    .map_or_else(Vec::new, lianli_media::rgb::parameters::scopes),
+                total_led_count: zones.iter().map(|z| z.led_count).sum(),
+                zones,
+                supports_direct: true,
+                supports_mb_rgb_sync: device.fan_type.supports_mb_rgb_sync(),
+                supported_scopes: vec![],
+                supports_direction: false,
+                supports_merge_lighting: false,
+                rf_owned: false,
+            });
+        }
+        caps.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+        caps
+    }
+
+    pub fn exposed_capabilities(&self) -> Vec<RgbDeviceCapabilities> {
+        self.capabilities()
+            .into_iter()
+            .filter(|c| !c.rf_owned)
+            .collect()
+    }
+}

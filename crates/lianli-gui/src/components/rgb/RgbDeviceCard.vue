@@ -8,6 +8,7 @@ import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useIpc } from "@/composables/useIpc";
 import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
+import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
 
 const props = defineProps<{ cap: RgbDeviceCapabilities }>();
 
@@ -33,17 +34,20 @@ const devConfig = computed(() => config.rgbDeviceConfig(props.cap.device_id));
 const device = computed(() => devices.byId(props.cap.device_id));
 
 const expanded = ref(true);
+const regional = computed(() => (props.cap.effect_regions?.length ?? 0) > 0);
+const controlTab = ref<"regions" | "direct">("regions");
+const visibleZones = computed(() => devConfig.value.zones.slice(0, props.cap.zones.length));
 
-// Ensure zones match the capability list.
 watch(
-  devConfig,
-  (cfg) => {
+  [devConfig, () => props.cap.zones.length],
+  ([cfg]) => {
     const cap = props.cap;
+    const mode = cfg.zones.length > 0 && cfg.zones.every((zone) => zone.effect.mode === "Direct") ? "Direct" : "Static";
     while (cfg.zones.length < cap.zones.length) {
       cfg.zones.push({
         zone_index: cfg.zones.length,
         effect: {
-          mode: "Static",
+          mode,
           colors: [[255, 255, 255]],
           speed: 2,
           brightness: 4,
@@ -156,18 +160,24 @@ const summary = computed(() =>
 
       <!-- When MB sync is active, hide zone config — the motherboard controls RGB -->
       <template v-if="!mbSync">
-        <div class="zones">
+        <div v-if="regional" class="control-tabs">
+          <n-button size="small" :type="controlTab === 'regions' ? 'primary' : 'default'" @click="controlTab = 'regions'">Group effects</n-button>
+          <n-button v-if="cap.supports_direct" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">Direct / zones</n-button>
+        </div>
+        <RgbRegionEditor v-if="regional && controlTab === 'regions'" :device-id="cap.device_id" :cap="cap" />
+        <div v-if="!regional || controlTab === 'direct'" class="zones">
           <RgbZoneEditor
-            v-for="(z, i) in devConfig.zones"
+            v-for="(z, i) in visibleZones"
             :key="i"
             :device-id="cap.device_id"
             :cap="cap"
             :zone-index="i"
             :zone="z"
+            :direct-only="regional && controlTab === 'direct'"
           />
         </div>
 
-        <div class="actions">
+        <div v-if="!regional" class="actions">
           <n-button size="small" @click="applyToAllZones">Apply to All Zones</n-button>
         </div>
 
@@ -249,6 +259,10 @@ const summary = computed(() =>
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+.control-tabs {
+  display: flex;
+  gap: var(--space-2);
 }
 .row {
   display: flex;
