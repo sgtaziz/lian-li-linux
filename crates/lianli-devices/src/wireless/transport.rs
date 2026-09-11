@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use lianli_transport::usb::RusbBulk;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Try to open a USB device matching any of the given VID:PID pairs.
 pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<RusbBulk> {
@@ -38,30 +39,126 @@ pub(super) fn with_transport_recovery<F, R>(
     arc: &Arc<Mutex<RusbBulk>>,
     ids: &[(u16, u16)],
     name: &str,
+    stop: &AtomicBool,
     mut op: F,
 ) -> Result<R>
 where
     F: FnMut(&RusbBulk) -> Result<R>,
 {
-    let first = {
-        let handle = arc.lock();
-        op(&handle)
-    };
-    match first {
-        Ok(r) => Ok(r),
-        Err(e) => {
-            // Failures are expected once shutdown starts, since new
-            // transfers are refused. Do not warn or attempt a reopen, the
-            // caller is about to be joined anyway.
-            if lianli_transport::usb::shutting_down() {
-                debug!("{name} transport op failed ({e}) while shutting down, not reopening");
-                return Err(e).context("shutting down");
-            }
-            warn!("{name} transport op failed ({e}); attempting reopen");
+    retry_transport_operation(
+        stop,
+        || {
+            let handle = arc.lock();
+            anyhow::ensure!(
+                !stop.load(Ordering::Acquire),
+                "wireless controller is stopping"
+            );
+            op(&handle)
+        },
+        |error| {
+            warn!("{name} transport op failed ({error}); attempting reopen");
             reopen_transport(arc, ids, name).context("reopen after stale handle")?;
             info!("{name} transport reopened, retrying");
-            let handle = arc.lock();
-            op(&handle)
+            Ok(())
+        },
+    )
+}
+
+fn retry_transport_operation<R>(
+    stop: &AtomicBool,
+    mut operation: impl FnMut() -> Result<R>,
+    reopen: impl FnOnce(&anyhow::Error) -> Result<()>,
+) -> Result<R> {
+    anyhow::ensure!(
+        !stop.load(Ordering::Acquire),
+        "wireless controller is stopping"
+    );
+    match operation() {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            if lianli_transport::usb::shutting_down() || stop.load(Ordering::Acquire) {
+                return Err(error).context("shutting down");
+            }
+            reopen(&error)?;
+            anyhow::ensure!(
+                !stop.load(Ordering::Acquire),
+                "wireless controller is stopping"
+            );
+            operation()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn stopped_controller_never_starts_an_operation() {
+        let stop = AtomicBool::new(true);
+        let result: Result<()> = retry_transport_operation(
+            &stop,
+            || panic!("operation must not start"),
+            |_| panic!("transport must not reopen"),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stop_during_failed_operation_prevents_reopen() {
+        let stop = AtomicBool::new(false);
+        let result: Result<()> = retry_transport_operation(
+            &stop,
+            || {
+                stop.store(true, Ordering::Release);
+                anyhow::bail!("receiver read failed")
+            },
+            |_| panic!("transport must not reopen after stop"),
+        );
+        assert!(result.unwrap_err().to_string().contains("shutting down"));
+    }
+
+    #[test]
+    fn stop_during_reopen_prevents_retry() {
+        let stop = AtomicBool::new(false);
+        let attempts = Cell::new(0);
+        let result: Result<()> = retry_transport_operation(
+            &stop,
+            || {
+                attempts.set(attempts.get() + 1);
+                anyhow::bail!("receiver read failed")
+            },
+            |_| {
+                stop.store(true, Ordering::Release);
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts.get(), 1);
+    }
+
+    #[test]
+    fn running_controller_reopens_once_and_returns_retry_result() {
+        let stop = AtomicBool::new(false);
+        let attempts = Cell::new(0);
+        let reopens = Cell::new(0);
+        let result = retry_transport_operation(
+            &stop,
+            || {
+                attempts.set(attempts.get() + 1);
+                if attempts.get() == 1 {
+                    anyhow::bail!("receiver read failed");
+                }
+                Ok(42)
+            },
+            |_| {
+                reopens.set(reopens.get() + 1);
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(attempts.get(), 2);
+        assert_eq!(reopens.get(), 1);
     }
 }

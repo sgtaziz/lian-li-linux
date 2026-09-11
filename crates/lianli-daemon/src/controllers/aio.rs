@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 const TICK: Duration = Duration::from_secs(1);
@@ -111,7 +111,7 @@ fn run(
 ) {
     let all_sensors = enumerate_sensors();
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
-    let mut switched: HashSet<[u8; 6]> = HashSet::new();
+    let mut switched: HashMap<[u8; 6], ThemeSwitch> = HashMap::new();
     // Last-sent speeds for wireless slots that resolve to "no target"
     // (off / missing curve / sensor failure): hold instead of dropping to 0.
     let mut wireless_hold: HashMap<[u8; 6], [u8; 4]> = HashMap::new();
@@ -153,7 +153,7 @@ fn run(
         );
 
         let live_macs: HashSet<[u8; 6]> = devices.iter().map(|d| d.mac).collect();
-        switched.retain(|m| live_macs.contains(m));
+        switched.retain(|m, _| live_macs.contains(m));
         wireless_hold.retain(|m, _| live_macs.contains(m));
 
         thread::sleep(TICK);
@@ -162,12 +162,18 @@ fn run(
     debug!("AioController stopped");
 }
 
+struct ThemeSwitch {
+    sequence: u8,
+    sent_at: Instant,
+    acknowledged: bool,
+}
+
 fn control_wireless(
     wireless: &WirelessController,
     devices: &[DiscoveredDevice],
     cfg: &AppConfig,
     curves: &HashMap<String, FanCurve>,
-    switched: &mut HashSet<[u8; 6]>,
+    switched: &mut HashMap<[u8; 6], ThemeSwitch>,
     wireless_hold: &mut HashMap<[u8; 6], [u8; 4]>,
     sensor_cache: &mut HashMap<SensorSource, ResolvedSensor>,
     all_sensors: &[SensorInfo],
@@ -181,18 +187,39 @@ fn control_wireless(
             continue;
         };
 
-        if !switched.contains(&device.mac) {
+        let needs_switch = match switched.get_mut(&device.mac) {
+            Some(state) => {
+                if !state.acknowledged
+                    && wireless.wireless_theme_acked(&device.mac, state.sequence, state.sent_at)
+                {
+                    state.acknowledged = true;
+                    info!(
+                        "AIO {}: wireless theme command acknowledged",
+                        device.mac_str()
+                    );
+                }
+                !state.acknowledged && state.sent_at.elapsed() >= Duration::from_secs(2)
+            }
+            None => true,
+        };
+        if needs_switch {
+            let sent_at = Instant::now();
             match wireless.switch_to_wireless_theme(&device.mac) {
-                Ok(()) => {
-                    switched.insert(device.mac);
-                    info!("AIO {}: wireless theme mode engaged", device.mac_str());
+                Ok(sequence) => {
+                    switched.insert(
+                        device.mac,
+                        ThemeSwitch {
+                            sequence,
+                            sent_at,
+                            acknowledged: false,
+                        },
+                    );
                 }
                 Err(e) => {
                     warn!(
                         "AIO {}: switch_to_wireless_theme failed: {e:#}",
                         device.mac_str()
                     );
-                    continue;
                 }
             }
         }

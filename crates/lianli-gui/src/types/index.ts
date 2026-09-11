@@ -242,7 +242,8 @@ export interface FanConfig {
 // ─── RGB ────────────────────────────────────────────────────────────────────
 export type RgbMode = string;
 export type RgbDirection = "Clockwise" | "CounterClockwise" | "Up" | "Down" | "Spread" | "Gather";
-export type RgbScope = "All" | "Top" | "Bottom" | "Inner" | "Outer";
+export type RgbScope = "All" | "Fan" | "Top" | "Bottom" | "Inner" | "Outer" | "Center" | "Pump" | "Front" | "Rear"
+  | "Segment1" | "Segment2" | "Segment3" | "Segment4" | "Segment5" | "Segment6";
 
 export interface RgbEffect {
   mode: RgbMode;
@@ -261,11 +262,36 @@ export interface RgbZoneConfig {
   swap_tb: boolean;
 }
 
+export interface RgbRegionConfig {
+  effect: RgbEffect;
+  flip: boolean;
+}
+
+export interface RgbEffectMemory {
+  zone?: number | null;
+  effect: RgbEffect;
+  flip: boolean;
+}
+
 export interface RgbDeviceConfig {
   device_id: string;
   mb_rgb_sync: boolean;
   active_preset?: string | null;
   zones: RgbZoneConfig[];
+  regions?: RgbRegionConfig[] | null;
+  effect_memory?: RgbEffectMemory[];
+}
+
+export type RgbSyncKind = "Continuous" | "Matched";
+
+export interface MergeLightingConfig {
+  enabled: boolean;
+  kind: RgbSyncKind;
+  effect_memory?: RgbEffect[];
+  device_order: string[];
+  directions: RgbDirection[];
+  effect: RgbEffect;
+  disabled_devices: string[];
 }
 
 export interface RgbAppConfig {
@@ -273,6 +299,7 @@ export interface RgbAppConfig {
   openrgb_server: boolean;
   openrgb_port: number;
   devices: RgbDeviceConfig[];
+  merge_lighting?: MergeLightingConfig | null;
 }
 
 export interface RgbZoneInfo {
@@ -280,10 +307,33 @@ export interface RgbZoneInfo {
   led_count: number;
 }
 
+export interface RgbEffectParameters {
+  mode: RgbMode;
+  min_colors: number;
+  max_colors: number;
+  per_fan_colors: boolean;
+  directions: RgbDirection[];
+  supports_speed: boolean;
+}
+
 export interface RgbDeviceCapabilities {
+  group_effect_modes?: string[];
+  zone_effect_modes?: string[];
   device_id: string;
   device_name: string;
   supported_modes: RgbMode[];
+  software_modes?: RgbMode[];
+  sync_led_count?: number | null;
+  sync_effect_parameters?: RgbEffectParameters[];
+  effect_regions?: RgbScope[];
+  region_parameters?: { scope: RgbScope; effects: RgbEffectParameters[] }[];
+  effect_parameters?: RgbEffectParameters[];
+  render_profile?: {
+    family: "Tl" | "Sl" | "SlInf" | "SlInfV3" | "SlV4" | "Cl" | "P28" | "Strimer" | "HydroShiftII" | "HydroShiftIIOled" | "UniversalScreen" | "Lancool217" | "LancoolV150";
+    right_attach?: boolean;
+    fan_count: number;
+    led_count: number;
+  } | null;
   zones: RgbZoneInfo[];
   supports_direct: boolean;
   supports_mb_rgb_sync: boolean;
@@ -305,6 +355,7 @@ export interface RgbPreset {
   name: string;
   device_id: string;
   zones: RgbPresetZone[];
+  regions?: RgbRegionConfig[] | null;
 }
 
 // ─── AIO ──────────────────────────────────────────────────────────────────────

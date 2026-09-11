@@ -27,7 +27,8 @@ pub enum IpcRequest {
     GetTelemetry,
     /// Get RGB capabilities for all devices.
     GetRgbCapabilities,
-    /// Set RGB effect for a specific device zone.
+    /// Set RGB effect for a specific device zone. Software effects acknowledge
+    /// acceptance by the bounded renderer; device delivery runs asynchronously.
     SetRgbEffect {
         device_id: String,
         zone: u8,
@@ -102,7 +103,9 @@ pub enum IpcRequest {
     SwitchDisplayMode {
         device_id: String,
     },
-    /// Bind an unbound wireless device to this dongle.
+    GetWirelessOperation {
+        operation_id: String,
+    },
     BindWirelessDevice {
         mac: String,
     },
@@ -231,6 +234,14 @@ pub enum IpcEvent {
         device_index: u8,
         rpms: Vec<u16>,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum WirelessOperationStatus {
+    Pending,
+    Succeeded,
+    Failed { message: String },
 }
 
 /// Info about a connected device, returned by ListDevices.

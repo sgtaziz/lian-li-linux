@@ -1,7 +1,7 @@
 use super::controller::WirelessController;
 use super::discovery::{DeviceHealthMap, DiscoveredDevice, ACK_FRESHNESS};
 use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, USB_CMD_SEND_RF};
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
@@ -11,18 +11,20 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
-/// Initial retry budget for a pending command. The convergence loop re-sends
-/// every [`TICK_INTERVAL`] until the device acknowledges or the budget is
-/// exhausted. On exhaustion the command is silently force-acknowledged — it
-/// is never dropped with a warning.
 const INITIAL_RETRIES: u32 = 10;
 
-/// Convergence loop tick interval. Commands are re-sent on each tick until
-/// acknowledged. 10 retries × 100 ms = 1 s hard timeout.
 const TICK_INTERVAL: Duration = Duration::from_millis(100);
+// RGB acknowledgement must not indefinitely suppress cooling keepalives.
+const RGB_CONTROL_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_PENDING_COMMANDS: usize = 256;
+
+pub(super) type BindingMac = Arc<Mutex<Option<[u8; 6]>>>;
+
+pub(super) type RgbTargets = Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>;
 
 /// How a pending command is acknowledged. Different RF command types use
 /// different ack signals.
+#[derive(Clone)]
 pub(super) enum AckSignal {
     /// Device's reported `current_pwm` must match.
     Pwm([u8; 4]),
@@ -31,6 +33,7 @@ pub(super) enum AckSignal {
 }
 
 /// A command awaiting device acknowledgment.
+#[derive(Clone)]
 pub(super) struct PendingCommand {
     pub mac: [u8; 6],
     pub channel: u8,
@@ -39,6 +42,7 @@ pub(super) struct PendingCommand {
     pub ack: AckSignal,
     pub remaining_retries: u32,
     pub last_sent: Instant,
+    queued_at: Instant,
     pub description: String,
 }
 
@@ -59,57 +63,61 @@ pub(super) type PendingQueue = Arc<Mutex<VecDeque<PendingCommand>>>;
 pub(super) type TargetSeqMap = Arc<Mutex<std::collections::HashMap<[u8; 6], u8>>>;
 
 impl WirelessController {
-    /// Enqueue a state-changing RF command for convergence-tracked delivery.
-    /// Sends the command immediately, then the background loop re-sends every
-    /// [`TICK_INTERVAL`] until the device acknowledges or the retry budget runs out.
     pub(super) fn enqueue_rf_command(
         &self,
         device: &DiscoveredDevice,
         rf_data: Vec<u8>,
         ack: AckSignal,
         description: impl Into<String>,
-    ) {
-        if let Some(queue) = self.pending_commands.as_ref() {
-            let cmd = PendingCommand {
-                mac: device.mac,
-                channel: device.channel,
-                rx_type: device.rx_type,
-                rf_data,
-                ack,
-                remaining_retries: INITIAL_RETRIES,
-                last_sent: Instant::now(),
-                description: description.into(),
-            };
+    ) -> Result<()> {
+        let _order = self.command_order.lock();
+        ensure!(self.tx.is_some(), "wireless TX is unavailable");
+        ensure!(
+            !self.poll_stop.load(Ordering::Acquire),
+            "wireless controller is stopping"
+        );
+        ensure!(
+            rf_data.len() == RF_DATA_SIZE,
+            "invalid wireless command length"
+        );
+        ensure!(
+            !binding_blocks_control(&self.binding_mac, &self.device_health, &device.mac),
+            "wireless binding change prevents this control command"
+        );
+        let queue = self
+            .pending_commands
+            .as_ref()
+            .context("wireless command queue is unavailable")?;
+        let cmd = PendingCommand {
+            mac: device.mac,
+            channel: device.channel,
+            rx_type: device.rx_type,
+            rf_data,
+            ack,
+            remaining_retries: INITIAL_RETRIES,
+            last_sent: Instant::now(),
+            queued_at: Instant::now(),
+            description: description.into(),
+        };
 
-            if let Err(e) = self.send_command_once(&cmd) {
-                warn!("initial send failed for {}: {e:#}", cmd.mac_str());
-            }
-
-            queue.lock().push_back(cmd);
+        admit_command(&mut queue.lock(), cmd.clone())?;
+        if let Err(e) = self.send_command_once(&cmd) {
+            warn!("initial send failed for {}: {e:#}", cmd.mac_str());
         }
+        Ok(())
     }
 
-    /// Compute the next target `cmd_seq` for a device. Seeded from the device's
-    /// last reported `cmd_seq`; increments by 1 for each queued command so rapid
-    /// successive sends each get a distinct target.
     pub(super) fn bump_target_cmd_seq(&self, mac: &[u8; 6], device_cmd_seq: u8) -> u8 {
         if let Some(map) = self.target_cmd_seqs.as_ref() {
             let mut guard = map.lock();
-            let next = match guard.get(mac) {
-                Some(&last_pending) if last_pending >= device_cmd_seq => {
-                    last_pending.wrapping_add(1)
-                }
-                _ => device_cmd_seq.wrapping_add(1),
-            };
-            let next = if next == 0 { 1 } else { next };
+            let next = next_target_sequence(guard.get(mac).copied(), device_cmd_seq);
             guard.insert(*mac, next);
             next
         } else {
-            device_cmd_seq.wrapping_add(1).max(1)
+            next_target_sequence(None, device_cmd_seq)
         }
     }
 
-    /// Send a single RF command packet set (4 × 64-byte USB chunks).
     fn send_command_once(&self, cmd: &PendingCommand) -> Result<()> {
         self.tx_recover(|handle| {
             send_rf_frame(handle, &cmd.channel, &cmd.rx_type, &cmd.rf_data)?;
@@ -117,16 +125,14 @@ impl WirelessController {
         })
     }
 
-    /// Spawn the convergence TX loop. Runs until `stop` is set; re-sends any
-    /// pending command whose `target_cmd_seq` has not yet been acknowledged by
-    /// the device.
     pub(super) fn spawn_convergence_loop(
         tx: Arc<Mutex<RusbBulk>>,
         queue: PendingQueue,
-        target_seqs: TargetSeqMap,
         health_map: DeviceHealthMap,
+        rgb_targets: RgbTargets,
+        binding_mac: BindingMac,
         stop: Arc<AtomicBool>,
-    ) -> thread::JoinHandle<()> {
+    ) -> Result<thread::JoinHandle<()>> {
         thread::Builder::new()
             .name("wireless-convergence".into())
             .spawn(move || {
@@ -134,7 +140,7 @@ impl WirelessController {
                 while !stop.load(Ordering::SeqCst) {
                     let tick_start = Instant::now();
 
-                    drain_pending(&tx, &queue, &target_seqs, &health_map, &stop);
+                    drain_pending(&tx, &queue, &health_map, &rgb_targets, &binding_mac, &stop);
 
                     let elapsed = tick_start.elapsed();
                     if elapsed < TICK_INTERVAL {
@@ -143,41 +149,57 @@ impl WirelessController {
                 }
                 debug!("wireless convergence loop stopped");
             })
-            .expect("spawning convergence thread")
+            .context("spawning wireless convergence thread")
+    }
+}
+
+fn next_target_sequence(previous: Option<u8>, observed: u8) -> u8 {
+    match previous.unwrap_or(observed) {
+        value @ 0..=253 => value + 1,
+        _ => 1,
     }
 }
 
 fn drain_pending(
     tx: &Arc<Mutex<RusbBulk>>,
     queue: &PendingQueue,
-    _target_seqs: &TargetSeqMap,
     health_map: &DeviceHealthMap,
-    _stop: &Arc<AtomicBool>,
+    rgb_targets: &RgbTargets,
+    binding_mac: &BindingMac,
+    stop: &Arc<AtomicBool>,
 ) {
-    // Retrying convergence is pointless once shutdown starts, since every
-    // transfer is refused on purpose. Leave the queue alone and let the
-    // loop end when its stop flag is raised.
     if lianli_transport::usb::shutting_down() {
         return;
     }
-    let mut guard = queue.lock();
-    if guard.is_empty() {
+    let mut commands = {
+        let mut pending = queue.lock();
+        std::mem::take(&mut *pending)
+    };
+    if commands.is_empty() {
         return;
     }
 
-    let health = health_map.lock();
     let now = Instant::now();
-
-    let mut retain = VecDeque::with_capacity(guard.len());
-    while let Some(mut cmd) = guard.pop_front() {
-        let acked = health
-            .get(&cmd.mac)
-            .filter(|h| h.raw_seen.elapsed() <= ACK_FRESHNESS)
-            .map(|h| match &cmd.ack {
-                AckSignal::Pwm(target) => pwm_acked(&h.published.current_pwm, target),
-                AckSignal::CmdSeq(target) => h.published.cmd_seq == *target,
-            })
-            .unwrap_or(false);
+    while let Some(mut cmd) = commands.pop_front() {
+        if stop.load(Ordering::Acquire) || lianli_transport::usb::shutting_down() {
+            break;
+        }
+        let target = rgb_targets.lock().get(&cmd.mac).copied();
+        let (acked, changing_rgb) = {
+            let health = health_map.lock();
+            let recent = health
+                .get(&cmd.mac)
+                .filter(|h| h.raw_seen.elapsed() <= ACK_FRESHNESS);
+            let acked = recent
+                .map(|h| match &cmd.ack {
+                    AckSignal::Pwm(target) => pwm_acked(&h.published.current_pwm, target),
+                    AckSignal::CmdSeq(target) => h.published.cmd_seq == *target,
+                })
+                .unwrap_or(false);
+            let changing_rgb = target
+                .is_some_and(|target| recent.is_none_or(|h| h.published.effect_index != target));
+            (acked, changing_rgb)
+        };
 
         if acked {
             debug!(
@@ -189,12 +211,12 @@ fn drain_pending(
             continue;
         }
 
-        let due = now.duration_since(cmd.last_sent) >= TICK_INTERVAL;
+        let due = retry_due(now.duration_since(cmd.last_sent), changing_rgb, &cmd.ack);
         if due {
             cmd.remaining_retries = cmd.remaining_retries.saturating_sub(1);
             if cmd.remaining_retries == 0 {
                 debug!(
-                    "force-ack {} ({}) after {} retries — giving up convergence",
+                    "command remained unacknowledged for {} ({}) after {} retries",
                     cmd.mac_str(),
                     cmd.description,
                     INITIAL_RETRIES,
@@ -202,7 +224,14 @@ fn drain_pending(
                 continue;
             }
             cmd.last_sent = now;
-            if let Err(e) = send_rf_frame(&tx.lock(), &cmd.channel, &cmd.rx_type, &cmd.rf_data) {
+            let handle = tx.lock();
+            if binding_blocks_control(binding_mac, health_map, &cmd.mac) {
+                continue;
+            }
+            if superseded_command(&queue.lock(), &cmd) {
+                continue;
+            }
+            if let Err(e) = send_rf_frame(&handle, &cmd.channel, &cmd.rx_type, &cmd.rf_data) {
                 warn!(
                     "re-send failed for {} ({}): {e:#}",
                     cmd.mac_str(),
@@ -210,13 +239,60 @@ fn drain_pending(
                 );
             }
         }
-        retain.push_back(cmd);
+        let mut pending = queue.lock();
+        let superseded = superseded_command(&pending, &cmd);
+        if !superseded && pending.len() < MAX_PENDING_COMMANDS {
+            pending.push_back(cmd);
+        } else if !superseded {
+            warn!(mac = ?cmd.mac, operation = %cmd.description, "Wireless command retry discarded because the queue is full");
+        }
     }
-    *guard = retain;
+}
+
+fn binding_blocks_control(binding: &BindingMac, health: &DeviceHealthMap, mac: &[u8; 6]) -> bool {
+    *binding.lock() == Some(*mac) || health.lock().get(mac).is_some_and(|h| h.man_unbind)
+}
+
+fn retry_due(elapsed: Duration, changing_rgb: bool, acknowledgement: &AckSignal) -> bool {
+    elapsed
+        >= if changing_rgb && matches!(acknowledgement, AckSignal::Pwm(_)) {
+            RGB_CONTROL_INTERVAL
+        } else {
+            TICK_INTERVAL
+        }
+}
+
+fn admit_command(pending: &mut VecDeque<PendingCommand>, command: PendingCommand) -> Result<()> {
+    let replaces = pending.iter().any(|old| same_target_slot(old, &command));
+    ensure!(
+        pending.len() < MAX_PENDING_COMMANDS || replaces,
+        "wireless command queue is full"
+    );
+    pending.retain(|old| !same_target_slot(old, &command));
+    pending.push_back(command);
+    Ok(())
+}
+
+fn same_target_slot(left: &PendingCommand, right: &PendingCommand) -> bool {
+    left.mac == right.mac
+        && match (&left.ack, &right.ack) {
+            (AckSignal::Pwm(_), AckSignal::Pwm(_)) => true,
+            (AckSignal::CmdSeq(_), AckSignal::CmdSeq(_)) => left.rf_data[1] == right.rf_data[1],
+            _ => false,
+        }
+}
+
+fn superseded_command(pending: &VecDeque<PendingCommand>, command: &PendingCommand) -> bool {
+    pending
+        .iter()
+        .any(|new| same_target_slot(new, command) && new.queued_at > command.queued_at)
 }
 
 fn send_rf_frame(handle: &RusbBulk, channel: &u8, rx_type: &u8, rf_data: &[u8]) -> Result<()> {
-    assert_eq!(rf_data.len(), RF_DATA_SIZE);
+    ensure!(
+        rf_data.len() == RF_DATA_SIZE,
+        "invalid wireless command length"
+    );
     for chunk_idx in 0..RF_CHUNKS as u8 {
         let mut packet = [0u8; 64];
         packet[0] = USB_CMD_SEND_RF;
@@ -226,9 +302,13 @@ fn send_rf_frame(handle: &RusbBulk, channel: &u8, rx_type: &u8, rf_data: &[u8]) 
         let start = chunk_idx as usize * RF_CHUNK_SIZE;
         let end = start + RF_CHUNK_SIZE;
         packet[4..64].copy_from_slice(&rf_data[start..end]);
-        handle
+        let written = handle
             .write(&packet, USB_TIMEOUT)
             .context("sending RF packet chunk")?;
+        ensure!(
+            written == packet.len(),
+            "short wireless command write: {written}/64 bytes"
+        );
         thread::sleep(Duration::from_millis(1));
     }
     Ok(())
@@ -237,8 +317,15 @@ fn send_rf_frame(handle: &RusbBulk, channel: &u8, rx_type: &u8, rf_data: &[u8]) 
 /// Check whether the device's reported PWM values match the target. Allows a
 /// tolerance of 5 because the device rounds to its nearest internal step.
 fn pwm_acked(reported: &[u8; 4], target: &[u8; 4]) -> bool {
-    reported
-        .iter()
-        .zip(target.iter())
-        .all(|(r, t)| r.abs_diff(*t) <= 5 || (*t <= 10 && *r == *t))
+    reported.iter().zip(target.iter()).all(|(r, t)| {
+        if *t <= 10 {
+            *r == *t
+        } else {
+            r.abs_diff(*t) <= 5
+        }
+    })
 }
+
+#[cfg(test)]
+#[path = "convergence_tests.rs"]
+mod tests;

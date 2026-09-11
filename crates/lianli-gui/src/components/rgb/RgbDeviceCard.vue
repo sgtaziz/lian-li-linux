@@ -8,6 +8,7 @@ import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useIpc } from "@/composables/useIpc";
 import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
+import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
 
 const props = defineProps<{ cap: RgbDeviceCapabilities }>();
 
@@ -33,17 +34,33 @@ const devConfig = computed(() => config.rgbDeviceConfig(props.cap.device_id));
 const device = computed(() => devices.byId(props.cap.device_id));
 
 const expanded = ref(true);
+const regional = computed(() => (props.cap.effect_regions?.length ?? 0) > 0);
+const portGroups = computed(() => (props.cap.group_effect_modes?.length ?? 0) > 0);
+const controlTab = ref<"regions" | "direct">("regions");
+watch(() => devConfig.value.zones[0]?.effect.scope, (scope) => {
+  if (portGroups.value) controlTab.value = scope === "Fan" ? "direct" : "regions";
+}, { immediate: true });
+const visibleZones = computed(() => devConfig.value.zones.slice(0, props.cap.zones.length));
+const syncActive = computed(() => {
+  const sync = config.ensureRgb().merge_lighting;
+  if (devConfig.value.mb_rgb_sync) return false;
+  if (!sync?.enabled || !sync.device_order.includes(props.cap.device_id)) return false;
+  if (sync.disabled_devices.includes(props.cap.device_id)) return false;
+  return sync.kind === "Continuous"
+    ? props.cap.sync_led_count != null
+    : props.cap.supported_modes.includes(sync.effect.mode);
+});
 
-// Ensure zones match the capability list.
 watch(
-  devConfig,
-  (cfg) => {
+  [devConfig, () => props.cap.zones.length],
+  ([cfg]) => {
     const cap = props.cap;
+    const mode = cfg.zones.length > 0 && cfg.zones.every((zone) => zone.effect.mode === "Direct") ? "Direct" : "Static";
     while (cfg.zones.length < cap.zones.length) {
       cfg.zones.push({
         zone_index: cfg.zones.length,
         effect: {
-          mode: "Static",
+          mode,
           colors: [[255, 255, 255]],
           speed: 2,
           brightness: 4,
@@ -150,24 +167,34 @@ const summary = computed(() =>
     </div>
 
     <div v-if="expanded" class="body">
+      <p v-if="syncActive" class="sync-notice">Quick Sync controls this device. Disable it in Quick Sync to edit device lighting.</p>
+      <div class="device-controls" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
       <div v-if="cap.supports_mb_rgb_sync" class="row">
         <n-checkbox v-model:checked="mbSync">Motherboard ARGB Sync</n-checkbox>
       </div>
 
       <!-- When MB sync is active, hide zone config — the motherboard controls RGB -->
       <template v-if="!mbSync">
-        <div class="zones">
+        <div v-if="regional || portGroups" class="control-tabs">
+          <n-button size="small" :type="controlTab === 'regions' ? 'primary' : 'default'" @click="controlTab = 'regions'">Group effects</n-button>
+          <n-button v-if="cap.supports_direct || portGroups" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">Direct / zones</n-button>
+        </div>
+        <RgbRegionEditor v-if="regional && controlTab === 'regions'" :device-id="cap.device_id" :cap="cap" />
+        <RgbZoneEditor v-else-if="portGroups && controlTab === 'regions' && visibleZones[0]" :device-id="cap.device_id" :cap="cap" :zone-index="0" :zone="visibleZones[0]" group-effects />
+        <div v-if="(!regional && !portGroups) || controlTab === 'direct'" class="zones">
           <RgbZoneEditor
-            v-for="(z, i) in devConfig.zones"
+            v-for="(z, i) in visibleZones"
             :key="i"
             :device-id="cap.device_id"
             :cap="cap"
             :zone-index="i"
             :zone="z"
+            :direct-only="regional && controlTab === 'direct'"
+            :per-fan-only="portGroups && controlTab === 'direct'"
           />
         </div>
 
-        <div class="actions">
+        <div v-if="!regional && !portGroups" class="actions">
           <n-button size="small" @click="applyToAllZones">Apply to All Zones</n-button>
         </div>
 
@@ -204,6 +231,7 @@ const summary = computed(() =>
         </n-button>
       </div>
       </template>
+      </div>
     </div>
   </div>
 </template>
@@ -249,6 +277,24 @@ const summary = computed(() =>
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+.device-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.sync-locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.sync-notice {
+  margin: 0;
+  color: var(--primary-color);
+  font-size: var(--font-size-sm);
+}
+.control-tabs {
+  display: flex;
+  gap: var(--space-2);
 }
 .row {
   display: flex;

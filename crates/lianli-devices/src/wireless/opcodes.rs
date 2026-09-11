@@ -34,7 +34,7 @@ impl WirelessController {
             rf_data,
             AckSignal::CmdSeq(target_cmd_seq),
             "selected group".to_string(),
-        );
+        )?;
 
         debug!("Selected group: {}", device.mac_str());
         Ok(())
@@ -62,7 +62,7 @@ impl WirelessController {
             rf_data,
             AckSignal::CmdSeq(target_cmd_seq),
             "LCD reboot".to_string(),
-        );
+        )?;
 
         debug!("LCD reboot: {}", device.mac_str());
         Ok(())
@@ -91,7 +91,7 @@ impl WirelessController {
             rf_data,
             AckSignal::CmdSeq(target_cmd_seq),
             format!("217 wifi {}", if disable { "disable" } else { "enable" }),
-        );
+        )?;
 
         debug!(
             "217 wifi {}: {}",
@@ -129,7 +129,7 @@ impl WirelessController {
                 chunk_idx,
                 &image[start..end],
             )?;
-            self.wait_pic_ack(&device.mac, next_seq);
+            self.wait_pic_ack(&device.mac, next_seq)?;
         }
 
         let len = image.len() as u16;
@@ -145,7 +145,7 @@ impl WirelessController {
             PIC_TERMINATOR,
             &term_payload,
         )?;
-        self.wait_pic_ack(&device.mac, next_seq);
+        self.wait_pic_ack(&device.mac, next_seq)?;
 
         debug!(
             "SendPic: {} ({} chunks + terminator, {} bytes)",
@@ -198,15 +198,20 @@ impl WirelessController {
         Ok(next_seq)
     }
 
-    fn wait_pic_ack(&self, mac: &[u8; 6], expected_seq: u8) {
+    fn wait_pic_ack(&self, mac: &[u8; 6], expected_seq: u8) -> Result<()> {
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while std::time::Instant::now() < deadline {
             if let Some(d) = self.device_by_mac(mac) {
                 if d.cmd_seq == expected_seq {
-                    return;
+                    return Ok(());
                 }
             }
+            anyhow::ensure!(
+                !self.poll_stop.load(std::sync::atomic::Ordering::Acquire),
+                "wireless controller is stopping"
+            );
             std::thread::sleep(Duration::from_millis(50));
         }
+        bail!("picture command acknowledgement timed out for {mac:02x?}")
     }
 }

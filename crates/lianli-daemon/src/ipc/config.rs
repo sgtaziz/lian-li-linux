@@ -48,6 +48,9 @@ pub fn set_rgb_config(
     tx: Sender<DaemonEvent>,
     config: RgbAppConfig,
 ) -> IpcResponse {
+    if let Some(response) = super::rgb::validate_config(state, &config) {
+        return response;
+    }
     let mut state = state.lock();
     state.config.get_or_insert_with(AppConfig::default).rgb = Some(config);
     persist_and_notify(&mut state, &tx, "SetRgbConfig")

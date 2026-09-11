@@ -443,6 +443,9 @@ impl ServiceManager {
 
         let arc = Arc::new(fan_devices);
         self.registry.fan_devices = Arc::clone(&arc);
+        if let Some(rgb) = &self.controllers.rgb {
+            rgb.lock().retain_wired(&present_ids);
+        }
         self.init_rgb_controller_from(wired_rgb);
         match self.snapshot_wired() {
             Ok((ids, topos)) => {
@@ -646,6 +649,17 @@ impl ServiceManager {
             None
         };
 
+        if let Some(rgb) = &self.controllers.rgb {
+            {
+                let mut controller = rgb.lock();
+                controller.replace_wired(all_wired);
+                controller.set_wireless(wireless);
+                controller.refresh_wireless_devices();
+            }
+            self.apply_rgb_config();
+            return;
+        }
+
         let mut controller = RgbController::new(all_wired, wireless);
 
         // Start thermal alert monitor and share override state with RGB controller
@@ -697,16 +711,24 @@ impl ServiceManager {
         self.start_fan_control();
     }
 
-    /// Apply RGB config from the current AppConfig to the RGB controller.
     pub(super) fn apply_rgb_config(&self) {
-        // Read from the IPC-side config, self.config only catches up on
-        // load_config and can lag behind a just-applied preset.
-        if let Some(ref rgb) = self.controllers.rgb {
-            let ipc_state = self.ipc.state.lock();
-            if let Some(rgb_cfg) = ipc_state.config.as_ref().and_then(|c| c.rgb.clone()) {
-                let presets = ipc_state.rgb_presets.clone();
-                rgb.lock().apply_config(&rgb_cfg, &presets);
-            }
+        let (controller, config, presets) = {
+            let state = self.ipc.state.lock();
+            (
+                state.rgb_controller.clone(),
+                state
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.rgb.clone())
+                    .unwrap_or_else(|| lianli_shared::rgb::RgbAppConfig {
+                        enabled: false,
+                        ..Default::default()
+                    }),
+                state.rgb_presets.clone(),
+            )
+        };
+        if let Some(controller) = controller {
+            controller.lock().apply_config(&config, &presets);
         }
     }
 
@@ -754,7 +776,6 @@ impl ServiceManager {
                 Arc::clone(&self.openrgb.stop),
                 Arc::clone(&self.openrgb.state),
             ));
-            // Start the async writer thread that flushes buffered colors at 30fps
             if self.controllers.direct_color_writer.is_none() {
                 self.controllers.direct_color_writer =
                     Some(crate::controllers::rgb::start_direct_color_writer(
@@ -790,35 +811,19 @@ impl ServiceManager {
         configured_ids
     }
 
-    fn auto_rebind_configured_wireless(&mut self) {
-        let configured_ids = self.configured_wireless_device_ids();
-
-        for dev in self.wireless.unbound_devices() {
-            if dev.master_mac != [0u8; 6] {
-                continue;
-            }
-            let device_id = format!("wireless:{}", dev.mac_str());
-            if !configured_ids.contains(&device_id) {
-                continue;
-            }
-
-            info!("Auto-rebinding configured wireless device {device_id}");
-            if let Err(err) = self.wireless.bind_device(&dev.mac) {
-                warn!("Auto-rebind failed for {device_id}: {err}");
-            }
-        }
-    }
-
     pub(super) fn try_wireless(&mut self) {
         if !lianli_devices::wireless::tx_dongle_present() {
             debug!("[wireless] no TX/RX devices found, skipping wireless");
             return;
         }
+        let restart_controllers = self.controllers.fan.is_some() || self.controllers.aio.is_some();
+        if let Some(rgb) = &self.controllers.rgb {
+            rgb.lock().set_wireless(None);
+        }
         match self.wireless.connect() {
             Ok(()) => match self.wireless.start_polling() {
                 Ok(()) => {
                     let _ = self.wireless.send_rx_sequence();
-                    self.auto_rebind_configured_wireless();
                     info!("Wireless links active");
                 }
                 Err(err) => warn!("[wireless] polling start failed: {err}"),
@@ -826,6 +831,11 @@ impl ServiceManager {
             Err(_) => {
                 debug!("[wireless] no TX/RX devices found, skipping wireless");
             }
+        }
+        if restart_controllers {
+            self.start_fan_control();
+            self.start_aio_control();
+            self.rebuild_rgb_controller();
         }
     }
 

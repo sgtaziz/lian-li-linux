@@ -41,6 +41,7 @@ pub struct DaemonState {
     pub presets_path: PathBuf,
     pub devices: Vec<DeviceInfo>,
     pub telemetry: TelemetrySnapshot,
+    pub wireless_operations: super::wireless::WirelessOperations,
     /// RGB controller, set once devices are opened.
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
     pub user_templates: Vec<LcdTemplate>,
@@ -61,6 +62,7 @@ impl DaemonState {
             presets_path,
             devices: Vec::new(),
             telemetry: TelemetrySnapshot::default(),
+            wireless_operations: Default::default(),
             rgb_controller: None,
             user_templates: Vec::new(),
             rgb_presets,
@@ -225,6 +227,11 @@ fn handle_request(
         IpcRequest::GetTelemetry => super::system::get_telemetry(state),
 
         IpcRequest::SetConfig { config } => {
+            if let Some(rgb_config) = &config.rgb {
+                if let Some(response) = super::rgb::validate_config(state, rgb_config) {
+                    return response;
+                }
+            }
             let mut state = state.lock();
             state.config = Some(config);
             super::persist_and_notify(&mut state, &tx, "SetConfig")
@@ -266,8 +273,11 @@ fn handle_request(
             super::lcd::switch_display_mode(state, tx, device_id)
         }
 
-        IpcRequest::BindWirelessDevice { mac } => super::wireless::bind(tx, mac),
-        IpcRequest::UnbindWirelessDevice { mac } => super::wireless::unbind(tx, mac),
+        IpcRequest::GetWirelessOperation { operation_id } => {
+            super::wireless::operation(state, operation_id)
+        }
+        IpcRequest::BindWirelessDevice { mac } => super::wireless::bind(state, tx, mac),
+        IpcRequest::UnbindWirelessDevice { mac } => super::wireless::unbind(state, tx, mac),
         IpcRequest::RebootWirelessLcd { device_id } => super::wireless::reboot_lcd(tx, device_id),
         IpcRequest::DisableLc217Wifi { device_id, disable } => {
             super::wireless::disable_lc217_wifi(tx, device_id, disable)
@@ -276,6 +286,16 @@ fn handle_request(
         IpcRequest::UnbindAllWireless => super::wireless::unbind_all(tx),
         IpcRequest::GetChannel => super::wireless::get_channel(state),
         IpcRequest::SetMergeLightingConfig { config } => {
+            let mut rgb = state
+                .lock()
+                .config
+                .as_ref()
+                .and_then(|c| c.rgb.clone())
+                .unwrap_or_default();
+            rgb.merge_lighting = Some(config.clone());
+            if let Some(error) = super::rgb::validate_config(state, &rgb) {
+                return error;
+            }
             let mut state = state.lock();
             if let Some(ref mut app_config) = state.config {
                 app_config

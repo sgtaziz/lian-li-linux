@@ -8,9 +8,9 @@
 //! `LEDS_PER_CHUNK` is fixed at 20; total LED count is rounded up to the
 //! nearest multiple.
 
-use crate::traits::RgbDevice;
+use crate::traits::{RgbDevice, RgbFrameDelivery};
 use anyhow::{bail, Context, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use lianli_transport::TransportError;
 use parking_lot::Mutex;
@@ -147,6 +147,30 @@ impl RgbDevice for WinUsbLedDevice {
 
     fn supports_direct(&self) -> bool {
         true
+    }
+
+    fn software_render_profile(&self) -> Option<RgbRenderProfile> {
+        Some(RgbRenderProfile {
+            family: RgbRenderFamily::UniversalScreen,
+            fan_count: 0,
+            led_count: self.led_count,
+            right_attach: false,
+        })
+    }
+
+    fn software_frame_delivery(&self) -> Option<RgbFrameDelivery> {
+        Some(RgbFrameDelivery::Streaming)
+    }
+
+    fn set_software_frames(&self, frames: &[Vec<[u8; 3]>], _interval_ms: u16) -> Result<()> {
+        if frames.len() != 1 || frames[0].len() != self.led_count as usize {
+            bail!(
+                "{} RGB requires one full {}-LED frame",
+                self.name,
+                self.led_count
+            )
+        }
+        self.send_frame(&frames[0])
     }
 
     fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {

@@ -111,10 +111,12 @@ pub enum DaemonEvent {
     }, // Desktop→LCD. Handled by main event loop.
     Bind {
         mac_address: String,
-    }, // MAC address pending wireless device bind. Handled by main event loop.
+        operation_id: String,
+    },
     Unbind {
         mac_address: String,
-    }, // MAC address pending wireless device unbind. Handled by main event loop.
+        operation_id: String,
+    },
     SetEne6k77FanQuantity {
         device_id: String,
         quantity: u8,
@@ -293,7 +295,8 @@ impl ServiceManager {
 
         // Rebuild wireless-dependent controllers only after the bound-device
         // count holds stable for 3 consecutive polls.
-        let current_wireless = self.wireless.devices().len();
+        let wireless_devices = self.wireless.devices();
+        let current_wireless = wireless_devices.len();
         if current_wireless != self.wireless_stable_count {
             match self.wireless_pending_count {
                 Some(c) if c == current_wireless => self.wireless_pending_streak += 1,
@@ -321,6 +324,13 @@ impl ServiceManager {
         } else if self.wireless_pending_count.is_some() {
             self.wireless_pending_count = None;
             self.wireless_pending_streak = 0;
+        } else if self
+            .controllers
+            .rgb
+            .as_ref()
+            .is_some_and(|rgb| !rgb.lock().wireless_topology_matches(&wireless_devices))
+        {
+            self.rebuild_rgb_controller();
         }
 
         self.run_wireless_rebind_supervisor();
@@ -669,28 +679,38 @@ impl ServiceManager {
                     self.handle_display_switch_to_lcd(&device_id, pid);
                 }
                 DaemonEvent::Bind {
-                    mac_address: mac_str,
+                    mac_address,
+                    operation_id,
                 } => {
-                    if let Some(mac) = parse_mac_str(&mac_str) {
-                        if let Err(e) = self.wireless.bind_device(&mac) {
-                            warn!("Failed to bind wireless device {mac_str}: {e}");
-                        }
-                        self.device_poll();
-                    } else {
-                        warn!("Invalid MAC address for bind: {mac_str}");
+                    let result = parse_mac_str(&mac_address)
+                        .ok_or_else(|| anyhow::anyhow!("invalid wireless MAC address"))
+                        .and_then(|mac| self.wireless.bind_device(&mac));
+                    if let Err(error) = &result {
+                        warn!("Failed to bind wireless device {mac_address}: {error:#}");
                     }
+                    self.ipc
+                        .state
+                        .lock()
+                        .wireless_operations
+                        .complete(&operation_id, result);
+                    self.device_poll();
                 }
                 DaemonEvent::Unbind {
-                    mac_address: mac_str,
+                    mac_address,
+                    operation_id,
                 } => {
-                    if let Some(mac) = parse_mac_str(&mac_str) {
-                        if let Err(e) = self.wireless.unbind_device(&mac) {
-                            warn!("Failed to unbind wireless device {mac_str}: {e}");
-                        }
-                        self.device_poll();
-                    } else {
-                        warn!("Invalid MAC address for unbind: {mac_str}");
+                    let result = parse_mac_str(&mac_address)
+                        .ok_or_else(|| anyhow::anyhow!("invalid wireless MAC address"))
+                        .and_then(|mac| self.wireless.unbind_device(&mac));
+                    if let Err(error) = &result {
+                        warn!("Failed to unbind wireless device {mac_address}: {error:#}");
                     }
+                    self.ipc
+                        .state
+                        .lock()
+                        .wireless_operations
+                        .complete(&operation_id, result);
+                    self.device_poll();
                 }
                 DaemonEvent::SetEne6k77FanQuantity {
                     device_id,
@@ -718,6 +738,7 @@ impl ServiceManager {
                             self.start_aio_control();
                         }
                         self.start_openrgb_server();
+                        self.apply_rgb_config();
                         if let Some(ref ta) = self.controllers.thermal_alert {
                             if let Some(ref cfg) = self.config {
                                 ta.update_settings(cfg.thermal_alert.clone());
@@ -745,8 +766,7 @@ impl ServiceManager {
                             // the resync fight the alert coloring.
                             debug!("Thermal override active — skipping RGB resync");
                         } else {
-                            drop(rgb);
-                            self.apply_rgb_config();
+                            rgb.resync_wireless_effects();
                         }
                     }
                 }
@@ -859,6 +879,9 @@ impl ServiceManager {
                 DaemonEvent::SystemResumed => {
                     info!("System resumed — waiting for USB re-enumeration");
                     thread::sleep(Duration::from_secs(2));
+                    if let Some(rgb) = &self.controllers.rgb {
+                        rgb.lock().invalidate_hardware_state();
+                    }
                     self.rebuild_rgb_controller();
                     self.restart_fan_control();
                     self.start_aio_control();

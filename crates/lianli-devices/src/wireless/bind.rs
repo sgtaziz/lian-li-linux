@@ -11,19 +11,36 @@ use tracing::info;
 
 impl WirelessController {
     pub fn bind_device(&self, mac: &[u8; 6]) -> Result<()> {
+        let _binding = self.begin_binding(mac)?;
         self.check_bind_allowed(mac)?;
         let master_mac = *self.master_mac.lock();
         let new_rx = self.get_rx_unused();
-        self.set_bind_intent(mac, true);
         self.converge_bind_state(mac, &master_mac, new_rx)?;
+        self.confirm_binding(mac, true);
         self.save_rf_config()
     }
 
     pub fn unbind_device(&self, mac: &[u8; 6]) -> Result<()> {
+        let _binding = self.begin_binding(mac)?;
         self.check_unbind_allowed(mac)?;
-        self.set_bind_intent(mac, false);
         self.converge_bind_state(mac, &[0u8; 6], 0)?;
+        self.confirm_binding(mac, false);
+        self.forget_mb_rgb_target(mac);
         self.save_rf_config()
+    }
+
+    fn begin_binding(&self, mac: &[u8; 6]) -> Result<BindingGuard> {
+        let _order = self.command_order.lock();
+        let mut binding = self.binding_mac.lock();
+        anyhow::ensure!(
+            binding.is_none(),
+            "another wireless binding operation is pending"
+        );
+        *binding = Some(*mac);
+        if let Some(queue) = &self.pending_commands {
+            queue.lock().retain(|command| command.mac != *mac);
+        }
+        Ok(BindingGuard(std::sync::Arc::clone(&self.binding_mac)))
     }
 
     fn check_bind_allowed(&self, mac: &[u8; 6]) -> Result<()> {
@@ -118,6 +135,11 @@ impl WirelessController {
         let deadline = Instant::now() + CONVERGE_TIMEOUT;
         let mut attempts = 0u32;
         loop {
+            anyhow::ensure!(
+                !self.poll_stop.load(std::sync::atomic::Ordering::Acquire),
+                "wireless controller is stopping"
+            );
+            let sent_at = Instant::now();
             self.send_bind_packet(mac, target_master_mac, target_rx)?;
             attempts += 1;
             thread::sleep(POLL_GAP);
@@ -127,8 +149,8 @@ impl WirelessController {
                 &self.discovered_devices,
                 &self.device_health,
                 &self.master_entries,
-                &self.mobo_pwm,
-                &self.fg_sync,
+                &self.receiver_state,
+                &self.poll_stop,
                 &self.master_mac,
             );
 
@@ -136,6 +158,7 @@ impl WirelessController {
                 .device_health
                 .lock()
                 .get(mac)
+                .filter(|h| h.raw_seen >= sent_at)
                 .map(|h| (h.raw_master, h.raw_rx, h.raw_channel));
 
             let master_ch = *self.master_channel.lock();
@@ -143,7 +166,7 @@ impl WirelessController {
                 Some((m, r, ch)) => {
                     &m == target_master_mac && r == target_rx && (target_rx == 0 || ch == master_ch)
                 }
-                None => target_master_mac == &[0u8; 6],
+                None => false,
             };
             if converged {
                 return Ok(());
@@ -258,6 +281,14 @@ impl WirelessController {
     }
 }
 
+struct BindingGuard(std::sync::Arc<parking_lot::Mutex<Option<[u8; 6]>>>);
+
+impl Drop for BindingGuard {
+    fn drop(&mut self) {
+        *self.0.lock() = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::discovery::{DeviceHealth, MasterEntry};
@@ -305,6 +336,53 @@ mod tests {
         h.raw_master = master;
         h.bind_intent = intent;
         health.insert(*mac, h);
+    }
+
+    #[test]
+    fn pending_binding_is_exclusive_and_released_on_failure() {
+        let c = controller_with([9; 6], false);
+        let mac = [1, 2, 3, 4, 5, 6];
+        let binding = c.begin_binding(&mac).unwrap();
+        assert!(c.begin_binding(&[2; 6]).is_err());
+        assert_eq!(*c.binding_mac.lock(), Some(mac));
+        drop(binding);
+        assert!(c.bind_device(&mac).is_err());
+        assert!(c.binding_mac.lock().is_none());
+    }
+
+    #[test]
+    fn confirmed_unbind_is_published_immediately_and_prevents_auto_rebind() {
+        let c = controller_with([9; 6], false);
+        let mac = [1, 2, 3, 4, 5, 6];
+        seed_device(&c, &mac, [9; 6], true);
+        let mut health = c.device_health.lock();
+        let h = health.get_mut(&mac).unwrap();
+        c.discovered_devices.lock().push(h.published.clone());
+        h.raw_master = [0; 6];
+        h.raw_rx = 0;
+        drop(health);
+        c.confirm_binding(&mac, false);
+        assert!(c.devices().is_empty());
+        assert_eq!(c.unbound_devices().len(), 1);
+        assert!(c.rebind_candidates().is_empty());
+    }
+
+    #[test]
+    fn failed_binding_commands_preserve_prior_intent() {
+        let c = controller_with([9; 6], false);
+        let mac = [1, 2, 3, 4, 5, 6];
+        seed_device(&c, &mac, [0; 6], false);
+        c.device_health.lock().get_mut(&mac).unwrap().man_unbind = true;
+        assert!(c.bind_device(&mac).is_err());
+        let health = c.device_health.lock();
+        assert!(!health[&mac].bind_intent);
+        assert!(health[&mac].man_unbind);
+        drop(health);
+        seed_device(&c, &mac, [9; 6], true);
+        assert!(c.unbind_device(&mac).is_err());
+        let health = c.device_health.lock();
+        assert!(health[&mac].bind_intent);
+        assert!(!health[&mac].man_unbind);
     }
 
     #[test]

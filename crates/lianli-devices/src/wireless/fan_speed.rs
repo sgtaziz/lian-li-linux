@@ -21,22 +21,15 @@ fn pwm_last_sent() -> &'static Mutex<HashMap<[u8; 6], Instant>> {
 }
 
 impl WirelessController {
-    /// Set fan PWM values for a specific device identified by MAC address.
-    /// Uses the device's own rx_type and channel from discovery.
-    ///
-    /// RF PWM packet layout (240 bytes):
-    /// ```text
-    /// [0]     = 0x12 (RF_Select — envelope command)
-    /// [1]     = 0x10 (RF_Bind — PWM sub-command)
-    /// [2-7]   = Device (slave) MAC address
-    /// [8-13]  = Master MAC address
-    /// [14]    = Target RX type (from device discovery)
-    /// [15]    = Target channel (master channel)
-    /// [16]    = Sequence index (1 for one-shot commands)
-    /// [17-20] = Fan PWM values (4 bytes, one per fan slot)
-    /// [21-239]= Reserved
-    /// ```
     pub fn set_fan_speeds_by_mac(&self, mac: &[u8; 6], fan_pwm: &[u8; 4]) -> Result<()> {
+        self.send_fan_pwm(mac, Some(fan_pwm))
+    }
+
+    pub fn set_hardware_pwm_sync(&self, mac: &[u8; 6]) -> Result<()> {
+        self.send_fan_pwm(mac, None)
+    }
+
+    fn send_fan_pwm(&self, mac: &[u8; 6], fan_pwm: Option<&[u8; 4]>) -> Result<()> {
         let devices = self.discovered_devices.lock();
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
@@ -59,11 +52,7 @@ impl WirelessController {
 
         drop(devices);
 
-        let mut pwm = *fan_pwm;
-        apply_pwm_constraints(&mut pwm, &device);
-        if device.is_inf_right_attach {
-            reverse_fan_order(&mut pwm, device.fan_count as usize);
-        }
+        let pwm = prepare_pwm(fan_pwm, &device)?;
 
         let needs_send = pwm
             .iter()
@@ -80,17 +69,9 @@ impl WirelessController {
             return Ok(());
         }
 
-        let mut rf_data = vec![0u8; RF_DATA_SIZE];
-        rf_data[0] = RF_SELECT;
-        rf_data[1] = RF_PWM_CMD;
-        rf_data[2..8].copy_from_slice(&device.mac);
-        rf_data[8..14].copy_from_slice(&master_mac);
-        rf_data[14] = device.rx_type;
-        rf_data[15] = master_ch;
-        rf_data[16] = slot_index;
-        rf_data[17..21].copy_from_slice(&pwm);
+        let rf_data = build_pwm_packet(&device, &master_mac, master_ch, slot_index, pwm);
 
-        self.enqueue_rf_command(&device, rf_data, AckSignal::Pwm(pwm), "fan PWM");
+        self.enqueue_rf_command(&device, rf_data, AckSignal::Pwm(pwm), "fan PWM")?;
 
         pwm_last_sent().lock().insert(*mac, Instant::now());
 
@@ -156,5 +137,98 @@ fn reverse_fan_order<T: Copy>(slots: &mut [T; 4], fan_count: usize) {
     let n = fan_count.min(4);
     if n > 1 {
         slots[..n].reverse();
+    }
+}
+
+fn build_pwm_packet(
+    device: &DiscoveredDevice,
+    master_mac: &[u8; 6],
+    channel: u8,
+    slot: u8,
+    pwm: [u8; 4],
+) -> Vec<u8> {
+    let mut data = vec![0; RF_DATA_SIZE];
+    data[0] = RF_SELECT;
+    data[1] = RF_PWM_CMD;
+    data[2..8].copy_from_slice(&device.mac);
+    data[8..14].copy_from_slice(master_mac);
+    data[14] = device.rx_type;
+    data[15] = channel;
+    data[16] = slot;
+    data[17..21].copy_from_slice(&pwm);
+    data
+}
+
+fn prepare_pwm(fan_pwm: Option<&[u8; 4]>, device: &DiscoveredDevice) -> Result<[u8; 4]> {
+    let Some(fan_pwm) = fan_pwm else {
+        anyhow::ensure!(
+            device.fan_type.supports_hw_mobo_sync(),
+            "device does not support hardware PWM sync"
+        );
+        return Ok([6; 4]);
+    };
+    let mut pwm = *fan_pwm;
+    apply_pwm_constraints(&mut pwm, device);
+    if device.is_inf_right_attach {
+        reverse_fan_order(&mut pwm, device.fan_count as usize);
+    }
+    Ok(pwm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(fan_type: WirelessFanType) -> DiscoveredDevice {
+        let mut record = [0; 42];
+        record[..6].copy_from_slice(&[1, 2, 3, 4, 5, 6]);
+        record[13] = 2;
+        record[19] = 3;
+        record[41] = 0x1c;
+        let mut device = super::super::discovery::parse_device_record(&record, 0).unwrap();
+        device.fan_type = fan_type;
+        device
+    }
+
+    #[test]
+    fn hardware_sync_packet_preserves_all_four_sentinels() {
+        for family in [WirelessFanType::Slv3Led, WirelessFanType::Slv3Lcd] {
+            let device = device(family);
+            let pwm = prepare_pwm(None, &device).unwrap();
+            let packet = build_pwm_packet(&device, &[9; 6], 8, 3, pwm);
+            assert_eq!(
+                &packet[..21],
+                &[0x12, 0x10, 1, 2, 3, 4, 5, 6, 9, 9, 9, 9, 9, 9, 2, 8, 3, 6, 6, 6, 6]
+            );
+            assert_eq!(packet.len(), 240);
+            assert!(packet[21..].iter().all(|&byte| byte == 0));
+            assert_eq!(
+                prepare_pwm(Some(&[6; 4]), &device).unwrap(),
+                [35, 35, 35, 0]
+            );
+        }
+        assert!(prepare_pwm(None, &device(WirelessFanType::SlInf)).is_err());
+    }
+
+    #[test]
+    fn normal_pwm_retains_stop_floors_filters_and_slot_order() {
+        assert_eq!(
+            prepare_pwm(Some(&[0, 1, 255, 255]), &device(WirelessFanType::Slv3Led)).unwrap(),
+            [0, 35, 255, 0]
+        );
+        assert_eq!(
+            prepare_pwm(Some(&[153, 154, 155, 255]), &device(WirelessFanType::Clv1)).unwrap(),
+            [152, 152, 156, 0]
+        );
+        let mut reversed = device(WirelessFanType::SlInf);
+        reversed.is_inf_right_attach = true;
+        assert_eq!(
+            prepare_pwm(Some(&[100, 150, 200, 255]), &reversed).unwrap(),
+            [200, 150, 100, 0]
+        );
+        assert_eq!(
+            prepare_pwm(Some(&[255; 4]), &device(WirelessFanType::WaterBlock)).unwrap(),
+            [255; 4]
+        );
     }
 }
