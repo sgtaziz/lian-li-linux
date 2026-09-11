@@ -79,11 +79,21 @@ export interface OpenRgbServerStatus {
   error: string | null;
 }
 
+export interface PixelCleanStatus {
+  active: boolean;
+  session_id?: number | null;
+  device_id?: string | null;
+  duration_minutes: number;
+  remaining_seconds: number;
+}
+
 export interface TelemetrySnapshot {
   fan_rpms: Record<string, number[]>;
   coolant_temps: Record<string, number>;
   streaming_active: boolean;
   openrgb_status: OpenRgbServerStatus;
+  /** Active pixel cleaner sessions keyed by target ID, card index, or "all" for multi-LCD concurrency. */
+  pixel_clean_statuses?: Record<string, PixelCleanStatus>;
 }
 
 export interface PollResult {
@@ -384,6 +394,7 @@ export interface Ene6k77DeviceConfig {
 
 // ─── AppConfig ───────────────────────────────────────────────────────────────
 export interface AppConfig {
+  turn_off_lcds_on_shutdown: boolean;
   default_fps: number;
   hid_backend: "hidraw" | "rusb";
   lcds: LcdConfig[];

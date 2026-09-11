@@ -168,7 +168,35 @@ pub enum IpcRequest {
         name: String,
         device_id: String,
     },
+    /// Run pixel conditioning / exercise loop to clear image retention on LCD(s).
+    StartPixelClean {
+        #[serde(default)]
+        device_id: Option<String>,
+        #[serde(default = "default_pixel_clean_minutes")]
+        duration_minutes: u16,
+        #[serde(default)]
+        preparation_id: Option<u64>,
+    },
+    /// Stop pixel conditioning loop and restore previous LCD configuration.
+    StopPixelClean {
+        #[serde(default)]
+        device_id: Option<String>,
+        #[serde(default)]
+        session_id: Option<u64>,
+    },
+    /// Query current pixel cleaner status.
+    GetPixelCleanStatus,
+    GetPixelCleanPreparation {
+        session_id: u64,
+    },
 }
+
+fn default_pixel_clean_minutes() -> u16 {
+    30
+}
+
+/// Maximum pixel cleaner duration in minutes (255m / ~4.25h).
+pub const MAX_CLEAN_MINUTES: u16 = 255;
 
 /// Responses from daemon to GUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,6 +320,20 @@ pub struct OpenRgbServerStatus {
     pub error: Option<String>,
 }
 
+/// Current state of the LCD pixel conditioning cleaner.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PixelCleanStatus {
+    pub active: bool,
+    #[serde(default)]
+    pub session_id: Option<u64>,
+    #[serde(default)]
+    pub device_id: Option<String>,
+    #[serde(default)]
+    pub duration_minutes: u16,
+    #[serde(default)]
+    pub remaining_seconds: u64,
+}
+
 /// Snapshot of live telemetry data, returned by GetTelemetry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TelemetrySnapshot {
@@ -304,4 +346,7 @@ pub struct TelemetrySnapshot {
     /// OpenRGB SDK server status.
     #[serde(default)]
     pub openrgb_status: OpenRgbServerStatus,
+    /// Map of active pixel cleaner sessions per target (keyed by target ID, card index, or "all") to support independent concurrent sessions.
+    #[serde(default)]
+    pub pixel_clean_statuses: HashMap<String, PixelCleanStatus>,
 }

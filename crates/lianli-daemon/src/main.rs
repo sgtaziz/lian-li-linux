@@ -4,11 +4,12 @@ mod ipc;
 mod openrgb_server;
 mod persistence;
 mod pidlock;
+mod pixel_cleaner;
 mod service;
 mod template_store;
 mod thermal_alert;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -56,6 +57,50 @@ struct Cli {
     /// Logging verbosity (error, warn, info, debug, trace)
     #[arg(long, default_value = "info")]
     log_level: String,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// LCD utilities and maintenance
+    Lcd {
+        #[command(subcommand)]
+        command: LcdCommands,
+    },
+}
+
+pub const MAX_CLEAN_MINUTES: u16 = lianli_shared::ipc::MAX_CLEAN_MINUTES;
+
+fn parse_clean_minutes(s: &str) -> Result<u16, String> {
+    let value: u64 = s
+        .trim()
+        .parse()
+        .map_err(|_| "Duration must be a positive integer".to_string())?;
+    if value == 0 {
+        return Err("Duration must be positive".into());
+    }
+    Ok(value.min(u64::from(MAX_CLEAN_MINUTES)) as u16)
+}
+
+#[derive(Subcommand, Debug)]
+enum LcdCommands {
+    /// Run pixel conditioning / exercise loop to clear image retention
+    Clean {
+        /// Target device ID (or all detected LCDs if omitted)
+        #[arg(long)]
+        device_id: Option<String>,
+
+        /// Duration in minutes to run cleaner (default: 30)
+        #[arg(
+            long,
+            default_value = "30",
+            allow_hyphen_values = true,
+            value_parser = parse_clean_minutes
+        )]
+        minutes: u16,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -63,6 +108,13 @@ fn main() -> anyhow::Result<()> {
     let system = cli.system;
     let config = cli.config.unwrap_or_else(|| default_config_path(system));
     let socket = cli.socket.unwrap_or_else(|| default_socket_path(system));
+
+    if let Some(Commands::Lcd {
+        command: LcdCommands::Clean { device_id, minutes },
+    }) = cli.command
+    {
+        return pixel_cleaner::run_clean_command(socket, device_id, minutes);
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -87,4 +139,26 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleaner_duration_rejects_nonpositive_and_invalid_input() {
+        for value in ["0", "-0", "-1", "-5000", "abc", "1.5", ""] {
+            assert!(parse_clean_minutes(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn cleaner_duration_preserves_positive_values_and_clamps_upper_bound() {
+        assert_eq!(parse_clean_minutes("30").unwrap(), 30);
+        assert_eq!(parse_clean_minutes("+45").unwrap(), 45);
+        assert_eq!(
+            parse_clean_minutes("4294967306").unwrap(),
+            MAX_CLEAN_MINUTES
+        );
+    }
 }

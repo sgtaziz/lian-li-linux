@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useDialog } from "naive-ui";
-import { FolderOpen, Trash2 } from "lucide-vue-next";
+import { useDialog, useMessage } from "naive-ui";
+import { FolderOpen, Sparkles, Trash2, Info } from "lucide-vue-next";
 import type { DeviceInfo, LcdConfig, MediaType, SensorDescriptor } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
@@ -16,6 +16,7 @@ import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
 import { enumerateSensorsAsOptions, optionForConfig, decodeOption } from "@/stores/sensorOptions";
 import { screenSupportsH264, aio512FrameDefault } from "@/constants/screen";
+import { PIXEL_CLEANER_DURATION_OPTIONS } from "@/constants";
 
 const props = defineProps<{
   entry: LcdConfig;
@@ -27,6 +28,7 @@ const devices = useDevicesStore();
 const lcd = useLcdStore();
 const ipc = useIpc();
 const dialog = useDialog();
+const message = useMessage();
 
 const lcdDevices = computed(() => devices.lcdDevices);
 
@@ -340,22 +342,121 @@ const brightness = computed({
     }
   },
 });
-</script>
 
-<script lang="ts">
-// (LcdConfig helpers live in the setup script above.)
+const cleanerDurationOptions = PIXEL_CLEANER_DURATION_OPTIONS.map((opt) => ({
+  label: opt.label,
+  key: opt.value,
+}));
+
+const cleanerTargetId = computed(() => {
+  const devId = selectedDeviceId.value || props.entry.serial || "";
+  return devId ? `${devId}#${props.index}` : `${props.index}`;
+});
+
+const isCleaningThis = computed(() => {
+  return lcd.isCleaning(cleanerTargetId.value, props.index);
+});
+
+const remainingFormatted = computed(() => {
+  return lcd.formattedRemainingFor(cleanerTargetId.value, props.index);
+});
+
+const isPreparingThis = computed(() => lcd.isPreparing(cleanerTargetId.value));
+const stopPending = ref(false);
+const settingsLocked = computed(() => isCleaningThis.value || isPreparingThis.value || stopPending.value);
+
+async function handleStartClean(key: string | number) {
+  const minutes = Number(key);
+  try {
+    const result = await lcd.startPixelClean(cleanerTargetId.value, minutes);
+    if (result.started) message.success(`Pixel cleaner started for ${minutes} minutes at 75% brightness`);
+    else if (result.cancelled) message.info("Pixel cleaner preparation cancelled");
+  } catch (err) {
+    message.error(`Failed to start pixel cleaner: ${err}`);
+  }
+}
+
+async function handleStopClean() {
+  stopPending.value = true;
+  try {
+    const result = await lcd.stopPixelClean(cleanerTargetId.value);
+    if (result.stopped) message.info("Pixel cleaner stopped; previous display restoration requested");
+    else message.warning("This session was not stopped; refreshed its status from the daemon");
+  } catch (err) {
+    message.error(`Failed to stop pixel cleaner: ${err}`);
+  } finally {
+    stopPending.value = false;
+  }
+}
+
 </script>
 
 <template>
   <div class="card lcd-config">
     <div class="head">
       <span class="title">LCD {{ index + 1 }}</span>
-      <n-button size="small" quaternary type="error" @click="removeEntry">
-        <template #icon><Trash2 :size="14" /></template>
-      </n-button>
+      <div class="head-actions">
+        <n-button
+          v-if="isPreparingThis"
+          size="small"
+          quaternary
+          title="Cancel pixel cleaner preparation"
+          @click="lcd.cancelPixelPreparation(cleanerTargetId)"
+        >Cancel</n-button>
+        <n-button
+          v-else-if="isCleaningThis"
+          :loading="stopPending"
+          size="small"
+          quaternary
+          type="warning"
+          class="cleaner-btn cleaner-btn-running"
+          @click="handleStopClean"
+          :title="`Stop pixel conditioning (${remainingFormatted} remaining)`"
+        >
+          <template #icon><Sparkles :size="14" /></template>
+        </n-button>
+        <n-dropdown
+          v-else
+          trigger="click"
+          placement="bottom-end"
+          :options="cleanerDurationOptions"
+          :disabled="!selectedDeviceId || lcd.preparingCleaner || stopPending"
+          @select="handleStartClean"
+        >
+          <n-button
+            size="small"
+            quaternary
+            type="warning"
+            class="cleaner-btn"
+            :disabled="!selectedDeviceId || lcd.preparingCleaner || stopPending"
+            title="Run pixel conditioning to clear image retention"
+          >
+            <template #icon><Sparkles :size="14" /></template>
+          </n-button>
+        </n-dropdown>
+        <n-button
+          size="small"
+          quaternary
+          type="error"
+          @click="removeEntry"
+          :disabled="settingsLocked"
+          title="Delete LCD configuration"
+        >
+          <template #icon><Trash2 :size="14" /></template>
+        </n-button>
+      </div>
     </div>
 
-    <div class="grid">
+    <div v-if="isPreparingThis" class="card-cleaner-notice">Preparing pixel cleaner…</div>
+    <div v-if="isCleaningThis" class="card-cleaner-notice">
+      <Info :size="14" class="cleaner-notice-icon" />
+      <span>
+        Pixel conditioning in progress (<strong>{{ remainingFormatted }}</strong> remaining at 75% brightness). Display settings locked during conditioning.
+      </span>
+    </div>
+
+    <div class="card-content" :inert="settingsLocked" :class="{ 'card-body-locked': settingsLocked }">
+      <div class="grid">
       <div class="field">
         <label class="muted">Device</label>
         <n-select
@@ -465,6 +566,7 @@ const brightness = computed({
         @update:model-value="(v: number) => brightness = v"
       />
     </div>
+    </div>
   </div>
 </template>
 
@@ -481,6 +583,59 @@ const brightness = computed({
 }
 .title {
   font-weight: 600;
+}
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.cleaner-btn {
+  color: var(--warning);
+  transition: filter 0.2s ease, transform 0.15s ease;
+}
+.cleaner-btn:hover:not(:disabled) {
+  filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.55));
+}
+.cleaner-btn-running {
+  color: var(--warning);
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+@keyframes pulse-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px rgba(251, 191, 36, 0.4));
+    opacity: 0.85;
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.85));
+    opacity: 1;
+  }
+}
+.card-cleaner-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  font-size: var(--font-size-xs);
+  color: var(--accent);
+}
+.cleaner-notice-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.card-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  transition: opacity 0.2s ease;
+}
+.card-body-locked {
+  pointer-events: none;
+  opacity: 0.45;
+  user-select: none;
 }
 .grid {
   display: grid;

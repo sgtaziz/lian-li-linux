@@ -20,6 +20,7 @@ mod aio_lcd_firmware;
 mod display_mode;
 mod init;
 mod media;
+mod pixel_cleaner;
 mod renderers;
 mod runtime;
 mod shutdown;
@@ -51,6 +52,8 @@ fn event_label(event: &DaemonEvent) -> &'static str {
         DaemonEvent::RebootWirelessLcd { .. } => "RebootWirelessLcd",
         DaemonEvent::DisableLc217Wifi { .. } => "DisableLc217Wifi",
         DaemonEvent::SetLcdBrightness { .. } => "SetLcdBrightness",
+        DaemonEvent::StartPixelClean { .. } => "StartPixelClean",
+        DaemonEvent::StopPixelClean { .. } => "StopPixelClean",
         DaemonEvent::BindAll => "BindAll",
         DaemonEvent::UnbindAll => "UnbindAll",
         DaemonEvent::Shutdown => "Shutdown",
@@ -141,6 +144,18 @@ pub enum DaemonEvent {
         device_id: String,
         brightness: u8,
     },
+    StartPixelClean {
+        device_id: Option<String>,
+        duration_minutes: u16,
+        preparation_id: Option<u64>,
+        deadline: Instant,
+        reply: std::sync::mpsc::SyncSender<Result<(u64, bool), String>>,
+    },
+    StopPixelClean {
+        device_id: Option<String>,
+        session_id: Option<u64>,
+        reply: Option<std::sync::mpsc::SyncSender<bool>>,
+    },
     BindAll,
     UnbindAll,
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
@@ -179,6 +194,9 @@ pub struct ServiceManager {
     tx: Option<Sender<DaemonEvent>>,
     mode_switch_suppression: HashMap<String, Instant>,
     serial_rewrite_backoff: Option<Instant>,
+    pixel_clean_sessions: Vec<crate::pixel_cleaner::PixelCleanSession>,
+    pixel_clean_preparation: Option<pixel_cleaner::PixelCleanPreparation>,
+    cleaner_reload_pending: bool,
 }
 
 impl ServiceManager {
@@ -212,6 +230,9 @@ impl ServiceManager {
             tx: None,
             mode_switch_suppression: HashMap::new(),
             serial_rewrite_backoff: None,
+            pixel_clean_sessions: Vec::new(),
+            pixel_clean_preparation: None,
+            cleaner_reload_pending: false,
         })
     }
 
@@ -272,6 +293,12 @@ impl ServiceManager {
     }
 
     pub fn device_poll(&mut self) {
+        if self.cleaner_reload_pending {
+            if let Some(tx) = &self.tx {
+                let _ = tx.send(DaemonEvent::IpcUpdate);
+                self.cleaner_reload_pending = false;
+            }
+        }
         let now_mono = Instant::now();
         let now_wall = std::time::SystemTime::now();
         let _mono_elapsed = now_mono.duration_since(self.last_poll_mono);
@@ -333,6 +360,7 @@ impl ServiceManager {
             let mut targets = self.targets.lock();
             for target in targets.values_mut() {
                 target.maybe_start_recovery(tx.clone(), Duration::ZERO);
+                target.flush_pending_brightness(Some(&self.wireless), &mut self.packet_builder);
             }
         }
 
@@ -651,6 +679,7 @@ impl ServiceManager {
                     }
                 }
                 DaemonEvent::DevicePoll => {
+                    self.check_pixel_clean_sessions();
                     self.device_poll();
                     if self.restart_requested {
                         break;
@@ -833,13 +862,40 @@ impl ServiceManager {
                         .iter_mut()
                         .find(|(_, t)| t.device_identity == device_id)
                     {
-                        if let Err(e) = target.lcd.set_brightness(
+                        target.apply_brightness(
                             Some(&self.wireless),
                             &mut self.packet_builder,
                             brightness,
-                        ) {
-                            warn!("Failed to set LCD brightness for {device_id}: {e}");
-                        }
+                        );
+                    }
+                }
+                DaemonEvent::StartPixelClean {
+                    device_id,
+                    duration_minutes,
+                    preparation_id,
+                    deadline,
+                    reply,
+                } => {
+                    let res = if Instant::now() >= deadline {
+                        Err("Pixel cleaner request expired".into())
+                    } else if let Some(id) = preparation_id {
+                        self.activate_pixel_cleaning(id).map(|id| (id, true))
+                    } else {
+                        self.start_pixel_cleaning(device_id, duration_minutes)
+                            .map(|id| (id, false))
+                    };
+                    if let Err(std::sync::mpsc::SendError(Ok((id, _)))) = reply.send(res) {
+                        self.stop_pixel_cleaning(None, Some(id));
+                    }
+                }
+                DaemonEvent::StopPixelClean {
+                    device_id,
+                    session_id,
+                    reply,
+                } => {
+                    let stopped = self.stop_pixel_cleaning(device_id, session_id);
+                    if let Some(r) = reply {
+                        let _ = r.send(stopped);
                     }
                 }
                 DaemonEvent::SystemResumed => {

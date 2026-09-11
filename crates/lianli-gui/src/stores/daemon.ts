@@ -5,6 +5,7 @@ import { usePolling } from "@/composables/usePolling";
 import { useDevicesStore } from "@/stores/devices";
 import { useConfigStore } from "@/stores/config";
 import { useThermalStore } from "@/stores/thermal";
+import { useLcdStore } from "@/stores/lcd";
 import { DONGLE_FAMILIES } from "@/constants";
 import type { SensorInfo } from "@/types";
 
@@ -32,6 +33,7 @@ export const useDaemonStore = defineStore("daemon", () => {
   const devices = useDevicesStore();
   const config = useConfigStore();
   const thermal = useThermalStore();
+  const lcd = useLcdStore();
 
   const connected = ref(false);
   const socketPath = ref("");
@@ -57,6 +59,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       openrgbPort.value = result.telemetry.openrgb_status.port;
 
       devices.applyPoll(result.devices, result.telemetry);
+      lcd.applyCleanerTelemetry(result.telemetry.pixel_clean_statuses);
 
       if (result.connected) {
         const visible = result.devices.filter(

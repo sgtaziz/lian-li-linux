@@ -136,3 +136,18 @@ fn binding_pause_blocks_only_target_device_and_manual_unbind_keeps_it_blocked() 
         &mac
     ));
 }
+
+#[test]
+fn recovery_cooldown_preserves_budget_only_before_a_send() {
+    let mut remaining = 2;
+    let backoff = Err(super::RecoveryBackoff.into());
+    super::account_retry(&mut remaining, false, &backoff);
+    assert_eq!(remaining, 2);
+    super::account_retry(&mut remaining, true, &backoff);
+    assert_eq!(remaining, 1);
+    super::account_retry(&mut remaining, false, &Err(anyhow::anyhow!("claim failed")));
+    assert_eq!(remaining, 0);
+    remaining = 2;
+    super::account_retry(&mut remaining, true, &Ok(()));
+    assert_eq!(remaining, 1);
+}

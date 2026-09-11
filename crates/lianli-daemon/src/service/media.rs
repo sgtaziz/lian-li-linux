@@ -440,7 +440,8 @@ impl ServiceManager {
                             self.tx.clone(),
                         );
                         new_targets.insert(cfg_idx, target);
-                        if let Some(brightness) = device_cfg.brightness {
+                        {
+                            let brightness = device_cfg.brightness();
                             if let Some(t) = new_targets.get_mut(&cfg_idx) {
                                 // Bounded so the main loop cannot stall behind
                                 // the init worker holding the LCD mutex. When
@@ -564,7 +565,7 @@ fn hid_id_norm(s: &str) -> &str {
     s.strip_prefix("hid:").unwrap_or(s)
 }
 
-fn lcd_id_matches(serial: &str, device_id: &str) -> bool {
+pub(super) fn lcd_id_matches(serial: &str, device_id: &str) -> bool {
     hid_id_norm(serial) == hid_id_norm(device_id)
 }
 

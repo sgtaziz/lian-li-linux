@@ -4,7 +4,7 @@ use super::h264::{
 use crate::common::MediaError;
 use lianli_shared::screen::ScreenInfo;
 use parking_lot::Mutex;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::io::AsRawFd;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,7 +39,7 @@ fn grow_pipe(fd: i32, frame_bytes: usize) {
 /// h264 streaming on devices that accept it.
 pub struct LiveH264Encoder {
     child: Child,
-    stdin: Option<BufWriter<ChildStdin>>,
+    stdin: Option<ChildStdin>,
     stdout: Option<ChildStdout>,
     frame_bytes: usize,
 }
@@ -101,12 +101,8 @@ impl LiveH264Encoder {
             .stdin
             .as_mut()
             .ok_or_else(|| MediaError::Ffmpeg("encoder stdin already closed".into()))?;
-        stdin
-            .write_all(rgba)
+        write_pipe(stdin, rgba, Duration::from_secs(2))
             .map_err(|e| MediaError::Ffmpeg(format!("write_frame: {e}")))?;
-        stdin
-            .flush()
-            .map_err(|e| MediaError::Ffmpeg(format!("flush: {e}")))?;
         Ok(())
     }
 
@@ -114,6 +110,42 @@ impl LiveH264Encoder {
     pub fn take_stdout(&mut self) -> Option<ChildStdout> {
         self.stdout.take()
     }
+}
+
+fn write_pipe(
+    pipe: &mut (impl Write + AsRawFd),
+    mut bytes: &[u8],
+    timeout: Duration,
+) -> std::io::Result<()> {
+    let deadline = Instant::now() + timeout;
+    while !bytes.is_empty() {
+        if Instant::now() >= deadline {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        match pipe.write(bytes) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(written) => bytes = &bytes[written..],
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                let mut descriptor = libc::pollfd {
+                    fd: pipe.as_raw_fd(),
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                let wait = deadline.saturating_duration_since(Instant::now());
+                let millis = wait.as_millis().clamp(1, 50) as i32;
+                // The descriptor remains owned by pipe throughout this bounded wait.
+                if unsafe { libc::poll(&mut descriptor, 1, millis) } < 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.kind() != std::io::ErrorKind::Interrupted {
+                        return Err(error);
+                    }
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 impl Drop for LiveH264Encoder {
@@ -215,6 +247,16 @@ fn try_spawn(
     let frame_bytes = (w as usize) * (h as usize) * 4;
     grow_pipe(stdin.as_raw_fd(), frame_bytes);
     grow_pipe(stdout.as_raw_fd(), 1 << 19);
+    // A stalled USB consumer must not trap the renderer in an encoder pipe write.
+    let flags = unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0
+        || unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+    {
+        let error = std::io::Error::last_os_error();
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("nonblocking encoder stdin: {error}"));
+    }
 
     let probing = Arc::new(AtomicBool::new(true));
     let open_failed = Arc::new(AtomicBool::new(false));
@@ -245,7 +287,7 @@ fn try_spawn(
     });
 
     let probe = vec![0u8; frame_bytes];
-    if let Err(e) = stdin.write_all(&probe) {
+    if let Err(e) = write_pipe(&mut stdin, &probe, Duration::from_secs(2)) {
         let _ = child.kill();
         let _ = child.wait();
         return Err(format!("probe write: {e}"));
@@ -286,8 +328,45 @@ fn try_spawn(
 
     Ok(LiveH264Encoder {
         child,
-        stdin: Some(BufWriter::with_capacity(frame_bytes, stdin)),
+        stdin: Some(stdin),
         stdout: Some(stdout),
         frame_bytes,
     })
+}
+
+#[cfg(test)]
+mod pipe_tests {
+    use super::*;
+    use std::io::Read;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn stalled_consumer_times_out_and_healthy_consumer_receives_exact_bytes() {
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        writer.set_nonblocking(true).unwrap();
+        let payload = vec![0x5a; 4 * 1024 * 1024];
+        let started = Instant::now();
+        assert_eq!(
+            write_pipe(&mut writer, &payload, Duration::from_millis(50))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(writer);
+        let mut partial = Vec::new();
+        reader.read_to_end(&mut partial).unwrap();
+        assert!(!partial.is_empty() && partial.len() < payload.len());
+
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        writer.set_nonblocking(true).unwrap();
+        let consumer = thread::spawn(move || {
+            let mut actual = Vec::new();
+            reader.read_to_end(&mut actual).unwrap();
+            actual
+        });
+        write_pipe(&mut writer, &payload, Duration::from_secs(2)).unwrap();
+        drop(writer);
+        assert_eq!(consumer.join().unwrap(), payload);
+    }
 }

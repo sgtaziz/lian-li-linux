@@ -4,7 +4,7 @@ use super::discovery::{
     ACK_FRESHNESS, REBIND_FOREIGN_AFTER,
 };
 use super::mb_sync::MbRgbTargetMap;
-use super::transport::{open_any, with_transport_recovery};
+use super::transport::{open_any, with_transport_recovery, SharedTransport, TransportState};
 use super::{
     CMD_RESET, CMD_RX_LCD_MODE, CMD_RX_QUERY_34, CMD_RX_QUERY_37, CMD_VIDEO_START, RF_CHUNKS,
     RF_CHUNK_SIZE, RF_DATA_SIZE, RF_SELECT, RX_IDS, TX_IDS, USB_CMD_GET_MAC, USB_CMD_SEND_RF,
@@ -40,8 +40,8 @@ impl Drop for RuntimeClaim {
 pub struct WirelessController {
     runtime_claimed: Arc<AtomicBool>,
     runtime_claim: Option<RuntimeClaim>,
-    pub(super) tx: Option<Arc<Mutex<RusbBulk>>>,
-    pub(super) rx: Option<Arc<Mutex<RusbBulk>>>,
+    pub(super) tx: Option<SharedTransport>,
+    pub(super) rx: Option<SharedTransport>,
     pub(super) receiver_state: Arc<ReceiverState>,
     pub(super) rx_running: Arc<AtomicBool>,
     pub(super) poll_stop: Arc<AtomicBool>,
@@ -155,13 +155,13 @@ impl WirelessController {
 
         let mut tx = tx.context("TX device failed to open after retries")?;
         tx.detach_and_configure("TX")?;
-        let tx_arc = Arc::new(Mutex::new(tx));
+        let tx_arc = Arc::new(Mutex::new(TransportState::new(tx)));
 
         let mut rx = open_any(&RX_IDS).context("opening wireless RX dongle")?;
         rx.detach_and_configure("RX")?;
         rx.read_flush();
         self.tx = Some(tx_arc);
-        self.rx = Some(Arc::new(Mutex::new(rx)));
+        self.rx = Some(Arc::new(Mutex::new(TransportState::new(rx))));
         self.tx_failures.store(0, Ordering::Relaxed);
 
         if let Err(error) = self.discover_master_mac() {
@@ -189,7 +189,8 @@ impl WirelessController {
                 cmd[0] = USB_CMD_GET_MAC;
                 cmd[1] = channel;
 
-                let handle = tx.lock();
+                let transport = tx.lock();
+                let handle = transport.get()?;
                 let mut stale = [0u8; 64];
                 for _ in 0..16 {
                     match handle.read(&mut stale, Duration::from_millis(5)) {
@@ -215,7 +216,7 @@ impl WirelessController {
                         continue;
                     }
                 };
-                drop(handle);
+                drop(transport);
 
                 if !valid_master_response(&response[..len]) {
                     debug!(channel, attempt, len, header = ?&response[..len.min(13)], "Rejected master query reply");
@@ -332,9 +333,11 @@ impl WirelessController {
                         }
                         let mut reset_cmd = vec![0u8; 64];
                         reset_cmd[0] = 0x15; // USB_ResetAnother
-                        if handle.write(&reset_cmd, USB_TIMEOUT).is_ok() {
-                            let mut resp = [0u8; 64];
-                            let _ = handle.read(&mut resp, Duration::from_millis(2000));
+                        if let Ok(handle) = handle.get() {
+                            if handle.write(&reset_cmd, USB_TIMEOUT).is_ok() {
+                                let mut resp = [0u8; 64];
+                                let _ = handle.read(&mut resp, Duration::from_millis(2000));
+                            }
                         }
                         drop(handle);
                         wait_for_poll(&stop_flag, Duration::from_millis(500));
@@ -493,7 +496,10 @@ impl WirelessController {
                 if capture {
                     let mut buf = [0u8; 64];
                     let handle = rx.lock();
-                    if let Ok(len) = handle.read(&mut buf, USB_TIMEOUT) {
+                    if let Ok(len) = handle
+                        .get()
+                        .and_then(|h| h.read(&mut buf, USB_TIMEOUT).map_err(Into::into))
+                    {
                         debug!("RX resp: {:02x?}", &buf[..len.min(8)]);
                     }
                 }
@@ -503,20 +509,35 @@ impl WirelessController {
     }
 
     pub fn soft_reset(&mut self) -> bool {
+        if self.poll_stop.load(Ordering::Acquire)
+            || lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed)
+        {
+            return false;
+        }
+
         if self.tx.is_none() {
             if let Ok(mut transport) = open_any(&TX_IDS) {
-                if transport.detach_and_configure("TX").is_ok() {
-                    self.tx = Some(Arc::new(Mutex::new(transport)));
+                if transport
+                    .detach_and_configure_with_cancel("TX", || {
+                        self.poll_stop.load(Ordering::Acquire)
+                    })
+                    .is_ok()
+                {
+                    self.tx = Some(Arc::new(Mutex::new(TransportState::new(transport))));
                 }
             }
         }
 
-        if let Some(tx) = &self.tx {
+        if self.tx.is_some() {
+            if self
+                .tx_recover(|handle| {
+                    let written = handle.write(&CMD_RESET, USB_TIMEOUT)?;
+                    anyhow::ensure!(written == CMD_RESET.len(), "short TX reset write");
+                    Ok(())
+                })
+                .is_err()
             {
-                let handle = tx.lock();
-                if handle.write(&CMD_RESET, USB_TIMEOUT).is_err() {
-                    return false;
-                }
+                return false;
             }
             self.video_mode_active.store(false, Ordering::Release);
             thread::sleep(Duration::from_millis(50));

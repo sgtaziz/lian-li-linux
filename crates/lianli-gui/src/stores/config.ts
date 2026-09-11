@@ -14,6 +14,7 @@ import type {
 
 function defaultConfig(): AppConfig {
   return {
+    turn_off_lcds_on_shutdown: true,
     default_fps: 30,
     hid_backend: "hidraw",
     lcds: [],

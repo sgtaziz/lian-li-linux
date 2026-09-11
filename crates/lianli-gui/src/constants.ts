@@ -227,3 +227,10 @@ export const RGB_BRIGHTNESS: { value: number; label: string }[] = [
   { value: 3, label: "Higher" },
   { value: 4, label: "Highest" },
 ];
+
+export const PIXEL_CLEANER_DURATION_OPTIONS: { value: number; label: string }[] = [
+  { label: "15 Minutes (Quick Refresh)", value: 15 },
+  { label: "30 Minutes (Recommended)", value: 30 },
+  { label: "60 Minutes (Deep Conditioning)", value: 60 },
+  { label: "120 Minutes (Heavy Burn-in Recovery)", value: 120 },
+];

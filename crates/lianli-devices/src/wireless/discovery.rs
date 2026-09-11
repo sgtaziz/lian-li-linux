@@ -1,7 +1,8 @@
 use super::transport::with_transport_recovery;
+use super::transport::SharedTransport;
 use super::{WirelessFanType, RX_IDS, USB_CMD_SEND_RF};
 use anyhow::{Context, Result};
-use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
+use lianli_transport::usb::USB_TIMEOUT;
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -416,7 +417,7 @@ impl Default for ReceiverState {
 /// full 42-byte device records. Results are merged into the persistent
 /// health map; the published device list is rebuilt from it.
 pub(super) fn poll_and_discover(
-    rx: &Arc<Mutex<RusbBulk>>,
+    rx: &SharedTransport,
     discovered_devices: &Arc<Mutex<Vec<DiscoveredDevice>>>,
     health_map: &DeviceHealthMap,
     master_entries: &MasterEntryMap,

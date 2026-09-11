@@ -12,6 +12,7 @@
 use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -33,8 +34,19 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 ///
 /// On timeout the child's whole process group is killed and reaped, so it
 /// cannot linger as an orphan holding the pipes (or the GPU) open.
-pub(crate) fn output_with_timeout(mut cmd: Command, timeout: Duration) -> Result<Output, TimedOut> {
+pub(crate) fn output_with_timeout(cmd: Command, timeout: Duration) -> Result<Output, TimedOut> {
+    output_cancellable(cmd, timeout, &AtomicBool::new(false))
+}
+
+pub(crate) fn output_cancellable(
+    mut cmd: Command,
+    timeout: Duration,
+    cancel: &AtomicBool,
+) -> Result<Output, TimedOut> {
     let program = cmd.get_program().to_string_lossy().into_owned();
+    if cancel.load(Ordering::Relaxed) {
+        return Err(TimedOut::Cancelled { program });
+    }
 
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -68,14 +80,18 @@ pub(crate) fn output_with_timeout(mut cmd: Command, timeout: Duration) -> Result
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {
-                if Instant::now() >= deadline {
+                if cancel.load(Ordering::Relaxed) || Instant::now() >= deadline {
                     // SIGKILL: the whole point is that the child is wedged and
                     // may not be servicing signals it could catch.
                     kill_group_and_reap(&mut child);
                     // The pipes close as the child dies, so the readers finish.
                     let _ = stdout_reader.join();
                     let _ = stderr_reader.join();
-                    return Err(TimedOut::Deadline { program, timeout });
+                    return Err(if cancel.load(Ordering::Relaxed) {
+                        TimedOut::Cancelled { program }
+                    } else {
+                        TimedOut::Deadline { program, timeout }
+                    });
                 }
                 thread::sleep(POLL_INTERVAL);
             }
@@ -117,18 +133,25 @@ impl From<TimedOut> for crate::common::MediaError {
 /// Why a bounded run did not produce an exit status.
 #[derive(Debug)]
 pub(crate) enum TimedOut {
+    Cancelled {
+        program: String,
+    },
     /// The process could not be started, or could not be waited on.
     Spawn {
         program: String,
         source: std::io::Error,
     },
     /// The process outlived its deadline and was killed.
-    Deadline { program: String, timeout: Duration },
+    Deadline {
+        program: String,
+        timeout: Duration,
+    },
 }
 
 impl std::fmt::Display for TimedOut {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Cancelled { program } => write!(f, "{program} was cancelled"),
             Self::Spawn { program, source } => write!(f, "could not run {program}: {source}"),
             Self::Deadline { program, timeout } => write!(
                 f,
@@ -142,6 +165,23 @@ impl std::fmt::Display for TimedOut {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_reaps_a_running_helper() {
+        let cancelled = std::sync::Arc::new(AtomicBool::new(false));
+        let cancel = cancelled.clone();
+        let worker = std::thread::spawn(move || {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 30"]);
+            output_cancellable(command, Duration::from_secs(10), &cancel)
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        cancelled.store(true, Ordering::Relaxed);
+        assert!(matches!(
+            worker.join().unwrap(),
+            Err(TimedOut::Cancelled { .. })
+        ));
+    }
 
     /// A child that exits normally still yields its output.
     #[test]
