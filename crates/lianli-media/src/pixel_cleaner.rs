@@ -74,21 +74,21 @@ pub fn prepare_asset(
         }
     };
     cancelled()?;
-    let mut encoding_screen = *screen;
+    let mut render_screen = *screen;
     if screen.h264 {
-        encoding_screen.width = (screen.width / 2).max(2) & !1;
-        encoding_screen.height = (screen.height / 2).max(2) & !1;
-        let noise_pixels = h264_budget(payload_limit).0 as f64 / f64::from(FPS) / 1.5;
-        let scale = (noise_pixels
-            / (f64::from(encoding_screen.width) * f64::from(encoding_screen.height)))
-        .sqrt()
-        .min(1.0);
-        encoding_screen.width = ((f64::from(encoding_screen.width) * scale) as u32).max(2) & !1;
-        encoding_screen.height = ((f64::from(encoding_screen.height) * scale) as u32).max(2) & !1;
+        let noise_pixels = h264_budget(payload_limit).0 as f64 / f64::from(FPS) / 3.0;
+        // Power-of-two grains reduce high-frequency detail in the native-size encoder input.
+        let grain_size = ((f64::from(screen.width) * f64::from(screen.height) / noise_pixels)
+            .sqrt()
+            .ceil() as u32)
+            .max(2)
+            .next_power_of_two();
+        render_screen.width = (screen.width / grain_size).max(2);
+        render_screen.height = (screen.height / grain_size).max(2);
     } else {
-        encoding_screen.max_payload = payload_limit.min(screen.max_payload);
+        render_screen.max_payload = payload_limit.min(screen.max_payload);
     }
-    let (width, height) = crate::common::render_dimensions(&encoding_screen, orientation);
+    let (width, height) = crate::common::render_dimensions(&render_screen, orientation);
     let mut frame = RgbImage::new(width, height);
     let frames_dir = if screen.h264 {
         Some(tempfile::TempDir::new()?)
@@ -107,7 +107,7 @@ pub fn prepare_asset(
             oriented = crate::common::apply_orientation(frame.clone(), orientation);
             &oriented
         };
-        let encoded = encode_frame(pixels, &encoding_screen)?;
+        let encoded = encode_frame(pixels, &render_screen)?;
         bytes += encoded.len();
         if bytes > MAX_ASSET_BYTES {
             return Err(crate::MediaError::InvalidConfig(
@@ -126,8 +126,10 @@ pub fn prepare_asset(
         let path = output_dir.path().join("cleaner.h264");
         let (max_rate, buffer_bits) = h264_budget(payload_limit);
         tracing::info!(
-            width = encoding_screen.width,
-            height = encoding_screen.height,
+            width = screen.width,
+            height = screen.height,
+            noise_width = render_screen.width,
+            noise_height = render_screen.height,
             payload_limit,
             max_rate,
             buffer_bits,
@@ -140,6 +142,8 @@ pub fn prepare_asset(
             .args([
                 "-frames:v",
                 "100",
+                "-vf",
+                &format!("scale={}:{}:flags=neighbor", screen.width, screen.height),
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -183,7 +187,7 @@ pub fn prepare_asset(
                 "generated H.264 asset is empty or exceeds its size limit".into(),
             ));
         }
-        validate_h264(&path, &encoding_screen, payload_limit, deadline, cancel)?;
+        validate_h264(&path, screen, payload_limit, deadline, cancel)?;
         cancelled()?;
         Ok(MediaAssetKind::H264Stream {
             path,
@@ -400,10 +404,10 @@ mod tests {
     fn prepared_h264_loops_bound_bursts_on_every_supported_h264_screen() {
         use lianli_shared::screen::ScreenInfo;
         for screen in [
+            ScreenInfo::UNIVERSAL_SCREEN,
             ScreenInfo::AIO_LCD_480,
             ScreenInfo::HYDROSHIFT2,
             ScreenInfo::HYDROSHIFT2_OLED_CURVE,
-            ScreenInfo::UNIVERSAL_SCREEN,
             ScreenInfo::FLEX_LCD,
         ] {
             let asset = prepare_asset(
@@ -446,14 +450,10 @@ mod tests {
             let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
             let width = data["streams"][0]["width"].as_u64().unwrap();
             let height = data["streams"][0]["height"].as_u64().unwrap();
-            assert!(width <= u64::from(screen.width / 2) && height <= u64::from(screen.height / 2));
-            let aspect_error = (width as f64 / height as f64)
-                / (f64::from(screen.width) / f64::from(screen.height))
-                - 1.0;
-            assert!(aspect_error.abs() < 0.01);
-            if screen == ScreenInfo::UNIVERSAL_SCREEN {
-                assert_eq!((width, height), (240, 960));
-            }
+            assert_eq!(
+                (width, height),
+                (u64::from(screen.width), u64::from(screen.height))
+            );
             assert_eq!(data["streams"][0]["nb_read_frames"], "100");
             let sizes: Vec<usize> = data["packets"]
                 .as_array()
