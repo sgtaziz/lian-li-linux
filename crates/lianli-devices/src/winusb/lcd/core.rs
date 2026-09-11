@@ -4,7 +4,7 @@ use lianli_shared::screen::ScreenInfo;
 use lianli_transport::usb::{RusbBulk, EP_IN, EP_OUT};
 use parking_lot::{Mutex, MutexGuard};
 use rusb::{Device, GlobalContext};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -45,6 +45,7 @@ pub struct LcdLink {
     /// transport can close and reopen it (vendor ReInitDev).
     raw_device: Option<Device<GlobalContext>>,
     streaming: AtomicBool,
+    h264_chunk_size: NegotiatedH264ChunkSize,
     /// Set by `push_and_recover`: the handle was reopened behind the LCD
     /// driver's back, so it must rerun its init before the next frame.
     needs_init: AtomicBool,
@@ -62,6 +63,7 @@ impl LcdLink {
             bulk: Mutex::new(bulk),
             raw_device,
             streaming: AtomicBool::new(false),
+            h264_chunk_size: NegotiatedH264ChunkSize::default(),
             needs_init: AtomicBool::new(false),
             last_hold: Mutex::new(None),
             last_ring: Mutex::new(None),
@@ -71,6 +73,17 @@ impl LcdLink {
 
     pub fn lock(&self) -> MutexGuard<'_, RusbBulk> {
         self.bulk.lock()
+    }
+
+    /// Last valid device-reported block size; absent until negotiation and after reopen.
+    pub fn negotiated_h264_chunk_size(&self) -> Option<usize> {
+        self.h264_chunk_size.get()
+    }
+
+    /// Negotiated block size, or the established transfer default before negotiation.
+    pub fn h264_chunk_size(&self) -> usize {
+        self.negotiated_h264_chunk_size()
+            .unwrap_or(DEFAULT_H264_CHUNK_SIZE)
     }
 
     /// True while an H.264 stream is feeding the panel.
@@ -127,6 +140,7 @@ impl LcdLink {
         t.detach_and_configure(name)
             .context("configuring reopened device")?;
         *bulk = t;
+        self.h264_chunk_size.clear();
         Ok(())
     }
 
@@ -295,6 +309,33 @@ impl LcdLink {
     }
 }
 
+const DEFAULT_H264_CHUNK_SIZE: usize = 202_752;
+// Keep device-reported allocations within the largest supported LCD payload budget.
+const MAX_H264_CHUNK_SIZE: usize = 1_048_576;
+
+#[derive(Default)]
+struct NegotiatedH264ChunkSize(AtomicUsize);
+
+impl NegotiatedH264ChunkSize {
+    fn get(&self) -> Option<usize> {
+        let size = self.0.load(Ordering::Acquire);
+        (size != 0).then_some(size)
+    }
+
+    fn clear(&self) {
+        self.0.store(0, Ordering::Release);
+    }
+
+    fn update(&self, response: &[u8]) -> Option<usize> {
+        let size = response
+            .get(8..12)
+            .map(|bytes| u32::from_be_bytes(bytes.try_into().expect("four-byte size")) as usize)
+            .filter(|&size| size > 0 && size <= MAX_H264_CHUNK_SIZE);
+        self.0.store(size.unwrap_or(0), Ordering::Release);
+        size
+    }
+}
+
 pub type SharedTransport = Arc<LcdLink>;
 
 /// Buffer level at or below which queued control commands go out right away.
@@ -330,7 +371,6 @@ pub(crate) struct WinUsbLcdCore {
     name: String,
     pub(crate) initialized: bool,
     pub(crate) consecutive_failures: u32,
-    pub(crate) h264_chunk_size: usize,
     pub(crate) device_gone: bool,
     pub(crate) firmware: Option<String>,
     /// Frame rate the current stream asked for, reapplied after a reinit
@@ -414,7 +454,6 @@ impl WinUsbLcdCore {
             name: name.to_string(),
             initialized: false,
             consecutive_failures: 0,
-            h264_chunk_size: 202_752,
             device_gone: false,
             firmware: None,
             stream_fps: None,
@@ -437,7 +476,6 @@ impl WinUsbLcdCore {
             name,
             initialized: false,
             consecutive_failures: 0,
-            h264_chunk_size: 202_752,
             device_gone: false,
             firmware: None,
             stream_fps: None,
@@ -636,18 +674,22 @@ impl WinUsbLcdCore {
     }
 
     pub(crate) fn query_h264_block(&mut self) {
-        let h264_block = self.builder.get_h264_block_header_winusb();
-        if self.tx_write_full(&h264_block).is_ok() {
-            if let Some(resp) = self.read_response("GetH264Block") {
-                if resp.len() >= 12 {
-                    let size = u32::from_be_bytes([resp[8], resp[9], resp[10], resp[11]]) as usize;
-                    if size > 0 {
-                        self.h264_chunk_size = size;
-                        debug!("H264 chunk size from device: {size}");
-                    }
-                }
-            }
+        let header = self.builder.get_h264_block_header_winusb();
+        let transport = Arc::clone(&self.transport);
+        let bulk = transport.lock();
+        transport.h264_chunk_size.clear();
+        if bulk.write_full(&header, self.write_timeout).is_err() {
+            return;
         }
+        let mut response = [0u8; 512];
+        match bulk.read(&mut response, self.read_timeout) {
+            Ok(length) => match transport.h264_chunk_size.update(&response[..length]) {
+                Some(size) => debug!("H264 chunk size from device: {size}"),
+                None => warn!("Invalid GetH264Block response ({length} bytes)"),
+            },
+            Err(error) => warn!("Read after GetH264Block failed: {error}"),
+        }
+        bulk.read_flush();
     }
 
     pub(crate) fn clear_png_cmd(&mut self) {
@@ -1090,7 +1132,7 @@ impl WinUsbLcdCore {
         play_tick: u32,
     ) -> Result<()> {
         let mut file = std::fs::File::open(path).context("opening h264 file")?;
-        let mut file_buf = vec![0u8; self.h264_chunk_size];
+        let mut file_buf = vec![0u8; self.transport.h264_chunk_size()];
         let interval = chunk_interval(fps);
         let mut next_deadline = Instant::now() + interval;
 
@@ -1156,7 +1198,7 @@ impl WinUsbLcdCore {
         play_count: u8,
         play_tick: u32,
     ) -> Result<()> {
-        let mut buf = vec![0u8; self.h264_chunk_size];
+        let mut buf = vec![0u8; self.transport.h264_chunk_size()];
         self.reinit_and_flush_unsafe(false)?;
         self.stream_begin();
         let result = (|| -> Result<()> {
@@ -1282,5 +1324,53 @@ mod file_stream_tests {
         assert!(
             read_stream_chunk(&mut Cursor::new(Vec::<u8>::new()), &mut [0; 2], true, 0).is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod h264_negotiation_tests {
+    use super::*;
+
+    fn response(size: u32) -> [u8; 12] {
+        let mut response = [0; 12];
+        response[8..12].copy_from_slice(&size.to_be_bytes());
+        response
+    }
+
+    #[test]
+    fn negotiated_size_uses_only_complete_bounded_device_values() {
+        let state = NegotiatedH264ChunkSize::default();
+        assert_eq!(state.get(), None);
+        for size in [1, 32_768, DEFAULT_H264_CHUNK_SIZE, MAX_H264_CHUNK_SIZE] {
+            assert_eq!(state.update(&response(size as u32)), Some(size));
+            assert_eq!(state.get(), Some(size));
+        }
+        for size in [0, MAX_H264_CHUNK_SIZE as u32 + 1, u32::MAX] {
+            assert_eq!(state.update(&response(size)), None);
+            assert_eq!(state.get(), None);
+        }
+        let reply = response(DEFAULT_H264_CHUNK_SIZE as u32);
+        for length in 0..12 {
+            state.update(&reply);
+            assert_eq!(state.update(&reply[..length]), None);
+            assert_eq!(state.get(), None);
+        }
+    }
+
+    #[test]
+    fn shared_snapshot_is_invalidated_before_a_new_negotiation() {
+        let state = Arc::new(NegotiatedH264ChunkSize::default());
+        let publisher = state.clone();
+        std::thread::spawn(move || {
+            publisher.update(&response(65_536));
+        })
+        .join()
+        .unwrap();
+        assert_eq!(state.get(), Some(65_536));
+        state.clear();
+        assert_eq!(state.get(), None);
+        assert_eq!(state.get().unwrap_or(DEFAULT_H264_CHUNK_SIZE), 202_752);
+        assert_eq!(state.update(&response(32_768)), Some(32_768));
+        assert_eq!(state.get(), Some(32_768));
     }
 }
