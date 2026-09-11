@@ -468,12 +468,14 @@ pub(super) enum LcdThreadMsg {
     StreamH264Reader(std::process::ChildStdout, f32),
     SwitchDesktop(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     SetBrightness(u8),
+    Shutdown(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     Stop,
 }
 
 pub(super) struct ThreadedWinUsbSender {
     tx: std::sync::mpsc::SyncSender<LcdThreadMsg>,
     h264_stop: Arc<AtomicBool>,
+    closing: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -482,8 +484,15 @@ impl ThreadedWinUsbSender {
         let (tx, rx) = std::sync::mpsc::sync_channel::<LcdThreadMsg>(2);
         let h264_stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&h264_stop);
+        let closing = Arc::new(AtomicBool::new(false));
+        let closing_clone = Arc::clone(&closing);
         let thread = thread::spawn(move || {
             for msg in rx {
+                if closing_clone.load(Ordering::Acquire)
+                    && !matches!(msg, LcdThreadMsg::Shutdown(_) | LcdThreadMsg::Stop)
+                {
+                    continue;
+                }
                 match msg {
                     LcdThreadMsg::Frame(data) => {
                         if let Err(e) = device.send_frame(&data) {
@@ -500,6 +509,9 @@ impl ThreadedWinUsbSender {
                     }
                     LcdThreadMsg::StreamH264 { path, looping, fps } => {
                         stop_clone.store(false, Ordering::Relaxed);
+                        if closing_clone.load(Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(e) = device.stream_h264(&path, looping, &stop_clone, fps) {
                             if lianli_transport::usb::shutting_down() {
                                 debug!("LCD[{index}] h264 stream ended by shutdown: {e:#}");
@@ -510,6 +522,9 @@ impl ThreadedWinUsbSender {
                     }
                     LcdThreadMsg::StreamH264Reader(mut stdout, fps) => {
                         stop_clone.store(false, Ordering::Relaxed);
+                        if closing_clone.load(Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(e) = device.stream_h264_reader(&mut stdout, &stop_clone, fps) {
                             if lianli_transport::usb::shutting_down() {
                                 debug!("LCD[{index}] h264 live stream ended by shutdown: {e:#}");
@@ -528,6 +543,15 @@ impl ThreadedWinUsbSender {
                             warn!("LCD[{index}] set_brightness error: {e}");
                         }
                     }
+                    LcdThreadMsg::Shutdown(reply) => {
+                        let result =
+                            lianli_transport::usb::with_teardown_io(Duration::from_secs(3), || {
+                                device.set_brightness_val(0)
+                            });
+                        device.transport_release();
+                        let _ = reply.send(result);
+                        return;
+                    }
                     LcdThreadMsg::Stop => break,
                 }
             }
@@ -536,6 +560,7 @@ impl ThreadedWinUsbSender {
         Self {
             tx,
             h264_stop,
+            closing,
             thread: Some(thread),
         }
     }
@@ -564,8 +589,7 @@ impl ThreadedWinUsbSender {
         match self.tx.try_send(LcdThreadMsg::SetBrightness(brightness)) {
             Ok(()) => Ok(()),
             Err(std::sync::mpsc::TrySendError::Full(_)) => {
-                warn!("LCD sender busy, brightness command dropped");
-                Ok(())
+                anyhow::bail!("LCD sender busy; brightness was not accepted")
             }
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
                 anyhow::bail!("LCD sender thread exited")
@@ -613,12 +637,70 @@ impl ThreadedWinUsbSender {
             .map_err(|_| anyhow::anyhow!("LCD sender thread timeout"))?
     }
 
-    fn stop(&mut self) {
-        self.h264_stop.store(true, Ordering::Relaxed);
-        let _ = self.tx.send(LcdThreadMsg::Stop);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+    fn send_before(
+        &self,
+        mut message: LcdThreadMsg,
+        deadline: std::time::Instant,
+    ) -> anyhow::Result<()> {
+        loop {
+            match self.tx.try_send(message) {
+                Ok(()) => return Ok(()),
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    anyhow::bail!("LCD sender thread exited")
+                }
+                Err(std::sync::mpsc::TrySendError::Full(returned)) => {
+                    if std::time::Instant::now() >= deadline {
+                        anyhow::bail!("LCD sender queue timed out")
+                    }
+                    message = returned;
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
         }
+    }
+
+    fn join_before(&mut self, deadline: std::time::Instant) {
+        if let Some(worker) = self.thread.take() {
+            while !worker.is_finished() && std::time::Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if worker.is_finished() {
+                if worker.join().is_err() {
+                    warn!("LCD sender panicked");
+                }
+            } else {
+                // The worker retains its transport until the current I/O returns.
+                warn!("LCD sender did not stop before deadline; detaching");
+            }
+        }
+    }
+
+    fn shutdown(&mut self) -> anyhow::Result<()> {
+        self.closing.store(true, Ordering::Release);
+        self.h264_stop.store(true, Ordering::Relaxed);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let result = self
+            .send_before(LcdThreadMsg::Shutdown(tx), deadline)
+            .and_then(|()| {
+                rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .map_err(|_| anyhow::anyhow!("LCD shutdown acknowledgement timed out"))?
+            });
+        self.join_before(deadline);
+        result
+    }
+
+    fn stop(&mut self) {
+        if self.thread.is_none() {
+            return;
+        }
+        self.closing.store(true, Ordering::Release);
+        self.h264_stop.store(true, Ordering::Relaxed);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        if let Err(e) = self.send_before(LcdThreadMsg::Stop, deadline) {
+            warn!("Failed to stop LCD sender: {e}");
+        }
+        self.join_before(deadline);
     }
 }
 
@@ -991,6 +1073,26 @@ impl ActiveTarget {
                     "LCD[{}] recovery thread did not stop in 5s — detaching it",
                     self.index
                 );
+            }
+        }
+    }
+
+    pub(super) fn shutdown(&mut self, builder: &mut PacketBuilder) -> anyhow::Result<()> {
+        self.stop();
+        match &mut self.lcd {
+            LcdBackend::WinUsb(sender) => sender.shutdown(),
+            LcdBackend::HidLcd(lcd) => {
+                let guard = lcd
+                    .try_lock_for(Duration::from_millis(500))
+                    .ok_or_else(|| anyhow::anyhow!("LCD is busy during shutdown"))?;
+                lianli_transport::usb::with_teardown_io(Duration::from_secs(3), || {
+                    guard.set_brightness(0)
+                })
+            }
+            LcdBackend::Slv3(lcd) => {
+                lianli_transport::usb::with_teardown_io(Duration::from_secs(3), || {
+                    lcd.set_brightness(builder, 0)
+                })
             }
         }
     }

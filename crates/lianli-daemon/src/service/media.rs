@@ -440,7 +440,8 @@ impl ServiceManager {
                             self.tx.clone(),
                         );
                         new_targets.insert(cfg_idx, target);
-                        if let Some(brightness) = device_cfg.brightness {
+                        {
+                            let brightness = device_cfg.brightness();
                             if let Some(t) = new_targets.get_mut(&cfg_idx) {
                                 // Bounded so the main loop cannot stall behind
                                 // the init worker holding the LCD mutex. When

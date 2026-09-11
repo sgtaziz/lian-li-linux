@@ -8,7 +8,8 @@
 
 use crate::error::TransportError;
 use rusb::{Device, DeviceHandle, GlobalContext};
-use std::time::Duration;
+use std::cell::Cell;
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 /// Default OUT endpoint address (vendor-defined but consistent across the
@@ -23,20 +24,48 @@ pub const LCD_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 /// Per-frame read timeout for LCD status polling.
 pub const LCD_READ_TIMEOUT: Duration = Duration::from_millis(2_000);
 
-/// USB bulk transport wrapping a `rusb::DeviceHandle`.
-///
-/// Auto-detects endpoint transfer types (bulk vs interrupt) from the USB
-/// descriptor so the correct libusb call is used.
-
-/// Set once the daemon starts shutting down. Long retry loops in this module
-/// poll it so a worker thread never sits inside a multi-second USB retry while
-/// `shutdown()` is blocked joining it — that stall is what forced the process
-/// to exit with a transfer still in flight, which hangs the device MCU.
+/// Stops ordinary I/O while workers drain during daemon shutdown.
 pub static SHUTTING_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+thread_local! {
+    static TEARDOWN_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+/// Permit a bounded teardown transaction on the calling thread only.
+pub fn with_teardown_io<T>(timeout: Duration, operation: impl FnOnce() -> T) -> T {
+    struct Reset(Option<Instant>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEARDOWN_DEADLINE.set(self.0);
+        }
+    }
+    let deadline = Instant::now() + timeout;
+    let previous = TEARDOWN_DEADLINE.get();
+    let _reset = Reset(previous);
+    TEARDOWN_DEADLINE.set(Some(previous.map_or(deadline, |old| old.min(deadline))));
+    operation()
+}
 
 /// True once shutdown has begun; long loops must bail out promptly.
 pub fn shutting_down() -> bool {
     SHUTTING_DOWN.load(std::sync::atomic::Ordering::Relaxed)
+        && !TEARDOWN_DEADLINE
+            .get()
+            .is_some_and(|until| Instant::now() < until)
+}
+
+fn transfer_timeout(timeout: Duration) -> Result<Duration, TransportError> {
+    if shutting_down() {
+        return Err(TransportError::Usb(rusb::Error::Interrupted));
+    }
+    if let Some(until) = TEARDOWN_DEADLINE.get() {
+        let remaining = until.saturating_duration_since(Instant::now());
+        if remaining < Duration::from_millis(1) {
+            return Err(TransportError::Usb(rusb::Error::Interrupted));
+        }
+        return Ok(timeout.min(remaining));
+    }
+    Ok(timeout)
 }
 
 pub struct RusbBulk {
@@ -184,15 +213,7 @@ impl RusbBulk {
     }
 
     pub fn write(&self, data: &[u8], timeout: Duration) -> Result<usize, TransportError> {
-        // FIX: refuse to start new transfers once shutdown begins. The main
-        // loop was blocking inside device_poll()'s USB reads (2s timeout each)
-        // and never reached the Shutdown event, so shutdown() never ran and the
-        // process was forced down mid-transfer — which hangs the device MCU.
-        // Refusing *new* transfers is safe: in-flight ones still drain within
-        // their own timeout, so handlers unwind quickly and cleanly.
-        if shutting_down() {
-            return Err(TransportError::Usb(rusb::Error::Interrupted));
-        }
+        let timeout = transfer_timeout(timeout)?;
         let n = if self.ep_out_interrupt {
             self.handle.write_interrupt(self.ep_out, data, timeout)?
         } else {
@@ -217,17 +238,10 @@ impl RusbBulk {
     /// where the previous transfer left off. Each sub-transfer uses the same
     /// timeout, so the total worst-case is `timeout * number_of_chunks`.
     pub fn write_full(&self, data: &[u8], timeout: Duration) -> Result<(), TransportError> {
-        // FIX: refuse to start new transfers once shutdown begins. The main
-        // loop was blocking inside device_poll()'s USB reads (2s timeout each)
-        // and never reached the Shutdown event, so shutdown() never ran and the
-        // process was forced down mid-transfer — which hangs the device MCU.
-        // Refusing *new* transfers is safe: in-flight ones still drain within
-        // their own timeout, so handlers unwind quickly and cleanly.
-        if shutting_down() {
-            return Err(TransportError::Usb(rusb::Error::Interrupted));
-        }
+        let timeout = transfer_timeout(timeout)?;
         let mut offset = 0usize;
         while offset < data.len() {
+            let timeout = transfer_timeout(timeout)?;
             let n = if self.ep_out_interrupt {
                 self.handle
                     .write_interrupt(self.ep_out, &data[offset..], timeout)?
@@ -247,15 +261,7 @@ impl RusbBulk {
     }
 
     pub fn read(&self, buf: &mut [u8], timeout: Duration) -> Result<usize, TransportError> {
-        // FIX: refuse to start new transfers once shutdown begins. The main
-        // loop was blocking inside device_poll()'s USB reads (2s timeout each)
-        // and never reached the Shutdown event, so shutdown() never ran and the
-        // process was forced down mid-transfer — which hangs the device MCU.
-        // Refusing *new* transfers is safe: in-flight ones still drain within
-        // their own timeout, so handlers unwind quickly and cleanly.
-        if shutting_down() {
-            return Err(TransportError::Usb(rusb::Error::Interrupted));
-        }
+        let timeout = transfer_timeout(timeout)?;
         if self.ep_in_interrupt {
             Ok(self.handle.read_interrupt(self.ep_in, buf, timeout)?)
         } else {
@@ -412,4 +418,35 @@ pub fn find_usb_devices(vid: u16, pid: u16) -> Result<Vec<Device<GlobalContext>>
     }
     list.sort_by_key(|dev| (dev.bus_number(), dev.address()));
     Ok(list)
+}
+
+#[cfg(test)]
+mod teardown_tests {
+    use super::*;
+
+    #[test]
+    fn teardown_permission_is_thread_local_and_restored_after_unwind() {
+        assert!(TEARDOWN_DEADLINE.get().is_none());
+        let result = std::panic::catch_unwind(|| {
+            with_teardown_io(Duration::from_secs(1), || {
+                assert!(TEARDOWN_DEADLINE.get().is_some());
+                std::thread::spawn(|| assert!(TEARDOWN_DEADLINE.get().is_none()))
+                    .join()
+                    .unwrap();
+                panic!("exercise teardown unwind");
+            });
+        });
+        assert!(result.is_err());
+        assert!(TEARDOWN_DEADLINE.get().is_none());
+    }
+
+    #[test]
+    fn expired_teardown_never_uses_a_zero_usb_timeout() {
+        with_teardown_io(Duration::ZERO, || {
+            assert!(transfer_timeout(Duration::from_secs(5)).is_err());
+            with_teardown_io(Duration::from_secs(5), || {
+                assert!(transfer_timeout(Duration::from_secs(5)).is_err());
+            });
+        });
+    }
 }

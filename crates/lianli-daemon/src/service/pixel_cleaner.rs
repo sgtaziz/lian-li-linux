@@ -227,19 +227,8 @@ impl ServiceManager {
             let orig_brightness = self
                 .config
                 .as_ref()
-                .and_then(|cfg| {
-                    cfg.lcds
-                        .iter()
-                        .find(|l| {
-                            l.serial
-                                .as_deref()
-                                .map_or(false, |s| lcd_id_matches(s, &device_identity))
-                        })
-                        .and_then(|l| l.brightness)
-                        .or_else(|| cfg.lcds.get(idx).and_then(|l| l.brightness))
-                        .or_else(|| cfg.aio.get(&device_identity).map(|a| a.brightness))
-                })
-                .unwrap_or(75);
+                .and_then(|cfg| cfg.lcds.get(idx))
+                .map_or(100, LcdConfig::brightness);
 
             let mut targets = self.targets.lock();
             if let Some(target) = targets.get_mut(&idx) {
@@ -326,12 +315,16 @@ impl ServiceManager {
         ipc_state.pixel_clean_states.clear();
         ipc_state
             .pixel_clean_states
-            .extend(self.pixel_clean_sessions.iter().map(|s| crate::ipc::PixelCleanState {
-                session_id: s.session_id,
-                device_id: s.target_id.clone(),
-                duration_minutes: s.duration_minutes,
-                clean_until: s.clean_until,
-            }));
+            .extend(
+                self.pixel_clean_sessions
+                    .iter()
+                    .map(|s| crate::ipc::PixelCleanState {
+                        session_id: s.session_id,
+                        device_id: s.target_id.clone(),
+                        duration_minutes: s.duration_minutes,
+                        clean_until: s.clean_until,
+                    }),
+            );
         ipc_state.telemetry.pixel_clean_statuses = ipc_state.pixel_clean_statuses();
     }
 
@@ -362,9 +355,7 @@ impl ServiceManager {
             let mut remaining = Vec::new();
             for saved in session.original_targets.drain(..) {
                 let matches = match &target_dev_id {
-                    Some(id) => {
-                        target_matches(id, saved.target_index, &saved.device_identity, cfg)
-                    }
+                    Some(id) => target_matches(id, saved.target_index, &saved.device_identity, cfg),
                     None => true,
                 };
 
@@ -401,7 +392,10 @@ impl ServiceManager {
                 for target in remaining {
                     new_split_sessions.push(PixelCleanSession {
                         session_id: NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
-                        target_id: Some(format!("{}#{}", target.device_identity, target.target_index)),
+                        target_id: Some(format!(
+                            "{}#{}",
+                            target.device_identity, target.target_index
+                        )),
                         duration_minutes: session.duration_minutes,
                         original_targets: vec![target],
                         clean_until: session.clean_until,
@@ -501,10 +495,7 @@ mod tests {
 
         // Active session should remain untouched
         assert!(!service.pixel_clean_sessions.is_empty());
-        assert_eq!(
-            service.pixel_clean_sessions[0].session_id,
-            12345
-        );
+        assert_eq!(service.pixel_clean_sessions[0].session_id, 12345);
     }
 
     #[test]
@@ -555,10 +546,7 @@ mod tests {
         assert!(res.is_err());
 
         assert_eq!(service.pixel_clean_sessions.len(), 1);
-        assert_eq!(
-            service.pixel_clean_sessions[0].session_id,
-            8888
-        );
+        assert_eq!(service.pixel_clean_sessions[0].session_id, 8888);
     }
 
     #[test]
@@ -645,10 +633,10 @@ mod tests {
 
     #[test]
     fn test_stop_pixel_cleaning_global_session_partial_stop_splits() {
+        use crate::pixel_cleaner::SavedTargetState;
+        use lianli_media::{MediaAsset, MediaAssetKind};
         use std::path::PathBuf;
         use std::sync::Arc;
-        use lianli_media::{MediaAsset, MediaAssetKind};
-        use crate::pixel_cleaner::SavedTargetState;
 
         let mut service = ServiceManager::new(
             PathBuf::from("/tmp/test_config.json"),
@@ -698,9 +686,17 @@ mod tests {
 
         // Global session should be replaced by a targeted session for devB#1
         let statuses_after = service.ipc.state.lock().pixel_clean_statuses();
-        assert!(!statuses_after.contains_key("all"), "all should no longer be broadcast");
-        assert!(!statuses_after.contains_key("hid:devA#0"), "devA#0 was stopped");
-        assert!(statuses_after.contains_key("hid:devB#1"), "devB#1 should still be cleaning");
+        assert!(
+            !statuses_after.contains_key("all"),
+            "all should no longer be broadcast"
+        );
+        assert!(
+            !statuses_after.contains_key("hid:devA#0"),
+            "devA#0 was stopped"
+        );
+        assert!(
+            statuses_after.contains_key("hid:devB#1"),
+            "devB#1 should still be cleaning"
+        );
     }
 }
-

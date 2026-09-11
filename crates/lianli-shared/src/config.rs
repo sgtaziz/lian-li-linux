@@ -49,6 +49,10 @@ pub struct LcdConfig {
 }
 
 impl LcdConfig {
+    pub fn brightness(&self) -> u8 {
+        self.brightness.unwrap_or(100).min(100)
+    }
+
     pub fn smooth_edges(&self) -> bool {
         self.smooth_edges.unwrap_or(false)
     }
