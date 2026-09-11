@@ -509,24 +509,35 @@ impl WirelessController {
     }
 
     pub fn soft_reset(&mut self) -> bool {
+        if self.poll_stop.load(Ordering::Acquire)
+            || lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed)
+        {
+            return false;
+        }
+
         if self.tx.is_none() {
             if let Ok(mut transport) = open_any(&TX_IDS) {
-                if transport.detach_and_configure("TX").is_ok() {
+                if transport
+                    .detach_and_configure_with_cancel("TX", || {
+                        self.poll_stop.load(Ordering::Acquire)
+                    })
+                    .is_ok()
+                {
                     self.tx = Some(Arc::new(Mutex::new(TransportState::new(transport))));
                 }
             }
         }
 
-        if let Some(tx) = &self.tx {
+        if self.tx.is_some() {
+            if self
+                .tx_recover(|handle| {
+                    let written = handle.write(&CMD_RESET, USB_TIMEOUT)?;
+                    anyhow::ensure!(written == CMD_RESET.len(), "short TX reset write");
+                    Ok(())
+                })
+                .is_err()
             {
-                let handle = tx.lock();
-                if handle
-                    .get()
-                    .and_then(|h| h.write(&CMD_RESET, USB_TIMEOUT).map_err(Into::into))
-                    .is_err()
-                {
-                    return false;
-                }
+                return false;
             }
             self.video_mode_active.store(false, Ordering::Release);
             thread::sleep(Duration::from_millis(50));

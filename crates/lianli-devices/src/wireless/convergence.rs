@@ -1,6 +1,6 @@
 use super::controller::WirelessController;
 use super::discovery::{DeviceHealthMap, DiscoveredDevice, ACK_FRESHNESS};
-use super::transport::SharedTransport;
+use super::transport::{with_transport_recovery, RecoveryBackoff, SharedTransport};
 use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, USB_CMD_SEND_RF};
 use anyhow::{ensure, Context, Result};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
@@ -214,7 +214,6 @@ fn drain_pending(
 
         let due = retry_due(now.duration_since(cmd.last_sent), changing_rgb, &cmd.ack);
         if due {
-            cmd.remaining_retries = cmd.remaining_retries.saturating_sub(1);
             if cmd.remaining_retries == 0 {
                 debug!(
                     "command remained unacknowledged for {} ({}) after {} retries",
@@ -225,22 +224,33 @@ fn drain_pending(
                 continue;
             }
             cmd.last_sent = now;
-            let handle = tx.lock();
-            if binding_blocks_control(binding_mac, health_map, &cmd.mac) {
+            let mut obsolete = false;
+            let mut attempted = false;
+            let result = with_transport_recovery(tx, &super::TX_IDS, "TX", stop, |handle| {
+                if binding_blocks_control(binding_mac, health_map, &cmd.mac)
+                    || superseded_command(&queue.lock(), &cmd)
+                {
+                    obsolete = true;
+                    return Ok(());
+                }
+                attempted = true;
+                send_rf_frame(handle, &cmd.channel, &cmd.rx_type, &cmd.rf_data)
+            });
+            if obsolete {
                 continue;
             }
-            if superseded_command(&queue.lock(), &cmd) {
-                continue;
-            }
-            if let Err(e) = handle
-                .get()
-                .and_then(|h| send_rf_frame(h, &cmd.channel, &cmd.rx_type, &cmd.rf_data))
+            account_retry(&mut cmd.remaining_retries, attempted, &result);
+            if !result
+                .as_ref()
+                .is_err_and(|error| error.is::<RecoveryBackoff>())
             {
-                warn!(
-                    "re-send failed for {} ({}): {e:#}",
-                    cmd.mac_str(),
-                    cmd.description,
-                );
+                if let Err(e) = result {
+                    warn!(
+                        "re-send failed for {} ({}): {e:#}",
+                        cmd.mac_str(),
+                        cmd.description,
+                    );
+                }
             }
         }
         let mut pending = queue.lock();
@@ -250,6 +260,16 @@ fn drain_pending(
         } else if !superseded {
             warn!(mac = ?cmd.mac, operation = %cmd.description, "Wireless command retry discarded because the queue is full");
         }
+    }
+}
+
+fn account_retry(remaining: &mut u32, attempted: bool, result: &Result<()>) {
+    if attempted
+        || !result
+            .as_ref()
+            .is_err_and(|error| error.is::<RecoveryBackoff>())
+    {
+        *remaining = remaining.saturating_sub(1);
     }
 }
 

@@ -182,20 +182,31 @@ impl WirelessController {
         rf_data[19..19 + copy_len].copy_from_slice(&data[..copy_len]);
 
         let chunks = rf_data.len() / 60;
-        let transport = tx.lock();
-        let handle = transport.get()?;
-        for i in 0..chunks {
-            let mut packet = [0u8; 64];
-            packet[0] = super::USB_CMD_SEND_RF;
-            packet[1] = i as u8;
-            packet[2] = channel;
-            packet[3] = 0xFF;
-            let start = i * 60;
-            packet[4..64].copy_from_slice(&rf_data[start..start + 60]);
-            handle.write(&packet, USB_TIMEOUT)?;
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        drop(transport);
+        super::transport::with_ready_transport(
+            tx,
+            &super::TX_IDS,
+            "TX",
+            &self.poll_stop,
+            |handle| {
+                for i in 0..chunks {
+                    let mut packet = [0u8; 64];
+                    packet[0] = super::USB_CMD_SEND_RF;
+                    packet[1] = i as u8;
+                    packet[2] = channel;
+                    packet[3] = 0xFF;
+                    let start = i * 60;
+                    packet[4..64].copy_from_slice(&rf_data[start..start + 60]);
+                    anyhow::ensure!(
+                        !self.poll_stop.load(std::sync::atomic::Ordering::Acquire),
+                        "wireless controller is stopping"
+                    );
+                    let written = handle.write(&packet, USB_TIMEOUT)?;
+                    anyhow::ensure!(written == packet.len(), "short picture packet write");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Ok(())
+            },
+        )?;
         Ok(next_seq)
     }
 

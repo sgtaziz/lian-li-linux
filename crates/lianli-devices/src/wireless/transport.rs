@@ -8,6 +8,16 @@ use tracing::{info, warn};
 
 pub(super) type SharedTransport = Arc<Mutex<TransportState<RusbBulk>>>;
 
+#[derive(Debug)]
+pub(super) struct RecoveryBackoff;
+
+impl std::fmt::Display for RecoveryBackoff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("wireless transport recovery is backing off")
+    }
+}
+impl std::error::Error for RecoveryBackoff {}
+
 pub(super) struct TransportState<T> {
     handle: Option<T>,
     retry_after: Option<Instant>,
@@ -32,10 +42,9 @@ impl<T> TransportState<T> {
         open: impl FnOnce() -> Result<T>,
         claim: impl FnOnce(&mut T) -> Result<()>,
     ) -> Result<()> {
-        anyhow::ensure!(
-            self.retry_after.is_none_or(|until| Instant::now() >= until),
-            "wireless transport recovery is backing off"
-        );
+        if self.retry_after.is_some_and(|until| Instant::now() < until) {
+            return Err(RecoveryBackoff.into());
+        }
         drop(self.handle.take());
         let result = (|| {
             let mut replacement = open()?;
@@ -85,28 +94,68 @@ where
             );
             op(handle.get()?)
         },
-        |handle, error| {
-            handle.replace(
-                || {
-                    warn!("{name} transport op failed ({error}); attempting reopen");
-                    open_any(ids).context(format!("reopening {name} dongle"))
-                },
-                |replacement| {
-                    replacement
-                        .detach_and_configure_with_cancel(name, || stop.load(Ordering::Acquire))
-                        .context("claiming replacement wireless transport")?;
-                    anyhow::ensure!(
-                        !stop.load(Ordering::Acquire)
-                            && !lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed),
-                        "wireless controller is stopping"
-                    );
-                    Ok(())
-                },
-            )?;
-            info!("{name} transport reopened, retrying");
+        |handle, error| reopen_transport(handle, ids, name, stop, error),
+    )
+}
+
+fn reopen_transport(
+    handle: &mut TransportState<RusbBulk>,
+    ids: &[(u16, u16)],
+    name: &str,
+    stop: &AtomicBool,
+    error: &anyhow::Error,
+) -> Result<()> {
+    handle.replace(
+        || {
+            warn!("{name} transport op failed ({error}); attempting reopen");
+            open_any(ids).context(format!("reopening {name} dongle"))
+        },
+        |replacement| {
+            replacement
+                .detach_and_configure_with_cancel(name, || stop.load(Ordering::Acquire))
+                .context("claiming replacement wireless transport")?;
+            anyhow::ensure!(
+                !stop.load(Ordering::Acquire)
+                    && !lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed),
+                "wireless controller is stopping"
+            );
             Ok(())
         },
-    )
+    )?;
+    info!("{name} transport reopened");
+    Ok(())
+}
+
+/// Recover an absent handle before the operation; never replay a partially sent transaction.
+pub(super) fn with_ready_transport<R>(
+    arc: &SharedTransport,
+    ids: &[(u16, u16)],
+    name: &str,
+    stop: &AtomicBool,
+    op: impl FnOnce(&RusbBulk) -> Result<R>,
+) -> Result<R> {
+    let mut handle = arc.lock();
+    transport_operation_once(&mut handle, stop, op, |handle, error| {
+        reopen_transport(handle, ids, name, stop, error)
+    })
+}
+
+fn transport_operation_once<T, R>(
+    state: &mut TransportState<T>,
+    stop: &AtomicBool,
+    op: impl FnOnce(&T) -> Result<R>,
+    reopen: impl FnOnce(&mut TransportState<T>, &anyhow::Error) -> Result<()>,
+) -> Result<R> {
+    retry_transport_operation(state, stop, |state| state.get().map(|_| ()), reopen)?;
+    anyhow::ensure!(
+        !stop.load(Ordering::Acquire),
+        "wireless controller is stopping"
+    );
+    let result = op(state.get()?);
+    if result.as_ref().is_err_and(needs_reopen) {
+        drop(state.handle.take());
+    }
+    result
 }
 
 fn retry_transport_operation<T, R>(
@@ -155,6 +204,70 @@ mod tests {
     use std::cell::Cell;
 
     #[test]
+    fn non_replayable_operation_recovers_missing_handle_before_sending() {
+        let mut state = TransportState::<u8> {
+            handle: None,
+            retry_after: None,
+        };
+        let sends = Cell::new(0);
+        let result = transport_operation_once(
+            &mut state,
+            &AtomicBool::new(false),
+            |handle| {
+                sends.set(sends.get() + 1);
+                Ok(*handle)
+            },
+            |state, _| state.replace(|| Ok(7), |_| Ok(())),
+        )
+        .unwrap();
+        assert_eq!(result, 7);
+        assert_eq!(sends.get(), 1);
+    }
+
+    #[test]
+    fn partial_transaction_is_not_replayed_and_disconnect_invalidates_handle() {
+        let mut state = TransportState::new(1u8);
+        let packets = Cell::new(0);
+        let result: Result<()> = transport_operation_once(
+            &mut state,
+            &AtomicBool::new(false),
+            |_| {
+                packets.set(packets.get() + 1);
+                Err(lianli_transport::TransportError::Usb(rusb::Error::NoDevice).into())
+            },
+            |_, _| panic!("must not reopen during a transaction"),
+        );
+        assert!(result.is_err());
+        assert_eq!(packets.get(), 1);
+        assert!(state.get().is_err());
+    }
+
+    #[test]
+    fn transaction_never_starts_when_recovery_fails_or_is_cancelled() {
+        for cancel in [false, true] {
+            let mut state = TransportState::<u8> {
+                handle: None,
+                retry_after: None,
+            };
+            let stop = AtomicBool::new(false);
+            let result: Result<()> = transport_operation_once(
+                &mut state,
+                &stop,
+                |_| panic!("transaction must not start"),
+                |state, _| {
+                    if cancel {
+                        stop.store(true, Ordering::Release);
+                        state.replace(|| Ok(1), |_| Ok(()))
+                    } else {
+                        state.replace(|| anyhow::bail!("open failed"), |_| Ok(()))
+                    }
+                },
+            );
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
     fn replacement_releases_old_owner_before_claim_even_when_claim_fails() {
         struct Handle<'a>(&'a Cell<bool>);
         impl Drop for Handle<'_> {
@@ -188,7 +301,8 @@ mod tests {
         assert!(state.get().is_err());
         assert!(state
             .replace(|| panic!("must back off"), |_| Ok(()))
-            .is_err());
+            .unwrap_err()
+            .is::<RecoveryBackoff>());
         state.retry_after = Some(Instant::now());
         let sends = Cell::new(0);
         let result = retry_transport_operation(
@@ -227,7 +341,8 @@ mod tests {
         assert!(state.handle.is_none());
         assert!(state
             .replace(|| panic!("must back off"), |_| Ok(()))
-            .is_err());
+            .unwrap_err()
+            .is::<RecoveryBackoff>());
     }
 
     #[test]
