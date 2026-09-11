@@ -2,6 +2,7 @@ use image::{Rgb, RgbImage};
 
 pub const FPS: u32 = 20;
 pub const FRAME_COUNT: u64 = 100;
+const MAX_NOISE_CELLS: u64 = 65_536;
 
 /// Fill a reusable, native-size buffer with one frame of the five-second loop.
 pub fn render_frame(frame: &mut RgbImage, frame_index: u64) {
@@ -27,15 +28,27 @@ pub fn render_frame(frame: &mut RgbImage, frame_index: u64) {
         return;
     }
 
+    let (width, height) = frame.dimensions();
+    let mut grain = 1;
+    // Bound random detail while preserving native geometry and contrast.
+    while u64::from(width.div_ceil(grain)) * u64::from(height.div_ceil(grain)) > MAX_NOISE_CELLS {
+        grain += 1;
+    }
     let mut random = 0x9e37_79b9_u32 ^ frame_index as u32;
-    for pixel in frame.pixels_mut() {
-        random ^= random << 13;
-        random ^= random >> 17;
-        random ^= random << 5;
-        let luma = (random >> 24) as i32;
-        // Match the reference noise's contrast after limited-range luma expansion.
-        let gray = ((luma - 16) * 255 / 219).clamp(0, 255) as u8;
-        *pixel = Rgb([gray; 3]);
+    for y in (0..height).step_by(grain as usize) {
+        for x in (0..width).step_by(grain as usize) {
+            random ^= random << 13;
+            random ^= random >> 17;
+            random ^= random << 5;
+            let luma = (random >> 24) as i32;
+            // Match the reference noise's contrast after limited-range luma expansion.
+            let gray = ((luma - 16) * 255 / 219).clamp(0, 255) as u8;
+            for row in y..(y + grain).min(height) {
+                for column in x..(x + grain).min(width) {
+                    frame.put_pixel(column, row, Rgb([gray; 3]));
+                }
+            }
+        }
     }
 }
 
@@ -127,6 +140,10 @@ pub fn prepare_asset(
                 "20",
                 "-bf",
                 "0",
+                "-maxrate",
+                "8M",
+                "-bufsize",
+                "800k",
                 "-x264-params",
                 "repeat-headers=1:aud=1",
                 "-fs",
@@ -200,6 +217,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rectangular_noise_uses_square_grains_and_fills_partial_edges() {
+        let mut frame = RgbImage::from_pixel(481, 1921, Rgb([1, 2, 3]));
+        render_frame(&mut frame, 35);
+        for y in (0..frame.height()).step_by(4) {
+            for x in (0..frame.width()).step_by(4) {
+                let expected = frame.get_pixel(x, y);
+                assert_eq!(expected[0], expected[1]);
+                assert_eq!(expected[1], expected[2]);
+                for dy in y..(y + 4).min(frame.height()) {
+                    for dx in x..(x + 4).min(frame.width()) {
+                        assert_eq!(frame.get_pixel(dx, dy), expected);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn noise_fits_each_supported_screen_payload() {
         use lianli_shared::screen::ScreenInfo;
         for screen in [
@@ -265,44 +300,109 @@ mod tests {
     }
 
     #[test]
-    fn prepared_h264_loop_decodes_all_frames_and_removes_temporary_file() {
-        let screen = lianli_shared::screen::ScreenInfo::AIO_LCD_480;
-        let asset =
-            prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(false)).unwrap();
-        let crate::MediaAssetKind::H264Stream {
-            ref path,
-            fps,
-            looping,
-            ..
-        } = asset
-        else {
-            panic!("expected H.264")
-        };
-        assert_eq!(fps, 20.0);
-        assert!(looping);
-        let mut command = std::process::Command::new("ffprobe");
-        command
-            .args([
-                "-v",
-                "error",
-                "-count_frames",
-                "-show_entries",
-                "stream=width,height,nb_read_frames",
-                "-of",
-                "json",
-            ])
-            .arg(path);
-        let result =
-            crate::video::process::output_with_timeout(command, std::time::Duration::from_secs(10))
+    fn prepared_h264_loops_bound_bursts_on_every_supported_h264_screen() {
+        use lianli_shared::screen::ScreenInfo;
+        for screen in [
+            ScreenInfo::AIO_LCD_480,
+            ScreenInfo::HYDROSHIFT2,
+            ScreenInfo::HYDROSHIFT2_OLED_CURVE,
+            ScreenInfo::UNIVERSAL_SCREEN,
+            ScreenInfo::FLEX_LCD,
+        ] {
+            let asset =
+                prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+            let crate::MediaAssetKind::H264Stream {
+                ref path,
+                fps,
+                looping,
+                ..
+            } = asset
+            else {
+                panic!("expected H.264")
+            };
+            assert_eq!(fps, 20.0);
+            assert!(looping);
+            let mut command = std::process::Command::new("ffprobe");
+            command
+                .args([
+                    "-v",
+                    "error",
+                    "-count_frames",
+                    "-show_packets",
+                    "-show_entries",
+                    "packet=size:stream=width,height,nb_read_frames",
+                    "-of",
+                    "json",
+                ])
+                .arg(path);
+            let result = crate::video::process::output_with_timeout(
+                command,
+                std::time::Duration::from_secs(10),
+            )
+            .unwrap();
+            assert!(result.status.success());
+            let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(data["streams"][0]["width"], screen.width);
+            assert_eq!(data["streams"][0]["height"], screen.height);
+            assert_eq!(data["streams"][0]["nb_read_frames"], "100");
+            let sizes: Vec<usize> = data["packets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|packet| packet["size"].as_str().unwrap().parse().unwrap())
+                .collect();
+            assert_eq!(sizes.len(), FRAME_COUNT as usize);
+            assert!(
+                sizes.iter().all(|&size| size <= 128 * 1024),
+                "oversized H.264 frame on {screen:?}: {sizes:?}"
+            );
+            assert!(
+                sizes
+                    .windows(FPS as usize)
+                    .all(|second| second.iter().sum::<usize>() <= 1_150_000),
+                "H.264 bitrate burst on {screen:?}"
+            );
+
+            if screen == ScreenInfo::UNIVERSAL_SCREEN {
+                let mut command = std::process::Command::new("ffmpeg");
+                command.args(["-v", "error", "-i"]).arg(path).args([
+                    "-vf",
+                    "select=eq(n\\,35)",
+                    "-frames:v",
+                    "1",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-f",
+                    "rawvideo",
+                    "-",
+                ]);
+                let frame = crate::video::process::output_with_timeout(
+                    command,
+                    std::time::Duration::from_secs(10),
+                )
                 .unwrap();
-        assert!(result.status.success());
-        let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
-        assert_eq!(data["streams"][0]["width"], 480);
-        assert_eq!(data["streams"][0]["height"], 480);
-        assert_eq!(data["streams"][0]["nb_read_frames"], "100");
-        let path = path.clone();
-        drop(asset);
-        assert!(!path.exists());
+                assert!(frame.status.success());
+                let pixels = (screen.width * screen.height) as usize;
+                assert_eq!(frame.stdout.len(), pixels * 3);
+                let dark = frame
+                    .stdout
+                    .iter()
+                    .step_by(3)
+                    .filter(|&&red| red < 48)
+                    .count();
+                let bright = frame
+                    .stdout
+                    .iter()
+                    .step_by(3)
+                    .filter(|&&red| red > 207)
+                    .count();
+                assert!(dark > pixels * 15 / 100 && bright > pixels * 15 / 100,
+                    "bandwidth limiting must preserve contrasting noise rather than flatten it to gray");
+            }
+            let path = path.clone();
+            drop(asset);
+            assert!(!path.exists());
+        }
     }
 
     #[test]
