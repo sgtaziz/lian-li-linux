@@ -156,9 +156,9 @@ sudo dnf copr enable crashdummy/Displaylink
 sudo dnf install displaylink
 ```
 
-### Distrobox / toolbx (containers)
+### Distrobox (containers)
 
-On Bazzite and other immutable systems, the recommended way to add software is a distrobox or toolbx container rather than layering onto the base. lian-li-linux runs fine in one — just make sure your USB devices are exposed to the box so the daemon can see them.
+On Bazzite and other immutable systems, the recommended way to add software is a Distrobox container rather than layering onto the base. lian-li-linux runs fine in one when the host grants access to its USB devices.
 
 Inside the container:
 ```bash
@@ -174,34 +174,36 @@ sudo dnf install --setopt=install_weak_deps=False lian-li-linux
 
 Don't enable `crashdummy/Displaylink` inside the box either, same reason.
 
-The package installs its udev rules and creates the `lianli` group inside the container, but USB device nodes are managed by the host. After replacing `BOX` with your container name, install the rule and create the group on the **host**:
+The package installs its udev rules and creates the `lianli` group inside the container, but USB device nodes are managed by the host. After replacing `<boxname>` with your container name, install the rule and grant your user access on the **host**:
 ```bash
 getent group lianli >/dev/null || sudo groupadd --system lianli
-distrobox-enter -n BOX -- cat /usr/lib/udev/rules.d/60-lianli.rules \
+sudo usermod --append --groups lianli "$USER"
+distrobox-enter -n <boxname> -- cat /usr/lib/udev/rules.d/60-lianli.rules \
   | sudo tee /etc/udev/rules.d/60-lianli.rules >/dev/null
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
+Log out and back in so the new group membership reaches Distrobox and the user systemd service. If the box remained running, stop it with `distrobox stop <boxname>`; the next `distrobox-enter` starts it again with the updated groups.
 
-A container doesn't run systemd, so the shipped `lianli-daemon.service` can't manage the daemon from inside the box. To start it on login, create a user systemd unit on the **host** that enters the box, e.g. `~/.config/systemd/user/lianli-daemon.service`:
+A default Distrobox doesn't run systemd, so the shipped `lianli-daemon.service` can't manage the daemon from inside the box. To start it on login, create a user systemd unit on the **host** that enters the box, e.g. `~/.config/systemd/user/lianli-daemon.service`:
 ```ini
 [Unit]
 Description=Lian Li Daemon (distrobox)
 After=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/distrobox-enter -n BOX -- lianli-daemon
+ExecStart=/usr/bin/distrobox-enter -n <boxname> -- lianli-daemon
 Restart=on-failure
 
 [Install]
 WantedBy=default.target
 ```
-Replace `BOX` with your container name (check the path with `command -v distrobox-enter`), then:
+Replace `<boxname>` with your container name (check the path with `command -v distrobox-enter`), then:
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now lianli-daemon.service
 ```
-Run the GUI with `distrobox-enter -n BOX -- lianli-gui`.
+Run the GUI with `distrobox-enter -n <boxname> -- lianli-gui`.
 
 ### Immutable Fedora (Bazzite)
 
