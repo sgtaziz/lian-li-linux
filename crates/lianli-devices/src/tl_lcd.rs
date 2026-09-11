@@ -93,9 +93,13 @@ pub struct TlLcdIdentity {
 pub struct TlLcdDevice {
     device: SharedHid,
     identity: Option<TlLcdIdentity>,
+    settings: Mutex<LcdSettings>,
+    initialized: bool,
+}
+
+struct LcdSettings {
     brightness: u8,
     rotation: ScreenRotation,
-    initialized: bool,
 }
 
 impl TlLcdDevice {
@@ -104,8 +108,10 @@ impl TlLcdDevice {
         Self {
             device,
             identity: None,
-            brightness: 50,
-            rotation: ScreenRotation::Rotate0,
+            settings: Mutex::new(LcdSettings {
+                brightness: 50,
+                rotation: ScreenRotation::Rotate0,
+            }),
             initialized: false,
         }
     }
@@ -213,16 +219,17 @@ impl TlLcdDevice {
 
     /// Set LCD brightness and rotation via LCD Control command.
     pub fn apply_lcd_settings(&self) -> Result<()> {
+        let settings = self.settings.lock();
         let mut payload = [0u8; 11];
         payload[0] = LcdControlMode::LcdSetting as u8;
-        payload[4] = self.brightness;
-        payload[5] = 30; // fps
-        payload[6] = self.rotation as u8;
+        payload[4] = settings.brightness;
+        payload[5] = 30;
+        payload[6] = settings.rotation as u8;
 
         self.send_command_with_response(CMD_LCD_CONTROL, &payload)?;
         debug!(
             "LCD settings applied: brightness={}, rotation={:?}",
-            self.brightness, self.rotation
+            settings.brightness, settings.rotation
         );
         Ok(())
     }
@@ -238,11 +245,12 @@ impl TlLcdDevice {
     }
 
     pub fn switch_to_show_jpg(&self) -> Result<()> {
+        let settings = self.settings.lock();
         let mut payload = [0u8; 11];
         payload[0] = LcdControlMode::ShowJpg as u8;
-        payload[4] = self.brightness;
+        payload[4] = settings.brightness;
         payload[5] = 30;
-        payload[6] = self.rotation as u8;
+        payload[6] = settings.rotation as u8;
 
         let _chain = CHAIN_LOCK.lock();
         let mut dev = self.device.lock();
@@ -364,23 +372,28 @@ impl LcdDevice for TlLcdDevice {
     }
 
     fn set_brightness(&self, brightness: u8) -> Result<()> {
+        let mut settings = self.settings.lock();
+        let brightness = brightness.min(100);
         let mut payload = [0u8; 11];
         payload[0] = LcdControlMode::LcdSetting as u8;
-        payload[4] = brightness.min(100);
+        payload[4] = brightness;
         payload[5] = 30;
-        payload[6] = self.rotation as u8;
+        payload[6] = settings.rotation as u8;
         self.send_command_with_response(CMD_LCD_CONTROL, &payload)?;
+        settings.brightness = brightness;
         Ok(())
     }
 
     fn set_rotation(&self, degrees: u16) -> Result<()> {
+        let mut settings = self.settings.lock();
         let rotation = ScreenRotation::from_degrees(degrees);
         let mut payload = [0u8; 11];
         payload[0] = LcdControlMode::LcdSetting as u8;
-        payload[4] = self.brightness;
+        payload[4] = settings.brightness;
         payload[5] = 30;
         payload[6] = rotation as u8;
         self.send_command_with_response(CMD_LCD_CONTROL, &payload)?;
+        settings.rotation = rotation;
         Ok(())
     }
 
@@ -536,5 +549,105 @@ impl crate::registry::DeviceDriver for TlLcdDriver {
             shared_hid: None,
             shared_usb: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use lianli_transport::{HidTransport, TransportError};
+    use std::sync::Arc;
+
+    #[derive(Default)]
+    struct RecordedIo {
+        packets: Vec<Vec<u8>>,
+        fail_write: bool,
+        fail_read: bool,
+    }
+
+    struct RecordingTransport(Arc<Mutex<RecordedIo>>);
+
+    impl HidTransport for RecordingTransport {
+        fn write(&mut self, data: &[u8]) -> Result<usize, TransportError> {
+            let mut io = self.0.lock();
+            if io.fail_write {
+                return Err(TransportError::Other("write failed".into()));
+            }
+            io.packets.push(data.to_vec());
+            Ok(data.len())
+        }
+
+        fn read_timeout(&mut self, buf: &mut [u8], _: i32) -> Result<usize, TransportError> {
+            let io = self.0.lock();
+            if io.fail_read {
+                return Ok(0);
+            }
+            buf[1] = io.packets.last().unwrap()[1];
+            Ok(HEADER_LEN)
+        }
+
+        fn send_feature_report(&mut self, _: &[u8]) -> Result<usize, TransportError> {
+            unreachable!()
+        }
+        fn get_feature_report(&mut self, _: &mut [u8]) -> Result<usize, TransportError> {
+            unreachable!()
+        }
+        fn get_input_report(&mut self, _: &mut [u8]) -> Result<usize, TransportError> {
+            unreachable!()
+        }
+        fn read_flush(&mut self) {}
+    }
+
+    fn device() -> (TlLcdDevice, Arc<Mutex<RecordedIo>>) {
+        let io = Arc::new(Mutex::new(RecordedIo::default()));
+        let transport: SharedHid = Arc::new(Mutex::new(Box::new(RecordingTransport(io.clone()))));
+        (TlLcdDevice::new(transport), io)
+    }
+
+    fn assert_control(io: &Arc<Mutex<RecordedIo>>, mode: u8, brightness: u8, rotation: u8) {
+        let io = io.lock();
+        let packet = io.packets.last().unwrap();
+        assert_eq!(&packet[..HEADER_LEN], &[2, 64, 0, 0, 0, 11, 0, 0, 0, 0, 11]);
+        assert_eq!(
+            &packet[HEADER_LEN..HEADER_LEN + 11],
+            &[mode, 0, 0, 0, brightness, 30, rotation, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn brightness_survives_static_display_rotation_and_settings_reapplication() {
+        let (mut device, io) = device();
+        for (requested, expected) in [(0, 0), (37, 37), (75, 75), (100, 100), (255, 100)] {
+            device.set_brightness(requested).unwrap();
+            device.set_rotation(90).unwrap();
+            assert_control(&io, 5, expected, 1);
+            device.send_static_frame(&[0xff, 0xd8, 0xff, 0xd9]).unwrap();
+            assert_control(&io, 1, expected, 1);
+            device.apply_lcd_settings().unwrap();
+            assert_control(&io, 5, expected, 1);
+        }
+    }
+
+    #[test]
+    fn failed_settings_do_not_replace_the_last_successful_values() {
+        let (device, io) = device();
+        device.set_brightness(37).unwrap();
+        device.set_rotation(90).unwrap();
+        for fail_write in [true, false] {
+            {
+                let mut io = io.lock();
+                io.fail_write = fail_write;
+                io.fail_read = !fail_write;
+            }
+            assert!(device.set_brightness(0).is_err());
+            assert!(device.set_rotation(180).is_err());
+            {
+                let mut io = io.lock();
+                io.fail_write = false;
+                io.fail_read = false;
+            }
+            device.switch_to_show_jpg().unwrap();
+            assert_control(&io, 1, 37, 1);
+        }
     }
 }
