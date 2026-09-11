@@ -1,6 +1,7 @@
 pub mod common;
 pub mod custom;
 pub mod image;
+pub mod pixel_cleaner;
 pub mod rgb;
 pub mod sensor;
 pub mod video;
