@@ -3,6 +3,17 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v0.9.1 — 2026-09-11
+
+### Documentation
+- **changelog**: Regenerate for v0.9.0  ([#196](https://github.com/sgtaziz/lian-li-linux/pull/196))
+
+### Features
+- **lcd**: Add LCD shutdown off, pixel conditioning cleaner, and UI controls  ([#192](https://github.com/sgtaziz/lian-li-linux/pull/192))
+
+### Fixes
+- **wireless**: Bound restart recovery and channel correction  (`73aef4f`)
+
 ## v0.9.0 — 2026-09-10
 
 ### Chores
