@@ -174,6 +174,15 @@ sudo dnf install --setopt=install_weak_deps=False lian-li-linux
 
 Don't enable `crashdummy/Displaylink` inside the box either, same reason.
 
+The package installs its udev rules and creates the `lianli` group inside the container, but USB device nodes are managed by the host. After replacing `BOX` with your container name, install the rule and create the group on the **host**:
+```bash
+getent group lianli >/dev/null || sudo groupadd --system lianli
+distrobox-enter -n BOX -- cat /usr/lib/udev/rules.d/60-lianli.rules \
+  | sudo tee /etc/udev/rules.d/60-lianli.rules >/dev/null
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
 A container doesn't run systemd, so the shipped `lianli-daemon.service` can't manage the daemon from inside the box. To start it on login, create a user systemd unit on the **host** that enters the box, e.g. `~/.config/systemd/user/lianli-daemon.service`:
 ```ini
 [Unit]
