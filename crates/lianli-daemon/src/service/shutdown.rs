@@ -28,7 +28,7 @@ impl ServiceManager {
         self.desktop_displays.shutdown();
         mark("desktop_displays", t0);
 
-        let mut targets = self.targets.lock();
+        let mut targets = std::mem::take(&mut *self.targets.lock());
         // Temporarily permit shutdown teardown packet through transport
         lianli_transport::usb::SHUTTING_DOWN
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -45,8 +45,6 @@ impl ServiceManager {
             }
             target.stop();
         }
-        targets.clear();
-        drop(targets);
         lianli_transport::usb::SHUTTING_DOWN
             .store(true, std::sync::atomic::Ordering::Relaxed);
         mark("targets", t0);
@@ -60,7 +58,7 @@ impl ServiceManager {
         {
             let mut state = self.ipc.state.lock();
             state.rgb_controller = None;
-            state.pixel_clean_state = None;
+            state.pixel_clean_states.clear();
         }
         self.registry.clear();
         mark("registry", t0);

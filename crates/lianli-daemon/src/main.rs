@@ -71,6 +71,25 @@ enum Commands {
     },
 }
 
+pub const MAX_CLEAN_MINUTES: u16 = lianli_shared::ipc::MAX_CLEAN_MINUTES;
+
+//guard against a user's bad input -400 | 3141414612
+fn parse_clean_minutes(s: &str) -> Result<u16, String> {
+    let raw: i64 = s
+        .trim()
+        .parse()
+        .map_err(|e| format!("invalid number '{s}': {e}"))?;
+    let abs_raw = raw.unsigned_abs();
+    if abs_raw > MAX_CLEAN_MINUTES as u64 {
+        eprintln!(
+            "Note: requested duration ({abs_raw}m) exceeds max threshold ({MAX_CLEAN_MINUTES}m); clamping to {MAX_CLEAN_MINUTES}m"
+        );
+        return Ok(MAX_CLEAN_MINUTES);
+    }
+    let desired_mins = abs_raw as u16;
+    Ok(desired_mins.clamp(1, MAX_CLEAN_MINUTES))
+}
+
 #[derive(Subcommand, Debug)]
 enum LcdCommands {
     /// Run pixel conditioning / exercise loop to clear image retention
@@ -80,8 +99,13 @@ enum LcdCommands {
         device_id: Option<String>,
 
         /// Duration in minutes to run cleaner (default: 30)
-        #[arg(long, default_value_t = 30)]
-        minutes: u32,
+        #[arg(
+            long,
+            default_value = "30",
+            allow_hyphen_values = true,
+            value_parser = parse_clean_minutes
+        )]
+        minutes: u16,
     },
 }
 
@@ -121,4 +145,46 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_clean_minutes_positive() {
+        assert_eq!(parse_clean_minutes("22").unwrap(), 22);
+        assert_eq!(parse_clean_minutes("30").unwrap(), 30);
+        assert_eq!(parse_clean_minutes("+45").unwrap(), 45);
+    }
+
+    #[test]
+    fn test_parse_clean_minutes_negative_takes_abs() {
+        assert_eq!(parse_clean_minutes("-22").unwrap(), 22);
+        assert_eq!(parse_clean_minutes("-120").unwrap(), 120);
+    }
+
+    #[test]
+    fn test_parse_clean_minutes_zero_clamped_to_one() {
+        assert_eq!(parse_clean_minutes("0").unwrap(), 1);
+        assert_eq!(parse_clean_minutes("-0").unwrap(), 1);
+    }
+
+    #[test]
+    fn test_parse_clean_minutes_exceeding_threshold_clamps_silently() {
+        assert_eq!(
+            parse_clean_minutes(&MAX_CLEAN_MINUTES.to_string()).unwrap(),
+            MAX_CLEAN_MINUTES
+        );
+        assert_eq!(parse_clean_minutes("300").unwrap(), MAX_CLEAN_MINUTES);
+        assert_eq!(parse_clean_minutes("1500").unwrap(), MAX_CLEAN_MINUTES);
+        assert_eq!(parse_clean_minutes("-5000").unwrap(), MAX_CLEAN_MINUTES);
+    }
+
+    #[test]
+    fn test_parse_clean_minutes_overflow_clamped() {
+        // Value exceeding u32::MAX (e.g. 2^32 + 10 = 4294967306)
+        assert_eq!(parse_clean_minutes("4294967306").unwrap(), MAX_CLEAN_MINUTES);
+        assert_eq!(parse_clean_minutes("-4294967306").unwrap(), MAX_CLEAN_MINUTES);
+    }
 }

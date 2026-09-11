@@ -4,8 +4,10 @@ import type { DeviceInfo, TelemetrySnapshot } from "@/types";
 import { DONGLE_FAMILIES } from "@/constants";
 import { usePendingAction } from "@/composables/usePendingAction";
 
-/// Dev-only mock AIO device for the AIO page.
-const MOCK_AIO = false;
+/// Dev-only mock device flags. Activated via `npm run dev:mock` (mode: "mock") or manual toggle.
+const MOCK_MODE = import.meta.env.MODE === "mock";
+const MOCK_AIO = MOCK_MODE || false;
+const MOCK_HYDROSHIFT_LCD = MOCK_MODE || false;
 
 /// Fake wireless AIO so the AIO page can be tested without hardware.
 const MOCK_AIO_DEVICE: DeviceInfo = {
@@ -35,6 +37,34 @@ const MOCK_AIO_DEVICE: DeviceInfo = {
   port_index: null,
 };
 
+/// Fake HydroShift LCD device so the LCD page can be tested without hardware.
+const MOCK_HYDROSHIFT_LCD_DEVICE: DeviceInfo = {
+  device_id: "hidraw:mock_hydroshift_lcd_001",
+  family: "HydroShiftLcd",
+  name: "HydroShift LCD",
+  serial: "MOCK-HS-LCD-001",
+  vid: 0x0cf2,
+  pid: 0x7398,
+  has_lcd: true,
+  has_fan: true,
+  has_pump: true,
+  has_rgb: true,
+  has_pump_control: false,
+  fan_count: null,
+  per_fan_control: null,
+  mb_sync_support: false,
+  rgb_zone_count: null,
+  screen_width: 480,
+  screen_height: 480,
+  is_unbound_wireless: false,
+  pump_rpm_range: [2200, 3800],
+  fan_quantity: null,
+  max_fan_quantity: null,
+  firmware_version: "1.0.0-mock",
+  supports_c_command: true,
+  port_index: null,
+};
+
 /**
  * Holds the live device list + telemetry snapshot, refreshed every 2s by the
  * daemon store. Also owns pending-action tracking for the Devices page cards.
@@ -49,22 +79,39 @@ export const useDevicesStore = defineStore("devices", () => {
   });
   const pending = usePendingAction();
 
+  const allDevices = computed(() => {
+    const real = list.value;
+    const mocks: DeviceInfo[] = [];
+    if (import.meta.env.DEV) {
+      if (MOCK_AIO && !real.some((d) => d.device_id === MOCK_AIO_DEVICE.device_id)) {
+        mocks.push(MOCK_AIO_DEVICE);
+      }
+      if (
+        MOCK_HYDROSHIFT_LCD &&
+        !real.some((d) => d.device_id === MOCK_HYDROSHIFT_LCD_DEVICE.device_id)
+      ) {
+        mocks.push(MOCK_HYDROSHIFT_LCD_DEVICE);
+      }
+    }
+    return mocks.length > 0 ? [...real, ...mocks] : real;
+  });
+
   const visible = computed(() =>
-    list.value.filter(
+    allDevices.value.filter(
       (d) => !DONGLE_FAMILIES.includes(d.family) && d.wireless_group_mac == null,
     ),
   );
 
   /** Device lookup by id. */
   function byId(id: string): DeviceInfo | undefined {
-    return list.value.find((d) => d.device_id === id);
+    return allDevices.value.find((d) => d.device_id === id);
   }
 
   /**
    * Devices that expose an LCD screen. Derived from the full list so wired
    * LCD endpoints hidden as wireless duplicates stay targetable here.
    */
-  const lcdDevices = computed(() => list.value.filter((d) => d.has_lcd));
+  const lcdDevices = computed(() => allDevices.value.filter((d) => d.has_lcd));
 
   /** Devices that have controllable fans (excluding AIOs handled on the AIO page). */
   const fanDevices = computed(() =>
@@ -73,7 +120,7 @@ export const useDevicesStore = defineStore("devices", () => {
 
   /** Devices whose family is an AIO (routed to the AIO page). */
   const aioDevices = computed(() => {
-    const real = visible.value.filter((d) => {
+    return visible.value.filter((d) => {
       const fam = d.family;
       return (
         (fam === "Galahad2Trinity" ||
@@ -85,9 +132,6 @@ export const useDevicesStore = defineStore("devices", () => {
         (d.has_fan || d.has_pump)
       );
     });
-    // DEV ONLY: inject a mock AIO device so the AIO page can be exercised
-    // without hardware. Flip MOCK_AIO off (or build in release) to remove.
-    return import.meta.env.DEV && MOCK_AIO ? [...real, MOCK_AIO_DEVICE] : real;
   });
 
   function fanRpms(deviceId: string): number[] {

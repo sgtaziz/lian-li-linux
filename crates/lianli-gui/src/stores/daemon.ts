@@ -59,7 +59,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       openrgbPort.value = result.telemetry.openrgb_status.port;
 
       devices.applyPoll(result.devices, result.telemetry);
-      lcd.applyCleanerTelemetry(result.telemetry.pixel_clean_status);
+      lcd.applyCleanerTelemetry(result.telemetry.pixel_clean_statuses);
 
       if (result.connected) {
         const visible = result.devices.filter(

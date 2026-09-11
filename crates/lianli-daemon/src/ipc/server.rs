@@ -11,6 +11,7 @@ use lianli_shared::ipc::{DeviceInfo, IpcRequest, IpcResponse, TelemetrySnapshot}
 use lianli_shared::rgb::RgbPreset;
 use lianli_shared::template::LcdTemplate;
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
@@ -29,7 +30,7 @@ use std::time::{Duration, Instant};
 pub struct PixelCleanState {
     pub session_id: u64,
     pub device_id: Option<String>,
-    pub duration_minutes: u32,
+    pub duration_minutes: u16,
     pub clean_until: Instant,
 }
 
@@ -44,7 +45,7 @@ pub struct DaemonState {
     pub rgb_controller: Option<Arc<Mutex<RgbController>>>,
     pub user_templates: Vec<LcdTemplate>,
     pub rgb_presets: Vec<RgbPreset>,
-    pub pixel_clean_state: Option<PixelCleanState>,
+    pub pixel_clean_states: Vec<PixelCleanState>,
 }
 
 impl DaemonState {
@@ -63,7 +64,7 @@ impl DaemonState {
             rgb_controller: None,
             user_templates: Vec::new(),
             rgb_presets,
-            pixel_clean_state: None,
+            pixel_clean_states: Vec::new(),
         }
     }
 
@@ -71,21 +72,35 @@ impl DaemonState {
         template_store::templates_path_for(&self.config_path)
     }
 
-    pub fn pixel_clean_status(&self) -> Option<PixelCleanStatus> {
-        if let Some(ref state) = self.pixel_clean_state {
-            let now = Instant::now();
+
+
+    /// Returns a map of all currently active pixel cleaner sessions keyed by target identifier.
+    /// Supports multi-LCD setups by indexing each active cleaner under:
+    /// 1. Its full target identifier (e.g. "hid:1-2:1.0#0")
+    /// 2. "all" when the cleaner was triggered globally across all LCDs
+    pub fn pixel_clean_statuses(&self) -> HashMap<String, PixelCleanStatus> {
+        let now = Instant::now();
+        let mut map = HashMap::new();
+        for state in &self.pixel_clean_states {
             if now < state.clean_until {
                 let remaining = (state.clean_until - now).as_secs();
-                return Some(PixelCleanStatus {
+                let status = PixelCleanStatus {
                     active: true,
                     session_id: Some(state.session_id),
                     device_id: state.device_id.clone(),
                     duration_minutes: state.duration_minutes,
                     remaining_seconds: remaining,
-                });
+                };
+                if let Some(ref dev_id) = state.device_id {
+                    // Index by canonical target ID
+                    map.insert(dev_id.clone(), status);
+                } else {
+                    // Global CLI invocation affecting all displays
+                    map.insert("all".to_string(), status);
+                }
             }
         }
-        None
+        map
     }
 }
 
@@ -300,6 +315,8 @@ fn handle_request(
             device_id,
             duration_minutes,
         } => {
+            let duration_minutes =
+                duration_minutes.clamp(1, lianli_shared::ipc::MAX_CLEAN_MINUTES);
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
             if tx
                 .send(DaemonEvent::StartPixelClean {
@@ -311,7 +328,7 @@ fn handle_request(
             {
                 return IpcResponse::error("daemon service not running");
             }
-            match reply_rx.recv_timeout(Duration::from_secs(5)) {
+            match reply_rx.recv_timeout(Duration::from_secs(15)) {
                 Ok(Ok(session_id)) => {
                     IpcResponse::ok(serde_json::json!({ "started": true, "session_id": session_id }))
                 }
@@ -323,9 +340,6 @@ fn handle_request(
             device_id,
             session_id,
         } => {
-            let Some(session_id) = session_id else {
-                return IpcResponse::error("session_id is required to stop pixel cleaning");
-            };
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
             if tx
                 .send(DaemonEvent::StopPixelClean {
@@ -344,8 +358,8 @@ fn handle_request(
         }
         IpcRequest::GetPixelCleanStatus => {
             let state = state.lock();
-            let status = state.pixel_clean_status().unwrap_or_default();
-            IpcResponse::ok(status)
+            let statuses = state.pixel_clean_statuses();
+            IpcResponse::ok(statuses)
         }
         IpcRequest::PingDevice { device_id, zone } => {
             let rgb = state.lock();
@@ -410,4 +424,34 @@ fn write_response(writer: &mut impl Write, response: &IpcResponse) -> anyhow::Re
     writer.write_all(b"\n")?;
     writer.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_pixel_clean_statuses_indexes_canonical_and_all_only() {
+        let mut state = DaemonState::new(PathBuf::from("/tmp/dummy.toml"));
+        let until = Instant::now() + Duration::from_secs(60);
+        state.pixel_clean_states.push(PixelCleanState {
+            session_id: 1,
+            device_id: Some("hid:1-2:1.0#0".to_string()),
+            duration_minutes: 10,
+            clean_until: until,
+        });
+        state.pixel_clean_states.push(PixelCleanState {
+            session_id: 2,
+            device_id: None,
+            duration_minutes: 30,
+            clean_until: until,
+        });
+
+        let statuses = state.pixel_clean_statuses();
+        assert!(statuses.contains_key("hid:1-2:1.0#0"));
+        assert!(statuses.contains_key("all"));
+        // Bare numeric key "0" should NOT be present
+        assert!(!statuses.contains_key("0"));
+    }
 }

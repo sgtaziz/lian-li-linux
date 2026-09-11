@@ -92,7 +92,8 @@ export interface TelemetrySnapshot {
   coolant_temps: Record<string, number>;
   streaming_active: boolean;
   openrgb_status: OpenRgbServerStatus;
-  pixel_clean_status?: PixelCleanStatus | null;
+  /** Active pixel cleaner sessions keyed by target ID, card index, or "all" for multi-LCD concurrency. */
+  pixel_clean_statuses?: Record<string, PixelCleanStatus>;
 }
 
 export interface PollResult {

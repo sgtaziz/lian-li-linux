@@ -1,4 +1,9 @@
 //! Pixel cleaner module for exercising LCD panels to relieve image retention.
+//!
+//! Follow-up / Roadmap:
+//! As a future update, expand `pixel_cleaner.rs` so instead of fetching or extracting
+//! a file, it can generate it at runtime with some predefined parameters, avoiding
+//! the complexity of that task for now.
 
 use anyhow::{Context, Result};
 use lianli_media::MediaAsset;
@@ -23,11 +28,17 @@ pub struct SavedTargetState {
 #[derive(Debug)]
 pub struct PixelCleanSession {
     pub session_id: u64,
+    pub target_id: Option<String>,
+    pub duration_minutes: u16,
     pub original_targets: Vec<SavedTargetState>,
     pub clean_until: Instant,
 }
 
 /// Locate or extract the pixel cleaner video asset.
+///
+/// Follow-up (Future update): Expand `pixel_cleaner.rs` so instead of fetching or
+/// extracting a file, it can generate it at runtime with some predefined parameters,
+/// avoiding the complexity of that task for now.
 pub fn pixel_cleaner_asset_path() -> PathBuf {
     if let Ok(path) = std::env::var("LIANLI_PIXEL_CLEANER_PATH") {
         let p = PathBuf::from(path);
@@ -123,8 +134,10 @@ fn send_ipc(socket_path: &PathBuf, request: &IpcRequest) -> Result<IpcResponse> 
 pub fn run_clean_command(
     socket_path: PathBuf,
     device_id: Option<String>,
-    minutes: u32,
+    minutes: u16,
 ) -> Result<()> {
+    let minutes = minutes.clamp(1, lianli_shared::ipc::MAX_CLEAN_MINUTES);
+
     println!(
         "Connecting to lianli-daemon to start pixel conditioning (duration: {minutes}m)..."
     );
@@ -156,7 +169,7 @@ pub fn run_clean_command(
     let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, r.clone());
     let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, r);
 
-    let total_secs = minutes as u64 * 60;
+    let total_secs = (minutes as u64).saturating_mul(60);
     let start_time = Instant::now();
 
     while running.load(Ordering::Relaxed) && start_time.elapsed().as_secs() < total_secs {
@@ -177,6 +190,8 @@ pub fn run_clean_command(
         IpcResponse::Ok { data } => {
             if data.get("stopped").and_then(|v| v.as_bool()) == Some(true) {
                 println!("[+] Restored previous LCD media and brightness successfully.");
+            } else if start_time.elapsed().as_secs() >= total_secs {
+                println!("[+] Pixel conditioning completed successfully (session completed).");
             } else {
                 eprintln!("[-] Warning: the requested pixel-clean session was not stopped.");
             }

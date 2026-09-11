@@ -144,12 +144,12 @@ pub enum DaemonEvent {
     },
     StartPixelClean {
         device_id: Option<String>,
-        duration_minutes: u32,
+        duration_minutes: u16,
         reply: std::sync::mpsc::SyncSender<Result<u64, String>>,
     },
     StopPixelClean {
         device_id: Option<String>,
-        session_id: u64,
+        session_id: Option<u64>,
         reply: Option<std::sync::mpsc::SyncSender<bool>>,
     },
     BindAll,
@@ -190,7 +190,7 @@ pub struct ServiceManager {
     tx: Option<Sender<DaemonEvent>>,
     mode_switch_suppression: HashMap<String, Instant>,
     serial_rewrite_backoff: Option<Instant>,
-    pixel_clean_session: Option<crate::pixel_cleaner::PixelCleanSession>,
+    pixel_clean_sessions: Vec<crate::pixel_cleaner::PixelCleanSession>,
 }
 
 impl ServiceManager {
@@ -224,7 +224,7 @@ impl ServiceManager {
             tx: None,
             mode_switch_suppression: HashMap::new(),
             serial_rewrite_backoff: None,
-            pixel_clean_session: None,
+            pixel_clean_sessions: Vec::new(),
         })
     }
 
@@ -656,12 +656,7 @@ impl ServiceManager {
                     }
                 }
                 DaemonEvent::DevicePoll => {
-                    if let Some(ref session) = self.pixel_clean_session {
-                        if Instant::now() >= session.clean_until {
-                            info!("Pixel cleaner duration elapsed; restoring previous display");
-                            self.force_stop_pixel_cleaning(None);
-                        }
-                    }
+                    self.check_pixel_clean_sessions();
                     self.device_poll();
                     if self.restart_requested {
                         break;
@@ -704,9 +699,6 @@ impl ServiceManager {
                     self.handle_set_ene6k77_fan_quantity(&device_id, quantity);
                 }
                 DaemonEvent::IpcUpdate => {
-                    if self.pixel_clean_session.is_some() {
-                        self.force_stop_pixel_cleaning(None);
-                    }
                     let ipc_state = self.ipc.state.lock();
                     info!("Config reload triggered via IPC");
                     drop(ipc_state);

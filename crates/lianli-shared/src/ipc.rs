@@ -170,7 +170,7 @@ pub enum IpcRequest {
         #[serde(default)]
         device_id: Option<String>,
         #[serde(default = "default_pixel_clean_minutes")]
-        duration_minutes: u32,
+        duration_minutes: u16,
     },
     /// Stop pixel conditioning loop and restore previous LCD configuration.
     StopPixelClean {
@@ -183,9 +183,12 @@ pub enum IpcRequest {
     GetPixelCleanStatus,
 }
 
-fn default_pixel_clean_minutes() -> u32 {
+fn default_pixel_clean_minutes() -> u16 {
     30
 }
+
+/// Maximum pixel cleaner duration in minutes (255m / ~4.25h).
+pub const MAX_CLEAN_MINUTES: u16 = 255;
 
 /// Responses from daemon to GUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,7 +313,7 @@ pub struct PixelCleanStatus {
     #[serde(default)]
     pub device_id: Option<String>,
     #[serde(default)]
-    pub duration_minutes: u32,
+    pub duration_minutes: u16,
     #[serde(default)]
     pub remaining_seconds: u64,
 }
@@ -327,7 +330,7 @@ pub struct TelemetrySnapshot {
     /// OpenRGB SDK server status.
     #[serde(default)]
     pub openrgb_status: OpenRgbServerStatus,
-    /// Active pixel cleaner session status, if running.
+    /// Map of active pixel cleaner sessions per target (keyed by target ID, card index, or "all") to support independent concurrent sessions.
     #[serde(default)]
-    pub pixel_clean_status: Option<PixelCleanStatus>,
+    pub pixel_clean_statuses: HashMap<String, PixelCleanStatus>,
 }

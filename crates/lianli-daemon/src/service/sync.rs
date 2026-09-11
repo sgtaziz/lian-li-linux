@@ -451,7 +451,7 @@ impl ServiceManager {
             ipc_state.telemetry.openrgb_status = openrgb_status;
             ipc_state.telemetry.fan_rpms = fan_rpms;
             ipc_state.telemetry.coolant_temps = coolant_temps;
-            ipc_state.telemetry.pixel_clean_status = ipc_state.pixel_clean_status();
+            ipc_state.telemetry.pixel_clean_statuses = ipc_state.pixel_clean_statuses();
             ipc_state.devices = devices;
         }
     }
