@@ -147,6 +147,7 @@ fn recovery_cooldown_preserves_budget_only_before_a_send() {
     assert_eq!(remaining, 1);
     super::account_retry(&mut remaining, false, &Err(anyhow::anyhow!("claim failed")));
     assert_eq!(remaining, 0);
+    remaining = 2;
     super::account_retry(&mut remaining, true, &Ok(()));
-    assert_eq!(remaining, 0);
+    assert_eq!(remaining, 1);
 }
