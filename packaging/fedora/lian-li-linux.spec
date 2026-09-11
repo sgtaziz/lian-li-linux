@@ -71,7 +71,6 @@ install -Dpm644 assets/icons/32x32.png      %{buildroot}%{_datadir}/icons/hicolo
 install -Dpm644 assets/icons/128x128.png    %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/com.sgtaziz.lianlilinux.png
 install -Dpm644 assets/icons/128x128@2x.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/com.sgtaziz.lianlilinux.png
 install -Dpm644 assets/icons/icon.svg       %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.sgtaziz.lianlilinux.svg
-install -Dpm644 assets/media/pixel_cleaner.mp4 %{buildroot}%{_datadir}/lianli/media/pixel_cleaner.mp4
 
 %pre
 getent group lianli >/dev/null || groupadd -r lianli
@@ -125,7 +124,6 @@ fi
 %{_datadir}/icons/hicolor/128x128/apps/com.sgtaziz.lianlilinux.png
 %{_datadir}/icons/hicolor/256x256/apps/com.sgtaziz.lianlilinux.png
 %{_datadir}/icons/hicolor/scalable/apps/com.sgtaziz.lianlilinux.svg
-%{_datadir}/lianli/media/pixel_cleaner.mp4
 
 %package evdi
 Summary:        Bundled libevdi library for %{name}

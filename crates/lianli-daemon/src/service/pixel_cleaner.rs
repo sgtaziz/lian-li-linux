@@ -1,29 +1,71 @@
 use super::media::lcd_id_matches;
-use super::{DaemonEvent, ServiceManager};
-use crate::pixel_cleaner::{pixel_cleaner_asset_path, PixelCleanSession, SavedTargetState};
+use super::ServiceManager;
+use crate::pixel_cleaner::{PixelCleanSession, SavedTargetState};
 use lianli_media::MediaAsset;
 use lianli_shared::config::LcdConfig;
 use lianli_shared::screen::ScreenInfo;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::warn;
 
-static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+fn next_session_id() -> Result<u64, String> {
+    use std::io::Read;
+    let mut bytes = [0_u8; 8];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut bytes))
+        .map_err(|e| format!("Creating pixel cleaner session ID: {e}"))?;
+    Ok((u64::from_ne_bytes(bytes) & ((1 << 53) - 1)).max(1))
+}
+const MAX_TARGETS: usize = 16;
+const PREPARATION_LIFETIME: Duration = Duration::from_secs(90);
 
-/// Helper to check if a requested target string matches an active LCD target.
-/// Supports:
-/// - Compound device-and-index format: `"<device_id>#<idx>"` (used by GUI cards)
-/// - Config index: `"0"`, `"1"`, `"index:0"`, `"lcd:0"`
-/// - Config-based serial or device_id: `"serial:XYZ"`, `"XYZ"`
-/// - USB device identity: `"hid:1-2:1.0"`, `"1-2:1.0"`
+#[derive(Clone)]
+struct PlannedTarget {
+    index: usize,
+    identity: String,
+    screen: ScreenInfo,
+    orientation: f32,
+    previous: Arc<MediaAsset>,
+}
+
+pub(super) struct PixelCleanPreparation {
+    id: u64,
+    minutes: u16,
+    targets: Vec<PlannedTarget>,
+    cancel: Arc<AtomicBool>,
+    worker: Option<JoinHandle<Result<Vec<Arc<MediaAsset>>, String>>>,
+    assets: Option<Vec<Arc<MediaAsset>>>,
+    expires: Instant,
+}
+
+impl Drop for PixelCleanPreparation {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let until = Instant::now() + Duration::from_secs(2);
+            while !worker.is_finished() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if worker.is_finished() {
+                if worker.join().is_err() {
+                    warn!("Pixel cleaner preparation panicked");
+                }
+            } else {
+                // It owns only temporary media; cancellation prevents activation or device I/O.
+                warn!("Pixel cleaner preparation is still stopping; detaching");
+            }
+        }
+    }
+}
+
 pub(super) fn target_matches(
     target_id: &str,
     idx: usize,
     device_identity: &str,
     config: Option<&lianli_shared::config::AppConfig>,
 ) -> bool {
-    // 1. Compound target with index: "<device_id>#<idx>"
     if let Some((prefix, idx_str)) = target_id.rsplit_once('#') {
         if let Ok(target_idx) = idx_str.parse::<usize>() {
             if target_idx != idx {
@@ -51,7 +93,6 @@ pub(super) fn target_matches(
         }
     }
 
-    // 2. Direct index matching: "0", "1", "index:0", "lcd:0"
     if let Ok(target_idx) = target_id.parse::<usize>() {
         return target_idx == idx;
     }
@@ -64,7 +105,6 @@ pub(super) fn target_matches(
         }
     }
 
-    // 3. Config-based device ID or serial matching
     if let Some(cfg) = config {
         if let Some(lcd_cfg) = cfg.lcds.get(idx) {
             if lcd_cfg.device_id() == target_id {
@@ -78,522 +118,581 @@ pub(super) fn target_matches(
         }
     }
 
-    // 4. Device identity matching
     lcd_id_matches(target_id, device_identity) || device_identity == target_id
 }
 
 impl ServiceManager {
     pub(super) fn start_pixel_cleaning(
         &mut self,
-        target_dev_id: Option<String>,
+        target_id: Option<String>,
         minutes: u16,
     ) -> Result<u64, String> {
-        let original_minutes = minutes;
-        let minutes = minutes.clamp(1, lianli_shared::ipc::MAX_CLEAN_MINUTES);
-        if minutes != original_minutes {
-            info!("Pixel cleaner duration {original_minutes} clamped to {minutes} minutes");
+        if minutes == 0 {
+            return Err("Duration must be positive".into());
         }
-
-        let cleaner_path = pixel_cleaner_asset_path();
-        if !cleaner_path.exists() {
-            let msg = format!(
-                "Pixel cleaner asset does not exist at {}",
-                cleaner_path.display()
-            );
-            warn!("{msg}");
-            return Err(msg);
+        if self.pixel_clean_preparation.is_some() {
+            return Err("Another pixel cleaner preparation is pending".into());
         }
-
-        let target_info: Vec<(usize, String, ScreenInfo, bool)> = {
-            let targets = self.targets.lock();
-            let cfg = self.config.as_ref();
-            targets
-                .iter()
-                .filter_map(|(idx, target)| {
-                    if let Some(ref target_id) = target_dev_id {
-                        if !target_matches(target_id, *idx, &target.device_identity, cfg) {
-                            return None;
-                        }
-                    }
-                    Some((
-                        *idx,
-                        target.device_identity.clone(),
-                        target.screen,
-                        target.custom_h264,
-                    ))
+        let targets = self
+            .targets
+            .try_lock_for(Duration::from_millis(100))
+            .ok_or("LCD targets are busy; retry shortly")?;
+        let planned: Vec<_> = targets
+            .iter()
+            .filter(|(index, target)| {
+                target_id.as_ref().is_none_or(|id| {
+                    target_matches(id, **index, &target.device_identity, self.config.as_ref())
                 })
-                .collect()
-        };
-
-        if target_info.is_empty() {
-            let msg = format!("No active LCD targets found matching {:?}", target_dev_id);
-            warn!("{msg}");
-            return Err(msg);
+            })
+            .map(|(&index, target)| PlannedTarget {
+                index,
+                identity: target.device_identity.clone(),
+                screen: target.screen,
+                orientation: self
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.lcds.get(index))
+                    .map_or(0.0, |c| c.orientation),
+                previous: Arc::clone(&target.asset),
+            })
+            .collect();
+        let cached: Vec<_> = targets
+            .values()
+            .filter(|target| target.asset.config_key.starts_with("pixel_cleaner:"))
+            .map(|target| {
+                (
+                    target.screen,
+                    self.config
+                        .as_ref()
+                        .and_then(|c| c.lcds.get(target.index))
+                        .map_or(0.0, |c| c.orientation)
+                        .to_bits(),
+                    target.asset.clone(),
+                )
+            })
+            .collect();
+        let mut affected: std::collections::HashSet<_> = self
+            .pixel_clean_sessions
+            .iter()
+            .flat_map(|session| session.original_targets.iter().map(|t| t.target_index))
+            .collect();
+        affected.extend(planned.iter().map(|t| t.index));
+        drop(targets);
+        if affected.len() > MAX_TARGETS {
+            return Err("At most 16 LCDs can be cleaned concurrently".into());
         }
-
-        let mut prepared = Vec::new();
-        let mut asset_cache: std::collections::HashMap<(u32, u32, bool, i32), Arc<MediaAsset>> =
-            std::collections::HashMap::new();
-
-        for (idx, device_identity, screen, custom_h264) in target_info {
-            let orig_orientation = self
-                .config
-                .as_ref()
-                .and_then(|cfg| cfg.lcds.get(idx).map(|l| l.orientation))
-                .unwrap_or(0.0);
-
-            let cache_key = (
-                screen.width,
-                screen.height,
-                screen.h264,
-                (orig_orientation * 10.0) as i32,
-            );
-
-            let clean_asset = if let Some(cached) = asset_cache.get(&cache_key) {
-                Arc::clone(cached)
-            } else {
-                let clean_cfg = LcdConfig {
-                    index: Some(idx),
-                    serial: Some(device_identity.clone()),
-                    media_type: lianli_shared::media::MediaType::Video,
-                    path: Some(cleaner_path.clone()),
-                    fps: Some(30.0),
-                    update_interval_ms: None,
-                    rgb: None,
-                    orientation: orig_orientation,
-                    sensor: None,
-                    sensor_source_1: Default::default(),
-                    sensor_source_2: Default::default(),
-                    doublegauge: None,
-                    template_id: None,
-                    smooth_edges: None,
-                    custom_h264: Some(true),
-                    aio_512_frame: None,
-                    brightness: Some(75),
-                };
-
-                let asset_kind = match lianli_media::prepare_media_asset(
-                    &clean_cfg,
-                    30.0,
-                    &screen,
-                    screen.h264,
-                    &[],
-                    &[],
-                ) {
-                    Ok(k) => k,
-                    Err(e) => {
-                        warn!(
-                            "Failed to prepare pixel cleaner asset for target {}: {e}",
-                            device_identity
-                        );
-                        continue;
+        if planned.is_empty() {
+            return Err("No active LCD targets match the request".into());
+        }
+        if planned.len() > MAX_TARGETS {
+            return Err("Pixel cleaning supports at most 16 targets per request".into());
+        }
+        let id = next_session_id()?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let worker_targets = planned.clone();
+        let worker = std::thread::Builder::new()
+            .name("pixel-cleaner-prepare".into())
+            .spawn(move || {
+                let mut cache = cached;
+                let mut seen = std::collections::HashSet::new();
+                cache.retain(|(_, _, asset)| seen.insert(Arc::as_ptr(asset)));
+                let mut prepared = Vec::new();
+                let mut total_bytes = cache
+                    .iter()
+                    .map(|(_, _, asset)| match &asset.kind {
+                        lianli_media::MediaAssetKind::Video { frames, .. } => {
+                            frames.iter().map(Vec::len).sum::<usize>()
+                        }
+                        lianli_media::MediaAssetKind::H264Stream { path, .. } => {
+                            std::fs::metadata(path).map_or(0, |m| m.len() as usize)
+                        }
+                        _ => 0,
+                    })
+                    .sum::<usize>();
+                for target in worker_targets {
+                    if worker_cancel.load(Ordering::Relaxed) {
+                        return Err("Preparation cancelled".into());
                     }
-                };
+                    let rotation = target.orientation.to_bits();
+                    let asset = if let Some((_, _, asset)) =
+                        cache.iter().find(|(screen, orientation, _)| {
+                            *screen == target.screen && *orientation == rotation
+                        }) {
+                        Arc::clone(asset)
+                    } else {
+                        let kind = lianli_media::pixel_cleaner::prepare_asset(
+                            &target.screen,
+                            target.orientation,
+                            &worker_cancel,
+                        )
+                        .map_err(|e| format!("Preparing {}: {e}", target.identity))?;
+                        total_bytes += match &kind {
+                            lianli_media::MediaAssetKind::Video { frames, .. } => {
+                                frames.iter().map(Vec::len).sum::<usize>()
+                            }
+                            lianli_media::MediaAssetKind::H264Stream { path, .. } => {
+                                std::fs::metadata(path).map_err(|e| e.to_string())?.len() as usize
+                            }
+                            _ => 0,
+                        };
+                        if total_bytes > 64 * 1024 * 1024 {
+                            return Err("Pixel cleaner preparation exceeds 64 MiB budget".into());
+                        }
+                        let asset = Arc::new(MediaAsset {
+                            kind,
+                            config_key: format!("pixel_cleaner:{id}:{}", target.index),
+                            stream_fps: lianli_media::pixel_cleaner::FPS as f32,
+                        });
+                        cache.push((target.screen, rotation, Arc::clone(&asset)));
+                        asset
+                    };
+                    prepared.push(asset);
+                }
+                Ok(prepared)
+            })
+            .map_err(|e| format!("Starting pixel cleaner preparation: {e}"))?;
+        self.pixel_clean_preparation = Some(PixelCleanPreparation {
+            id,
+            minutes: minutes.min(lianli_shared::ipc::MAX_CLEAN_MINUTES),
+            targets: planned,
+            cancel,
+            worker: Some(worker),
+            assets: None,
+            expires: Instant::now() + PREPARATION_LIFETIME,
+        });
+        self.ipc.state.lock().pixel_clean_preparation = Some((id, false, None));
+        Ok(id)
+    }
 
-                let stream_fps = match &asset_kind {
-                    lianli_media::MediaAssetKind::Custom { asset } => asset.render_fps(),
-                    _ => 30.0_f32.min(screen.max_fps as f32).max(1.0),
-                };
-                let asset = Arc::new(MediaAsset {
-                    kind: asset_kind,
-                    config_key: format!("pixel_cleaner_{idx}"),
-                    stream_fps,
-                });
-                asset_cache.insert(cache_key, Arc::clone(&asset));
-                asset
-            };
-
-            prepared.push((idx, device_identity, screen, custom_h264, clean_asset));
-        }
-
-        if prepared.is_empty() {
-            let msg = "Failed to prepare pixel cleaner asset for target LCDs".to_string();
-            warn!("{msg}");
-            return Err(msg);
-        }
-
-        // If any of the requested targets already have an active conditioning session,
-        // stop that target from its existing session first without affecting other targets.
-        for (idx, _, _, _, _) in &prepared {
-            self.stop_target_from_sessions(*idx);
-        }
-
-        let session_id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
-        let mut saved_targets = Vec::new();
-
-        for (idx, device_identity, screen, custom_h264, clean_asset) in prepared {
-            self.media_assets.insert(idx, Arc::clone(&clean_asset));
-
-            let orig_brightness = self
-                .config
-                .as_ref()
-                .and_then(|cfg| cfg.lcds.get(idx))
-                .map_or(100, LcdConfig::brightness);
-
-            let mut targets = self.targets.lock();
-            if let Some(target) = targets.get_mut(&idx) {
-                saved_targets.push(SavedTargetState {
-                    target_index: idx,
-                    device_identity: device_identity.clone(),
-                    media_asset: Arc::clone(&target.asset),
-                    custom_h264,
-                    original_brightness: Some(orig_brightness),
-                });
-
-                target.swap_media(clean_asset, screen.h264, self.tx.clone());
-                target.apply_brightness(Some(&self.wireless), &mut self.packet_builder, 75);
-                info!(
-                    "Started pixel cleaner on LCD[{device_identity}] for {minutes} minutes at 75% brightness"
-                );
+    pub(super) fn activate_pixel_cleaning(&mut self, id: u64) -> Result<u64, String> {
+        self.poll_pixel_clean_preparation();
+        let pending = self
+            .pixel_clean_preparation
+            .as_ref()
+            .filter(|p| p.id == id)
+            .ok_or("Unknown pixel cleaner preparation")?;
+        let assets = pending
+            .assets
+            .as_ref()
+            .ok_or("Pixel cleaner is not ready")?;
+        let mut targets = self
+            .targets
+            .try_lock_for(Duration::from_millis(100))
+            .ok_or("LCD targets are busy; retry shortly")?;
+        for plan in &pending.targets {
+            let current = targets
+                .get(&plan.index)
+                .ok_or("LCD disappeared while preparing; previous session preserved")?;
+            if current.device_identity != plan.identity
+                || !Arc::ptr_eq(&current.asset, &plan.previous)
+            {
+                return Err("LCD changed while preparing; previous session preserved".into());
             }
         }
-
-        if !saved_targets.is_empty() {
-            let clean_until = Instant::now()
-                .checked_add(Duration::from_secs((minutes as u64).saturating_mul(60)))
-                .unwrap_or_else(|| Instant::now() + Duration::from_secs(u32::MAX as u64));
-            self.pixel_clean_sessions.push(PixelCleanSession {
-                session_id,
-                target_id: target_dev_id,
-                duration_minutes: minutes,
-                original_targets: saved_targets,
-                clean_until,
+        let mut saved = Vec::new();
+        for (plan, asset) in pending.targets.iter().zip(assets) {
+            let current = targets.get_mut(&plan.index).expect("validated target");
+            let prior = self.pixel_clean_sessions.iter_mut().find_map(|session| {
+                session
+                    .original_targets
+                    .iter()
+                    .position(|s| {
+                        s.target_index == plan.index && s.device_identity == plan.identity
+                    })
+                    .map(|i| session.original_targets.remove(i))
             });
-            self.sync_cleaner_ipc_state();
-            if let Some(ref tx) = self.tx {
-                tx.send(DaemonEvent::FrameFinished).ok();
+            saved.push(prior.unwrap_or_else(|| {
+                SavedTargetState {
+                    target_index: plan.index,
+                    device_identity: plan.identity.clone(),
+                    media_asset: current.asset.clone(),
+                    custom_h264: current.custom_h264,
+                    original_brightness: Some(
+                        self.config
+                            .as_ref()
+                            .and_then(|c| c.lcds.get(plan.index))
+                            .map_or(100, LcdConfig::brightness),
+                    ),
+                }
+            }));
+            current.swap_media(Arc::clone(asset), plan.screen.h264, self.tx.clone());
+            current.apply_brightness(Some(&self.wireless), &mut self.packet_builder, 75);
+            self.media_assets.insert(plan.index, Arc::clone(asset));
+        }
+        drop(targets);
+        self.pixel_clean_sessions
+            .retain(|s| !s.original_targets.is_empty());
+        self.pixel_clean_sessions.push(PixelCleanSession {
+            session_id: id,
+            duration_minutes: pending.minutes,
+            clean_until: Instant::now() + Duration::from_secs(u64::from(pending.minutes) * 60),
+            original_targets: saved,
+        });
+        self.pixel_clean_preparation = None;
+        self.ipc.state.lock().pixel_clean_preparation = None;
+        self.sync_cleaner_ipc_state();
+        Ok(id)
+    }
+
+    fn poll_pixel_clean_preparation(&mut self) {
+        let Some(pending) = self.pixel_clean_preparation.as_mut() else {
+            return;
+        };
+        if Instant::now() >= pending.expires {
+            self.cancel_pixel_clean_preparation();
+            return;
+        }
+        if pending.worker.as_ref().is_some_and(JoinHandle::is_finished) {
+            let worker = pending.worker.take().expect("finished worker");
+            match worker
+                .join()
+                .unwrap_or_else(|_| Err("Pixel cleaner preparation panicked".into()))
+            {
+                Ok(assets) => {
+                    pending.assets = Some(assets);
+                    self.ipc.state.lock().pixel_clean_preparation = Some((pending.id, true, None));
+                }
+                Err(error) => {
+                    self.ipc.state.lock().pixel_clean_preparation =
+                        Some((pending.id, false, Some(error)));
+                }
             }
-            Ok(session_id)
-        } else {
-            let msg = "Failed to initialize pixel cleaner on target LCDs".to_string();
-            warn!("{msg}");
-            Err(msg)
         }
     }
 
-    fn stop_target_from_sessions(&mut self, target_idx: usize) {
-        let mut empty_indices = Vec::new();
-        for (s_idx, session) in self.pixel_clean_sessions.iter_mut().enumerate() {
-            let mut remaining = Vec::new();
-            for saved in session.original_targets.drain(..) {
-                if saved.target_index == target_idx {
-                    self.media_assets
-                        .insert(saved.target_index, Arc::clone(&saved.media_asset));
-                    let mut targets = self.targets.lock();
-                    if let Some(target) = targets.get_mut(&saved.target_index) {
-                        target.swap_media(saved.media_asset, saved.custom_h264, self.tx.clone());
-                        if let Some(orig_b) = saved.original_brightness {
-                            target.apply_brightness(
-                                Some(&self.wireless),
-                                &mut self.packet_builder,
-                                orig_b,
-                            );
-                        }
-                        info!(
-                            "Restored previous media and brightness on LCD[{}]",
-                            target.device_identity
-                        );
-                    }
-                } else {
-                    remaining.push(saved);
-                }
-            }
-            session.original_targets = remaining;
-            if session.original_targets.is_empty() {
-                empty_indices.push(s_idx);
-            }
-        }
-
-        for &s_idx in empty_indices.iter().rev() {
-            self.pixel_clean_sessions.remove(s_idx);
-        }
-        self.sync_cleaner_ipc_state();
+    pub(super) fn cancel_pixel_clean_preparation(&mut self) {
+        self.pixel_clean_preparation = None;
+        self.ipc.state.lock().pixel_clean_preparation = None;
     }
 
     fn sync_cleaner_ipc_state(&self) {
-        let mut ipc_state = self.ipc.state.lock();
-        ipc_state.pixel_clean_states.clear();
-        ipc_state
-            .pixel_clean_states
-            .extend(
-                self.pixel_clean_sessions
+        let mut state = self.ipc.state.lock();
+        state.pixel_clean_states = self
+            .pixel_clean_sessions
+            .iter()
+            .flat_map(|session| {
+                session
+                    .original_targets
                     .iter()
-                    .map(|s| crate::ipc::PixelCleanState {
-                        session_id: s.session_id,
-                        device_id: s.target_id.clone(),
-                        duration_minutes: s.duration_minutes,
-                        clean_until: s.clean_until,
-                    }),
-            );
-        ipc_state.telemetry.pixel_clean_statuses = ipc_state.pixel_clean_statuses();
-    }
-
-    pub(super) fn stop_pixel_cleaning(
-        &mut self,
-        target_dev_id: Option<String>,
-        session_id: Option<u64>,
-    ) -> bool {
-        if self.pixel_clean_sessions.is_empty() {
-            self.sync_cleaner_ipc_state();
-            return false;
-        }
-
-        let cfg = self.config.as_ref();
-        let mut stopped_any = false;
-        let mut empty_indices = Vec::new();
-        let mut new_split_sessions = Vec::new();
-
-        for (s_idx, session) in self.pixel_clean_sessions.iter_mut().enumerate() {
-            if let Some(sid) = session_id {
-                if session.session_id != sid {
-                    continue;
-                }
-            }
-
-            let initial_count = session.original_targets.len();
-            let is_global = session.target_id.is_none();
-            let mut remaining = Vec::new();
-            for saved in session.original_targets.drain(..) {
-                let matches = match &target_dev_id {
-                    Some(id) => target_matches(id, saved.target_index, &saved.device_identity, cfg),
-                    None => true,
-                };
-
-                if matches {
-                    stopped_any = true;
-                    self.media_assets
-                        .insert(saved.target_index, Arc::clone(&saved.media_asset));
-                    let mut targets = self.targets.lock();
-                    if let Some(target) = targets.get_mut(&saved.target_index) {
-                        target.swap_media(saved.media_asset, saved.custom_h264, self.tx.clone());
-                        if let Some(orig_b) = saved.original_brightness {
-                            target.apply_brightness(
-                                Some(&self.wireless),
-                                &mut self.packet_builder,
-                                orig_b,
-                            );
-                        }
-                        info!(
-                            "Restored previous media and brightness on LCD[{}]",
-                            target.device_identity
-                        );
-                    }
-                } else {
-                    remaining.push(saved);
-                }
-            }
-
-            if remaining.is_empty() {
-                empty_indices.push(s_idx);
-            } else if is_global && remaining.len() < initial_count {
-                // Global session partially stopped: split remaining targets into targeted individual sessions
-                // so "all" is no longer broadcast to the stopped screen.
-                empty_indices.push(s_idx);
-                for target in remaining {
-                    new_split_sessions.push(PixelCleanSession {
-                        session_id: NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
-                        target_id: Some(format!(
+                    .map(|target| crate::ipc::PixelCleanState {
+                        session_id: session.session_id,
+                        device_id: Some(format!(
                             "{}#{}",
                             target.device_identity, target.target_index
                         )),
                         duration_minutes: session.duration_minutes,
-                        original_targets: vec![target],
                         clean_until: session.clean_until,
-                    });
-                }
-            } else {
-                session.original_targets = remaining;
-            }
-        }
-
-        for &s_idx in empty_indices.iter().rev() {
-            self.pixel_clean_sessions.remove(s_idx);
-        }
-        self.pixel_clean_sessions.extend(new_split_sessions);
-
-        self.sync_cleaner_ipc_state();
-        if let Some(ref tx) = self.tx {
-            tx.send(DaemonEvent::FrameFinished).ok();
-        }
-        stopped_any
+                    })
+            })
+            .collect();
+        state.telemetry.pixel_clean_statuses = state.pixel_clean_statuses();
     }
 
-    #[allow(dead_code)]
-    pub(super) fn force_stop_pixel_cleaning(&mut self, target_dev_id: Option<String>) -> bool {
-        self.stop_pixel_cleaning(target_dev_id, None)
+    pub(super) fn stop_pixel_cleaning(
+        &mut self,
+        target_id: Option<String>,
+        session_id: Option<u64>,
+    ) -> bool {
+        let Some(id) = session_id else { return false };
+        if self
+            .pixel_clean_preparation
+            .as_ref()
+            .is_some_and(|p| p.id == id)
+        {
+            self.cancel_pixel_clean_preparation();
+            return true;
+        }
+        self.restore_cleaner_targets(|session, saved, cfg| {
+            session == id
+                && target_id.as_ref().is_none_or(|target| {
+                    target_matches(target, saved.target_index, &saved.device_identity, cfg)
+                })
+        })
+    }
+
+    fn restore_cleaner_targets(
+        &mut self,
+        matches: impl Fn(u64, &SavedTargetState, Option<&lianli_shared::config::AppConfig>) -> bool,
+    ) -> bool {
+        let mut restore = Vec::new();
+        for session in &mut self.pixel_clean_sessions {
+            let mut retained = Vec::new();
+            for saved in session.original_targets.drain(..) {
+                if matches(session.session_id, &saved, self.config.as_ref()) {
+                    restore.push(saved);
+                } else {
+                    retained.push(saved);
+                }
+            }
+            session.original_targets = retained;
+        }
+        self.pixel_clean_sessions
+            .retain(|s| !s.original_targets.is_empty());
+        let mut stopped = false;
+        for saved in restore {
+            let mut targets = self.targets.lock();
+            if let Some(target) = targets.get_mut(&saved.target_index) {
+                if target.device_identity != saved.device_identity {
+                    continue;
+                }
+                target.swap_media(
+                    saved.media_asset.clone(),
+                    saved.custom_h264,
+                    self.tx.clone(),
+                );
+                target.apply_brightness(
+                    Some(&self.wireless),
+                    &mut self.packet_builder,
+                    saved.original_brightness.unwrap_or(100),
+                );
+                stopped = true;
+            }
+            self.media_assets
+                .insert(saved.target_index, saved.media_asset);
+        }
+        self.sync_cleaner_ipc_state();
+        stopped
+    }
+
+    pub(super) fn force_stop_pixel_cleaning(&mut self, target_id: Option<String>) -> bool {
+        self.cancel_pixel_clean_preparation();
+        self.restore_cleaner_targets(|_, saved, cfg| {
+            target_id.as_ref().is_none_or(|id| {
+                target_matches(id, saved.target_index, &saved.device_identity, cfg)
+            })
+        })
     }
 
     pub(super) fn check_pixel_clean_sessions(&mut self) {
+        self.poll_pixel_clean_preparation();
         if self.pixel_clean_sessions.is_empty() {
             return;
         }
         let now = Instant::now();
-        let mut expired = Vec::new();
-        self.pixel_clean_sessions.retain_mut(|session| {
-            if now >= session.clean_until {
-                expired.append(&mut session.original_targets);
-                false
-            } else {
-                true
-            }
-        });
-
-        if !expired.is_empty() {
-            for saved in expired {
-                self.media_assets
-                    .insert(saved.target_index, Arc::clone(&saved.media_asset));
-                let mut targets = self.targets.lock();
-                if let Some(target) = targets.get_mut(&saved.target_index) {
-                    target.swap_media(saved.media_asset, saved.custom_h264, self.tx.clone());
-                    if let Some(orig_b) = saved.original_brightness {
-                        target.apply_brightness(
-                            Some(&self.wireless),
-                            &mut self.packet_builder,
-                            orig_b,
-                        );
-                    }
-                    info!(
-                        "Pixel cleaner elapsed: restored previous media and brightness on LCD[{}]",
-                        target.device_identity
-                    );
-                }
-            }
-            self.sync_cleaner_ipc_state();
-            if let Some(ref tx) = self.tx {
-                tx.send(DaemonEvent::FrameFinished).ok();
-            }
+        let expired: Vec<_> = self
+            .pixel_clean_sessions
+            .iter()
+            .filter(|s| now >= s.clean_until)
+            .map(|s| s.session_id)
+            .collect();
+        let current: Vec<_> = self
+            .targets
+            .lock()
+            .iter()
+            .map(|(&index, target)| (index, target.device_identity.clone()))
+            .collect();
+        if self.pixel_clean_sessions.iter().any(|s| {
+            expired.contains(&s.session_id)
+                || s.original_targets.iter().any(|saved| {
+                    !current.contains(&(saved.target_index, saved.device_identity.clone()))
+                })
+        }) {
+            self.restore_cleaner_targets(|id, saved, _| {
+                expired.contains(&id)
+                    || !current.contains(&(saved.target_index, saved.device_identity.clone()))
+            });
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::pixel_cleaner::PixelCleanSession;
-    use crate::service::ServiceManager;
-    use std::path::PathBuf;
-    use std::time::{Duration, Instant};
+    use super::*;
+    use crate::service::runtime::{ActiveTarget, HidLcd, LcdBackend};
+    use lianli_devices::traits::LcdDevice;
+    use lianli_media::MediaAssetKind;
 
-    #[test]
-    fn test_stop_pixel_cleaning_mismatched_session_returns_false() {
+    struct TestLcd;
+    impl LcdDevice for TestLcd {
+        fn screen_info(&self) -> &ScreenInfo {
+            &ScreenInfo::TLLCD
+        }
+        fn send_jpeg_frame(&mut self, _: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn set_brightness(&self, _: u8) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn set_rotation(&self, _: u16) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn initialize(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn asset(key: &str) -> Arc<MediaAsset> {
+        Arc::new(MediaAsset {
+            kind: MediaAssetKind::Static {
+                frame: Arc::new(vec![1]),
+            },
+            config_key: key.into(),
+            stream_fps: 20.0,
+        })
+    }
+
+    fn service() -> ServiceManager {
         let mut service = ServiceManager::new(
-            PathBuf::from("/tmp/test_config.json"),
-            PathBuf::from("/tmp/test_socket.sock"),
+            "/tmp/unused-clean-config".into(),
+            "/tmp/unused-clean-socket".into(),
         )
-        .expect("failed to instantiate ServiceManager");
+        .unwrap();
+        for index in 0..2 {
+            let asset = asset(&format!("original-{index}"));
+            let target = ActiveTarget::new(
+                index,
+                asset.config_key.clone(),
+                format!("hid:device-{index}"),
+                LcdBackend::HidLcd(Arc::new(HidLcd::new(Box::new(TestLcd)))),
+                asset.clone(),
+                ScreenInfo::TLLCD,
+                false,
+                None,
+            );
+            service.targets.lock().insert(index, target);
+            service.media_assets.insert(index, asset);
+        }
+        service
+    }
 
-        service.pixel_clean_sessions.push(PixelCleanSession {
-            session_id: 12345,
-            target_id: None,
-            duration_minutes: 1,
-            original_targets: Vec::new(),
-            clean_until: Instant::now() + Duration::from_secs(60),
+    fn ready(service: &mut ServiceManager, id: u64, indices: &[usize]) {
+        let targets = service.targets.lock();
+        let planned = indices
+            .iter()
+            .map(|&index| {
+                let target = &targets[&index];
+                PlannedTarget {
+                    index,
+                    identity: target.device_identity.clone(),
+                    screen: target.screen,
+                    orientation: 0.0,
+                    previous: target.asset.clone(),
+                }
+            })
+            .collect();
+        service.pixel_clean_preparation = Some(PixelCleanPreparation {
+            id,
+            minutes: 1,
+            targets: planned,
+            cancel: Arc::new(AtomicBool::new(false)),
+            worker: None,
+            assets: Some(
+                indices
+                    .iter()
+                    .map(|_| asset(&format!("clean-{id}")))
+                    .collect(),
+            ),
+            expires: Instant::now() + PREPARATION_LIFETIME,
         });
-
-        // Attempting to stop with a mismatched session ID should return false
-        let stopped = service.stop_pixel_cleaning(None, Some(99999));
-        assert!(!stopped);
-
-        // Active session should remain untouched
-        assert!(!service.pixel_clean_sessions.is_empty());
-        assert_eq!(service.pixel_clean_sessions[0].session_id, 12345);
     }
 
     #[test]
-    fn test_stop_pixel_cleaning_no_active_session_returns_false() {
-        let mut service = ServiceManager::new(
-            PathBuf::from("/tmp/test_config.json"),
-            PathBuf::from("/tmp/test_socket.sock"),
-        )
-        .expect("failed to instantiate ServiceManager");
+    fn partial_stop_keeps_original_token_and_reports_only_remaining_targets() {
+        let mut service = service();
+        ready(&mut service, 10, &[0, 1]);
+        service.activate_pixel_cleaning(10).unwrap();
+        assert!(!service.stop_pixel_cleaning(None, None));
+        assert!(!service.stop_pixel_cleaning(None, Some(99)));
+        assert!(!service.stop_pixel_cleaning(Some("nonexistent".into()), Some(10)));
+        assert!(service.stop_pixel_cleaning(Some("index:0".into()), Some(10)));
+        let statuses = service.ipc.state.lock().pixel_clean_statuses();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses["hid:device-1#1"].session_id, Some(10));
+        assert!(service.stop_pixel_cleaning(None, Some(10)));
+        assert!(service.ipc.state.lock().pixel_clean_statuses().is_empty());
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "original-0");
+        assert_eq!(service.targets.lock()[&1].asset.config_key, "original-1");
+    }
 
+    #[test]
+    fn replacement_inherits_original_media_without_claiming_other_targets() {
+        let mut service = service();
+        ready(&mut service, 10, &[0, 1]);
+        service.activate_pixel_cleaning(10).unwrap();
+        ready(&mut service, 11, &[0]);
+        service.activate_pixel_cleaning(11).unwrap();
+        let statuses = service.ipc.state.lock().pixel_clean_statuses();
+        assert_eq!(statuses["hid:device-0#0"].session_id, Some(11));
+        assert_eq!(statuses["hid:device-1#1"].session_id, Some(10));
+        assert!(service.stop_pixel_cleaning(None, Some(10)));
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "clean-11");
+        assert!(service.stop_pixel_cleaning(None, Some(11)));
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "original-0");
+    }
+
+    #[test]
+    fn missing_target_during_replacement_preserves_previous_session() {
+        let mut service = service();
+        ready(&mut service, 10, &[0]);
+        service.activate_pixel_cleaning(10).unwrap();
+        ready(&mut service, 11, &[0, 1]);
+        service.targets.lock().remove(&1);
+        assert!(service.activate_pixel_cleaning(11).is_err());
+        assert_eq!(service.pixel_clean_sessions[0].session_id, 10);
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "clean-10");
+    }
+
+    #[test]
+    fn expired_or_cancelled_preparation_cannot_activate() {
+        let mut service = service();
+        ready(&mut service, 10, &[0]);
+        service.pixel_clean_preparation.as_mut().unwrap().expires = Instant::now();
+        assert!(service.activate_pixel_cleaning(10).is_err());
+        ready(&mut service, 11, &[0]);
+        assert!(service.stop_pixel_cleaning(None, Some(11)));
+        assert!(service.activate_pixel_cleaning(11).is_err());
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "original-0");
+    }
+
+    #[test]
+    fn restored_media_is_never_sent_to_a_reused_slot() {
+        let mut service = service();
+        ready(&mut service, 10, &[0]);
+        service.activate_pixel_cleaning(10).unwrap();
+        service.targets.lock().get_mut(&0).unwrap().device_identity = "hid:replacement".into();
+        assert!(!service.stop_pixel_cleaning(None, Some(10)));
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "clean-10");
         assert!(service.pixel_clean_sessions.is_empty());
-        let stopped = service.stop_pixel_cleaning(None, Some(12345));
-        assert!(!stopped);
     }
 
     #[test]
-    fn test_start_pixel_cleaning_clamps_zero_minutes_without_error() {
-        let mut service = ServiceManager::new(
-            PathBuf::from("/tmp/test_config.json"),
-            PathBuf::from("/tmp/test_socket.sock"),
-        )
-        .expect("failed to instantiate ServiceManager");
-
-        let result_zero = service.start_pixel_cleaning(None, 0);
-        assert!(result_zero.is_err());
-        assert!(!result_zero.unwrap_err().contains("Duration"));
+    fn force_stop_for_reload_clears_preparation_and_active_sessions() {
+        let mut service = service();
+        ready(&mut service, 10, &[0]);
+        service.activate_pixel_cleaning(10).unwrap();
+        ready(&mut service, 11, &[1]);
+        service.force_stop_pixel_cleaning(None);
+        assert!(service.pixel_clean_preparation.is_none());
+        assert!(service.pixel_clean_sessions.is_empty());
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "original-0");
     }
 
     #[test]
-    fn test_start_pixel_cleaning_no_matching_target_preserves_active_session() {
-        let mut service = ServiceManager::new(
-            PathBuf::from("/tmp/test_config.json"),
-            PathBuf::from("/tmp/test_socket.sock"),
-        )
-        .expect("failed to instantiate ServiceManager");
-
-        service.pixel_clean_sessions.push(PixelCleanSession {
-            session_id: 8888,
-            target_id: Some("0".into()),
-            duration_minutes: 5,
-            original_targets: Vec::new(),
-            clean_until: Instant::now() + Duration::from_secs(300),
-        });
-
-        // Requesting for an LCD device that does not exist in targets should fail
-        // and leave the existing session untouched
-        let res = service.start_pixel_cleaning(Some("non_existent_lcd_target".into()), 30);
-        assert!(res.is_err());
-
-        assert_eq!(service.pixel_clean_sessions.len(), 1);
-        assert_eq!(service.pixel_clean_sessions[0].session_id, 8888);
-    }
-
-    #[test]
-    fn test_stop_pixel_cleaning_concurrent_sessions() {
-        let mut service = ServiceManager::new(
-            PathBuf::from("/tmp/test_config.json"),
-            PathBuf::from("/tmp/test_socket.sock"),
-        )
-        .expect("failed to instantiate ServiceManager");
-
-        service.pixel_clean_sessions.push(PixelCleanSession {
-            session_id: 101,
-            target_id: Some("0".into()),
-            duration_minutes: 15,
-            original_targets: Vec::new(),
-            clean_until: Instant::now() + Duration::from_secs(900),
-        });
-
-        service.pixel_clean_sessions.push(PixelCleanSession {
-            session_id: 102,
-            target_id: Some("1".into()),
-            duration_minutes: 30,
-            original_targets: Vec::new(),
-            clean_until: Instant::now() + Duration::from_secs(1800),
-        });
-
-        assert_eq!(service.pixel_clean_sessions.len(), 2);
-
-        // Stopping session 101 removes that session and keeps session 102
-        let _ = service.stop_pixel_cleaning(None, Some(101));
-        // original_targets was empty, but session 101 is dropped
-        assert_eq!(service.pixel_clean_sessions.len(), 1);
-        assert_eq!(service.pixel_clean_sessions[0].session_id, 102);
+    fn invalid_start_never_changes_an_active_session() {
+        let mut service = service();
+        ready(&mut service, 10, &[0]);
+        service.activate_pixel_cleaning(10).unwrap();
+        assert!(service
+            .start_pixel_cleaning(None, 0)
+            .unwrap_err()
+            .contains("Duration"));
+        assert!(service
+            .start_pixel_cleaning(Some("missing".into()), 1)
+            .is_err());
+        assert_eq!(service.pixel_clean_sessions[0].session_id, 10);
     }
 
     #[test]
     fn test_target_matches_compound_index() {
         use super::target_matches;
 
-        // Compound identifier with index: e.g. "hid:1-2:1.0#0" vs "hid:1-2:1.0#1"
         assert!(target_matches("hid:1-2:1.0#0", 0, "hid:1-2:1.0", None));
         assert!(!target_matches("hid:1-2:1.0#0", 1, "hid:1-2:1.0", None));
 
         assert!(!target_matches("hid:1-2:1.0#1", 0, "hid:1-2:1.0", None));
         assert!(target_matches("hid:1-2:1.0#1", 1, "hid:1-2:1.0", None));
 
-        // Bare #0 or #1
         assert!(target_matches("#0", 0, "hid:1-2:1.0", None));
         assert!(!target_matches("#0", 1, "hid:1-2:1.0", None));
     }
@@ -616,7 +715,6 @@ mod tests {
     fn test_target_matches_device_identity() {
         use super::target_matches;
 
-        // When device identity without # is provided, matches device
         assert!(target_matches("hid:1-2:1.0", 0, "hid:1-2:1.0", None));
         assert!(target_matches("1-2:1.0", 0, "hid:1-2:1.0", None));
         assert!(!target_matches("hid:9-9:1.0", 0, "hid:1-2:1.0", None));
@@ -626,77 +724,7 @@ mod tests {
     fn test_target_matches_compound_invalid_prefix_returns_false() {
         use super::target_matches;
 
-        // Compound identifier with nonexistent prefix should return false even if index matches
         assert!(!target_matches("nonexistent#0", 0, "hid:1-2:1.0", None));
         assert!(!target_matches("other_device#0", 0, "hid:1-2:1.0", None));
-    }
-
-    #[test]
-    fn test_stop_pixel_cleaning_global_session_partial_stop_splits() {
-        use crate::pixel_cleaner::SavedTargetState;
-        use lianli_media::{MediaAsset, MediaAssetKind};
-        use std::path::PathBuf;
-        use std::sync::Arc;
-
-        let mut service = ServiceManager::new(
-            PathBuf::from("/tmp/test_config.json"),
-            PathBuf::from("/tmp/test_socket.sock"),
-        )
-        .expect("failed to instantiate ServiceManager");
-
-        let dummy_asset = Arc::new(MediaAsset {
-            kind: MediaAssetKind::Static {
-                frame: Arc::new(vec![0u8; 16]),
-            },
-            config_key: "dummy".to_string(),
-            stream_fps: 30.0,
-        });
-
-        // Push a global session (target_id: None) with 2 targets
-        service.pixel_clean_sessions.push(PixelCleanSession {
-            session_id: 10,
-            target_id: None,
-            duration_minutes: 30,
-            original_targets: vec![
-                SavedTargetState {
-                    target_index: 0,
-                    device_identity: "hid:devA".to_string(),
-                    media_asset: Arc::clone(&dummy_asset),
-                    custom_h264: false,
-                    original_brightness: Some(100),
-                },
-                SavedTargetState {
-                    target_index: 1,
-                    device_identity: "hid:devB".to_string(),
-                    media_asset: Arc::clone(&dummy_asset),
-                    custom_h264: false,
-                    original_brightness: Some(100),
-                },
-            ],
-            clean_until: Instant::now() + Duration::from_secs(1800),
-        });
-
-        service.sync_cleaner_ipc_state();
-        let statuses_before = service.ipc.state.lock().pixel_clean_statuses();
-        assert!(statuses_before.contains_key("all"));
-
-        // Partially stop target 0
-        let stopped = service.stop_pixel_cleaning(Some("hid:devA#0".into()), None);
-        assert!(stopped);
-
-        // Global session should be replaced by a targeted session for devB#1
-        let statuses_after = service.ipc.state.lock().pixel_clean_statuses();
-        assert!(
-            !statuses_after.contains_key("all"),
-            "all should no longer be broadcast"
-        );
-        assert!(
-            !statuses_after.contains_key("hid:devA#0"),
-            "devA#0 was stopped"
-        );
-        assert!(
-            statuses_after.contains_key("hid:devB#1"),
-            "devB#1 should still be cleaning"
-        );
     }
 }

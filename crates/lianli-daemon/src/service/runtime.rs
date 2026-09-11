@@ -738,6 +738,7 @@ pub(crate) struct ActiveTarget {
     /// Brightness that could not be applied because the init worker held
     /// the LCD. Applied when init completes.
     pending_brightness: Option<u8>,
+    brightness_retries: u8,
 }
 
 fn spawn_recovery_thread(
@@ -838,6 +839,7 @@ impl ActiveTarget {
             init_complete: false,
             recovery_unsupported: false,
             pending_brightness: None,
+            brightness_retries: 0,
         }
     }
 
@@ -903,63 +905,45 @@ impl ActiveTarget {
         self.init_complete = true;
     }
 
-    /// Apply brightness now when the LCD is free, otherwise remember it
-    /// for when init completes. The init worker holds the LCD mutex across
-    /// its whole settle and firmware retry window, so an unbounded lock
-    /// here would stall the main loop for that entire duration.
     pub(super) fn apply_brightness(
         &mut self,
         wireless: Option<&WirelessController>,
         builder: &mut PacketBuilder,
         brightness: u8,
     ) {
-        if let LcdBackend::HidLcd(d) = &self.lcd {
-            match d.try_lock_for(Duration::from_millis(500)) {
-                None => {
-                    debug!(
-                        "[devices] LCD[{}] initializing, brightness deferred",
-                        self.index
-                    );
-                    self.pending_brightness = Some(brightness);
-                }
-                Some(guard) => {
-                    if let Err(e) = guard.set_brightness(brightness) {
-                        warn!(
-                            "Failed to apply LCD brightness for LCD[{}]: {e:#}",
-                            self.index
-                        );
-                    }
-                }
-            }
-            return;
-        }
-        if let Err(e) = self.lcd.set_brightness(wireless, builder, brightness) {
-            warn!(
-                "Failed to apply LCD brightness for LCD[{}]: {e:#}",
-                self.index
-            );
-        }
+        self.pending_brightness = Some(brightness);
+        self.brightness_retries = 3;
+        self.flush_pending_brightness(wireless, builder);
     }
 
-    /// Apply a brightness that was deferred while the LCD was initializing.
-    /// Called once init completed, so an unbounded lock is safe here.
     pub(super) fn flush_pending_brightness(
         &mut self,
         wireless: Option<&WirelessController>,
         builder: &mut PacketBuilder,
     ) {
-        let Some(brightness) = self.pending_brightness.take() else {
+        let Some(brightness) = self.pending_brightness else {
             return;
         };
-        info!(
-            "[devices] LCD[{}] applying deferred brightness {brightness}",
-            self.index
-        );
-        if let Err(e) = self.lcd.set_brightness(wireless, builder, brightness) {
-            warn!(
-                "Failed to apply LCD brightness for LCD[{}]: {e:#}",
-                self.index
-            );
+        let result = if let LcdBackend::HidLcd(device) = &self.lcd {
+            let Some(guard) = device.try_lock() else {
+                return;
+            };
+            guard.set_brightness(brightness)
+        } else {
+            self.lcd.set_brightness(wireless, builder, brightness)
+        };
+        match result {
+            Ok(()) => self.pending_brightness = None,
+            Err(error) => {
+                self.brightness_retries = self.brightness_retries.saturating_sub(1);
+                if self.brightness_retries == 0 {
+                    self.pending_brightness = None;
+                    warn!(
+                        "LCD[{}] brightness could not be applied after three attempts: {error:#}",
+                        self.index
+                    );
+                }
+            }
         }
     }
 
@@ -974,6 +958,8 @@ impl ActiveTarget {
         custom_h264: bool,
         tx: Option<Sender<DaemonEvent>>,
     ) {
+        self.media = Box::new(NoopFrameSource);
+        self.key = asset.config_key.clone();
         self.asset = Arc::clone(&asset);
         self.custom_h264 = custom_h264;
         self.media = make_frame_source(asset, tx, &self.lcd, &self.screen, custom_h264);
@@ -1551,6 +1537,37 @@ pub(super) enum SendError {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn shutdown_reports_the_sender_result_after_stopping_production() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(2);
+        let stop = Arc::new(AtomicBool::new(false));
+        let closing = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker_closing = closing.clone();
+        let worker = thread::spawn(move || {
+            let LcdThreadMsg::Shutdown(reply) = rx.recv().unwrap() else {
+                panic!("expected shutdown")
+            };
+            assert!(worker_stop.load(Ordering::Relaxed));
+            assert!(worker_closing.load(Ordering::Acquire));
+            reply
+                .send(Err(anyhow::anyhow!("brightness transfer failed")))
+                .unwrap();
+        });
+        let mut sender = ThreadedWinUsbSender {
+            tx,
+            h264_stop: stop,
+            closing,
+            thread: Some(worker),
+        };
+        assert!(sender
+            .shutdown()
+            .unwrap_err()
+            .to_string()
+            .contains("brightness transfer failed"));
+        assert!(sender.thread.is_none());
+    }
 
     struct TestLcd {
         sends: Arc<AtomicUsize>,

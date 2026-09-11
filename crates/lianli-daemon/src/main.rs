@@ -73,21 +73,15 @@ enum Commands {
 
 pub const MAX_CLEAN_MINUTES: u16 = lianli_shared::ipc::MAX_CLEAN_MINUTES;
 
-//guard against a user's bad input -400 | 3141414612
 fn parse_clean_minutes(s: &str) -> Result<u16, String> {
-    let raw: i64 = s
+    let value: u64 = s
         .trim()
         .parse()
-        .map_err(|e| format!("invalid number '{s}': {e}"))?;
-    let abs_raw = raw.unsigned_abs();
-    if abs_raw > MAX_CLEAN_MINUTES as u64 {
-        eprintln!(
-            "Note: requested duration ({abs_raw}m) exceeds max threshold ({MAX_CLEAN_MINUTES}m); clamping to {MAX_CLEAN_MINUTES}m"
-        );
-        return Ok(MAX_CLEAN_MINUTES);
+        .map_err(|_| "Duration must be a positive integer".to_string())?;
+    if value == 0 {
+        return Err("Duration must be positive".into());
     }
-    let desired_mins = abs_raw as u16;
-    Ok(desired_mins.clamp(1, MAX_CLEAN_MINUTES))
+    Ok(value.min(u64::from(MAX_CLEAN_MINUTES)) as u16)
 }
 
 #[derive(Subcommand, Debug)]
@@ -152,39 +146,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_clean_minutes_positive() {
-        assert_eq!(parse_clean_minutes("22").unwrap(), 22);
+    fn cleaner_duration_rejects_nonpositive_and_invalid_input() {
+        for value in ["0", "-0", "-1", "-5000", "abc", "1.5", ""] {
+            assert!(parse_clean_minutes(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn cleaner_duration_preserves_positive_values_and_clamps_upper_bound() {
         assert_eq!(parse_clean_minutes("30").unwrap(), 30);
         assert_eq!(parse_clean_minutes("+45").unwrap(), 45);
-    }
-
-    #[test]
-    fn test_parse_clean_minutes_negative_takes_abs() {
-        assert_eq!(parse_clean_minutes("-22").unwrap(), 22);
-        assert_eq!(parse_clean_minutes("-120").unwrap(), 120);
-    }
-
-    #[test]
-    fn test_parse_clean_minutes_zero_clamped_to_one() {
-        assert_eq!(parse_clean_minutes("0").unwrap(), 1);
-        assert_eq!(parse_clean_minutes("-0").unwrap(), 1);
-    }
-
-    #[test]
-    fn test_parse_clean_minutes_exceeding_threshold_clamps_silently() {
         assert_eq!(
-            parse_clean_minutes(&MAX_CLEAN_MINUTES.to_string()).unwrap(),
+            parse_clean_minutes("4294967306").unwrap(),
             MAX_CLEAN_MINUTES
         );
-        assert_eq!(parse_clean_minutes("300").unwrap(), MAX_CLEAN_MINUTES);
-        assert_eq!(parse_clean_minutes("1500").unwrap(), MAX_CLEAN_MINUTES);
-        assert_eq!(parse_clean_minutes("-5000").unwrap(), MAX_CLEAN_MINUTES);
-    }
-
-    #[test]
-    fn test_parse_clean_minutes_overflow_clamped() {
-        // Value exceeding u32::MAX (e.g. 2^32 + 10 = 4294967306)
-        assert_eq!(parse_clean_minutes("4294967306").unwrap(), MAX_CLEAN_MINUTES);
-        assert_eq!(parse_clean_minutes("-4294967306").unwrap(), MAX_CLEAN_MINUTES);
     }
 }

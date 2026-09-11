@@ -174,6 +174,8 @@ pub enum IpcRequest {
         device_id: Option<String>,
         #[serde(default = "default_pixel_clean_minutes")]
         duration_minutes: u16,
+        #[serde(default)]
+        preparation_id: Option<u64>,
     },
     /// Stop pixel conditioning loop and restore previous LCD configuration.
     StopPixelClean {
@@ -184,6 +186,9 @@ pub enum IpcRequest {
     },
     /// Query current pixel cleaner status.
     GetPixelCleanStatus,
+    GetPixelCleanPreparation {
+        session_id: u64,
+    },
 }
 
 fn default_pixel_clean_minutes() -> u16 {

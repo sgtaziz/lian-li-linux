@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { emit } from "@tauri-apps/api/event";
 import { useIpc } from "@/composables/useIpc";
+import { PIXEL_CLEANER_DURATION_OPTIONS } from "@/constants";
 import { useDebounce } from "@/composables/useDebounce";
 import type { CatalogTemplate, LcdConfig, LcdTemplate, PixelCleanStatus } from "@/types";
 
@@ -151,6 +152,7 @@ export const useLcdStore = defineStore("lcd", () => {
   }
 
   function getSession(targetId?: string | null, cardIndex?: number): ActiveCleanerSession | undefined {
+    if (targetId && activeCleaners.value[targetId]) return activeCleaners.value[targetId];
     if (activeCleaners.value["all"]) return activeCleaners.value["all"];
     for (const [key, session] of Object.entries(activeCleaners.value)) {
       if (cleanerMatchesTarget(key, targetId, cardIndex)) {
@@ -171,10 +173,8 @@ export const useLcdStore = defineStore("lcd", () => {
       const next: Record<string, ActiveCleanerSession> = {};
       for (const [key, session] of Object.entries(activeCleaners.value)) {
         const left = Math.max(0, Math.round((session.endsAt - now) / MS_PER_SECOND));
-        if (left > 0) {
-          next[key] = { ...session, remainingSeconds: left };
-          hasAny = true;
-        }
+        next[key] = { ...session, remainingSeconds: left };
+        hasAny = true;
       }
       activeCleaners.value = next;
       if (!hasAny) {
@@ -197,10 +197,10 @@ export const useLcdStore = defineStore("lcd", () => {
       const now = Date.now();
       const updated: Record<string, ActiveCleanerSession> = {};
       for (const [key, s] of Object.entries(statuses)) {
-        if (s.active && s.remaining_seconds > 0) {
+        if (s.active) {
           const existing = activeCleaners.value[key];
           const hasDrifted =
-            !existing ||
+            !existing || existing.sessionId !== s.session_id ||
             Math.abs(existing.remainingSeconds - s.remaining_seconds) > MAX_TIMER_DRIFT_SECONDS;
           const endsAt = hasDrifted
             ? now + s.remaining_seconds * MS_PER_SECOND
@@ -226,95 +226,82 @@ export const useLcdStore = defineStore("lcd", () => {
     }
   }
 
-  async function startPixelClean(
-    deviceId?: string | null,
-    durationMinutes: number = 30,
-  ) {
-    const allowed = [15, 30, 60, 120];
-    if (!allowed.includes(durationMinutes)) {
-      throw new Error("Invalid duration: allowed presets are 15, 30, 60, or 120 minutes");
-    }
+  const pendingCleaners = ref<Record<string, { sessionId: number | null; cancelled: boolean }>>({});
+  const preparingCleaner = computed(() => Object.keys(pendingCleaners.value).length > 0);
 
+  function isPreparing(targetId: string): boolean {
+    return !!pendingCleaners.value[targetId];
+  }
+
+  function cancelPixelPreparation(targetId: string) {
+    const pending = pendingCleaners.value[targetId];
+    if (pending) pending.cancelled = true;
+  }
+
+  async function refreshCleanerStatus() {
+    applyCleanerTelemetry(await ipc.request<Record<string, PixelCleanStatus>>("GetPixelCleanStatus"));
+  }
+
+  async function startPixelClean(deviceId?: string | null, durationMinutes: number = 30) {
+    if (!PIXEL_CLEANER_DURATION_OPTIONS.some((option) => option.value === durationMinutes)) {
+      throw new Error("Invalid pixel cleaner duration");
+    }
     const key = deviceId ?? "all";
-    const totalDurationSeconds = durationMinutes * SECONDS_PER_MINUTE;
-    const durationMs = totalDurationSeconds * MS_PER_SECOND;
-
-    if (
-      import.meta.env.DEV &&
-      (deviceId === "hidraw:mock_hydroshift_lcd_001" ||
-        deviceId === "MOCK-HS-LCD-001" ||
-        deviceId?.includes("mock") ||
-        (typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__))
-    ) {
-      activeCleaners.value = {
-        ...activeCleaners.value,
-        [key]: {
-          sessionId: 999,
-          deviceId: deviceId ?? null,
-          durationMinutes,
-          remainingSeconds: totalDurationSeconds,
-          endsAt: Date.now() + durationMs,
-        },
-      };
-      ensureTimerRunning();
-      return { started: true, session_id: 999 };
+    if (preparingCleaner.value) throw new Error("Another cleaner is being prepared");
+    const pending = { sessionId: null as number | null, cancelled: false };
+    pendingCleaners.value[key] = pending;
+    let activated = false;
+    try {
+      let response = await ipc.request<{ started: boolean; session_id: number }>("StartPixelClean", {
+        device_id: deviceId ?? null, duration_minutes: durationMinutes, preparation_id: null,
+      });
+      if (!Number.isSafeInteger(response.session_id)) throw new Error("Daemon did not return a session ID");
+      pending.sessionId = response.session_id;
+      activated = response.started === true;
+      const deadline = Date.now() + 90_000;
+      while (!activated && !pending.cancelled) {
+        if (Date.now() >= deadline) throw new Error("Pixel cleaner preparation timed out");
+        const status = await ipc.request<{ ready: boolean; error: string | null }>("GetPixelCleanPreparation", {
+          session_id: pending.sessionId,
+        });
+        if (status.error) throw new Error(status.error);
+        if (pending.cancelled) break;
+        if (status.ready) {
+          response = await ipc.request("StartPixelClean", {
+            device_id: deviceId ?? null, duration_minutes: durationMinutes, preparation_id: pending.sessionId,
+          });
+          if (response.started !== true) throw new Error("Daemon did not confirm activation");
+          activated = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      if (pending.cancelled) {
+        activated = false;
+        return { started: false, cancelled: true };
+      }
+      await refreshCleanerStatus();
+      return { started: true, cancelled: false };
+    } finally {
+      if (!activated && pending.sessionId !== null) {
+        // Unconfirmed preparations cannot activate and expire in the daemon.
+        await ipc.request("StopPixelClean", { device_id: null, session_id: pending.sessionId }).catch(() => {});
+      }
+      delete pendingCleaners.value[key];
     }
-
-    const res = await ipc.request<{ started?: boolean; session_id?: number }>(
-      "StartPixelClean",
-      {
-        device_id: deviceId ?? null,
-        duration_minutes: durationMinutes,
-      },
-    );
-    if (res && res.started !== false) {
-      activeCleaners.value = {
-        ...activeCleaners.value,
-        [key]: {
-          sessionId: res.session_id ?? null,
-          deviceId: deviceId ?? null,
-          durationMinutes,
-          remainingSeconds: totalDurationSeconds,
-          endsAt: Date.now() + durationMs,
-        },
-      };
-      ensureTimerRunning();
-    }
-    return res;
   }
 
   async function stopPixelClean(deviceId?: string | null) {
-    const key = deviceId ?? "all";
     const session = getSession(deviceId);
-    if (
-      import.meta.env.DEV &&
-      (deviceId === "hidraw:mock_hydroshift_lcd_001" ||
-        deviceId === "MOCK-HS-LCD-001" ||
-        deviceId?.includes("mock") ||
-        (typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__))
-    ) {
-      const next = { ...activeCleaners.value };
-      delete next[key];
-      activeCleaners.value = next;
-      if (Object.keys(next).length === 0) stopTimer();
-      return { stopped: true };
+    if (session?.sessionId == null) {
+      await refreshCleanerStatus();
+      return { stopped: false };
     }
-
-    const res = await ipc.request<{ stopped?: boolean }>("StopPixelClean", {
-      device_id: deviceId ?? null,
-      session_id: session?.sessionId ?? null,
+    const result = await ipc.request<{ stopped: boolean }>("StopPixelClean", {
+      device_id: deviceId ?? null, session_id: session.sessionId,
     });
-    if (res && res.stopped === true) {
-      const next: Record<string, ActiveCleanerSession> = {};
-      for (const [k, v] of Object.entries(activeCleaners.value)) {
-        if (!cleanerMatchesTarget(k, deviceId)) {
-          next[k] = v;
-        }
-      }
-      activeCleaners.value = next;
-      if (Object.keys(next).length === 0) stopTimer();
-    }
-    return res;
+    await refreshCleanerStatus();
+    return result;
   }
 
   return {
@@ -336,6 +323,9 @@ export const useLcdStore = defineStore("lcd", () => {
     setBrightness,
     renderPreview,
     startPixelClean,
+    preparingCleaner,
+    isPreparing,
+    cancelPixelPreparation,
     stopPixelClean,
     applyCleanerTelemetry,
   };

@@ -361,28 +361,34 @@ const remainingFormatted = computed(() => {
   return lcd.formattedRemainingFor(cleanerTargetId.value, props.index);
 });
 
+const isPreparingThis = computed(() => lcd.isPreparing(cleanerTargetId.value));
+const stopPending = ref(false);
+const settingsLocked = computed(() => isCleaningThis.value || isPreparingThis.value || stopPending.value);
+
 async function handleStartClean(key: string | number) {
   const minutes = Number(key);
   try {
-    await lcd.startPixelClean(cleanerTargetId.value, minutes);
-    message.success(`Pixel cleaner started for ${minutes} minutes at 75% brightness`);
-  } catch (err: any) {
+    const result = await lcd.startPixelClean(cleanerTargetId.value, minutes);
+    if (result.started) message.success(`Pixel cleaner started for ${minutes} minutes at 75% brightness`);
+    else if (result.cancelled) message.info("Pixel cleaner preparation cancelled");
+  } catch (err) {
     message.error(`Failed to start pixel cleaner: ${err}`);
   }
 }
 
 async function handleStopClean() {
+  stopPending.value = true;
   try {
-    await lcd.stopPixelClean(cleanerTargetId.value);
-    message.info("Pixel cleaner stopped; previous LCD display restored");
-  } catch (err: any) {
+    const result = await lcd.stopPixelClean(cleanerTargetId.value);
+    if (result.stopped) message.info("Pixel cleaner stopped; previous display restoration requested");
+    else message.warning("This session was not stopped; refreshed its status from the daemon");
+  } catch (err) {
     message.error(`Failed to stop pixel cleaner: ${err}`);
+  } finally {
+    stopPending.value = false;
   }
 }
-</script>
 
-<script lang="ts">
-// (LcdConfig helpers live in the setup script above.)
 </script>
 
 <template>
@@ -391,7 +397,15 @@ async function handleStopClean() {
       <span class="title">LCD {{ index + 1 }}</span>
       <div class="head-actions">
         <n-button
-          v-if="isCleaningThis"
+          v-if="isPreparingThis"
+          size="small"
+          quaternary
+          title="Cancel pixel cleaner preparation"
+          @click="lcd.cancelPixelPreparation(cleanerTargetId)"
+        >Cancel</n-button>
+        <n-button
+          v-else-if="isCleaningThis"
+          :loading="stopPending"
           size="small"
           quaternary
           type="warning"
@@ -406,7 +420,7 @@ async function handleStopClean() {
           trigger="click"
           placement="bottom-end"
           :options="cleanerDurationOptions"
-          :disabled="!selectedDeviceId"
+          :disabled="!selectedDeviceId || lcd.preparingCleaner || stopPending"
           @select="handleStartClean"
         >
           <n-button
@@ -414,7 +428,7 @@ async function handleStopClean() {
             quaternary
             type="warning"
             class="cleaner-btn"
-            :disabled="!selectedDeviceId"
+            :disabled="!selectedDeviceId || lcd.preparingCleaner || stopPending"
             title="Run pixel conditioning to clear image retention"
           >
             <template #icon><Sparkles :size="14" /></template>
@@ -425,7 +439,7 @@ async function handleStopClean() {
           quaternary
           type="error"
           @click="removeEntry"
-          :disabled="isCleaningThis"
+          :disabled="settingsLocked"
           title="Delete LCD configuration"
         >
           <template #icon><Trash2 :size="14" /></template>
@@ -433,7 +447,7 @@ async function handleStopClean() {
       </div>
     </div>
 
-    <!-- Active conditioning banner on card -->
+    <div v-if="isPreparingThis" class="card-cleaner-notice">Preparing pixel cleaner…</div>
     <div v-if="isCleaningThis" class="card-cleaner-notice">
       <Info :size="14" class="cleaner-notice-icon" />
       <span>
@@ -441,7 +455,7 @@ async function handleStopClean() {
       </span>
     </div>
 
-    <div class="card-content" :class="{ 'card-body-locked': isCleaningThis }">
+    <div class="card-content" :inert="settingsLocked" :class="{ 'card-body-locked': settingsLocked }">
       <div class="grid">
       <div class="field">
         <label class="muted">Device</label>

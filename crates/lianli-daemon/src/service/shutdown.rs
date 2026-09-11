@@ -26,6 +26,8 @@ impl ServiceManager {
             rgb.lock().stop();
         }
 
+        self.cancel_pixel_clean_preparation();
+        self.pixel_clean_sessions.clear();
         self.desktop_displays.shutdown();
         mark("desktop_displays", t0);
 

@@ -1124,26 +1124,15 @@ impl WinUsbLcdCore {
         play_count: u8,
         play_tick: u32,
     ) -> Result<()> {
-        use std::io::{Read, Seek};
-        loop {
-            let n = file.read(file_buf).context("reading h264 chunk")?;
-            if n == 0 {
-                if looping && !stop.load(Ordering::Relaxed) {
-                    file.seek(std::io::SeekFrom::Start(0))?;
-                    continue;
-                }
+        use std::io::Seek;
+        let length = file.metadata()?.len();
+        while !stop.load(Ordering::Relaxed) {
+            let Some((n, is_last)) = read_stream_chunk(file, file_buf, looping, length)? else {
                 break;
-            }
+            };
             if stop.load(Ordering::Relaxed) {
                 break;
             }
-            let is_last = if looping {
-                false
-            } else {
-                let pos = file.stream_position()?;
-                let len = file.metadata()?.len();
-                pos >= len
-            };
             self.send_h264_chunk(&file_buf[..n], is_last, play_count, play_tick, stop)?;
             if self.hold_for_unsafe_pending()? {
                 // Play was stopped and the panel reinitialised; restart the
@@ -1222,5 +1211,76 @@ fn sleep_until(next_deadline: &mut Instant, interval: Duration) {
     let now = Instant::now();
     if *next_deadline < now {
         *next_deadline = now + interval;
+    }
+}
+
+fn read_stream_chunk(
+    reader: &mut (impl std::io::Read + std::io::Seek),
+    buffer: &mut [u8],
+    looping: bool,
+    length: u64,
+) -> Result<Option<(usize, bool)>> {
+    let mut count = reader.read(buffer).context("reading H.264 chunk")?;
+    if count == 0 {
+        if !looping {
+            return Ok(None);
+        }
+        reader.seek(std::io::SeekFrom::Start(0))?;
+        count = reader.read(buffer).context("restarting H.264 loop")?;
+        anyhow::ensure!(count > 0, "cannot loop an empty H.264 stream");
+    }
+    let last = !looping && reader.stream_position()? >= length;
+    Ok(Some((count, last)))
+}
+
+#[cfg(test)]
+mod file_stream_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn looping_chunks_never_signal_end_of_playback() {
+        let mut source = Cursor::new(vec![1, 2, 3]);
+        let mut buffer = [0; 2];
+        assert_eq!(
+            read_stream_chunk(&mut source, &mut buffer, true, 3).unwrap(),
+            Some((2, false))
+        );
+        assert_eq!(buffer, [1, 2]);
+        assert_eq!(
+            read_stream_chunk(&mut source, &mut buffer, true, 3).unwrap(),
+            Some((1, false))
+        );
+        assert_eq!(buffer[0], 3);
+        assert_eq!(
+            read_stream_chunk(&mut source, &mut buffer, true, 3).unwrap(),
+            Some((2, false))
+        );
+        assert_eq!(buffer, [1, 2]);
+    }
+
+    #[test]
+    fn finite_stream_signals_last_chunk_then_finishes() {
+        let mut source = Cursor::new(vec![1, 2, 3]);
+        let mut buffer = [0; 2];
+        assert_eq!(
+            read_stream_chunk(&mut source, &mut buffer, false, 3).unwrap(),
+            Some((2, false))
+        );
+        assert_eq!(
+            read_stream_chunk(&mut source, &mut buffer, false, 3).unwrap(),
+            Some((1, true))
+        );
+        assert_eq!(
+            read_stream_chunk(&mut source, &mut buffer, false, 3).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn empty_loop_returns_an_error_instead_of_spinning() {
+        assert!(
+            read_stream_chunk(&mut Cursor::new(Vec::<u8>::new()), &mut [0; 2], true, 0).is_err()
+        );
     }
 }

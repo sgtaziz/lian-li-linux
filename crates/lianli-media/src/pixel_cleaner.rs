@@ -200,6 +200,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn noise_fits_each_supported_screen_payload() {
+        use lianli_shared::screen::ScreenInfo;
+        for screen in [
+            ScreenInfo::TLLCD,
+            ScreenInfo::WIRELESS_LCD,
+            ScreenInfo::AIO_LCD_480,
+            ScreenInfo::HYDROSHIFT2,
+            ScreenInfo::HYDROSHIFT2_OLED_CURVE,
+            ScreenInfo::LANCOOL_207,
+            ScreenInfo::UNIVERSAL_SCREEN,
+            ScreenInfo::VISION_9P2,
+            ScreenInfo::FLEX_LCD,
+        ] {
+            let mut frame = RgbImage::new(screen.width, screen.height);
+            render_frame(&mut frame, 30);
+            let encoded = encode_frame(&frame, &screen).unwrap();
+            assert!(encoded.len() <= screen.max_payload);
+        }
+    }
+
+    #[test]
+    fn rotated_rectangular_loops_keep_native_output_dimensions() {
+        let mut screen = lianli_shared::screen::ScreenInfo::TLLCD;
+        screen.width = 32;
+        screen.height = 64;
+        for orientation in [0.0, 90.0, 180.0, 270.0] {
+            let asset = prepare_asset(
+                &screen,
+                orientation,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
+            let crate::MediaAssetKind::Video { frames, .. } = asset else {
+                panic!("expected JPEG")
+            };
+            let frame = image::load_from_memory(&frames[30]).unwrap();
+            assert_eq!((frame.width(), frame.height()), (32, 64));
+        }
+    }
+
+    #[test]
     fn prepared_jpeg_loop_respects_tl_payloads_and_timing() {
         let screen = lianli_shared::screen::ScreenInfo::TLLCD;
         let asset =

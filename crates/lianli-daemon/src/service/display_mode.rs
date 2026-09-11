@@ -7,6 +7,7 @@ use tracing::{info, warn};
 
 impl ServiceManager {
     pub(super) fn handle_display_switch_to_desktop(&mut self, device_id: &str) {
+        self.force_stop_pixel_cleaning(Some(device_id.to_string()));
         // Find and remove the active LCD target for this device
         let target_idx = {
             let targets = self.targets.lock();

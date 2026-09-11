@@ -47,6 +47,7 @@ pub struct DaemonState {
     pub user_templates: Vec<LcdTemplate>,
     pub rgb_presets: Vec<RgbPreset>,
     pub pixel_clean_states: Vec<PixelCleanState>,
+    pub pixel_clean_preparation: Option<(u64, bool, Option<String>)>,
 }
 
 impl DaemonState {
@@ -67,6 +68,7 @@ impl DaemonState {
             user_templates: Vec::new(),
             rgb_presets,
             pixel_clean_states: Vec::new(),
+            pixel_clean_preparation: None,
         }
     }
 
@@ -74,35 +76,24 @@ impl DaemonState {
         template_store::templates_path_for(&self.config_path)
     }
 
-
-
-    /// Returns a map of all currently active pixel cleaner sessions keyed by target identifier.
-    /// Supports multi-LCD setups by indexing each active cleaner under:
-    /// 1. Its full target identifier (e.g. "hid:1-2:1.0#0")
-    /// 2. "all" when the cleaner was triggered globally across all LCDs
     pub fn pixel_clean_statuses(&self) -> HashMap<String, PixelCleanStatus> {
         let now = Instant::now();
-        let mut map = HashMap::new();
-        for state in &self.pixel_clean_states {
-            if now < state.clean_until {
-                let remaining = (state.clean_until - now).as_secs();
+        self.pixel_clean_states
+            .iter()
+            .map(|state| {
                 let status = PixelCleanStatus {
                     active: true,
                     session_id: Some(state.session_id),
                     device_id: state.device_id.clone(),
                     duration_minutes: state.duration_minutes,
-                    remaining_seconds: remaining,
+                    remaining_seconds: state.clean_until.saturating_duration_since(now).as_secs(),
                 };
-                if let Some(ref dev_id) = state.device_id {
-                    // Index by canonical target ID
-                    map.insert(dev_id.clone(), status);
-                } else {
-                    // Global CLI invocation affecting all displays
-                    map.insert("all".to_string(), status);
-                }
-            }
-        }
-        map
+                (
+                    state.device_id.clone().unwrap_or_else(|| "all".into()),
+                    status,
+                )
+            })
+            .collect()
     }
 }
 
@@ -334,24 +325,29 @@ fn handle_request(
         IpcRequest::StartPixelClean {
             device_id,
             duration_minutes,
+            preparation_id,
         } => {
-            let duration_minutes =
-                duration_minutes.clamp(1, lianli_shared::ipc::MAX_CLEAN_MINUTES);
+            if duration_minutes == 0 {
+                return IpcResponse::error("Duration must be positive");
+            }
+            let duration_minutes = duration_minutes.clamp(1, lianli_shared::ipc::MAX_CLEAN_MINUTES);
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
             if tx
                 .send(DaemonEvent::StartPixelClean {
                     device_id,
                     duration_minutes,
+                    preparation_id,
+                    deadline: Instant::now() + Duration::from_secs(3),
                     reply: reply_tx,
                 })
                 .is_err()
             {
                 return IpcResponse::error("daemon service not running");
             }
-            match reply_rx.recv_timeout(Duration::from_secs(15)) {
-                Ok(Ok(session_id)) => {
-                    IpcResponse::ok(serde_json::json!({ "started": true, "session_id": session_id }))
-                }
+            match reply_rx.recv_timeout(Duration::from_secs(4)) {
+                Ok(Ok((session_id, started))) => IpcResponse::ok(
+                    serde_json::json!({ "started": started, "session_id": session_id }),
+                ),
                 Ok(Err(err)) => IpcResponse::error(err),
                 Err(e) => IpcResponse::error(format!("timeout starting pixel cleaner: {e}")),
             }
@@ -360,6 +356,9 @@ fn handle_request(
             device_id,
             session_id,
         } => {
+            if session_id.is_none() {
+                return IpcResponse::error("session_id is required");
+            }
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
             if tx
                 .send(DaemonEvent::StopPixelClean {
@@ -374,6 +373,14 @@ fn handle_request(
             match reply_rx.recv_timeout(Duration::from_secs(5)) {
                 Ok(stopped) => IpcResponse::ok(serde_json::json!({ "stopped": stopped })),
                 Err(e) => IpcResponse::error(format!("timeout stopping pixel cleaner: {e}")),
+            }
+        }
+        IpcRequest::GetPixelCleanPreparation { session_id } => {
+            match &state.lock().pixel_clean_preparation {
+                Some((id, ready, error)) if *id == session_id => {
+                    IpcResponse::ok(serde_json::json!({ "ready": ready, "error": error }))
+                }
+                _ => IpcResponse::error("Unknown or expired pixel cleaner preparation"),
             }
         }
         IpcRequest::GetPixelCleanStatus => {
@@ -450,6 +457,45 @@ fn write_response(writer: &mut impl Write, response: &IpcResponse) -> anyhow::Re
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn invalid_cleaner_requests_never_reach_the_service() {
+        let state = Arc::new(Mutex::new(DaemonState::new("/tmp/unused-config".into())));
+        let (tx, rx) = std::sync::mpsc::channel();
+        for request in [
+            IpcRequest::StartPixelClean {
+                device_id: None,
+                duration_minutes: 0,
+                preparation_id: None,
+            },
+            IpcRequest::StopPixelClean {
+                device_id: None,
+                session_id: None,
+            },
+        ] {
+            assert!(matches!(
+                handle_request(request, &state, tx.clone()),
+                IpcResponse::Error { .. }
+            ));
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn elapsed_cleaner_stays_active_until_the_service_restores_it() {
+        let mut state = DaemonState::new("/tmp/unused-config".into());
+        state.pixel_clean_states.push(PixelCleanState {
+            session_id: 7,
+            device_id: Some("lcd#0".into()),
+            duration_minutes: 1,
+            clean_until: Instant::now() - Duration::from_secs(1),
+        });
+        let statuses = state.pixel_clean_statuses();
+        assert!(statuses["lcd#0"].active);
+        assert_eq!(statuses["lcd#0"].remaining_seconds, 0);
+        state.pixel_clean_states.clear();
+        assert!(state.pixel_clean_statuses().is_empty());
+    }
 
     #[test]
     fn test_pixel_clean_statuses_indexes_canonical_and_all_only() {

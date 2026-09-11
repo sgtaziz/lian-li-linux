@@ -147,7 +147,9 @@ pub enum DaemonEvent {
     StartPixelClean {
         device_id: Option<String>,
         duration_minutes: u16,
-        reply: std::sync::mpsc::SyncSender<Result<u64, String>>,
+        preparation_id: Option<u64>,
+        deadline: Instant,
+        reply: std::sync::mpsc::SyncSender<Result<(u64, bool), String>>,
     },
     StopPixelClean {
         device_id: Option<String>,
@@ -193,6 +195,7 @@ pub struct ServiceManager {
     mode_switch_suppression: HashMap<String, Instant>,
     serial_rewrite_backoff: Option<Instant>,
     pixel_clean_sessions: Vec<crate::pixel_cleaner::PixelCleanSession>,
+    pixel_clean_preparation: Option<pixel_cleaner::PixelCleanPreparation>,
 }
 
 impl ServiceManager {
@@ -227,6 +230,7 @@ impl ServiceManager {
             mode_switch_suppression: HashMap::new(),
             serial_rewrite_backoff: None,
             pixel_clean_sessions: Vec::new(),
+            pixel_clean_preparation: None,
         })
     }
 
@@ -348,6 +352,7 @@ impl ServiceManager {
             let mut targets = self.targets.lock();
             for target in targets.values_mut() {
                 target.maybe_start_recovery(tx.clone(), Duration::ZERO);
+                target.flush_pending_brightness(Some(&self.wireless), &mut self.packet_builder);
             }
         }
 
@@ -849,22 +854,31 @@ impl ServiceManager {
                         .iter_mut()
                         .find(|(_, t)| t.device_identity == device_id)
                     {
-                        if let Err(e) = target.lcd.set_brightness(
+                        target.apply_brightness(
                             Some(&self.wireless),
                             &mut self.packet_builder,
                             brightness,
-                        ) {
-                            warn!("Failed to set LCD brightness for {device_id}: {e}");
-                        }
+                        );
                     }
                 }
                 DaemonEvent::StartPixelClean {
                     device_id,
                     duration_minutes,
+                    preparation_id,
+                    deadline,
                     reply,
                 } => {
-                    let res = self.start_pixel_cleaning(device_id, duration_minutes);
-                    let _ = reply.send(res);
+                    let res = if Instant::now() >= deadline {
+                        Err("Pixel cleaner request expired".into())
+                    } else if let Some(id) = preparation_id {
+                        self.activate_pixel_cleaning(id).map(|id| (id, true))
+                    } else {
+                        self.start_pixel_cleaning(device_id, duration_minutes)
+                            .map(|id| (id, false))
+                    };
+                    if let Err(std::sync::mpsc::SendError(Ok((id, _)))) = reply.send(res) {
+                        self.stop_pixel_cleaning(None, Some(id));
+                    }
                 }
                 DaemonEvent::StopPixelClean {
                     device_id,

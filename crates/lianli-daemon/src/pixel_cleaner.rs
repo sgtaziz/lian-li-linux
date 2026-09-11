@@ -1,10 +1,3 @@
-//! Pixel cleaner module for exercising LCD panels to relieve image retention.
-//!
-//! Follow-up / Roadmap:
-//! As a future update, expand `pixel_cleaner.rs` so instead of fetching or extracting
-//! a file, it can generate it at runtime with some predefined parameters, avoiding
-//! the complexity of that task for now.
-
 use anyhow::{Context, Result};
 use lianli_media::MediaAsset;
 use lianli_shared::ipc::{IpcRequest, IpcResponse};
@@ -14,7 +7,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::warn;
 
 #[derive(Clone, Debug)]
 pub struct SavedTargetState {
@@ -28,84 +20,9 @@ pub struct SavedTargetState {
 #[derive(Debug)]
 pub struct PixelCleanSession {
     pub session_id: u64,
-    pub target_id: Option<String>,
     pub duration_minutes: u16,
     pub original_targets: Vec<SavedTargetState>,
     pub clean_until: Instant,
-}
-
-/// Locate or extract the pixel cleaner video asset.
-///
-/// Follow-up (Future update): Expand `pixel_cleaner.rs` so instead of fetching or
-/// extracting a file, it can generate it at runtime with some predefined parameters,
-/// avoiding the complexity of that task for now.
-pub fn pixel_cleaner_asset_path() -> PathBuf {
-    if let Ok(path) = std::env::var("LIANLI_PIXEL_CLEANER_PATH") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return p;
-        }
-    }
-
-    if let Ok(home) = std::env::var("HOME") {
-        let user_asset = PathBuf::from(home).join(".config/lianli/pixel_cleaner.mp4");
-        if user_asset.exists() {
-            return user_asset;
-        }
-    }
-
-    for loc in [
-        "/usr/share/lianli/media/pixel_cleaner.mp4",
-        "/usr/local/share/lianli/media/pixel_cleaner.mp4",
-        "assets/media/pixel_cleaner.mp4",
-    ] {
-        let p = PathBuf::from(loc);
-        if p.exists() {
-            return p;
-        }
-    }
-
-    // Embedded fallback ensures binary functions stand-alone without asset files installed.
-    // Prefer user-private runtime directory over shared /tmp, and create atomically with 0o600.
-    let target_dir = std::env::var("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .or_else(|_| {
-            std::env::var("HOME")
-                .map(|h| PathBuf::from(h).join(".config/lianli"))
-        })
-        .unwrap_or_else(|_| std::env::temp_dir());
-    let temp_path = target_dir.join("lianli_pixel_cleaner.mp4");
-    if !temp_path.exists() {
-        const EMBEDDED_CLEANER: &[u8] =
-            include_bytes!("../../../assets/media/pixel_cleaner.mp4");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&temp_path)
-            {
-                Ok(mut f) => {
-                    if let Err(e) = f.write_all(EMBEDDED_CLEANER) {
-                        warn!("Failed to write embedded pixel cleaner asset: {e}");
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(e) => {
-                    warn!("Failed to extract embedded pixel cleaner asset: {e}");
-                }
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            if let Err(e) = std::fs::write(&temp_path, EMBEDDED_CLEANER) {
-                warn!("Failed to extract embedded pixel cleaner asset: {e}");
-            }
-        }
-    }
-    temp_path
 }
 
 fn send_ipc(socket_path: &PathBuf, request: &IpcRequest) -> Result<IpcResponse> {
@@ -130,86 +47,183 @@ fn send_ipc(socket_path: &PathBuf, request: &IpcRequest) -> Result<IpcResponse> 
     Ok(resp)
 }
 
-/// Run pixel cleaner via CLI client against the active daemon.
+struct SignalHandlers(Vec<signal_hook::SigId>);
+
+impl SignalHandlers {
+    fn register(cancelled: &Arc<AtomicBool>) -> Result<Self> {
+        let mut handlers = Self(Vec::new());
+        for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+            handlers.0.push(
+                signal_hook::flag::register(signal, Arc::clone(cancelled))
+                    .context("registering pixel cleaner cancellation handler")?,
+            );
+        }
+        Ok(handlers)
+    }
+}
+
+impl Drop for SignalHandlers {
+    fn drop(&mut self) {
+        for id in self.0.drain(..) {
+            signal_hook::low_level::unregister(id);
+        }
+    }
+}
+
+fn response_data(response: IpcResponse) -> Result<serde_json::Value> {
+    match response {
+        IpcResponse::Ok { data } => Ok(data),
+        IpcResponse::Error { message } => anyhow::bail!("{message}"),
+    }
+}
+
+fn prepare_and_start(
+    socket: &PathBuf,
+    device_id: Option<String>,
+    minutes: u16,
+    cancelled: &AtomicBool,
+) -> Result<Option<u64>> {
+    anyhow::ensure!(minutes > 0, "Duration must be positive");
+    if cancelled.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    let data = response_data(send_ipc(
+        socket,
+        &IpcRequest::StartPixelClean {
+            device_id: device_id.clone(),
+            duration_minutes: minutes,
+            preparation_id: None,
+        },
+    )?)?;
+    let id = data
+        .get("session_id")
+        .and_then(serde_json::Value::as_u64)
+        .context("Daemon response missing session_id")?;
+    let result = (|| {
+        if data.get("started").and_then(serde_json::Value::as_bool) == Some(true) {
+            return Ok(Some(id));
+        }
+        let deadline = Instant::now() + Duration::from_secs(90);
+        loop {
+            if cancelled.load(Ordering::Relaxed) {
+                return Ok(None);
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "Pixel cleaner preparation timed out"
+            );
+            let status = response_data(send_ipc(
+                socket,
+                &IpcRequest::GetPixelCleanPreparation { session_id: id },
+            )?)?;
+            if let Some(error) = status.get("error").and_then(serde_json::Value::as_str) {
+                anyhow::bail!("{error}");
+            }
+            if status.get("ready").and_then(serde_json::Value::as_bool) == Some(true) {
+                if cancelled.load(Ordering::Relaxed) {
+                    return Ok(None);
+                }
+                let started = response_data(send_ipc(
+                    socket,
+                    &IpcRequest::StartPixelClean {
+                        device_id,
+                        duration_minutes: minutes,
+                        preparation_id: Some(id),
+                    },
+                )?)?;
+                anyhow::ensure!(
+                    started.get("started").and_then(serde_json::Value::as_bool) == Some(true),
+                    "Daemon did not confirm cleaner activation"
+                );
+                return Ok(Some(id));
+            }
+            sleep_until_cancelled(cancelled, Duration::from_millis(500));
+        }
+    })();
+    if !matches!(result, Ok(Some(_))) {
+        match send_ipc(
+            socket,
+            &IpcRequest::StopPixelClean {
+                device_id: None,
+                session_id: Some(id),
+            },
+        ) {
+            Ok(IpcResponse::Ok { .. }) => {}
+            Ok(IpcResponse::Error { message }) => {
+                eprintln!("Could not cancel preparation: {message}")
+            }
+            Err(error) => eprintln!("Could not cancel preparation: {error:#}"),
+        }
+    }
+    result
+}
+
 pub fn run_clean_command(
     socket_path: PathBuf,
     device_id: Option<String>,
     minutes: u16,
 ) -> Result<()> {
-    let minutes = minutes.clamp(1, lianli_shared::ipc::MAX_CLEAN_MINUTES);
-
-    println!(
-        "Connecting to lianli-daemon to start pixel conditioning (duration: {minutes}m)..."
-    );
-
-    let start_req = IpcRequest::StartPixelClean {
-        device_id: device_id.clone(),
-        duration_minutes: minutes,
+    anyhow::ensure!(minutes > 0, "Duration must be positive");
+    let minutes = minutes.min(lianli_shared::ipc::MAX_CLEAN_MINUTES);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _handlers = SignalHandlers::register(&cancelled)?;
+    println!("Preparing pixel conditioning ({minutes} minutes). Press Ctrl+C to cancel.");
+    let Some(id) = prepare_and_start(&socket_path, device_id, minutes, &cancelled)? else {
+        println!("Pixel cleaner preparation cancelled.");
+        return Ok(());
     };
-
-    let session_id = match send_ipc(&socket_path, &start_req)? {
-        IpcResponse::Ok { data } => {
-            let sid = data
-                .get("session_id")
-                .and_then(|v| v.as_u64())
-                .ok_or_else(|| anyhow::anyhow!("Daemon response missing session_id"))?;
-            println!(
-                "[+] Pixel cleaner active at 75% brightness. Asset: pixel_cleaner.mp4\n\
-                 [+] Running for {minutes} minutes. Press Ctrl+C at any time to cancel and restore previous display."
+    println!("Pixel cleaner active at 75% brightness. Press Ctrl+C to stop.");
+    let polling = (|| -> Result<()> {
+        while !cancelled.load(Ordering::Relaxed) {
+            let statuses =
+                response_data(send_ipc(&socket_path, &IpcRequest::GetPixelCleanStatus)?)?;
+            let remaining = statuses
+                .as_object()
+                .context("Invalid cleaner status response")?
+                .values()
+                .filter(|s| s.get("session_id").and_then(serde_json::Value::as_u64) == Some(id))
+                .filter_map(|s| {
+                    s.get("remaining_seconds")
+                        .and_then(serde_json::Value::as_u64)
+                })
+                .max();
+            let Some(seconds) = remaining else { break };
+            print!(
+                "\rTime remaining: {:02}:{:02} (Ctrl+C to stop)",
+                seconds / 60,
+                seconds % 60
             );
-            sid
+            std::io::stdout().flush()?;
+            sleep_until_cancelled(&cancelled, Duration::from_secs(1));
         }
-        IpcResponse::Error { message } => {
-            anyhow::bail!("Daemon rejected StartPixelClean: {message}");
-        }
-    };
-
-    let running = Arc::new(AtomicBool::new(true));
-    let r = Arc::clone(&running);
-    let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, r.clone());
-    let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, r);
-
-    let total_secs = (minutes as u64).saturating_mul(60);
-    let start_time = Instant::now();
-
-    while running.load(Ordering::Relaxed) && start_time.elapsed().as_secs() < total_secs {
-        let remaining = total_secs.saturating_sub(start_time.elapsed().as_secs());
-        let mins = remaining / 60;
-        let secs = remaining % 60;
-        print!("\r[*] Time remaining: {:02}:{:02} (Ctrl+C to stop)", mins, secs);
-        let _ = std::io::stdout().flush();
-        thread_sleep_interruptible(&running, Duration::from_secs(1));
-    }
-
-    println!("\n[*] Restoring original LCD configuration...");
-    let stop_req = IpcRequest::StopPixelClean {
-        device_id,
-        session_id: Some(session_id),
-    };
-    match send_ipc(&socket_path, &stop_req)? {
-        IpcResponse::Ok { data } => {
-            if data.get("stopped").and_then(|v| v.as_bool()) == Some(true) {
-                println!("[+] Restored previous LCD media and brightness successfully.");
-            } else if start_time.elapsed().as_secs() >= total_secs {
-                println!("[+] Pixel conditioning completed successfully (session completed).");
-            } else {
-                eprintln!("[-] Warning: the requested pixel-clean session was not stopped.");
-            }
-        }
-        IpcResponse::Error { message } => {
-            eprintln!("[-] Warning: Failed to restore previous config: {message}");
-        }
-    }
-
-    Ok(())
+        Ok(())
+    })();
+    let result = send_ipc(
+        &socket_path,
+        &IpcRequest::StopPixelClean {
+            device_id: None,
+            session_id: Some(id),
+        },
+    )?;
+    println!("\n{}", stop_message(result)?);
+    polling
 }
 
-fn thread_sleep_interruptible(running: &AtomicBool, dur: Duration) {
-    let step = Duration::from_millis(100);
-    let mut elapsed = Duration::ZERO;
-    while running.load(Ordering::Relaxed) && elapsed < dur {
-        std::thread::sleep(step);
-        elapsed += step;
+fn stop_message(response: IpcResponse) -> Result<&'static str> {
+    let data = response_data(response)?;
+    match data.get("stopped").and_then(serde_json::Value::as_bool) {
+        Some(true) => Ok("Stopped the pixel cleaner and requested restoration of the previous display."),
+        Some(false) => Ok("The session is no longer active; completion and restoration were not confirmed by this stop request."),
+        None => anyhow::bail!("Daemon response missing stopped result"),
+    }
+}
+
+fn sleep_until_cancelled(cancelled: &AtomicBool, duration: Duration) {
+    let deadline = Instant::now() + duration;
+    while !cancelled.load(Ordering::Relaxed) && Instant::now() < deadline {
+        std::thread::sleep(
+            Duration::from_millis(50).min(deadline.saturating_duration_since(Instant::now())),
+        );
     }
 }
 
@@ -218,16 +232,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_stop_response_stopped_true() {
-        let resp = IpcResponse::ok(serde_json::json!({ "stopped": true }));
-        let IpcResponse::Ok { data } = resp else { panic!("expected Ok") };
-        assert_eq!(data.get("stopped").and_then(|v| v.as_bool()), Some(true));
+    fn false_stop_never_reports_successful_completion() {
+        let message = stop_message(IpcResponse::ok(serde_json::json!({"stopped": false}))).unwrap();
+        assert!(message.contains("not confirmed"));
+        assert!(stop_message(IpcResponse::ok(serde_json::json!({}))).is_err());
+        assert!(stop_message(IpcResponse::error("failed")).is_err());
     }
 
     #[test]
-    fn test_stop_response_stopped_false() {
-        let resp = IpcResponse::ok(serde_json::json!({ "stopped": false }));
-        let IpcResponse::Ok { data } = resp else { panic!("expected Ok") };
-        assert_ne!(data.get("stopped").and_then(|v| v.as_bool()), Some(true));
+    fn cancelled_start_does_not_connect_or_wait() {
+        let cancel = AtomicBool::new(true);
+        assert!(
+            prepare_and_start(&"/nonexistent/socket".into(), None, 1, &cancel)
+                .unwrap()
+                .is_none()
+        );
+        sleep_until_cancelled(&cancel, Duration::from_secs(60));
     }
 }
