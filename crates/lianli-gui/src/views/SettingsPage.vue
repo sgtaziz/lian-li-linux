@@ -123,6 +123,14 @@ function onHidBackend(v: "hidraw" | "rusb") {
           @update:value="onHidBackend"
         />
       </div>
+      <div class="kv">
+        <span class="muted">Turn off LCDs on shutdown</span>
+        <n-switch
+          :value="config.config.turn_off_lcds_on_shutdown"
+          aria-label="Turn off LCDs on shutdown"
+          @update:value="(v: boolean) => { config.config.turn_off_lcds_on_shutdown = v; config.markDirty(); }"
+        />
+      </div>
       <div class="kv"><span class="muted">LCD count</span><span>{{ config.config.lcds.length }}</span></div>
       <div class="kv"><span class="muted">Fan curve count</span><span>{{ config.config.fan_curves.length }}</span></div>
       <div class="kv"><span class="muted">Max FPS Limit</span>

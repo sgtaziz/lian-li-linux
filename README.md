@@ -380,7 +380,7 @@ lianli-daemon lcd clean --device-id 'hid:1-2:1.0#0' --minutes 15
 
 Omitting `--device-id` selects active configured LCD targets. The `#0` suffix identifies the configuration entry, not the physical USB port. Ctrl+C or SIGTERM cancels preparation or stops the session started by that CLI process. CLI durations must be positive; values above 255 minutes are capped.
 
-Conditioning uses 75% brightness and restores the configured brightness afterward (100% when omitted). Config reload cancels conditioning before applying new entries. On daemon shutdown, supported LCD backlights are turned off; startup reapplies configured brightness. This routine exercises pixels; it does not guarantee recovery from retention or panel damage.
+Conditioning uses 75% brightness and restores the configured brightness afterward (100% when omitted). Config reload cancels conditioning before applying new entries. On daemon shutdown, supported LCD backlights are turned off by default. Disable **Turn off LCDs on shutdown** in Settings to skip this brightness change. Startup reapplies configured brightness. This routine exercises pixels; it does not guarantee recovery from retention or panel damage.
 
 ## Troubleshooting
 

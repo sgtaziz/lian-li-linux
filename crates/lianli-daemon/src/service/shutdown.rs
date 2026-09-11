@@ -31,13 +31,18 @@ impl ServiceManager {
         self.desktop_displays.shutdown();
         mark("desktop_displays", t0);
 
+        let turn_off_lcds = self
+            .config
+            .as_ref()
+            .is_none_or(|config| config.turn_off_lcds_on_shutdown);
         let mut targets = std::mem::take(&mut *self.targets.lock());
         for target in targets.values_mut() {
-            if let Err(e) = target.shutdown(Some(&self.wireless), &mut self.packet_builder) {
-                tracing::warn!(
-                    "Failed to turn off LCD {} during shutdown: {e:#}",
-                    target.device_identity
-                );
+            if let Err(e) = target.shutdown(
+                Some(&self.wireless),
+                &mut self.packet_builder,
+                turn_off_lcds,
+            ) {
+                tracing::warn!("Failed to shut down LCD {}: {e:#}", target.device_identity);
             }
         }
         drop(targets);

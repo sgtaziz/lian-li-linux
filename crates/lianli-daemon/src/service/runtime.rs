@@ -1168,8 +1168,15 @@ impl ActiveTarget {
         &mut self,
         wireless: Option<&WirelessController>,
         builder: &mut PacketBuilder,
+        turn_off: bool,
     ) -> anyhow::Result<()> {
         self.stop();
+        if !turn_off {
+            if let LcdBackend::WinUsb(sender) = &mut self.lcd {
+                sender.stop();
+            }
+            return Ok(());
+        }
         match &mut self.lcd {
             LcdBackend::WinUsb(sender) => sender.shutdown(),
             LcdBackend::HidLcd(lcd) => {
@@ -1830,6 +1837,7 @@ mod tests {
     }
 
     struct TestLcd {
+        brightness: Arc<AtomicUsize>,
         sends: Arc<AtomicUsize>,
         fail_on: usize,
         fail_count: usize,
@@ -1842,7 +1850,8 @@ mod tests {
         fn send_jpeg_frame(&mut self, _: &[u8]) -> anyhow::Result<()> {
             Ok(())
         }
-        fn set_brightness(&self, _: u8) -> anyhow::Result<()> {
+        fn set_brightness(&self, value: u8) -> anyhow::Result<()> {
+            self.brightness.store(usize::from(value), Ordering::Relaxed);
             Ok(())
         }
         fn set_rotation(&self, _: u16) -> anyhow::Result<()> {
@@ -1869,12 +1878,52 @@ mod tests {
         let sends = Arc::new(AtomicUsize::new(0));
         (
             Arc::new(HidLcd::new(Box::new(TestLcd {
+                brightness: Arc::new(AtomicUsize::new(100)),
                 sends: Arc::clone(&sends),
                 fail_on,
                 fail_count,
             }))),
             sends,
         )
+    }
+
+    #[test]
+    fn shutdown_setting_controls_brightness_but_always_stops_media() {
+        for turn_off in [false, true] {
+            let brightness = Arc::new(AtomicUsize::new(75));
+            let device = Arc::new(HidLcd::new(Box::new(TestLcd {
+                brightness: brightness.clone(),
+                sends: Arc::new(AtomicUsize::new(0)),
+                fail_on: 0,
+                fail_count: 0,
+            })));
+            let asset = Arc::new(MediaAsset {
+                kind: MediaAssetKind::Static {
+                    frame: Arc::new(vec![1]),
+                },
+                config_key: "shutdown-test".into(),
+                stream_fps: 20.0,
+            });
+            let mut target = ActiveTarget::new(
+                0,
+                asset.config_key.clone(),
+                "test".into(),
+                LcdBackend::HidLcd(device),
+                asset,
+                ScreenInfo::AIO_LCD_480,
+                false,
+                None,
+            );
+            target
+                .shutdown(None, &mut PacketBuilder::new(), turn_off)
+                .unwrap();
+            assert_eq!(
+                brightness.load(Ordering::Relaxed),
+                if turn_off { 0 } else { 75 }
+            );
+            assert!(!target.media_pending);
+            assert!(target.recovery_stop.load(Ordering::Relaxed));
+        }
     }
 
     #[test]

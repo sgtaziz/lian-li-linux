@@ -216,6 +216,8 @@ impl std::fmt::Display for HidBackend {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
+    #[serde(default = "default_true")]
+    pub turn_off_lcds_on_shutdown: bool,
     #[serde(default = "default_fps")]
     pub default_fps: f32,
     #[serde(default, skip_serializing)]
@@ -271,6 +273,7 @@ fn default_drift_interval_ms() -> u64 {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            turn_off_lcds_on_shutdown: default_true(),
             default_fps: default_fps(),
             hid_driver: None,
             hid_backend: HidBackend::default(),
@@ -452,6 +455,22 @@ pub fn config_identity(cfg: &LcdConfig) -> ConfigKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lcd_shutdown_defaults_on_and_preserves_explicit_false() {
+        assert!(AppConfig::default().turn_off_lcds_on_shutdown);
+        let legacy: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(legacy.turn_off_lcds_on_shutdown);
+        for enabled in [false, true] {
+            let config: AppConfig = serde_json::from_value(serde_json::json!({
+                "turn_off_lcds_on_shutdown": enabled
+            }))
+            .unwrap();
+            assert_eq!(config.turn_off_lcds_on_shutdown, enabled);
+            let saved = serde_json::to_value(&config).unwrap();
+            assert_eq!(saved["turn_off_lcds_on_shutdown"], enabled);
+        }
+    }
 
     fn load_from(json: &str) -> (AppConfig, Vec<String>) {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

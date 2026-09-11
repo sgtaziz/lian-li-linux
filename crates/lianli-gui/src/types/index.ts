@@ -394,6 +394,7 @@ export interface Ene6k77DeviceConfig {
 
 // ─── AppConfig ───────────────────────────────────────────────────────────────
 export interface AppConfig {
+  turn_off_lcds_on_shutdown: boolean;
   default_fps: number;
   hid_backend: "hidraw" | "rusb";
   lcds: LcdConfig[];
