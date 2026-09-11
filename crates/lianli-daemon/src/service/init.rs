@@ -865,7 +865,11 @@ impl ServiceManager {
                 for w in &warnings {
                     warn!("Config: {w}");
                 }
-                self.force_stop_pixel_cleaning(None);
+                if !self.force_stop_pixel_cleaning(None) {
+                    self.cleaner_reload_pending = true;
+                    return false;
+                }
+                self.cleaner_reload_pending = false;
                 self.config = Some(cfg);
                 self.packet_builder = PacketBuilder::new();
                 self.prepare_media_assets(tx);

@@ -409,12 +409,20 @@ impl ServiceManager {
                     target_matches(target, saved.target_index, &saved.device_identity, cfg)
                 })
         })
+        .unwrap_or(false)
     }
 
     fn restore_cleaner_targets(
         &mut self,
         matches: impl Fn(u64, &SavedTargetState, Option<&lianli_shared::config::AppConfig>) -> bool,
-    ) -> bool {
+    ) -> Result<bool, String> {
+        if self.pixel_clean_sessions.is_empty() {
+            return Ok(false);
+        }
+        let targets_handle = Arc::clone(&self.targets);
+        let mut targets = targets_handle
+            .try_lock_for(Duration::from_millis(100))
+            .ok_or("LCD targets are busy; cleaner restoration deferred")?;
         let mut restore = Vec::new();
         for session in &mut self.pixel_clean_sessions {
             let mut retained = Vec::new();
@@ -431,7 +439,6 @@ impl ServiceManager {
             .retain(|s| !s.original_targets.is_empty());
         let mut stopped = false;
         for saved in restore {
-            let mut targets = self.targets.lock();
             if let Some(target) = targets.get_mut(&saved.target_index) {
                 if target.device_identity != saved.device_identity {
                     continue;
@@ -451,8 +458,9 @@ impl ServiceManager {
             self.media_assets
                 .insert(saved.target_index, saved.media_asset);
         }
+        drop(targets);
         self.sync_cleaner_ipc_state();
-        stopped
+        Ok(stopped)
     }
 
     pub(super) fn force_stop_pixel_cleaning(&mut self, target_id: Option<String>) -> bool {
@@ -462,6 +470,7 @@ impl ServiceManager {
                 target_matches(id, saved.target_index, &saved.device_identity, cfg)
             })
         })
+        .is_ok()
     }
 
     pub(super) fn check_pixel_clean_sessions(&mut self) {
@@ -476,19 +485,21 @@ impl ServiceManager {
             .filter(|s| now >= s.clean_until)
             .map(|s| s.session_id)
             .collect();
-        let current: Vec<_> = self
-            .targets
-            .lock()
+        let Some(targets) = self.targets.try_lock() else {
+            return;
+        };
+        let current: Vec<_> = targets
             .iter()
             .map(|(&index, target)| (index, target.device_identity.clone()))
             .collect();
+        drop(targets);
         if self.pixel_clean_sessions.iter().any(|s| {
             expired.contains(&s.session_id)
                 || s.original_targets.iter().any(|saved| {
                     !current.contains(&(saved.target_index, saved.device_identity.clone()))
                 })
         }) {
-            self.restore_cleaner_targets(|id, saved, _| {
+            let _ = self.restore_cleaner_targets(|id, saved, _| {
                 expired.contains(&id)
                     || !current.contains(&(saved.target_index, saved.device_identity.clone()))
             });
@@ -654,6 +665,24 @@ mod tests {
         assert!(!service.stop_pixel_cleaning(None, Some(10)));
         assert_eq!(service.targets.lock()[&0].asset.config_key, "clean-10");
         assert!(service.pixel_clean_sessions.is_empty());
+    }
+
+    #[test]
+    fn busy_stop_keeps_session_and_saved_media_for_retry() {
+        let mut service = service();
+        ready(&mut service, 10, &[0]);
+        service.activate_pixel_cleaning(10).unwrap();
+        let targets = service.targets.clone();
+        let guard = targets.lock();
+        let started = Instant::now();
+        assert!(!service.stop_pixel_cleaning(None, Some(10)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(service.pixel_clean_sessions[0].session_id, 10);
+        assert_eq!(service.pixel_clean_sessions[0].original_targets.len(), 1);
+        assert!(!service.force_stop_pixel_cleaning(None));
+        drop(guard);
+        assert!(service.stop_pixel_cleaning(None, Some(10)));
+        assert_eq!(service.targets.lock()[&0].asset.config_key, "original-0");
     }
 
     #[test]

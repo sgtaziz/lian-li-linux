@@ -196,6 +196,7 @@ pub struct ServiceManager {
     serial_rewrite_backoff: Option<Instant>,
     pixel_clean_sessions: Vec<crate::pixel_cleaner::PixelCleanSession>,
     pixel_clean_preparation: Option<pixel_cleaner::PixelCleanPreparation>,
+    cleaner_reload_pending: bool,
 }
 
 impl ServiceManager {
@@ -231,6 +232,7 @@ impl ServiceManager {
             serial_rewrite_backoff: None,
             pixel_clean_sessions: Vec::new(),
             pixel_clean_preparation: None,
+            cleaner_reload_pending: false,
         })
     }
 
@@ -291,6 +293,12 @@ impl ServiceManager {
     }
 
     pub fn device_poll(&mut self) {
+        if self.cleaner_reload_pending {
+            if let Some(tx) = &self.tx {
+                let _ = tx.send(DaemonEvent::IpcUpdate);
+                self.cleaner_reload_pending = false;
+            }
+        }
         let now_mono = Instant::now();
         let now_wall = std::time::SystemTime::now();
         let _mono_elapsed = now_mono.duration_since(self.last_poll_mono);

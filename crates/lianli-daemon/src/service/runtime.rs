@@ -110,7 +110,12 @@ fn send_h264_au_with_retry(lcd: &SharedHidLcd, au: &[u8], aborted: &dyn Fn() -> 
             return false;
         }
         let result = {
-            let mut guard = lcd.lock();
+            let Some(mut guard) = lcd.try_lock_for(Duration::from_millis(50)) else {
+                continue;
+            };
+            if aborted() {
+                return false;
+            }
             guard.send_h264_frame(au)
         };
         match result {
@@ -147,9 +152,17 @@ fn spawn_hid_h264_stream(
     let handle = thread::spawn(move || {
         let _lease = lease;
         let halted = || worker_stop.load(Ordering::Relaxed) || worker_halt.load(Ordering::Relaxed);
-        let fps = {
-            let mut guard = lcd.lock();
-            guard.set_stream_fps(fps)
+        let fps = loop {
+            if halted() {
+                return;
+            }
+            let Some(mut guard) = lcd.try_lock_for(Duration::from_millis(50)) else {
+                continue;
+            };
+            if halted() {
+                return;
+            }
+            break guard.set_stream_fps(fps);
         };
         let frame_interval = Duration::from_secs_f32(1.0 / fps);
         let mut read_buf = vec![0u8; 64 * 1024];
@@ -320,7 +333,8 @@ impl LcdBackend {
             )),
             Self::WinUsb(sender) => Some(StreamRestarter::WinUsb(
                 sender.tx.clone(),
-                Arc::clone(&sender.h264_stop),
+                Arc::clone(&sender.stream_control),
+                Mutex::new(Arc::clone(&sender.stream_control.current.lock())),
             )),
             Self::Slv3(_) => None,
         }
@@ -411,7 +425,11 @@ impl HidStreamWorker {
 /// Cloneable handle for restarting an h264 stream from inside a render thread.
 pub(super) enum StreamRestarter {
     HidLcd(SharedHidLcd, Mutex<Option<HidStreamWorker>>),
-    WinUsb(std::sync::mpsc::SyncSender<LcdThreadMsg>, Arc<AtomicBool>),
+    WinUsb(
+        std::sync::mpsc::SyncSender<LcdThreadMsg>,
+        Arc<StreamControl>,
+        Mutex<Arc<AtomicBool>>,
+    ),
 }
 
 impl StreamRestarter {
@@ -434,6 +452,7 @@ impl StreamRestarter {
         stop: Arc<AtomicBool>,
         fps: f32,
     ) -> anyhow::Result<()> {
+        anyhow::ensure!(!stop.load(Ordering::Acquire), "H.264 renderer stopped");
         match self {
             Self::HidLcd(lcd, current) => {
                 let mut current = current.lock();
@@ -448,10 +467,14 @@ impl StreamRestarter {
                 ));
                 Ok(())
             }
-            Self::WinUsb(tx, h264_stop) => {
-                h264_stop.store(true, Ordering::Relaxed);
-                tx.send(LcdThreadMsg::StreamH264Reader(stdout, fps))
-                    .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))
+            Self::WinUsb(tx, control, owner) => {
+                let mut owner = owner.lock();
+                let stream_stop = control
+                    .restart(&owner)
+                    .ok_or_else(|| anyhow::anyhow!("H.264 stream was replaced"))?;
+                *owner = stream_stop.clone();
+                tx.try_send(LcdThreadMsg::StreamH264Reader(stdout, fps, stream_stop))
+                    .map_err(|e| anyhow::anyhow!("LCD stream restart was not accepted: {e}"))
             }
         }
     }
@@ -464,17 +487,46 @@ pub(super) enum LcdThreadMsg {
         path: PathBuf,
         looping: bool,
         fps: f32,
+        stop: Arc<AtomicBool>,
     },
-    StreamH264Reader(std::process::ChildStdout, f32),
+    StreamH264Reader(std::process::ChildStdout, f32, Arc<AtomicBool>),
     SwitchDesktop(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     SetBrightness(u8),
     Shutdown(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     Stop,
 }
 
+#[derive(Default)]
+pub(super) struct StreamControl {
+    current: Mutex<Arc<AtomicBool>>,
+}
+
+impl StreamControl {
+    fn next(&self) -> Arc<AtomicBool> {
+        let mut current = self.current.lock();
+        current.store(true, Ordering::Release);
+        *current = Arc::new(AtomicBool::new(false));
+        Arc::clone(&current)
+    }
+
+    fn cancel(&self) {
+        self.current.lock().store(true, Ordering::Release);
+    }
+
+    fn restart(&self, expected: &Arc<AtomicBool>) -> Option<Arc<AtomicBool>> {
+        let mut current = self.current.lock();
+        if !Arc::ptr_eq(&current, expected) || expected.load(Ordering::Acquire) {
+            return None;
+        }
+        current.store(true, Ordering::Release);
+        *current = Arc::new(AtomicBool::new(false));
+        Some(Arc::clone(&current))
+    }
+}
+
 pub(super) struct ThreadedWinUsbSender {
     tx: std::sync::mpsc::SyncSender<LcdThreadMsg>,
-    h264_stop: Arc<AtomicBool>,
+    stream_control: Arc<StreamControl>,
     closing: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -482,8 +534,7 @@ pub(super) struct ThreadedWinUsbSender {
 impl ThreadedWinUsbSender {
     pub(super) fn new(mut device: WinUsbLcdDevice, index: usize) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel::<LcdThreadMsg>(2);
-        let h264_stop = Arc::new(AtomicBool::new(false));
-        let stop_clone = Arc::clone(&h264_stop);
+        let stream_control = Arc::new(StreamControl::default());
         let closing = Arc::new(AtomicBool::new(false));
         let closing_clone = Arc::clone(&closing);
         let thread = thread::spawn(move || {
@@ -507,12 +558,16 @@ impl ThreadedWinUsbSender {
                         let result = device.send_frame_verified(&data);
                         let _ = reply.send(result);
                     }
-                    LcdThreadMsg::StreamH264 { path, looping, fps } => {
-                        stop_clone.store(false, Ordering::Relaxed);
-                        if closing_clone.load(Ordering::Acquire) {
+                    LcdThreadMsg::StreamH264 {
+                        path,
+                        looping,
+                        fps,
+                        stop,
+                    } => {
+                        if stop.load(Ordering::Acquire) || closing_clone.load(Ordering::Acquire) {
                             continue;
                         }
-                        if let Err(e) = device.stream_h264(&path, looping, &stop_clone, fps) {
+                        if let Err(e) = device.stream_h264(&path, looping, &stop, fps) {
                             if lianli_transport::usb::shutting_down() {
                                 debug!("LCD[{index}] h264 stream ended by shutdown: {e:#}");
                             } else {
@@ -520,12 +575,11 @@ impl ThreadedWinUsbSender {
                             }
                         }
                     }
-                    LcdThreadMsg::StreamH264Reader(mut stdout, fps) => {
-                        stop_clone.store(false, Ordering::Relaxed);
-                        if closing_clone.load(Ordering::Acquire) {
+                    LcdThreadMsg::StreamH264Reader(mut stdout, fps, stop) => {
+                        if stop.load(Ordering::Acquire) || closing_clone.load(Ordering::Acquire) {
                             continue;
                         }
-                        if let Err(e) = device.stream_h264_reader(&mut stdout, &stop_clone, fps) {
+                        if let Err(e) = device.stream_h264_reader(&mut stdout, &stop, fps) {
                             if lianli_transport::usb::shutting_down() {
                                 debug!("LCD[{index}] h264 live stream ended by shutdown: {e:#}");
                             } else {
@@ -559,17 +613,22 @@ impl ThreadedWinUsbSender {
         });
         Self {
             tx,
-            h264_stop,
+            stream_control,
             closing,
             thread: Some(thread),
         }
     }
 
     fn stream_h264(&self, path: PathBuf, looping: bool, fps: f32) -> anyhow::Result<()> {
-        self.h264_stop.store(true, Ordering::Relaxed);
+        let stop = self.stream_control.next();
         self.tx
-            .send(LcdThreadMsg::StreamH264 { path, looping, fps })
-            .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
+            .try_send(LcdThreadMsg::StreamH264 {
+                path,
+                looping,
+                fps,
+                stop,
+            })
+            .map_err(|e| anyhow::anyhow!("LCD file stream was not accepted: {e}"))?;
         Ok(())
     }
 
@@ -578,10 +637,10 @@ impl ThreadedWinUsbSender {
         stdout: std::process::ChildStdout,
         fps: f32,
     ) -> anyhow::Result<()> {
-        self.h264_stop.store(true, Ordering::Relaxed);
+        let stop = self.stream_control.next();
         self.tx
-            .send(LcdThreadMsg::StreamH264Reader(stdout, fps))
-            .map_err(|_| anyhow::anyhow!("LCD sender thread exited"))?;
+            .try_send(LcdThreadMsg::StreamH264Reader(stdout, fps, stop))
+            .map_err(|e| anyhow::anyhow!("LCD live stream was not accepted: {e}"))?;
         Ok(())
     }
 
@@ -598,7 +657,7 @@ impl ThreadedWinUsbSender {
     }
 
     fn send_frame(&self, frame: &[u8]) -> anyhow::Result<()> {
-        self.h264_stop.store(true, Ordering::Relaxed);
+        self.stream_control.cancel();
         match self.tx.try_send(LcdThreadMsg::Frame(frame.to_vec())) {
             Ok(()) => Ok(()),
             Err(std::sync::mpsc::TrySendError::Full(_)) => {
@@ -612,7 +671,7 @@ impl ThreadedWinUsbSender {
     }
 
     pub(super) fn switch_to_desktop_mode(&mut self) -> anyhow::Result<()> {
-        self.h264_stop.store(true, Ordering::Relaxed);
+        self.stream_control.cancel();
         let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
         self.tx
             .send(LcdThreadMsg::SwitchDesktop(reply_tx))
@@ -627,7 +686,7 @@ impl ThreadedWinUsbSender {
     }
 
     fn send_frame_verified(&self, frame: &[u8]) -> anyhow::Result<()> {
-        self.h264_stop.store(true, Ordering::Relaxed);
+        self.stream_control.cancel();
         let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
         self.tx
             .send(LcdThreadMsg::FrameVerified(frame.to_vec(), reply_tx))
@@ -677,7 +736,7 @@ impl ThreadedWinUsbSender {
 
     fn shutdown(&mut self) -> anyhow::Result<()> {
         self.closing.store(true, Ordering::Release);
-        self.h264_stop.store(true, Ordering::Relaxed);
+        self.stream_control.cancel();
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let result = self
@@ -695,7 +754,7 @@ impl ThreadedWinUsbSender {
             return;
         }
         self.closing.store(true, Ordering::Release);
-        self.h264_stop.store(true, Ordering::Relaxed);
+        self.stream_control.cancel();
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         if let Err(e) = self.send_before(LcdThreadMsg::Stop, deadline) {
             warn!("Failed to stop LCD sender: {e}");
@@ -718,6 +777,8 @@ pub(crate) struct ActiveTarget {
     // the encoder's stdin, ffmpeg flushes its trailer to stdout, and the WinUsb
     // thread (owned by `lcd`) needs to still be alive to drain it.
     media: Box<dyn FrameSource>,
+    media_pending: bool,
+    media_tx: Option<Sender<DaemonEvent>>,
     pub(super) lcd: LcdBackend,
     pub(super) asset: Arc<MediaAsset>,
     pub(super) screen: ScreenInfo,
@@ -798,7 +859,7 @@ impl ActiveTarget {
         custom_h264: bool,
         tx: Option<Sender<DaemonEvent>>,
     ) -> Self {
-        let media = make_frame_source(Arc::clone(&asset), tx.clone(), &lcd, &screen, custom_h264);
+        let media: Box<dyn FrameSource> = Box::new(NoopFrameSource);
         let recovery_stop = Arc::new(AtomicBool::new(false));
         let recovery_thread = match &lcd {
             LcdBackend::HidLcd(d) => {
@@ -829,6 +890,8 @@ impl ActiveTarget {
             device_identity,
             lcd,
             media,
+            media_pending: true,
+            media_tx: tx,
             asset,
             screen,
             custom_h264,
@@ -911,6 +974,13 @@ impl ActiveTarget {
         builder: &mut PacketBuilder,
         brightness: u8,
     ) {
+        if !self.media_pending && self.media.is_autonomous() {
+            if let LcdBackend::WinUsb(sender) = &self.lcd {
+                sender.stream_control.cancel();
+                self.media = Box::new(NoopFrameSource);
+                self.media_pending = true;
+            }
+        }
         self.pending_brightness = Some(brightness);
         self.brightness_retries = 3;
         self.flush_pending_brightness(wireless, builder);
@@ -962,7 +1032,11 @@ impl ActiveTarget {
         self.key = asset.config_key.clone();
         self.asset = Arc::clone(&asset);
         self.custom_h264 = custom_h264;
-        self.media = make_frame_source(asset, tx, &self.lcd, &self.screen, custom_h264);
+        if let LcdBackend::WinUsb(sender) = &self.lcd {
+            sender.stream_control.cancel();
+        }
+        self.media_pending = true;
+        self.media_tx = tx;
         self.frame_counter = 0;
         info!(
             "[devices] LCD[{}] media swapped (keeping transport)",
@@ -981,19 +1055,7 @@ impl ActiveTarget {
         if self.custom_h264 == custom_h264 {
             return;
         }
-        self.custom_h264 = custom_h264;
-        self.media = make_frame_source(
-            Arc::clone(&self.asset),
-            tx,
-            &self.lcd,
-            &self.screen,
-            custom_h264,
-        );
-        self.frame_counter = 0;
-        info!(
-            "[devices] LCD[{}] custom_h264 -> {custom_h264} (frame source rebuilt)",
-            self.index
-        );
+        self.swap_media(Arc::clone(&self.asset), custom_h264, tx);
     }
 
     pub(super) fn send_frame(
@@ -1001,6 +1063,19 @@ impl ActiveTarget {
         wireless: Option<&WirelessController>,
         builder: &mut PacketBuilder,
     ) -> Result<bool, SendError> {
+        if self.media_pending {
+            if self.pending_brightness.is_some() {
+                return Ok(false);
+            }
+            self.media = make_frame_source(
+                Arc::clone(&self.asset),
+                self.media_tx.clone(),
+                &self.lcd,
+                &self.screen,
+                self.custom_h264,
+            );
+            self.media_pending = false;
+        }
         // H.264 / autonomous sources: kick off streaming on the first call,
         // then short-circuit (their threads push frames directly to the LCD).
         if self.media.is_autonomous() {
@@ -1047,6 +1122,7 @@ impl ActiveTarget {
 
     pub(super) fn stop(&mut self) {
         self.recovery_stop.store(true, Ordering::Relaxed);
+        self.media_pending = false;
         // dropping media sets the renderer stop flags, which unblock stop()
         self.media = Box::new(NoopFrameSource);
         if let Some(t) = self.recovery_thread.take() {
@@ -1308,8 +1384,17 @@ impl FrameSource for H264FileSource {
 impl Drop for H264FileSource {
     fn drop(&mut self) {
         self.hid_stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.hid_thread.take() {
-            let _ = t.join();
+        if let Some(worker) = self.hid_thread.take() {
+            let deadline = std::time::Instant::now() + Duration::from_millis(100);
+            while !worker.is_finished() && std::time::Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            if worker.is_finished() {
+                let _ = worker.join();
+            } else {
+                // The worker retains its stream lease and checks stop after locking the device.
+                warn!("HID H.264 file worker is stopping; detaching until its transfer returns");
+            }
         }
     }
 }
@@ -1445,7 +1530,12 @@ fn stream_h264_file_to_hid(
     use std::time::Instant;
 
     let frame_interval = {
-        let mut guard = lcd.lock();
+        let Some(mut guard) = lcd.try_lock_for(Duration::from_millis(100)) else {
+            return false;
+        };
+        if stop.load(Ordering::Relaxed) {
+            return false;
+        }
         Duration::from_secs_f32(1.0 / guard.set_stream_fps(fps))
     };
     let mut read_buf = vec![0u8; 64 * 1024];
@@ -1539,10 +1629,145 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     #[test]
+    fn replacing_queued_stream_keeps_old_cancellation_and_brightness_order() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(3);
+        let sender = ThreadedWinUsbSender {
+            tx,
+            stream_control: Arc::new(StreamControl::default()),
+            closing: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        };
+        sender.stream_h264("old".into(), true, 20.0).unwrap();
+        sender.stream_control.cancel();
+        sender.set_brightness(37).unwrap();
+        sender.stream_h264("new".into(), true, 20.0).unwrap();
+        let LcdThreadMsg::StreamH264 {
+            path, stop: old, ..
+        } = rx.try_recv().unwrap()
+        else {
+            panic!("expected old stream")
+        };
+        assert_eq!(path, PathBuf::from("old"));
+        assert!(old.load(Ordering::Acquire));
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            LcdThreadMsg::SetBrightness(37)
+        ));
+        let LcdThreadMsg::StreamH264 {
+            path, stop: new, ..
+        } = rx.try_recv().unwrap()
+        else {
+            panic!("expected replacement stream")
+        };
+        assert_eq!(path, PathBuf::from("new"));
+        assert!(!new.load(Ordering::Acquire));
+        assert!(sender.stream_control.restart(&old).is_none());
+        assert!(!new.load(Ordering::Acquire));
+        sender.stream_control.cancel();
+        assert!(new.load(Ordering::Acquire));
+        assert!(sender.stream_control.restart(&new).is_none());
+    }
+
+    #[test]
+    fn live_sources_do_not_queue_streaming_before_brightness() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(2);
+        let sender = ThreadedWinUsbSender {
+            tx,
+            stream_control: Arc::new(StreamControl::default()),
+            closing: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        };
+        let screen = ScreenInfo {
+            h264: true,
+            ..ScreenInfo::TLLCD
+        };
+        let descriptor = serde_json::from_value(serde_json::json!({
+            "label": "Test", "unit": "%", "source": { "type": "constant", "value": 25 }
+        }))
+        .unwrap();
+        let sensor =
+            lianli_media::SensorAsset::new(&descriptor, 0.0, &screen, &[], None, 1000).unwrap();
+        let asset = Arc::new(MediaAsset {
+            kind: MediaAssetKind::Sensor { asset: sensor },
+            config_key: "sensor-test".into(),
+            stream_fps: 20.0,
+        });
+        let mut target = ActiveTarget::new(
+            0,
+            asset.config_key.clone(),
+            "test".into(),
+            LcdBackend::WinUsb(sender),
+            asset.clone(),
+            screen,
+            true,
+            None,
+        );
+        assert!(rx.try_recv().is_err());
+        target.apply_brightness(None, &mut PacketBuilder::new(), 100);
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            LcdThreadMsg::SetBrightness(100)
+        ));
+        target.swap_media(asset, true, None);
+        assert!(rx.try_recv().is_err());
+        target.apply_brightness(None, &mut PacketBuilder::new(), 37);
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            LcdThreadMsg::SetBrightness(37)
+        ));
+    }
+
+    #[test]
+    fn stopping_file_source_does_not_wait_for_a_busy_worker() {
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let mut source = H264FileSource::new("unused".into(), true, 20.0);
+        let stop = source.hid_stop.clone();
+        source.hid_thread = Some(thread::spawn(move || {
+            blocked.recv().unwrap();
+            assert!(stop.load(Ordering::Relaxed));
+            finished.send(()).unwrap();
+        }));
+        let started = std::time::Instant::now();
+        drop(source);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        release.send(()).unwrap();
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn cancelled_access_unit_never_writes_after_waiting_for_the_device() {
+        let (lcd, sends) = lcd(0);
+        let guard = lcd.lock();
+        let worker_lcd = lcd.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let first = AtomicBool::new(true);
+            send_h264_au_with_retry(&worker_lcd, &[1, 2, 3], &|| {
+                let cancelled = worker_stop.load(Ordering::Relaxed);
+                if first.swap(false, Ordering::Relaxed) {
+                    entered.send(()).unwrap();
+                }
+                cancelled
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+        stop.store(true, Ordering::Relaxed);
+        drop(guard);
+        assert!(!worker.join().unwrap());
+        assert_eq!(sends.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
     fn shutdown_reports_the_sender_result_after_stopping_production() {
         let (tx, rx) = std::sync::mpsc::sync_channel(2);
         let stop = Arc::new(AtomicBool::new(false));
         let closing = Arc::new(AtomicBool::new(false));
+        let stream_control = Arc::new(StreamControl {
+            current: Mutex::new(stop.clone()),
+        });
         let worker_stop = stop.clone();
         let worker_closing = closing.clone();
         let worker = thread::spawn(move || {
@@ -1557,7 +1782,7 @@ mod tests {
         });
         let mut sender = ThreadedWinUsbSender {
             tx,
-            h264_stop: stop,
+            stream_control,
             closing,
             thread: Some(worker),
         };

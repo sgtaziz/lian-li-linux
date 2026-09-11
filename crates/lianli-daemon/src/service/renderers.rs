@@ -34,6 +34,9 @@ fn try_restart_encoder(
     restart_count: &mut u32,
     started_at: &mut Instant,
 ) -> bool {
+    if stop.load(Ordering::Relaxed) {
+        return false;
+    }
     if *restart_count >= MAX_RESTARTS {
         warn!("h264 encoder exceeded max restarts ({MAX_RESTARTS}), giving up");
         return false;
@@ -79,6 +82,9 @@ fn try_restart_encoder(
             }
         };
 
+    if stop.load(Ordering::Relaxed) {
+        return false;
+    }
     if let Some(stdout) = new_encoder.take_stdout() {
         if let Err(e) = restarter.start_stream(stdout, Arc::clone(stop), fps) {
             warn!("h264 stream restart failed: {e}");
@@ -432,7 +438,7 @@ impl Drop for AsyncCustomH264Renderer {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(t) = self._thread.take() {
-            let _ = t.join();
+            finish_h264_renderer(t);
         }
     }
 }
@@ -551,7 +557,20 @@ impl Drop for AsyncSensorH264Renderer {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(t) = self._thread.take() {
-            let _ = t.join();
+            finish_h264_renderer(t);
         }
+    }
+}
+
+fn finish_h264_renderer(worker: JoinHandle<()>) {
+    let deadline = Instant::now() + Duration::from_millis(100);
+    while !worker.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    if worker.is_finished() {
+        let _ = worker.join();
+    } else {
+        // The stopped worker owns its encoder until its bounded pipe write finishes.
+        warn!("H.264 renderer is stopping; detaching until its current frame completes");
     }
 }
