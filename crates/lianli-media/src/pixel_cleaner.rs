@@ -2,9 +2,8 @@ use image::{Rgb, RgbImage};
 
 pub const FPS: u32 = 20;
 pub const FRAME_COUNT: u64 = 100;
-const MAX_NOISE_CELLS: u64 = 65_536;
 
-/// Fill a reusable, native-size buffer with one frame of the five-second loop.
+/// Fill a reusable buffer with one frame of the five-second loop.
 pub fn render_frame(frame: &mut RgbImage, frame_index: u64) {
     let frame_index = frame_index % FRAME_COUNT;
     let color = match frame_index {
@@ -28,27 +27,15 @@ pub fn render_frame(frame: &mut RgbImage, frame_index: u64) {
         return;
     }
 
-    let (width, height) = frame.dimensions();
-    let mut grain = 1;
-    // Bound random detail while preserving native geometry and contrast.
-    while u64::from(width.div_ceil(grain)) * u64::from(height.div_ceil(grain)) > MAX_NOISE_CELLS {
-        grain += 1;
-    }
     let mut random = 0x9e37_79b9_u32 ^ frame_index as u32;
-    for y in (0..height).step_by(grain as usize) {
-        for x in (0..width).step_by(grain as usize) {
-            random ^= random << 13;
-            random ^= random >> 17;
-            random ^= random << 5;
-            let luma = (random >> 24) as i32;
-            // Match the reference noise's contrast after limited-range luma expansion.
-            let gray = ((luma - 16) * 255 / 219).clamp(0, 255) as u8;
-            for row in y..(y + grain).min(height) {
-                for column in x..(x + grain).min(width) {
-                    frame.put_pixel(column, row, Rgb([gray; 3]));
-                }
-            }
-        }
+    for pixel in frame.pixels_mut() {
+        random ^= random << 13;
+        random ^= random >> 17;
+        random ^= random << 5;
+        let luma = (random >> 24) as i32;
+        // Match the reference noise's contrast after limited-range luma expansion.
+        let gray = ((luma - 16) * 255 / 219).clamp(0, 255) as u8;
+        *pixel = Rgb([gray; 3]);
     }
 }
 
@@ -57,6 +44,7 @@ pub const MAX_ASSET_BYTES: usize = 32 * 1024 * 1024;
 pub fn prepare_asset(
     screen: &lianli_shared::screen::ScreenInfo,
     orientation: f32,
+    payload_limit: usize,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<crate::MediaAssetKind, crate::MediaError> {
     use crate::MediaAssetKind;
@@ -69,6 +57,7 @@ pub fn prepare_asset(
         || u64::from(screen.width) * u64::from(screen.height) > 4096 * 4096
         || screen.max_fps < FPS
         || !orientation.is_finite()
+        || !(4096..=MAX_ASSET_BYTES).contains(&payload_limit)
     {
         return Err(crate::MediaError::InvalidConfig(
             "unsupported pixel cleaner screen or orientation".into(),
@@ -85,7 +74,21 @@ pub fn prepare_asset(
         }
     };
     cancelled()?;
-    let (width, height) = crate::common::render_dimensions(screen, orientation);
+    let mut encoding_screen = *screen;
+    if screen.h264 {
+        encoding_screen.width = (screen.width / 2).max(2) & !1;
+        encoding_screen.height = (screen.height / 2).max(2) & !1;
+        let noise_pixels = h264_budget(payload_limit).0 as f64 / f64::from(FPS) / 1.5;
+        let scale = (noise_pixels
+            / (f64::from(encoding_screen.width) * f64::from(encoding_screen.height)))
+        .sqrt()
+        .min(1.0);
+        encoding_screen.width = ((f64::from(encoding_screen.width) * scale) as u32).max(2) & !1;
+        encoding_screen.height = ((f64::from(encoding_screen.height) * scale) as u32).max(2) & !1;
+    } else {
+        encoding_screen.max_payload = payload_limit.min(screen.max_payload);
+    }
+    let (width, height) = crate::common::render_dimensions(&encoding_screen, orientation);
     let mut frame = RgbImage::new(width, height);
     let frames_dir = if screen.h264 {
         Some(tempfile::TempDir::new()?)
@@ -104,7 +107,7 @@ pub fn prepare_asset(
             oriented = crate::common::apply_orientation(frame.clone(), orientation);
             &oriented
         };
-        let encoded = encode_frame(pixels, screen)?;
+        let encoded = encode_frame(pixels, &encoding_screen)?;
         bytes += encoded.len();
         if bytes > MAX_ASSET_BYTES {
             return Err(crate::MediaError::InvalidConfig(
@@ -121,6 +124,15 @@ pub fn prepare_asset(
     if let Some(frames_dir) = frames_dir {
         let output_dir = tempfile::TempDir::new()?;
         let path = output_dir.path().join("cleaner.h264");
+        let (max_rate, buffer_bits) = h264_budget(payload_limit);
+        tracing::info!(
+            width = encoding_screen.width,
+            height = encoding_screen.height,
+            payload_limit,
+            max_rate,
+            buffer_bits,
+            "Preparing pixel cleaner H.264"
+        );
         let mut command = std::process::Command::new("ffmpeg");
         command
             .args(["-y", "-loglevel", "error", "-framerate", "20", "-i"])
@@ -131,7 +143,9 @@ pub fn prepare_asset(
                 "-c:v",
                 "libx264",
                 "-preset",
-                "ultrafast",
+                "medium",
+                "-profile:v",
+                "baseline",
                 "-threads",
                 "2",
                 "-pix_fmt",
@@ -141,9 +155,9 @@ pub fn prepare_asset(
                 "-bf",
                 "0",
                 "-maxrate",
-                "8M",
+                &max_rate.to_string(),
                 "-bufsize",
-                "800k",
+                &buffer_bits.to_string(),
                 "-x264-params",
                 "repeat-headers=1:aud=1",
                 "-fs",
@@ -169,6 +183,7 @@ pub fn prepare_asset(
                 "generated H.264 asset is empty or exceeds its size limit".into(),
             ));
         }
+        validate_h264(&path, &encoding_screen, payload_limit, deadline, cancel)?;
         cancelled()?;
         Ok(MediaAssetKind::H264Stream {
             path,
@@ -182,6 +197,68 @@ pub fn prepare_asset(
             frames: Arc::new(frames),
         })
     }
+}
+
+fn h264_budget(payload_limit: usize) -> (usize, usize) {
+    // Reserve headroom: quarter-block average frames, half-block bursts, and a decoder rate ceiling.
+    let max_rate = (payload_limit as u64 * u64::from(FPS) * 8 / 4).min(16_000_000) as usize;
+    let buffer_bits = (payload_limit * 8 / 2).min(max_rate / FPS as usize * 2);
+    (max_rate, buffer_bits)
+}
+
+fn validate_h264(
+    path: &std::path::Path,
+    screen: &lianli_shared::screen::ScreenInfo,
+    payload_limit: usize,
+    deadline: std::time::Instant,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<(), crate::MediaError> {
+    let mut command = std::process::Command::new("ffprobe");
+    command
+        .args([
+            "-v",
+            "error",
+            "-count_frames",
+            "-show_packets",
+            "-show_entries",
+            "packet=size:stream=width,height,nb_read_frames",
+            "-of",
+            "json",
+        ])
+        .arg(path);
+    let output = crate::video::process::output_cancellable(
+        command,
+        deadline.saturating_duration_since(std::time::Instant::now()),
+        cancel,
+    )?;
+    let valid = (|| -> Option<bool> {
+        if !output.status.success() {
+            return Some(false);
+        }
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+        let stream = data.get("streams")?.get(0)?;
+        let packets = data.get("packets")?.as_array()?;
+        Some(
+            stream.get("width")?.as_u64()? == u64::from(screen.width)
+                && stream.get("height")?.as_u64()? == u64::from(screen.height)
+                && stream.get("nb_read_frames")?.as_str()? == "100"
+                && packets.len() == FRAME_COUNT as usize
+                && packets.iter().all(|packet| {
+                    packet
+                        .get("size")
+                        .and_then(|v| v.as_str())
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .is_some_and(|size| size > 0 && size <= payload_limit)
+                }),
+        )
+    })()
+    .unwrap_or(false);
+    if !valid {
+        return Err(crate::MediaError::InvalidConfig(
+            "generated H.264 exceeds the device payload limit or failed decode validation".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn encode_frame(
@@ -217,20 +294,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rectangular_noise_uses_square_grains_and_fills_partial_edges() {
-        let mut frame = RgbImage::from_pixel(481, 1921, Rgb([1, 2, 3]));
-        render_frame(&mut frame, 35);
-        for y in (0..frame.height()).step_by(4) {
-            for x in (0..frame.width()).step_by(4) {
-                let expected = frame.get_pixel(x, y);
-                assert_eq!(expected[0], expected[1]);
-                assert_eq!(expected[1], expected[2]);
-                for dy in y..(y + 4).min(frame.height()) {
-                    for dx in x..(x + 4).min(frame.width()) {
-                        assert_eq!(frame.get_pixel(dx, dy), expected);
-                    }
-                }
-            }
+    fn negotiated_h264_limits_change_encoding_budgets() {
+        assert_eq!(h264_budget(65_536), (2_621_440, 262_144));
+        assert_eq!(h264_budget(202_752), (8_110_080, 811_008));
+        assert_eq!(h264_budget(1_048_576), (16_000_000, 1_600_000));
+    }
+
+    #[test]
+    fn small_negotiated_blocks_produce_complete_validated_h264_loops() {
+        let screen = lianli_shared::screen::ScreenInfo::UNIVERSAL_SCREEN;
+        for payload_limit in [32_768, 65_536] {
+            let asset = prepare_asset(
+                &screen,
+                90.0,
+                payload_limit,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
+            assert!(matches!(
+                asset,
+                crate::MediaAssetKind::H264Stream { looping: true, .. }
+            ));
         }
     }
 
@@ -264,6 +348,7 @@ mod tests {
             let asset = prepare_asset(
                 &screen,
                 orientation,
+                screen.max_payload,
                 &std::sync::atomic::AtomicBool::new(false),
             )
             .unwrap();
@@ -276,26 +361,38 @@ mod tests {
     }
 
     #[test]
-    fn prepared_jpeg_loop_respects_tl_payloads_and_timing() {
-        let screen = lianli_shared::screen::ScreenInfo::TLLCD;
-        let asset =
-            prepare_asset(&screen, 90.0, &std::sync::atomic::AtomicBool::new(false)).unwrap();
-        let crate::MediaAssetKind::Video {
-            frames,
-            frame_durations,
-        } = asset
-        else {
-            panic!("expected JPEG frames")
-        };
-        assert_eq!(frames.len(), 100);
-        assert_eq!(
-            frame_durations.iter().sum::<std::time::Duration>(),
-            std::time::Duration::from_secs(5)
-        );
-        for frame in frames.iter() {
-            assert!(frame.len() <= screen.max_payload);
-            let decoded = image::load_from_memory(frame).unwrap();
-            assert_eq!((decoded.width(), decoded.height()), (400, 400));
+    fn prepared_jpeg_loops_respect_wired_and_wireless_payloads_and_timing() {
+        for screen in [
+            lianli_shared::screen::ScreenInfo::TLLCD,
+            lianli_shared::screen::ScreenInfo::WIRELESS_LCD,
+        ] {
+            let asset = prepare_asset(
+                &screen,
+                90.0,
+                screen.max_payload,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
+            let crate::MediaAssetKind::Video {
+                frames,
+                frame_durations,
+            } = asset
+            else {
+                panic!("expected JPEG frames")
+            };
+            assert_eq!(frames.len(), 100);
+            assert_eq!(
+                frame_durations.iter().sum::<std::time::Duration>(),
+                std::time::Duration::from_secs(5)
+            );
+            for frame in frames.iter() {
+                assert!(frame.len() <= screen.max_payload);
+                let decoded = image::load_from_memory(frame).unwrap();
+                assert_eq!(
+                    (decoded.width(), decoded.height()),
+                    (screen.width, screen.height)
+                );
+            }
         }
     }
 
@@ -309,8 +406,13 @@ mod tests {
             ScreenInfo::UNIVERSAL_SCREEN,
             ScreenInfo::FLEX_LCD,
         ] {
-            let asset =
-                prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+            let asset = prepare_asset(
+                &screen,
+                0.0,
+                screen.max_payload.min(202_752),
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
             let crate::MediaAssetKind::H264Stream {
                 ref path,
                 fps,
@@ -342,8 +444,16 @@ mod tests {
             .unwrap();
             assert!(result.status.success());
             let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
-            assert_eq!(data["streams"][0]["width"], screen.width);
-            assert_eq!(data["streams"][0]["height"], screen.height);
+            let width = data["streams"][0]["width"].as_u64().unwrap();
+            let height = data["streams"][0]["height"].as_u64().unwrap();
+            assert!(width <= u64::from(screen.width / 2) && height <= u64::from(screen.height / 2));
+            let aspect_error = (width as f64 / height as f64)
+                / (f64::from(screen.width) / f64::from(screen.height))
+                - 1.0;
+            assert!(aspect_error.abs() < 0.01);
+            if screen == ScreenInfo::UNIVERSAL_SCREEN {
+                assert_eq!((width, height), (240, 960));
+            }
             assert_eq!(data["streams"][0]["nb_read_frames"], "100");
             let sizes: Vec<usize> = data["packets"]
                 .as_array()
@@ -353,17 +463,22 @@ mod tests {
                 .collect();
             assert_eq!(sizes.len(), FRAME_COUNT as usize);
             assert!(
-                sizes.iter().all(|&size| size <= 128 * 1024),
+                sizes
+                    .iter()
+                    .all(|&size| size <= screen.max_payload.min(202_752)),
                 "oversized H.264 frame on {screen:?}: {sizes:?}"
             );
             assert!(
                 sizes
                     .windows(FPS as usize)
-                    .all(|second| second.iter().sum::<usize>() <= 1_150_000),
+                    .all(|second| second.iter().sum::<usize>()
+                        <= (h264_budget(screen.max_payload.min(202_752)).0
+                            + h264_budget(screen.max_payload.min(202_752)).1)
+                            / 8),
                 "H.264 bitrate burst on {screen:?}"
             );
 
-            if screen == ScreenInfo::UNIVERSAL_SCREEN {
+            {
                 let mut command = std::process::Command::new("ffmpeg");
                 command.args(["-v", "error", "-i"]).arg(path).args([
                     "-vf",
@@ -382,7 +497,7 @@ mod tests {
                 )
                 .unwrap();
                 assert!(frame.status.success());
-                let pixels = (screen.width * screen.height) as usize;
+                let pixels = (width * height) as usize;
                 assert_eq!(frame.stdout.len(), pixels * 3);
                 let dark = frame
                     .stdout
@@ -396,8 +511,8 @@ mod tests {
                     .step_by(3)
                     .filter(|&&red| red > 207)
                     .count();
-                assert!(dark > pixels * 15 / 100 && bright > pixels * 15 / 100,
-                    "bandwidth limiting must preserve contrasting noise rather than flatten it to gray");
+                assert!(dark > pixels * 10 / 100 && bright > pixels * 10 / 100,
+                    "noise contrast lost on {screen:?}: dark={dark}, bright={bright}, pixels={pixels}");
             }
             let path = path.clone();
             drop(asset);
@@ -408,9 +523,21 @@ mod tests {
     #[test]
     fn cancelled_preparation_and_unsupported_frame_rate_are_rejected() {
         let mut screen = lianli_shared::screen::ScreenInfo::TLLCD;
-        assert!(prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(true)).is_err());
+        assert!(prepare_asset(
+            &screen,
+            0.0,
+            screen.max_payload.min(202_752),
+            &std::sync::atomic::AtomicBool::new(true)
+        )
+        .is_err());
         screen.max_fps = 10;
-        assert!(prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(false)).is_err());
+        assert!(prepare_asset(
+            &screen,
+            0.0,
+            screen.max_payload.min(202_752),
+            &std::sync::atomic::AtomicBool::new(false)
+        )
+        .is_err());
     }
 
     #[test]

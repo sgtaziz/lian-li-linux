@@ -371,7 +371,7 @@ The daemon reads its config from `~/.config/lianli/config.json` (per-user servic
 
 ## Pixel conditioning
 
-Each LCD card has a pixel-conditioning control with 15, 30, 60, and 120-minute presets. The daemon generates a five-second pattern at the panel's native size: alternating black/white, changing grayscale noise, and solid color phases. There is no bundled video or download. Preparation finishes before the display changes; use Cancel to abandon preparation or Stop to restore the previous display.
+Each LCD card has a pixel-conditioning control with 15, 30, 60, and 120-minute presets. The daemon generates a five-second pattern of alternating black/white, changing grayscale noise, and solid color phases. JPEG-only displays use native-sized frames within their payload limits. H.264 displays use reduced-resolution video with the panel's aspect ratio; bitrate and frame bursts follow the negotiated block size, or the driver's fallback when negotiation is unavailable. There is no bundled video or download. Preparation finishes before the display changes; use Cancel to abandon preparation or Stop to restore the previous display.
 
 ```bash
 lianli-daemon lcd clean --minutes 30

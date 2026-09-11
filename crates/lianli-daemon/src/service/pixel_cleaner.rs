@@ -26,6 +26,7 @@ struct PlannedTarget {
     index: usize,
     identity: String,
     screen: ScreenInfo,
+    payload_limit: usize,
     orientation: f32,
     previous: Arc<MediaAsset>,
 }
@@ -148,6 +149,7 @@ impl ServiceManager {
                 index,
                 identity: target.device_identity.clone(),
                 screen: target.screen,
+                payload_limit: target.cleaner_payload_limit(),
                 orientation: self
                     .config
                     .as_ref()
@@ -158,17 +160,26 @@ impl ServiceManager {
             .collect();
         let cached: Vec<_> = targets
             .values()
-            .filter(|target| target.asset.config_key.starts_with("pixel_cleaner:"))
-            .map(|target| {
-                (
+            .filter_map(|target| {
+                let payload_limit = target.cleaner_payload_limit();
+                if !target.asset.config_key.starts_with("pixel_cleaner:")
+                    || !target
+                        .asset
+                        .config_key
+                        .ends_with(&format!(":{payload_limit}"))
+                {
+                    return None;
+                }
+                Some((
                     target.screen,
+                    payload_limit,
                     self.config
                         .as_ref()
                         .and_then(|c| c.lcds.get(target.index))
                         .map_or(0.0, |c| c.orientation)
                         .to_bits(),
                     target.asset.clone(),
-                )
+                ))
             })
             .collect();
         let mut affected: std::collections::HashSet<_> = self
@@ -196,11 +207,11 @@ impl ServiceManager {
             .spawn(move || {
                 let mut cache = cached;
                 let mut seen = std::collections::HashSet::new();
-                cache.retain(|(_, _, asset)| seen.insert(Arc::as_ptr(asset)));
+                cache.retain(|(_, _, _, asset)| seen.insert(Arc::as_ptr(asset)));
                 let mut prepared = Vec::new();
                 let mut total_bytes = cache
                     .iter()
-                    .map(|(_, _, asset)| match &asset.kind {
+                    .map(|(_, _, _, asset)| match &asset.kind {
                         lianli_media::MediaAssetKind::Video { frames, .. } => {
                             frames.iter().map(Vec::len).sum::<usize>()
                         }
@@ -215,15 +226,18 @@ impl ServiceManager {
                         return Err("Preparation cancelled".into());
                     }
                     let rotation = target.orientation.to_bits();
-                    let asset = if let Some((_, _, asset)) =
-                        cache.iter().find(|(screen, orientation, _)| {
-                            *screen == target.screen && *orientation == rotation
+                    let asset = if let Some((_, _, _, asset)) =
+                        cache.iter().find(|(screen, limit, orientation, _)| {
+                            *screen == target.screen
+                                && *limit == target.payload_limit
+                                && *orientation == rotation
                         }) {
                         Arc::clone(asset)
                     } else {
                         let kind = lianli_media::pixel_cleaner::prepare_asset(
                             &target.screen,
                             target.orientation,
+                            target.payload_limit,
                             &worker_cancel,
                         )
                         .map_err(|e| format!("Preparing {}: {e}", target.identity))?;
@@ -241,10 +255,18 @@ impl ServiceManager {
                         }
                         let asset = Arc::new(MediaAsset {
                             kind,
-                            config_key: format!("pixel_cleaner:{id}:{}", target.index),
+                            config_key: format!(
+                                "pixel_cleaner:{id}:{}:{}",
+                                target.index, target.payload_limit
+                            ),
                             stream_fps: lianli_media::pixel_cleaner::FPS as f32,
                         });
-                        cache.push((target.screen, rotation, Arc::clone(&asset)));
+                        cache.push((
+                            target.screen,
+                            target.payload_limit,
+                            rotation,
+                            Arc::clone(&asset),
+                        ));
                         asset
                     };
                     prepared.push(asset);
@@ -286,6 +308,7 @@ impl ServiceManager {
                 .ok_or("LCD disappeared while preparing; previous session preserved")?;
             if current.device_identity != plan.identity
                 || !Arc::ptr_eq(&current.asset, &plan.previous)
+                || current.cleaner_payload_limit() != plan.payload_limit
             {
                 return Err("LCD changed while preparing; previous session preserved".into());
             }
@@ -577,6 +600,7 @@ mod tests {
                     index,
                     identity: target.device_identity.clone(),
                     screen: target.screen,
+                    payload_limit: target.cleaner_payload_limit(),
                     orientation: 0.0,
                     previous: target.asset.clone(),
                 }
@@ -665,6 +689,24 @@ mod tests {
         assert!(!service.stop_pixel_cleaning(None, Some(10)));
         assert_eq!(service.targets.lock()[&0].asset.config_key, "clean-10");
         assert!(service.pixel_clean_sessions.is_empty());
+    }
+
+    #[test]
+    fn changed_payload_budget_rejects_activation_without_replacing_the_session() {
+        let mut service = service();
+        ready(&mut service, 10, &[0]);
+        service.activate_pixel_cleaning(10).unwrap();
+        ready(&mut service, 11, &[0]);
+        service
+            .targets
+            .lock()
+            .get_mut(&0)
+            .unwrap()
+            .screen
+            .max_payload /= 2;
+        assert!(service.activate_pixel_cleaning(11).is_err());
+        assert_eq!(service.pixel_clean_sessions[0].session_id, 10);
+        assert_eq!(service.pixel_clean_sessions[0].original_targets.len(), 1);
     }
 
     #[test]

@@ -525,6 +525,7 @@ impl StreamControl {
 }
 
 pub(super) struct ThreadedWinUsbSender {
+    transport: Option<lianli_devices::winusb::lcd::SharedTransport>,
     tx: std::sync::mpsc::SyncSender<LcdThreadMsg>,
     stream_control: Arc<StreamControl>,
     closing: Arc<AtomicBool>,
@@ -533,6 +534,7 @@ pub(super) struct ThreadedWinUsbSender {
 
 impl ThreadedWinUsbSender {
     pub(super) fn new(mut device: WinUsbLcdDevice, index: usize) -> Self {
+        let transport = Some(device.shared_transport());
         let (tx, rx) = std::sync::mpsc::sync_channel::<LcdThreadMsg>(2);
         let stream_control = Arc::new(StreamControl::default());
         let closing = Arc::new(AtomicBool::new(false));
@@ -612,6 +614,7 @@ impl ThreadedWinUsbSender {
             device.transport_release();
         });
         Self {
+            transport,
             tx,
             stream_control,
             closing,
@@ -966,6 +969,18 @@ impl ActiveTarget {
     /// definitive and deferred work can be applied.
     pub(super) fn mark_init_complete(&mut self) {
         self.init_complete = true;
+    }
+
+    pub(super) fn cleaner_payload_limit(&self) -> usize {
+        match &self.lcd {
+            LcdBackend::WinUsb(sender) if self.screen.h264 => sender
+                .transport
+                .as_ref()
+                .map_or(self.screen.max_payload, |transport| {
+                    transport.h264_chunk_size()
+                }),
+            _ => self.screen.max_payload,
+        }
     }
 
     pub(super) fn apply_brightness(
@@ -1632,6 +1647,7 @@ mod tests {
     fn replacing_queued_stream_keeps_old_cancellation_and_brightness_order() {
         let (tx, rx) = std::sync::mpsc::sync_channel(3);
         let sender = ThreadedWinUsbSender {
+            transport: None,
             tx,
             stream_control: Arc::new(StreamControl::default()),
             closing: Arc::new(AtomicBool::new(false)),
@@ -1672,6 +1688,7 @@ mod tests {
     fn live_sources_do_not_queue_streaming_before_brightness() {
         let (tx, rx) = std::sync::mpsc::sync_channel(2);
         let sender = ThreadedWinUsbSender {
+            transport: None,
             tx,
             stream_control: Arc::new(StreamControl::default()),
             closing: Arc::new(AtomicBool::new(false)),
@@ -1781,6 +1798,7 @@ mod tests {
                 .unwrap();
         });
         let mut sender = ThreadedWinUsbSender {
+            transport: None,
             tx,
             stream_control,
             closing,
