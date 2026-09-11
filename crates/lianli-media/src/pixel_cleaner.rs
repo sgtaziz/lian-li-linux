@@ -39,9 +39,238 @@ pub fn render_frame(frame: &mut RgbImage, frame_index: u64) {
     }
 }
 
+pub const MAX_ASSET_BYTES: usize = 32 * 1024 * 1024;
+
+pub fn prepare_asset(
+    screen: &lianli_shared::screen::ScreenInfo,
+    orientation: f32,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<crate::MediaAssetKind, crate::MediaError> {
+    use crate::MediaAssetKind;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    if screen.width == 0
+        || screen.height == 0
+        || u64::from(screen.width) * u64::from(screen.height) > 4096 * 4096
+        || screen.max_fps < FPS
+        || !orientation.is_finite()
+    {
+        return Err(crate::MediaError::InvalidConfig(
+            "unsupported pixel cleaner screen or orientation".into(),
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let cancelled = || {
+        if cancel.load(Ordering::Relaxed) || Instant::now() >= deadline {
+            Err(crate::MediaError::InvalidConfig(
+                "pixel cleaner preparation cancelled or timed out".into(),
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    cancelled()?;
+    let (width, height) = crate::common::render_dimensions(screen, orientation);
+    let mut frame = RgbImage::new(width, height);
+    let frames_dir = if screen.h264 {
+        Some(tempfile::TempDir::new()?)
+    } else {
+        None
+    };
+    let mut frames = Vec::new();
+    let mut bytes = 0;
+    for index in 0..FRAME_COUNT {
+        cancelled()?;
+        render_frame(&mut frame, index);
+        let oriented;
+        let pixels = if orientation.rem_euclid(360.0).abs() < f32::EPSILON {
+            &frame
+        } else {
+            oriented = crate::common::apply_orientation(frame.clone(), orientation);
+            &oriented
+        };
+        let encoded = encode_frame(pixels, screen)?;
+        bytes += encoded.len();
+        if bytes > MAX_ASSET_BYTES {
+            return Err(crate::MediaError::InvalidConfig(
+                "pixel cleaner asset exceeds memory budget".into(),
+            ));
+        }
+        if let Some(dir) = &frames_dir {
+            std::fs::write(dir.path().join(format!("frame_{index:03}.jpg")), encoded)?;
+        } else {
+            frames.push(encoded);
+        }
+    }
+    cancelled()?;
+    if let Some(frames_dir) = frames_dir {
+        let output_dir = tempfile::TempDir::new()?;
+        let path = output_dir.path().join("cleaner.h264");
+        let mut command = std::process::Command::new("ffmpeg");
+        command
+            .args(["-y", "-loglevel", "error", "-framerate", "20", "-i"])
+            .arg(frames_dir.path().join("frame_%03d.jpg"))
+            .args([
+                "-frames:v",
+                "100",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-threads",
+                "2",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "20",
+                "-bf",
+                "0",
+                "-x264-params",
+                "repeat-headers=1:aud=1",
+                "-fs",
+                "33554432",
+                "-an",
+                "-f",
+                "h264",
+            ])
+            .arg(&path);
+        let output = crate::video::process::output_cancellable(
+            command,
+            deadline.saturating_duration_since(Instant::now()),
+            cancel,
+        )?;
+        if !output.status.success() {
+            return Err(crate::MediaError::Ffmpeg(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ));
+        }
+        let size = std::fs::metadata(&path)?.len();
+        if size == 0 || size >= MAX_ASSET_BYTES as u64 {
+            return Err(crate::MediaError::InvalidConfig(
+                "generated H.264 asset is empty or exceeds its size limit".into(),
+            ));
+        }
+        cancelled()?;
+        Ok(MediaAssetKind::H264Stream {
+            path,
+            looping: true,
+            fps: FPS as f32,
+            _temp: Arc::new(output_dir),
+        })
+    } else {
+        Ok(MediaAssetKind::Video {
+            frame_durations: Arc::new(vec![Duration::from_millis(50); frames.len()]),
+            frames: Arc::new(frames),
+        })
+    }
+}
+
+fn encode_frame(
+    frame: &RgbImage,
+    screen: &lianli_shared::screen::ScreenInfo,
+) -> Result<Vec<u8>, crate::MediaError> {
+    let mut encoding = *screen;
+    // H.264 preparation uses temporary JPEG inputs, even on PNG-overlay panels.
+    encoding.png = screen.png && !screen.h264;
+    let mut last_error = None;
+    for quality in [screen.jpeg_quality, 80, 65, 50, 35, 20] {
+        encoding.jpeg_quality = quality.min(screen.jpeg_quality);
+        let image = turbojpeg::Image {
+            pixels: frame.as_raw().as_slice(),
+            width: frame.width() as usize,
+            pitch: frame.width() as usize * 3,
+            height: frame.height() as usize,
+            format: turbojpeg::PixelFormat::RGB,
+        };
+        match crate::common::encode_compressed(image, &encoding) {
+            Ok(bytes) => return Ok(bytes),
+            Err(e @ crate::MediaError::PayloadTooLarge { .. }) if !encoding.png => {
+                last_error = Some(e)
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_error.expect("all quality attempts exceeded the payload limit"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_jpeg_loop_respects_tl_payloads_and_timing() {
+        let screen = lianli_shared::screen::ScreenInfo::TLLCD;
+        let asset =
+            prepare_asset(&screen, 90.0, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+        let crate::MediaAssetKind::Video {
+            frames,
+            frame_durations,
+        } = asset
+        else {
+            panic!("expected JPEG frames")
+        };
+        assert_eq!(frames.len(), 100);
+        assert_eq!(
+            frame_durations.iter().sum::<std::time::Duration>(),
+            std::time::Duration::from_secs(5)
+        );
+        for frame in frames.iter() {
+            assert!(frame.len() <= screen.max_payload);
+            let decoded = image::load_from_memory(frame).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (400, 400));
+        }
+    }
+
+    #[test]
+    fn prepared_h264_loop_decodes_all_frames_and_removes_temporary_file() {
+        let screen = lianli_shared::screen::ScreenInfo::AIO_LCD_480;
+        let asset =
+            prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+        let crate::MediaAssetKind::H264Stream {
+            ref path,
+            fps,
+            looping,
+            ..
+        } = asset
+        else {
+            panic!("expected H.264")
+        };
+        assert_eq!(fps, 20.0);
+        assert!(looping);
+        let mut command = std::process::Command::new("ffprobe");
+        command
+            .args([
+                "-v",
+                "error",
+                "-count_frames",
+                "-show_entries",
+                "stream=width,height,nb_read_frames",
+                "-of",
+                "json",
+            ])
+            .arg(path);
+        let result =
+            crate::video::process::output_with_timeout(command, std::time::Duration::from_secs(10))
+                .unwrap();
+        assert!(result.status.success());
+        let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(data["streams"][0]["width"], 480);
+        assert_eq!(data["streams"][0]["height"], 480);
+        assert_eq!(data["streams"][0]["nb_read_frames"], "100");
+        let path = path.clone();
+        drop(asset);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn cancelled_preparation_and_unsupported_frame_rate_are_rejected() {
+        let mut screen = lianli_shared::screen::ScreenInfo::TLLCD;
+        assert!(prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(true)).is_err());
+        screen.max_fps = 10;
+        assert!(prepare_asset(&screen, 0.0, &std::sync::atomic::AtomicBool::new(false)).is_err());
+    }
 
     #[test]
     fn solid_phases_cover_the_frame_at_the_reference_times() {

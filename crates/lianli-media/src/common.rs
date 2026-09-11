@@ -81,7 +81,7 @@ pub fn encode_jpeg_rgba(
     encode_compressed(tj_image, screen)
 }
 
-fn encode_compressed(
+pub(crate) fn encode_compressed(
     tj_image: turbojpeg::Image<&[u8]>,
     screen: &ScreenInfo,
 ) -> Result<Vec<u8>, MediaError> {
