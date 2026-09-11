@@ -103,25 +103,6 @@ fn fan_control_thread(
     let mut last_heartbeat = Instant::now() - heartbeat_interval;
     let mut last_drift_check = Instant::now() - rgb_drift_interval;
 
-    // Wait briefly for wireless discovery if we have wireless
-    if let Some(ref w) = wireless {
-        info!("Fan control thread started, waiting for wireless discovery...");
-        let discovery_start = Instant::now();
-        while !stop_flag.load(Ordering::Relaxed)
-            && discovery_start.elapsed() < Duration::from_secs(10)
-        {
-            if w.has_discovered_devices() {
-                let devices = w.devices();
-                info!("Wireless discovery complete: {} device(s)", devices.len());
-                for dev in &devices {
-                    info!("  {} — {:?}, {} fan(s)", dev, dev.fan_type, dev.fan_count);
-                }
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-    }
-
     if !wired.is_empty() {
         let wired_names: Vec<&str> = wired.keys().map(|s| s.as_str()).collect();
         info!("Wired fan devices: {}", wired_names.join(", "));
@@ -131,11 +112,7 @@ fn fan_control_thread(
         let _ = tx.send(DaemonEvent::ResyncWirelessRgb);
     }
 
-    if wireless
-        .as_ref()
-        .is_none_or(|w| !w.has_discovered_devices())
-        && wired.is_empty()
-    {
+    if wireless.is_none() && wired.is_empty() {
         warn!("No fan devices available — fan control disabled");
         return;
     }
@@ -148,6 +125,7 @@ fn fan_control_thread(
     let mut temp_ema: HashMap<SensorSource, f32> = HashMap::new();
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
     let mut fan_states: HashMap<usize, FanState> = HashMap::new();
+    let mut unavailable_wireless = HashSet::new();
 
     // Auto-detect CPU/GPU temp sensors for the wireless LCD clock-sync payload.
     let cpu_temp_source = picker::find_default_cpu_temp(all_sensors);
@@ -362,7 +340,11 @@ fn fan_control_thread(
             // Try to apply to the right device
             if let Some(ref device_id) = group.device_id {
                 if device_id.starts_with("wireless:") {
-                    apply_wireless_by_id(&wireless, device_id, &speeds, group_idx);
+                    if apply_wireless_by_id(&wireless, device_id, &speeds) {
+                        unavailable_wireless.remove(&group_idx);
+                    } else if unavailable_wireless.insert(group_idx) {
+                        warn!("Fan group {group_idx}: waiting for wireless device {device_id}");
+                    }
                 } else if let Some((base_id, port_str)) = device_id.rsplit_once(":port") {
                     if let (Some(dev), Ok(port)) = (wired.get(base_id), port_str.parse::<u8>()) {
                         if dev
@@ -448,22 +430,19 @@ fn apply_wireless_by_id(
     wireless: &Option<Arc<WirelessController>>,
     device_id: &str,
     speeds: &[u8; 4],
-    group_idx: usize,
-) {
+) -> bool {
     let Some(w) = wireless else {
-        warn!("Fan group {group_idx}: wireless not available for device {device_id}");
-        return;
+        return false;
     };
-    // Extract MAC from "wireless:AA:BB:CC:DD:EE:FF"
     let mac_str = device_id.strip_prefix("wireless:").unwrap_or(device_id);
-    // Find the device by MAC and get its list_index
     let devices = w.devices();
     if let Some(dev) = devices.iter().find(|d| d.mac_str() == mac_str) {
         if let Err(err) = w.set_fan_speeds(dev.list_index, speeds) {
             warn!("Failed to set fan speeds for {device_id}: {err}");
         }
+        true
     } else {
-        warn!("Fan group {group_idx}: wireless device {device_id} not discovered");
+        false
     }
 }
 

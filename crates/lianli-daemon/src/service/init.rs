@@ -36,7 +36,7 @@ impl ServiceManager {
         // Reuse the already-opened wired fan device handles (populated at startup).
         let wired_devices = Arc::clone(&self.registry.fan_devices);
 
-        let wireless = if self.wireless.has_discovered_devices() {
+        let wireless = if self.wireless.is_connected() {
             Some(Arc::new(self.wireless.clone()))
         } else {
             None

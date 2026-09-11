@@ -131,6 +131,9 @@ impl WirelessController {
         let _claim = RuntimeClaim::acquire(&self.runtime_claimed)?;
         self.poll_stop = Arc::new(AtomicBool::new(false));
         self.receiver_state.pages.store(1, Ordering::Relaxed);
+        for health in self.device_health.lock().values_mut() {
+            health.channel_correction = Default::default();
+        }
         let mut tx = None;
         let max_retries = 3;
 
@@ -180,41 +183,54 @@ impl WirelessController {
             .collect();
 
         for channel in channels_to_try {
-            let mut cmd = vec![0u8; 64];
-            cmd[0] = USB_CMD_GET_MAC;
-            cmd[1] = channel;
+            let attempts = if channel == 8 { 3 } else { 1 };
+            for attempt in 1..=attempts {
+                let mut cmd = [0u8; 64];
+                cmd[0] = USB_CMD_GET_MAC;
+                cmd[1] = channel;
 
-            let handle = tx.lock();
-            if handle.write(&cmd, USB_TIMEOUT).is_err() {
-                drop(handle);
-                continue;
-            }
-
-            let mut response = [0u8; 64];
-            let len = match handle.read(&mut response, Duration::from_millis(500)) {
-                Ok(len) => len,
-                Err(_) => {
-                    drop(handle);
+                let handle = tx.lock();
+                let mut stale = [0u8; 64];
+                for _ in 0..16 {
+                    match handle.read(&mut stale, Duration::from_millis(5)) {
+                        Ok(len) if len > 0 => {
+                            debug!(
+                                channel,
+                                attempt, len, "Discarding stale TX reply before master query"
+                            );
+                        }
+                        _ => break,
+                    }
+                }
+                if let Err(error) = handle.write(&cmd, USB_TIMEOUT) {
+                    debug!(channel, attempt, %error, "Master query write failed");
                     continue;
                 }
-            };
-            drop(handle);
 
-            if valid_master_response(&response[..len]) {
+                let mut response = [0u8; 64];
+                let len = match handle.read(&mut response, Duration::from_millis(500)) {
+                    Ok(len) => len,
+                    Err(error) => {
+                        debug!(channel, attempt, %error, "Master query read failed");
+                        continue;
+                    }
+                };
+                drop(handle);
+
+                if !valid_master_response(&response[..len]) {
+                    debug!(channel, attempt, len, header = ?&response[..len.min(13)], "Rejected master query reply");
+                    continue;
+                }
                 let mut mac = self.master_mac.lock();
                 mac.copy_from_slice(&response[1..7]);
-                if mac.iter().any(|&b| b != 0) {
-                    *self.master_channel.lock() = channel;
-                    info!(
-                        "Master MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} channel={}",
-                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], channel
-                    );
-                    if len >= 13 {
-                        let fw_ver = u16::from_be_bytes([response[11], response[12]]);
-                        debug!("Master firmware version: {fw_ver}");
-                    }
-                    return Ok(());
-                }
+                *self.master_channel.lock() = channel;
+                info!(
+                    "Master MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} channel={}",
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], channel
+                );
+                let fw_ver = u16::from_be_bytes([response[11], response[12]]);
+                debug!("Master firmware version: {fw_ver}");
+                return Ok(());
             }
         }
 
@@ -255,13 +271,6 @@ impl WirelessController {
             .as_ref()
             .cloned()
             .context("RX device must be connected for device discovery")?;
-
-        {
-            let handle = tx.lock();
-            handle
-                .write(&CMD_RESET, USB_TIMEOUT)
-                .context("sending TX reset")?;
-        }
 
         thread::sleep(Duration::from_millis(500));
 
@@ -691,11 +700,8 @@ impl WirelessController {
         Some(target)
     }
 
-    /// Move the dongle and all bound devices to a new channel, mirroring the
-    /// vendor: host state now, one bind packet per device carrying the new
-    /// channel, and the poll loop keeps re pushing until every device
-    /// reports it. Devices remain controllable while straddling channels
-    /// because every RF send is routed on the device s own channel.
+    /// Schedules bounded channel correction without waiting for confirmation.
+    /// RF commands continue to use each device's reported channel during migration.
     pub fn switch_channel(&self, target: u8) -> Result<()> {
         if !(1..=39).contains(&target) {
             bail!("invalid channel {target}");
@@ -710,28 +716,27 @@ impl WirelessController {
         Ok(())
     }
 
-    /// Send one bind packet to every bound device that does not yet report
-    /// the master channel. Vendor firmware applies the channel from these
-    /// packets lazily, so this runs on the poll cadence without a deadline.
     pub(super) fn retarget_mischannelled_devices(&self) {
         if self.binding_mac.lock().is_some() {
             return;
         }
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
+        let now = Instant::now();
         let targets: Vec<([u8; 6], u8)> = {
-            let health = self.device_health.lock();
-            health
-                .iter()
-                .filter(|(_, h)| {
-                    h.bind_intent
-                        && !h.dead
-                        && h.raw_master == master_mac
-                        && h.raw_rx != 0
-                        && h.raw_channel != master_ch
-                })
-                .map(|(mac, h)| (*mac, h.raw_rx))
-                .collect()
+            let mut health = self.device_health.lock();
+            health.iter_mut().filter_map(|(mac, h)| {
+                match h.channel_correction_action(master_mac, master_ch, now) {
+                    super::discovery::ChannelCorrectionAction::Send => Some((*mac, h.raw_rx)),
+                    super::discovery::ChannelCorrectionAction::Exhausted => {
+                        warn!(device = %h.published.mac_str(), observed_channel = h.raw_channel,
+                            target_channel = master_ch,
+                            "Wireless channel correction stopped after 5 attempts; device still reports another channel");
+                        None
+                    }
+                    super::discovery::ChannelCorrectionAction::Wait => None,
+                }
+            }).collect()
         };
         for (mac, rx) in targets {
             if let Err(e) = self.send_bind_packet(&mac, &master_mac, rx) {

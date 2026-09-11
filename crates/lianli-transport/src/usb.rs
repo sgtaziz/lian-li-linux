@@ -90,6 +90,17 @@ impl RusbBulk {
     /// state by retrying with short delays rather than USB reset (which can
     /// destabilise other devices on the same hub).
     pub fn detach_and_configure(&mut self, name: &str) -> Result<(), TransportError> {
+        self.detach_and_configure_with_cancel(name, || false)
+    }
+
+    pub fn detach_and_configure_with_cancel(
+        &mut self,
+        name: &str,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<(), TransportError> {
+        if shutting_down() || cancelled() {
+            return Err(rusb::Error::Interrupted.into());
+        }
         match self.handle.kernel_driver_active(0) {
             Ok(true) => {
                 self.handle.detach_kernel_driver(0)?;
@@ -125,18 +136,21 @@ impl RusbBulk {
                 // A busy interface is expected once shutdown starts, since
                 // handles are still held while their owners are being
                 // joined. Do not warn or sit through the retry loop.
-                if shutting_down() {
+                if shutting_down() || cancelled() {
                     debug!("{name} interface 0 busy while shutting down, not retrying");
                     return Err(rusb::Error::Busy.into());
                 }
                 warn!("{name} interface 0 busy, retrying...");
                 let mut claimed = false;
                 for attempt in 1..=20u32 {
-                    if shutting_down() {
+                    if shutting_down() || cancelled() {
                         debug!("{name}: aborting interface claim, shutting down");
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(250));
+                    if shutting_down() || cancelled() {
+                        return Err(rusb::Error::Interrupted.into());
+                    }
                     if let Ok(true) = self.handle.kernel_driver_active(0) {
                         let _ = self.handle.detach_kernel_driver(0);
                     }
@@ -335,6 +349,18 @@ impl RusbBulk {
         total
     }
 
+    /// Silence ends a response successfully; other USB errors discard partial data.
+    pub fn read_silence_checked(
+        &self,
+        buf: &mut [u8],
+        first_timeout: Duration,
+        chunk_timeout: Duration,
+    ) -> Result<usize, TransportError> {
+        read_chunks_until_silence(buf, first_timeout, chunk_timeout, |chunk, timeout| {
+            self.read(chunk, timeout)
+        })
+    }
+
     pub fn release(&self) {
         for &iface in self.claimed.iter().rev() {
             let _ = self.handle.release_interface(iface);
@@ -366,6 +392,32 @@ impl Drop for RusbBulk {
             let _ = self.handle.attach_kernel_driver(iface);
         }
     }
+}
+
+fn read_chunks_until_silence(
+    buf: &mut [u8],
+    first_timeout: Duration,
+    chunk_timeout: Duration,
+    mut read: impl FnMut(&mut [u8], Duration) -> Result<usize, TransportError>,
+) -> Result<usize, TransportError> {
+    let mut total = 0;
+    let mut timeout = first_timeout;
+    let mut chunk = [0u8; 64];
+    while total < buf.len() {
+        match read(&mut chunk, timeout) {
+            Ok(0)
+            | Err(TransportError::Usb(rusb::Error::Timeout))
+            | Err(TransportError::Timeout) => break,
+            Ok(n) => {
+                let n = n.min(chunk.len()).min(buf.len() - total);
+                buf[total..total + n].copy_from_slice(&chunk[..n]);
+                total += n;
+                timeout = chunk_timeout;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(total)
 }
 
 /// Detect whether EP_IN and EP_OUT are interrupt endpoints by reading the
@@ -412,4 +464,82 @@ pub fn find_usb_devices(vid: u16, pid: u16) -> Result<Vec<Device<GlobalContext>>
     }
     list.sort_by_key(|dev| (dev.bus_number(), dev.address()));
     Ok(list)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_read_returns_empty_response_on_initial_timeout() {
+        let result = read_chunks_until_silence(&mut [0; 512], USB_TIMEOUT, USB_TIMEOUT, |_, _| {
+            Err(rusb::Error::Timeout.into())
+        });
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn checked_read_keeps_partial_response_on_silence() {
+        let first = Duration::from_millis(100);
+        let next = Duration::from_millis(10);
+        let mut calls = 0;
+        let mut buf = [0; 512];
+        let len = read_chunks_until_silence(&mut buf, first, next, |chunk, timeout| {
+            calls += 1;
+            if calls == 1 {
+                assert_eq!(timeout, first);
+                chunk[..3].copy_from_slice(&[0x10, 0, 0x80]);
+                Ok(3)
+            } else {
+                assert_eq!(timeout, next);
+                Err(rusb::Error::Timeout.into())
+            }
+        })
+        .unwrap();
+        assert_eq!(len, 3);
+        assert_eq!(&buf[..len], &[0x10, 0, 0x80]);
+    }
+
+    #[test]
+    fn checked_read_reports_disconnect_after_partial_response() {
+        let mut calls = 0;
+        let result =
+            read_chunks_until_silence(&mut [0; 512], USB_TIMEOUT, USB_TIMEOUT, |chunk, _| {
+                calls += 1;
+                if calls == 1 {
+                    chunk.fill(0x10);
+                    Ok(64)
+                } else {
+                    Err(rusb::Error::NoDevice.into())
+                }
+            });
+        assert!(matches!(
+            result,
+            Err(TransportError::Usb(rusb::Error::NoDevice))
+        ));
+    }
+
+    #[test]
+    fn checked_read_stops_at_capacity_and_empty_buffers_do_not_read() {
+        let mut calls = 0;
+        let mut buf = [0; 64];
+        assert_eq!(
+            read_chunks_until_silence(&mut buf, USB_TIMEOUT, USB_TIMEOUT, |chunk, _| {
+                calls += 1;
+                chunk.fill(9);
+                Ok(64)
+            })
+            .unwrap(),
+            64
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(buf, [9; 64]);
+        assert_eq!(
+            read_chunks_until_silence(&mut [], USB_TIMEOUT, USB_TIMEOUT, |_, _| panic!(
+                "empty buffer"
+            ))
+            .unwrap(),
+            0
+        );
+    }
 }

@@ -274,7 +274,23 @@ pub(super) fn merge_master_sightings(
     masters.retain(|_, m| now.duration_since(m.last_seen) <= LIVENESS_TIMEOUT);
 }
 
+#[derive(Default)]
+pub(super) struct ChannelCorrection {
+    target: u8,
+    attempts: u8,
+    next_attempt: Option<Instant>,
+    exhausted_reported: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ChannelCorrectionAction {
+    Wait,
+    Send,
+    Exhausted,
+}
+
 pub(super) struct DeviceHealth {
+    pub channel_correction: ChannelCorrection,
     pub published: DiscoveredDevice,
     pub last_seen: Instant,
     pub bind_intent: bool,
@@ -293,8 +309,54 @@ pub(super) struct DeviceHealth {
 }
 
 impl DeviceHealth {
+    pub(super) fn channel_correction_action(
+        &mut self,
+        master: [u8; 6],
+        channel: u8,
+        now: Instant,
+    ) -> ChannelCorrectionAction {
+        if !self.bind_intent
+            || self.man_unbind
+            || self.dead
+            || self.raw_master != master
+            || master == [0; 6]
+            || self.raw_rx == 0
+            || now.saturating_duration_since(self.raw_seen) > ACK_FRESHNESS
+            || self.published.master_mac != self.raw_master
+            || self.published.channel != self.raw_channel
+            || self.published.rx_type != self.raw_rx
+        {
+            return ChannelCorrectionAction::Wait;
+        }
+        if self.raw_channel == channel {
+            self.channel_correction = ChannelCorrection::default();
+            return ChannelCorrectionAction::Wait;
+        }
+        let correction = &mut self.channel_correction;
+        if correction.target != channel {
+            *correction = ChannelCorrection {
+                target: channel,
+                ..Default::default()
+            };
+        }
+        if correction.next_attempt.is_some_and(|next| now < next) {
+            return ChannelCorrectionAction::Wait;
+        }
+        if correction.attempts >= 5 {
+            if correction.exhausted_reported {
+                return ChannelCorrectionAction::Wait;
+            }
+            correction.exhausted_reported = true;
+            return ChannelCorrectionAction::Exhausted;
+        }
+        correction.next_attempt = Some(now + Duration::from_secs(2 << correction.attempts));
+        correction.attempts += 1;
+        ChannelCorrectionAction::Send
+    }
+
     pub(super) fn new(rec: DiscoveredDevice) -> Self {
         Self {
+            channel_correction: ChannelCorrection::default(),
             observed_master: rec.master_mac,
             published: rec,
             last_seen: Instant::now(),
@@ -388,15 +450,19 @@ pub(super) fn poll_and_discover(
         handle
             .write(&cmd, USB_TIMEOUT)
             .context("sending GetDev command")?;
-        let len = handle.read_silence(
+        let len = handle.read_silence_checked(
             &mut response[..usize::from(pages) * 512],
             Duration::from_millis(100),
             Duration::from_millis(10),
-        );
-        validate_discovery_response(&response[..len], pages)?;
+        )?;
         Ok(len)
     });
-    let len = match len {
+    let len = match len.and_then(|len| {
+        validate_discovery_response(&response[..len], pages).inspect_err(|error| {
+            debug!(pages, len, header = ?&response[..len.min(16)], %error, "Rejected wireless discovery reply");
+        })?;
+        Ok(len)
+    }) {
         Ok(len) => len,
         Err(error) => {
             receiver.pwm.store(0xFFFF, Ordering::Relaxed);
@@ -682,6 +748,72 @@ mod tests {
             Arc::new(Mutex::new(Vec::new())),
             Arc::new(Mutex::new([9u8; 6])),
         )
+    }
+
+    fn correction_health(now: Instant) -> DeviceHealth {
+        let mut health = DeviceHealth::new(rec([1; 6], [9; 6]));
+        health.bind_intent = true;
+        health.raw_master = [9; 6];
+        health.raw_channel = 8;
+        health.raw_rx = 1;
+        health.raw_seen = now;
+        health
+    }
+
+    #[test]
+    fn channel_correction_backs_off_and_stops_until_channel_changes() {
+        use ChannelCorrectionAction::*;
+        let now = Instant::now();
+        let mut health = correction_health(now);
+        for seconds in [0, 2, 6, 14, 30] {
+            let time = now + Duration::from_secs(seconds);
+            health.raw_seen = time;
+            assert_eq!(health.channel_correction_action([9; 6], 4, time), Send);
+            assert_eq!(health.channel_correction_action([9; 6], 4, time), Wait);
+        }
+        let time = now + Duration::from_secs(62);
+        health.raw_seen = time;
+        assert_eq!(health.channel_correction_action([9; 6], 4, time), Exhausted);
+        assert_eq!(health.channel_correction_action([9; 6], 4, time), Wait);
+        let later = time + Duration::from_secs(3600);
+        health.raw_seen = later;
+        assert_eq!(health.channel_correction_action([9; 6], 4, later), Wait);
+        assert_eq!(health.channel_correction_action([9; 6], 12, later), Send);
+    }
+
+    #[test]
+    fn channel_correction_requires_fresh_confirmed_ownership_and_address() {
+        use ChannelCorrectionAction::*;
+        let now = Instant::now();
+        for variant in 0..8 {
+            let mut health = correction_health(now);
+            match variant {
+                0 => health.bind_intent = false,
+                1 => health.man_unbind = true,
+                2 => health.dead = true,
+                3 => health.raw_master = [3; 6],
+                4 => health.raw_seen = now - ACK_FRESHNESS - Duration::from_millis(1),
+                5 => health.raw_channel = 2,
+                6 => health.raw_rx = 2,
+                _ => health.published.master_mac = [3; 6],
+            }
+            assert_eq!(health.channel_correction_action([9; 6], 4, now), Wait);
+            assert_eq!(health.channel_correction.attempts, 0);
+        }
+    }
+
+    #[test]
+    fn confirmed_channel_match_clears_retry_budget() {
+        use ChannelCorrectionAction::*;
+        let now = Instant::now();
+        let mut health = correction_health(now);
+        assert_eq!(health.channel_correction_action([9; 6], 4, now), Send);
+        health.raw_channel = 4;
+        health.published.channel = 4;
+        assert_eq!(health.channel_correction_action([9; 6], 4, now), Wait);
+        health.raw_channel = 8;
+        health.published.channel = 8;
+        assert_eq!(health.channel_correction_action([9; 6], 4, now), Send);
     }
 
     #[test]
