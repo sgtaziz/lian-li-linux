@@ -110,8 +110,18 @@ fn send_h264_au_with_retry(lcd: &SharedHidLcd, au: &[u8], aborted: &dyn Fn() -> 
             return false;
         }
         let result = {
-            let Some(mut guard) = lcd.try_lock_for(Duration::from_millis(50)) else {
-                continue;
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            let mut guard = loop {
+                if aborted() {
+                    return false;
+                }
+                if let Some(guard) = lcd.try_lock_for(Duration::from_millis(50)) {
+                    break guard;
+                }
+                if std::time::Instant::now() >= deadline {
+                    warn!("HID h264 stream stopped: LCD remained busy for 3s");
+                    return false;
+                }
             };
             if aborted() {
                 return false;
@@ -1154,7 +1164,11 @@ impl ActiveTarget {
         }
     }
 
-    pub(super) fn shutdown(&mut self, builder: &mut PacketBuilder) -> anyhow::Result<()> {
+    pub(super) fn shutdown(
+        &mut self,
+        wireless: Option<&WirelessController>,
+        builder: &mut PacketBuilder,
+    ) -> anyhow::Result<()> {
         self.stop();
         match &mut self.lcd {
             LcdBackend::WinUsb(sender) => sender.shutdown(),
@@ -1168,6 +1182,9 @@ impl ActiveTarget {
             }
             LcdBackend::Slv3(lcd) => {
                 lianli_transport::usb::with_teardown_io(Duration::from_secs(3), || {
+                    if let Some(wireless) = wireless {
+                        wireless.ensure_video_mode()?;
+                    }
                     lcd.set_brightness(builder, 0)
                 })
             }
@@ -1858,6 +1875,34 @@ mod tests {
             }))),
             sends,
         )
+    }
+
+    #[test]
+    fn lock_contention_preserves_all_three_h264_send_attempts() {
+        let (lcd, sends) = lcd_with_failures(1, 2);
+        let guard = lcd.lock();
+        let worker_lcd = Arc::clone(&lcd);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            tx.send(()).unwrap();
+            send_h264_au_with_retry(&worker_lcd, &[1, 2, 3], &|| false)
+        });
+        rx.recv().unwrap();
+        thread::sleep(Duration::from_millis(250));
+        drop(guard);
+        assert!(worker.join().unwrap());
+        assert_eq!(sends.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn prolonged_h264_lock_contention_exits_without_sending() {
+        let (lcd, sends) = lcd(0);
+        let _guard = lcd.lock();
+        let started = std::time::Instant::now();
+        assert!(!send_h264_au_with_retry(&lcd, &[1, 2, 3], &|| false));
+        assert!(started.elapsed() >= Duration::from_secs(3));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(sends.load(Ordering::Relaxed), 0);
     }
 
     #[test]

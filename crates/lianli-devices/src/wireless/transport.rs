@@ -76,7 +76,9 @@ fn retry_transport_operation<R>(
     match operation() {
         Ok(result) => Ok(result),
         Err(error) => {
-            if lianli_transport::usb::shutting_down() || stop.load(Ordering::Acquire) {
+            if lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed)
+                || stop.load(Ordering::Acquire)
+            {
                 return Err(error).context("shutting down");
             }
             reopen(&error)?;

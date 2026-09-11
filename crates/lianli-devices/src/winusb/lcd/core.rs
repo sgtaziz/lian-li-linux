@@ -313,6 +313,14 @@ const DEFAULT_H264_CHUNK_SIZE: usize = 202_752;
 // Keep device-reported allocations within the largest supported LCD payload budget.
 const MAX_H264_CHUNK_SIZE: usize = 1_048_576;
 
+fn validate_h264_chunk_size(size: usize) -> Result<usize> {
+    anyhow::ensure!(
+        (4096..=MAX_H264_CHUNK_SIZE).contains(&size),
+        "unsupported H264 block size {size}: streaming requires at least 4096 bytes"
+    );
+    Ok(size)
+}
+
 #[derive(Default)]
 struct NegotiatedH264ChunkSize(AtomicUsize);
 
@@ -1132,7 +1140,7 @@ impl WinUsbLcdCore {
         play_tick: u32,
     ) -> Result<()> {
         let mut file = std::fs::File::open(path).context("opening h264 file")?;
-        let mut file_buf = vec![0u8; self.transport.h264_chunk_size()];
+        let mut file_buf = vec![0u8; validate_h264_chunk_size(self.transport.h264_chunk_size())?];
         let interval = chunk_interval(fps);
         let mut next_deadline = Instant::now() + interval;
 
@@ -1198,7 +1206,7 @@ impl WinUsbLcdCore {
         play_count: u8,
         play_tick: u32,
     ) -> Result<()> {
-        let mut buf = vec![0u8; self.transport.h264_chunk_size()];
+        let mut buf = vec![0u8; validate_h264_chunk_size(self.transport.h264_chunk_size())?];
         self.reinit_and_flush_unsafe(false)?;
         self.stream_begin();
         let result = (|| -> Result<()> {
@@ -1354,6 +1362,20 @@ mod h264_negotiation_tests {
             state.update(&reply);
             assert_eq!(state.update(&reply[..length]), None);
             assert_eq!(state.get(), None);
+        }
+    }
+
+    #[test]
+    fn tiny_negotiated_blocks_are_preserved_but_cannot_start_streaming() {
+        let state = NegotiatedH264ChunkSize::default();
+        for size in [1, 4, 4095] {
+            assert_eq!(state.update(&response(size)), Some(size as usize));
+            let effective = state.get().unwrap_or(DEFAULT_H264_CHUNK_SIZE);
+            assert_eq!(effective, size as usize);
+            assert!(validate_h264_chunk_size(effective).is_err());
+        }
+        for size in [4096, DEFAULT_H264_CHUNK_SIZE, MAX_H264_CHUNK_SIZE] {
+            assert_eq!(validate_h264_chunk_size(size).unwrap(), size);
         }
     }
 

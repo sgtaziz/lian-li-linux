@@ -57,11 +57,15 @@ pub fn prepare_asset(
         || u64::from(screen.width) * u64::from(screen.height) > 4096 * 4096
         || screen.max_fps < FPS
         || !orientation.is_finite()
-        || !(4096..=MAX_ASSET_BYTES).contains(&payload_limit)
     {
         return Err(crate::MediaError::InvalidConfig(
             "unsupported pixel cleaner screen or orientation".into(),
         ));
+    }
+    if !(4096..=MAX_ASSET_BYTES).contains(&payload_limit) {
+        return Err(crate::MediaError::InvalidConfig(format!(
+            "unsupported pixel cleaner payload limit {payload_limit}: expected 4096..={MAX_ASSET_BYTES} bytes"
+        )));
     }
     let deadline = Instant::now() + Duration::from_secs(30);
     let cancelled = || {

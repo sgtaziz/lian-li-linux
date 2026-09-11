@@ -33,7 +33,7 @@ impl ServiceManager {
 
         let mut targets = std::mem::take(&mut *self.targets.lock());
         for target in targets.values_mut() {
-            if let Err(e) = target.shutdown(&mut self.packet_builder) {
+            if let Err(e) = target.shutdown(Some(&self.wireless), &mut self.packet_builder) {
                 tracing::warn!(
                     "Failed to turn off LCD {} during shutdown: {e:#}",
                     target.device_identity
