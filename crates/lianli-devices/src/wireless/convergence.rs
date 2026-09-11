@@ -1,5 +1,6 @@
 use super::controller::WirelessController;
 use super::discovery::{DeviceHealthMap, DiscoveredDevice, ACK_FRESHNESS};
+use super::transport::SharedTransport;
 use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, USB_CMD_SEND_RF};
 use anyhow::{ensure, Context, Result};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
@@ -126,7 +127,7 @@ impl WirelessController {
     }
 
     pub(super) fn spawn_convergence_loop(
-        tx: Arc<Mutex<RusbBulk>>,
+        tx: SharedTransport,
         queue: PendingQueue,
         health_map: DeviceHealthMap,
         rgb_targets: RgbTargets,
@@ -161,7 +162,7 @@ fn next_target_sequence(previous: Option<u8>, observed: u8) -> u8 {
 }
 
 fn drain_pending(
-    tx: &Arc<Mutex<RusbBulk>>,
+    tx: &SharedTransport,
     queue: &PendingQueue,
     health_map: &DeviceHealthMap,
     rgb_targets: &RgbTargets,
@@ -231,7 +232,10 @@ fn drain_pending(
             if superseded_command(&queue.lock(), &cmd) {
                 continue;
             }
-            if let Err(e) = send_rf_frame(&handle, &cmd.channel, &cmd.rx_type, &cmd.rf_data) {
+            if let Err(e) = handle
+                .get()
+                .and_then(|h| send_rf_frame(h, &cmd.channel, &cmd.rx_type, &cmd.rf_data))
+            {
                 warn!(
                     "re-send failed for {} ({}): {e:#}",
                     cmd.mac_str(),

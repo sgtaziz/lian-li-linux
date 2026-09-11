@@ -158,7 +158,7 @@ impl WirelessController {
 
     fn send_pic_chunk(
         &self,
-        tx: &std::sync::Arc<parking_lot::Mutex<lianli_transport::usb::RusbBulk>>,
+        tx: &super::transport::SharedTransport,
         mac: &[u8; 6],
         master_mac: &[u8; 6],
         channel: u8,
@@ -182,7 +182,8 @@ impl WirelessController {
         rf_data[19..19 + copy_len].copy_from_slice(&data[..copy_len]);
 
         let chunks = rf_data.len() / 60;
-        let handle = tx.lock();
+        let transport = tx.lock();
+        let handle = transport.get()?;
         for i in 0..chunks {
             let mut packet = [0u8; 64];
             packet[0] = super::USB_CMD_SEND_RF;
@@ -194,7 +195,7 @@ impl WirelessController {
             handle.write(&packet, USB_TIMEOUT)?;
             std::thread::sleep(Duration::from_millis(2));
         }
-        drop(handle);
+        drop(transport);
         Ok(next_seq)
     }
 

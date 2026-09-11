@@ -3,7 +3,50 @@ use lianli_transport::usb::RusbBulk;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{info, warn};
+
+pub(super) type SharedTransport = Arc<Mutex<TransportState<RusbBulk>>>;
+
+pub(super) struct TransportState<T> {
+    handle: Option<T>,
+    retry_after: Option<Instant>,
+}
+
+impl<T> TransportState<T> {
+    pub(super) fn new(handle: T) -> Self {
+        Self {
+            handle: Some(handle),
+            retry_after: None,
+        }
+    }
+
+    pub(super) fn get(&self) -> Result<&T> {
+        self.handle
+            .as_ref()
+            .ok_or_else(|| lianli_transport::TransportError::Usb(rusb::Error::NoDevice).into())
+    }
+
+    fn replace(
+        &mut self,
+        open: impl FnOnce() -> Result<T>,
+        claim: impl FnOnce(&mut T) -> Result<()>,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.retry_after.is_none_or(|until| Instant::now() >= until),
+            "wireless transport recovery is backing off"
+        );
+        drop(self.handle.take());
+        let result = (|| {
+            let mut replacement = open()?;
+            claim(&mut replacement)?;
+            self.handle = Some(replacement);
+            Ok(())
+        })();
+        self.retry_after = Some(Instant::now() + Duration::from_secs(1));
+        result
+    }
+}
 
 /// Try to open a USB device matching any of the given VID:PID pairs.
 pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<RusbBulk> {
@@ -22,7 +65,7 @@ pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<RusbBulk> {
 /// Run a USB op on a dongle transport with one-shot reopen + retry on failure.
 /// `op` must be safe to call twice (idempotent at the protocol level).
 pub(super) fn with_transport_recovery<F, R>(
-    arc: &Arc<Mutex<RusbBulk>>,
+    arc: &SharedTransport,
     ids: &[(u16, u16)],
     name: &str,
     stop: &AtomicBool,
@@ -40,29 +83,30 @@ where
                 !stop.load(Ordering::Acquire),
                 "wireless controller is stopping"
             );
-            op(handle)
+            op(handle.get()?)
         },
         |handle, error| {
-            warn!("{name} transport op failed ({error}); attempting reopen");
-            let replacement = open_any(ids).context(format!("reopening {name} dongle"))?;
-            replace_transport(handle, replacement, |handle| {
-                handle
-                    .detach_and_configure_with_cancel(name, || stop.load(Ordering::Acquire))
-                    .context("claiming replacement wireless transport")
-            })?;
+            handle.replace(
+                || {
+                    warn!("{name} transport op failed ({error}); attempting reopen");
+                    open_any(ids).context(format!("reopening {name} dongle"))
+                },
+                |replacement| {
+                    replacement
+                        .detach_and_configure_with_cancel(name, || stop.load(Ordering::Acquire))
+                        .context("claiming replacement wireless transport")?;
+                    anyhow::ensure!(
+                        !stop.load(Ordering::Acquire)
+                            && !lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed),
+                        "wireless controller is stopping"
+                    );
+                    Ok(())
+                },
+            )?;
             info!("{name} transport reopened, retrying");
             Ok(())
         },
     )
-}
-
-fn replace_transport<T>(
-    current: &mut T,
-    replacement: T,
-    claim: impl FnOnce(&mut T) -> Result<()>,
-) -> Result<()> {
-    drop(std::mem::replace(current, replacement));
-    claim(current)
 }
 
 fn retry_transport_operation<T, R>(
@@ -120,16 +164,85 @@ mod tests {
         }
         let old_dropped = Cell::new(false);
         let new_dropped = Cell::new(false);
-        let mut handle = Handle(&old_dropped);
-        let result = replace_transport(&mut handle, Handle(&new_dropped), |_| {
-            assert!(old_dropped.get());
-            assert!(!new_dropped.get());
-            anyhow::bail!("interface unavailable")
-        });
+        let mut handle = TransportState::new(Handle(&old_dropped));
+        let result = handle.replace(
+            || Ok(Handle(&new_dropped)),
+            |_| {
+                assert!(old_dropped.get());
+                assert!(!new_dropped.get());
+                anyhow::bail!("interface unavailable")
+            },
+        );
         assert!(result.is_err());
-        assert!(!new_dropped.get());
-        drop(handle);
         assert!(new_dropped.get());
+        assert!(handle.get().is_err());
+        assert!(handle.handle.is_none());
+    }
+
+    #[test]
+    fn failed_claim_recovers_on_a_later_request_after_backoff() {
+        let mut state = TransportState::new(1u8);
+        assert!(state
+            .replace(|| Ok(2), |_| anyhow::bail!("claim failed"))
+            .is_err());
+        assert!(state.get().is_err());
+        assert!(state
+            .replace(|| panic!("must back off"), |_| Ok(()))
+            .is_err());
+        state.retry_after = Some(Instant::now());
+        let sends = Cell::new(0);
+        let result = retry_transport_operation(
+            &mut state,
+            &AtomicBool::new(false),
+            |state| {
+                let handle = state.get()?;
+                sends.set(sends.get() + 1);
+                Ok(*handle)
+            },
+            |state, _| {
+                state.replace(
+                    || Ok(3),
+                    |handle| {
+                        *handle = 4;
+                        Ok(())
+                    },
+                )
+            },
+        )
+        .unwrap();
+        assert_eq!(result, 4);
+        assert_eq!(sends.get(), 1);
+        assert_eq!(*state.get().unwrap(), 4);
+    }
+
+    #[test]
+    fn failed_open_leaves_no_transport_and_backs_off() {
+        let mut state = TransportState::new(1u8);
+        assert!(state
+            .replace(
+                || anyhow::bail!("open failed"),
+                |_| panic!("must not claim")
+            )
+            .is_err());
+        assert!(state.handle.is_none());
+        assert!(state
+            .replace(|| panic!("must back off"), |_| Ok(()))
+            .is_err());
+    }
+
+    #[test]
+    fn stopped_controller_does_not_recover_missing_transport() {
+        let mut state = TransportState::<u8> {
+            handle: None,
+            retry_after: None,
+        };
+        let result: Result<()> = retry_transport_operation(
+            &mut state,
+            &AtomicBool::new(true),
+            |_| panic!("must not send"),
+            |_, _| panic!("must not reopen"),
+        );
+        assert!(result.is_err());
     }
 
     #[test]
