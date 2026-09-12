@@ -314,8 +314,8 @@ const zoneLabel = computed(
         </div>
       </div>
 
-      <div v-if="showDirection" class="two-col">
-        <div class="field">
+      <div v-if="showDirection || showScope" class="two-col">
+        <div v-if="showDirection" class="field">
           <label class="muted">Direction</label>
           <n-select
             size="small"
