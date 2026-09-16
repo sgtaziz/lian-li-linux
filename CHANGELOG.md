@@ -30,6 +30,7 @@ Regenerate rather than editing by hand.
 - **daemon**: Apply cooling fail-safe to stale sensor readings  (`763232b`)
 - **lcd**: Preserve playback across replacement and shutdown  (`1c05dc5`)
 - **lcd**: Bound desktop delivery and asynchronous mode switching  (`6901769`)
+- **packaging**: Repair clean installs and retry busy test executables  (`178a494`)
 
 ### Refactoring
 - **daemon**: Clear workspace Clippy warnings  (`13c24ad`)
