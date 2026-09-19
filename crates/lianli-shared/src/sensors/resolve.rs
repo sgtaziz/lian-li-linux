@@ -17,69 +17,7 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
             name,
             label,
             device_path,
-        } => {
-            let hwmon_dir = Path::new("/sys/class/hwmon");
-            let entries = std::fs::read_dir(hwmon_dir).ok()?;
-
-            for entry in entries.flatten() {
-                let path = entry.path();
-
-                if device_path.is_empty() {
-                    let hw_name = std::fs::read_to_string(path.join("name"))
-                        .ok()
-                        .map(|n| n.trim().to_string());
-                    if hw_name.as_deref() != Some(name) {
-                        continue;
-                    }
-                } else {
-                    let device_path_symlink = std::fs::read_link(path.join("device"))
-                        .ok()
-                        .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()));
-
-                    let curr_device_path = if let Some(dev) = &device_path_symlink {
-                        if dev.starts_with("DEADBEEF") {
-                            pci_id_from_path(&path)
-                        } else {
-                            dev.to_string()
-                        }
-                    } else {
-                        pci_id_from_path(&path)
-                    };
-
-                    if curr_device_path != *device_path {
-                        continue;
-                    }
-                }
-
-                if let Ok(files) = std::fs::read_dir(&path) {
-                    for file in files.flatten() {
-                        let fname = file.file_name().to_string_lossy().to_string();
-                        if fname.ends_with("_input") {
-                            let prefix = fname.strip_suffix("_input").unwrap();
-                            if prefix == label {
-                                return Some(ResolvedSensor::SysfsFile {
-                                    path: file.path(),
-                                    divider,
-                                });
-                            }
-                            // Old config format: label is human-readable (e.g. "Package id 0")
-                            let file_label =
-                                std::fs::read_to_string(path.join(format!("{prefix}_label")))
-                                    .map(|l| l.trim().to_string())
-                                    .unwrap_or_default();
-                            if file_label == *label {
-                                let actual_divider = unit_for(prefix).1;
-                                return Some(ResolvedSensor::SysfsFile {
-                                    path: file.path(),
-                                    divider: actual_divider,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            None
-        }
+        } => resolve_hwmon(Path::new("/sys/class/hwmon"), name, label, device_path),
         SensorSource::NvidiaGpu { gpu_index, metric } => Some(ResolvedSensor::NvidiaGpu {
             index: *gpu_index,
             metric: *metric,
@@ -116,6 +54,63 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
             state: Arc::new(Mutex::new(RateState::default())),
         }),
     }
+}
+
+/// The divider comes from the sysfs attribute prefix rather than from the
+/// caller: enumeration may have run before the device appeared, and a stale
+/// list would otherwise leave millidegree readings unscaled.
+fn resolve_hwmon(
+    root: &Path,
+    name: &str,
+    label: &str,
+    device_path: &str,
+) -> Option<ResolvedSensor> {
+    for entry in std::fs::read_dir(root).ok()?.flatten() {
+        let path = entry.path();
+
+        if device_path.is_empty() {
+            let hw_name = std::fs::read_to_string(path.join("name"))
+                .ok()
+                .map(|n| n.trim().to_string());
+            if hw_name.as_deref() != Some(name) {
+                continue;
+            }
+        } else {
+            let device_path_symlink = std::fs::read_link(path.join("device"))
+                .ok()
+                .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()));
+
+            let curr_device_path = match &device_path_symlink {
+                Some(dev) if !dev.starts_with("DEADBEEF") => dev.to_string(),
+                _ => pci_id_from_path(&path),
+            };
+
+            if curr_device_path != device_path {
+                continue;
+            }
+        }
+
+        let Ok(files) = std::fs::read_dir(&path) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let fname = file.file_name().to_string_lossy().to_string();
+            let Some(prefix) = fname.strip_suffix("_input") else {
+                continue;
+            };
+            // Old config format: label is human-readable (e.g. "Package id 0")
+            let file_label = std::fs::read_to_string(path.join(format!("{prefix}_label")))
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default();
+            if prefix == label || file_label == label {
+                return Some(ResolvedSensor::SysfsFile {
+                    path: file.path(),
+                    divider: unit_for(prefix).1,
+                });
+            }
+        }
+    }
+    None
 }
 
 /// Runtime path for a wireless coolant temperature file.
@@ -207,5 +202,57 @@ mod coolant_tests {
             super::super::read_sensor_value(&ResolvedSensor::RuntimeFile(path)).unwrap(),
             50.0
         );
+    }
+}
+
+#[cfg(test)]
+mod hwmon_tests {
+    use super::*;
+
+    fn fake_hwmon() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        let chip = root.path().join("hwmon3");
+        std::fs::create_dir(&chip).unwrap();
+        std::fs::write(chip.join("name"), "amdgpu\n").unwrap();
+        std::fs::write(chip.join("temp1_input"), "45000\n").unwrap();
+        std::fs::write(chip.join("temp1_label"), "edge\n").unwrap();
+        std::fs::write(chip.join("fan1_input"), "1200\n").unwrap();
+        root
+    }
+
+    fn divider_of(resolved: Option<ResolvedSensor>) -> usize {
+        match resolved.expect("sensor resolves") {
+            ResolvedSensor::SysfsFile { divider, .. } => divider,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hwmon_divider_derives_from_attribute_prefix() {
+        let root = fake_hwmon();
+        assert_eq!(
+            divider_of(resolve_hwmon(root.path(), "amdgpu", "temp1", "")),
+            1000
+        );
+        assert_eq!(
+            divider_of(resolve_hwmon(root.path(), "amdgpu", "edge", "")),
+            1000
+        );
+        assert_eq!(
+            divider_of(resolve_hwmon(root.path(), "amdgpu", "fan1", "")),
+            1
+        );
+    }
+
+    #[test]
+    fn hwmon_resolves_once_the_chip_appears() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(resolve_hwmon(root.path(), "amdgpu", "temp1", "").is_none());
+        let chip = root.path().join("hwmon0");
+        std::fs::create_dir(&chip).unwrap();
+        std::fs::write(chip.join("name"), "amdgpu\n").unwrap();
+        std::fs::write(chip.join("temp1_input"), "45000\n").unwrap();
+        let resolved = resolve_hwmon(root.path(), "amdgpu", "temp1", "").unwrap();
+        assert_eq!(super::super::read_sensor_value(&resolved).unwrap(), 45.0);
     }
 }

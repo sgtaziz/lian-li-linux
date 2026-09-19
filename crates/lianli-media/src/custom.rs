@@ -33,8 +33,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::warn;
+use tracing::{info, warn};
 use widgets::{draw_widget, WidgetState};
+
+/// Sensors missing at startup (a GPU driver still probing, a hotplugged chip)
+/// are re-resolved on this cadence until they appear.
+const SENSOR_RESOLVE_RETRY: Duration = Duration::from_secs(2);
 
 fn default_sample_interval(kind: &WidgetKind, explicit_ms: Option<u64>) -> Duration {
     let default_ms = match kind {
@@ -51,6 +55,7 @@ fn default_sample_interval(kind: &WidgetKind, explicit_ms: Option<u64>) -> Durat
 
 pub struct CustomAsset {
     template: LcdTemplate,
+    sensors: Vec<SensorInfo>,
     widget_states: Mutex<Vec<WidgetState>>,
     template_image: RgbaImage,
     scratch: Mutex<RgbaImage>,
@@ -203,8 +208,9 @@ impl CustomAsset {
             if let Some(source) = widget_sensor_source(&widget.kind) {
                 state.resolved_sensor = resolve_sensor_source(source, all_sensors);
                 if state.resolved_sensor.is_none() {
+                    state.next_resolve_at = Some(Instant::now() + SENSOR_RESOLVE_RETRY);
                     warn!(
-                        "template '{}' widget '{}' sensor unavailable — rendering as zero",
+                        "template '{}' widget '{}' sensor unavailable — rendering as zero until it appears",
                         template.id, widget.id
                     );
                 }
@@ -276,6 +282,7 @@ impl CustomAsset {
         Ok(Arc::new(Self {
             _retained_budget: retained_budget,
             template: template.clone(),
+            sensors: all_sensors.to_vec(),
             widget_states: Mutex::new(widget_states),
             template_image: composite,
             scratch: Mutex::new(scratch),
@@ -397,6 +404,23 @@ impl CustomAsset {
                 .last_sample_at
                 .map(|t| now.saturating_duration_since(t) >= state.sample_interval)
                 .unwrap_or(true);
+
+            if state.resolved_sensor.is_none() {
+                if let Some(source) = widget_sensor_source(&widget.kind) {
+                    if state.next_resolve_at.is_none_or(|at| now >= at) {
+                        state.resolved_sensor = resolve_sensor_source(source, &self.sensors);
+                        if state.resolved_sensor.is_some() {
+                            info!(
+                                "template '{}' widget '{}' sensor became available",
+                                self.template.id, widget.id
+                            );
+                            any_dynamic_changed = true;
+                        } else {
+                            state.next_resolve_at = Some(now + SENSOR_RESOLVE_RETRY);
+                        }
+                    }
+                }
+            }
 
             if let Some(sensor) = &state.resolved_sensor {
                 if due {
@@ -543,6 +567,7 @@ mod text_work_tests {
                     .collect(),
             ),
             template,
+            sensors: Vec::new(),
             template_image: RgbaImage::new(8, 8),
             scratch: Mutex::new(RgbaImage::new(8, 8)),
             screen: ScreenInfo::WIRELESS_LCD,

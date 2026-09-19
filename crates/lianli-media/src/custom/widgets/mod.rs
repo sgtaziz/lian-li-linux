@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 
 pub(super) struct WidgetState {
     pub resolved_sensor: Option<ResolvedSensor>,
+    pub next_resolve_at: Option<Instant>,
     pub loaded_image: Option<RgbaImage>,
     pub video_stream: Option<crate::video::widget_stream::VideoStream>,
     pub last_render_text: Option<String>,
@@ -50,6 +51,7 @@ impl WidgetState {
     pub fn blank() -> Self {
         Self {
             resolved_sensor: None,
+            next_resolve_at: None,
             loaded_image: None,
             video_stream: None,
             last_render_text: None,
