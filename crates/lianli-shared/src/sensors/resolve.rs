@@ -56,9 +56,6 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
     }
 }
 
-/// The divider comes from the sysfs attribute prefix rather than from the
-/// caller: enumeration may have run before the device appeared, and a stale
-/// list would otherwise leave millidegree readings unscaled.
 fn resolve_hwmon(
     root: &Path,
     name: &str,
@@ -98,13 +95,14 @@ fn resolve_hwmon(
             let Some(prefix) = fname.strip_suffix("_input") else {
                 continue;
             };
-            // Old config format: label is human-readable (e.g. "Package id 0")
-            let file_label = std::fs::read_to_string(path.join(format!("{prefix}_label")))
-                .map(|l| l.trim().to_string())
-                .unwrap_or_default();
-            if prefix == label || file_label == label {
+            // Older configurations store the human-readable label.
+            let matches_label = prefix == label
+                || std::fs::read_to_string(path.join(format!("{prefix}_label")))
+                    .is_ok_and(|value| value.trim() == label);
+            if matches_label {
                 return Some(ResolvedSensor::SysfsFile {
                     path: file.path(),
+                    // Startup enumeration may predate this sensor, so its divider can be missing.
                     divider: unit_for(prefix).1,
                 });
             }
@@ -254,5 +252,11 @@ mod hwmon_tests {
         std::fs::write(chip.join("temp1_input"), "45000\n").unwrap();
         let resolved = resolve_hwmon(root.path(), "amdgpu", "temp1", "").unwrap();
         assert_eq!(super::super::read_sensor_value(&resolved).unwrap(), 45.0);
+    }
+
+    #[test]
+    fn hwmon_missing_label_does_not_match_empty_config_label() {
+        let root = fake_hwmon();
+        assert!(resolve_hwmon(root.path(), "amdgpu", "", "").is_none());
     }
 }
