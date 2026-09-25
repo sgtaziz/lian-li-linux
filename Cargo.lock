@@ -2539,7 +2539,7 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "lianli-control"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -2555,7 +2555,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-daemon"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2583,7 +2583,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-devices"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "cbc",
@@ -2608,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-display"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "glow",
@@ -2628,7 +2628,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-evdi"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "libc",
@@ -2639,7 +2639,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-gui"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "lianli-control",
@@ -2660,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-media"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2683,7 +2683,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-session"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -2701,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-shared"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "hex",
@@ -2717,7 +2717,7 @@ dependencies = [
 
 [[package]]
 name = "lianli-transport"
-version = "1.1.3"
+version = "1.1.4"
 dependencies = [
  "anyhow",
  "hidapi",

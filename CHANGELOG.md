@@ -3,6 +3,11 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.1.4 — 2026-09-25
+
+### Fixes
+- **rgb**: Preserve OpenRGB profile identity across upgrades (fixes [#225](https://github.com/sgtaziz/lian-li-linux/issues/225))
+
 ## v1.1.3 — 2026-09-24
 
 ### Fixes
