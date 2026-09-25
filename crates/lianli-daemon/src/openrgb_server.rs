@@ -19,6 +19,8 @@ const MAGIC: &[u8; 4] = b"ORGB";
 const HEADER_SIZE: usize = 16;
 const MAX_CLIENTS: usize = 16;
 const MAX_PACKET_BYTES: usize = 1024 * 1024;
+// OpenRGB matches profiles against this value, keep it independent of daemon releases.
+const CONTROLLER_VERSION: &str = "1.0";
 
 #[derive(Default)]
 struct Clients(Vec<(TcpStream, thread::JoinHandle<()>)>);
@@ -348,7 +350,10 @@ impl ClientHandler {
             PKT_REQUEST_CONTROLLER_DATA => {
                 let cap = self.caps().get(dev_idx as usize).cloned();
                 if let Some(cap) = cap {
-                    let data = self.build_controller_data(&cap);
+                    let data = ControllerSerializer {
+                        protocol_version: self.protocol_version,
+                    }
+                    .build_controller_data(&cap);
                     self.send_packet(dev_idx, PKT_REQUEST_CONTROLLER_DATA, &data)?;
                 } else {
                     // Empty response for invalid index
@@ -613,8 +618,13 @@ impl ClientHandler {
             ..RgbEffect::default()
         })
     }
+}
 
-    /// Build the full ControllerData response for a device.
+struct ControllerSerializer {
+    protocol_version: u32,
+}
+
+impl ControllerSerializer {
     fn build_controller_data(&self, cap: &RgbDeviceCapabilities) -> Vec<u8> {
         let mut buf = Vec::with_capacity(1024);
 
@@ -647,8 +657,7 @@ impl ClientHandler {
             &format!("Lian Li {} RGB Controller", cap.device_name),
         );
 
-        // version
-        write_string(&mut buf, env!("CARGO_PKG_VERSION"));
+        write_string(&mut buf, CONTROLLER_VERSION);
 
         // serial
         write_string(&mut buf, &cap.device_id);
@@ -892,6 +901,53 @@ fn mode_from_openrgb_name(name: &str, value: u32) -> RgbMode {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn controller_profile_identity_is_stable_across_protocol_versions() {
+        let cap: RgbDeviceCapabilities = serde_json::from_value(serde_json::json!({
+            "device_id": "led-ring-serial",
+            "device_name": "Universal Screen 8.8\" LED Ring",
+            "supported_modes": [],
+            "zones": [],
+            "supports_direct": true,
+            "supports_mb_rgb_sync": false,
+            "total_led_count": 0,
+            "supported_scopes": []
+        }))
+        .unwrap();
+
+        for protocol_version in 0..=SERVER_PROTOCOL_VERSION {
+            let data = ControllerSerializer { protocol_version }.build_controller_data(&cap);
+            assert_eq!(
+                u32::from_le_bytes(data[..4].try_into().unwrap()) as usize,
+                data.len()
+            );
+            assert_eq!(
+                u32::from_le_bytes(data[4..8].try_into().unwrap()),
+                DEVICE_TYPE_LED_STRIP
+            );
+            let mut cursor = Cursor::new(&data[8..]);
+            let mut read_string = || {
+                let mut length = [0; 2];
+                cursor.read_exact(&mut length).unwrap();
+                let mut bytes = vec![0; u16::from_le_bytes(length) as usize];
+                cursor.read_exact(&mut bytes).unwrap();
+                assert_eq!(bytes.pop(), Some(0));
+                String::from_utf8(bytes).unwrap()
+            };
+            assert_eq!(read_string(), "Universal Screen 8.8\" LED Ring");
+            if protocol_version >= 1 {
+                assert_eq!(read_string(), "Lian Li");
+            }
+            assert_eq!(
+                read_string(),
+                "Lian Li Universal Screen 8.8\" LED Ring RGB Controller"
+            );
+            assert_eq!(read_string(), "1.0");
+            assert_eq!(read_string(), "led-ring-serial");
+            assert_eq!(read_string(), "HID: led-ring-serial");
+        }
+    }
 
     fn header(size: usize) -> Vec<u8> {
         let mut bytes = MAGIC.to_vec();
