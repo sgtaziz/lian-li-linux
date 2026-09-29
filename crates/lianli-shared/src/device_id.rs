@@ -216,7 +216,18 @@ impl UsbId {
     pub const fn new(vid: u16, pid: u16) -> Self {
         Self { vid, pid }
     }
+
+    pub fn from_hid_device_id(id: &str) -> Option<Self> {
+        let mut parts = id.strip_prefix("hid:")?.split(':');
+        Some(Self {
+            vid: u16::from_str_radix(parts.next()?, 16).ok()?,
+            pid: u16::from_str_radix(parts.next()?, 16).ok()?,
+        })
+    }
 }
+
+pub const AL_V2_USB_ID: UsbId = UsbId::new(0x0cf2, 0xa104);
+pub const AL_V2_MAX_FANS_PER_GROUP: usize = 6;
 
 pub const V2_HID_COMPANION: UsbId = UsbId::new(0x1a86, 0x2107);
 

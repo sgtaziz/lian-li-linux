@@ -26,6 +26,7 @@ use lianli_shared::rgb::{
 };
 use render::RenderState;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tracing::{debug, warn};
 use upload::{Command, UploadWorker};
@@ -58,6 +59,9 @@ pub struct RgbController {
     thermal_override: crate::thermal_alert::SharedThermalAlert,
     thermal_last_color: Option<[u8; 3]>,
     last_direct: HashMap<(String, u8), Vec<[u8; 3]>>,
+    last_group_effects: HashMap<String, Vec<RgbEffect>>,
+    capabilities_revision: Arc<AtomicU64>,
+    delivery_generations: HashMap<String, u64>,
     mb_sync_state: HashMap<String, bool>,
 }
 
@@ -86,6 +90,9 @@ impl RgbController {
             thermal_override: crate::thermal_alert::new_shared(),
             thermal_last_color: None,
             last_direct: HashMap::new(),
+            last_group_effects: HashMap::new(),
+            capabilities_revision: Arc::new(AtomicU64::new(0)),
+            delivery_generations: HashMap::new(),
             mb_sync_state: HashMap::new(),
         };
         controller.refresh_wireless_devices();
@@ -96,6 +103,23 @@ impl RgbController {
         self.sync_clock.stop();
         self.upload_worker.stop();
         self.wired_renderer.stop();
+    }
+
+    pub fn capabilities_revision(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.capabilities_revision)
+    }
+
+    pub fn delivery_device(&self, id: &str) -> Option<(Arc<dyn RgbDevice>, u64)> {
+        self.wired.get(id).map(|device| {
+            (
+                device.clone(),
+                self.delivery_generations.get(id).copied().unwrap_or(0),
+            )
+        })
+    }
+
+    fn capabilities_changed(&self) {
+        self.capabilities_revision.fetch_add(1, Ordering::Release);
     }
 
     fn clear_pending(&mut self) {
@@ -280,12 +304,27 @@ impl RgbController {
     }
 
     pub fn get_effect_regions(&self, id: &str) -> Option<Vec<lianli_shared::rgb::RgbRegionConfig>> {
+        if self.is_openrgb_controlled() {
+            if let Some(effects) = self.last_group_effects.get(id) {
+                return Some(
+                    effects
+                        .iter()
+                        .cloned()
+                        .map(|effect| lianli_shared::rgb::RgbRegionConfig {
+                            effect,
+                            flip: false,
+                        })
+                        .collect(),
+                );
+            }
+        }
         self.rendered
             .get(id)
             .and_then(|state| state.regions.clone())
     }
 
     pub fn set_wireless(&mut self, wireless: Option<Arc<WirelessController>>) {
+        self.capabilities_changed();
         self.sync_clock.clear();
         self.sync_signature = None;
         self.upload_worker.clear();
@@ -296,11 +335,17 @@ impl RgbController {
     }
 
     pub fn drain_wired(&mut self) -> HashMap<String, Arc<dyn RgbDevice>> {
+        self.capabilities_changed();
+        self.last_group_effects.clear();
         self.clear_pending();
         std::mem::take(&mut self.wired)
     }
 
     pub fn replace_wired(&mut self, wired: HashMap<String, Arc<dyn RgbDevice>>) {
+        self.delivery_generations
+            .retain(|id, _| wired.contains_key(id));
+        self.capabilities_changed();
+        self.last_group_effects.clear();
         self.sync_signature = None;
         self.configured
             .retain(|id, _| !self.wired.contains_key(id) && !wired.contains_key(id));
@@ -313,6 +358,7 @@ impl RgbController {
     }
 
     pub fn retain_wired(&mut self, present: &std::collections::HashSet<String>) {
+        self.capabilities_changed();
         let previous: Vec<_> = self.wired.keys().cloned().collect();
         self.wired.retain(|id, _| {
             present.iter().any(|base| {
@@ -324,6 +370,8 @@ impl RgbController {
         });
         for id in previous {
             if !self.wired.contains_key(&id) {
+                self.delivery_generations.remove(&id);
+                self.last_group_effects.remove(&id);
                 self.sync_signature = None;
                 self.sync_clock.clear();
                 self.wired_renderer.remove(&id);
@@ -337,6 +385,7 @@ impl RgbController {
     }
 
     pub fn refresh_wireless_devices(&mut self) {
+        self.capabilities_changed();
         self.configured.retain(|id, _| !id.starts_with("wireless:"));
         self.sync_signature = None;
         self.thermal_last_color = None;
@@ -395,11 +444,23 @@ impl RgbController {
     }
 
     pub fn invalidate_hardware_state(&mut self) {
+        for id in self.wired.keys() {
+            let generation = self.delivery_generations.entry(id.clone()).or_default();
+            *generation = generation.wrapping_add(1);
+        }
+        self.capabilities_changed();
+        self.last_group_effects.clear();
         self.clear_pending();
         self.mb_sync_state.clear();
     }
 
     pub fn invalidate_device_config(&mut self, id: &str) {
+        if self.wired.contains_key(id) {
+            let generation = self.delivery_generations.entry(id.to_owned()).or_default();
+            *generation = generation.wrapping_add(1);
+        }
+        self.capabilities_changed();
+        self.last_group_effects.remove(id);
         self.configured.remove(id);
     }
 }

@@ -734,6 +734,9 @@ pub struct RgbAppConfig {
     /// OpenRGB SDK server port.
     #[serde(default = "default_openrgb_port")]
     pub openrgb_port: u16,
+    /// Expose independent AL V2 inner/outer controls, grouped as zones on SDK v6.
+    #[serde(default)]
+    pub openrgb_regions: bool,
     /// Per-device RGB settings.
     #[serde(default)]
     pub devices: Vec<RgbDeviceConfig>,
@@ -755,6 +758,7 @@ impl Default for RgbAppConfig {
             enabled: true,
             openrgb_server: false,
             openrgb_port: default_openrgb_port(),
+            openrgb_regions: false,
             devices: Vec::new(),
             merge_lighting: None,
         }
@@ -782,13 +786,13 @@ pub struct RgbPreset {
 }
 
 /// Information about an RGB zone, reported to GUI/OpenRGB.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbZoneInfo {
     pub name: String,
     pub led_count: u16,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbLedCountControl {
     pub zone: u8,
     pub min: u16,
@@ -814,6 +818,42 @@ mod led_count_tests {
     use super::*;
 
     #[test]
+    fn effect_values_enforce_palette_and_per_fan_boundaries() {
+        let mut spec = RgbEffectParameters {
+            mode: RgbMode::StaticColorful,
+            min_colors: 2,
+            max_colors: 4,
+            per_fan_colors: false,
+            directions: Vec::new(),
+            supports_speed: true,
+        };
+        for colors in 0..=5 {
+            assert_eq!(
+                spec.validate_values(4, 4, colors, 3).is_ok(),
+                (2..=4).contains(&colors)
+            );
+        }
+        assert!(spec.validate_values(5, 4, 2, 3).is_err());
+        assert!(spec.validate_values(4, 5, 2, 3).is_err());
+        spec.per_fan_colors = true;
+        for colors in 0..=5 {
+            assert_eq!(spec.validate_values(0, 0, colors, 3).is_ok(), colors == 3);
+        }
+        assert!(spec.validate_values(0, 0, 0, 0).is_ok());
+    }
+
+    #[test]
+    fn old_openrgb_configuration_keeps_legacy_topology() {
+        let mut config: RgbAppConfig = serde_json::from_str(r#"{"openrgb_server":true}"#).unwrap();
+        assert!(!config.openrgb_regions);
+        assert!(!RgbAppConfig::default().openrgb_regions);
+        config.openrgb_regions = true;
+        let restored: RgbAppConfig =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert_eq!(restored, config);
+    }
+
+    #[test]
     fn old_rgb_config_keeps_default_count_and_new_count_roundtrips() {
         let mut saved: RgbDeviceConfig =
             serde_json::from_str(r#"{"device_id":"offline","mb_rgb_sync":false,"zones":[]}"#)
@@ -837,7 +877,7 @@ mod led_count_tests {
 }
 
 /// RGB capabilities reported per device.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbDeviceCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fan_led_count_control: Option<RgbLedCountControl>,
@@ -887,7 +927,7 @@ pub struct RgbDeviceCapabilities {
     pub rf_owned: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbEffectParameters {
     pub mode: RgbMode,
     pub min_colors: u8,
@@ -897,10 +937,49 @@ pub struct RgbEffectParameters {
     pub supports_speed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl RgbEffectParameters {
+    pub fn validate_values(
+        &self,
+        speed: u32,
+        brightness: u32,
+        colors: usize,
+        fans: usize,
+    ) -> Result<(), &'static str> {
+        if speed > 4 || brightness > 4 {
+            return Err("RGB speed or brightness out of range");
+        }
+        let valid_colors = if self.per_fan_colors {
+            colors == fans
+        } else {
+            (self.min_colors as usize..=self.max_colors as usize).contains(&colors)
+        };
+        if !valid_colors {
+            return Err("Invalid RGB color count");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbRegionParameters {
     pub scope: RgbScope,
     pub effects: Vec<RgbEffectParameters>,
+}
+
+impl RgbDeviceCapabilities {
+    pub fn supports_openrgb_regions(&self) -> bool {
+        use crate::device_id::{UsbId, AL_V2_MAX_FANS_PER_GROUP, AL_V2_USB_ID};
+        // Other families need their group delivery semantics verified first.
+        UsbId::from_hid_device_id(&self.device_id) == Some(AL_V2_USB_ID)
+            && self.hardware_group_effects
+            && !self.supports_direct
+            && self.zones.len() <= AL_V2_MAX_FANS_PER_GROUP
+            && [RgbScope::Inner, RgbScope::Outer].iter().all(|scope| {
+                self.region_parameters
+                    .iter()
+                    .any(|region| region.scope == *scope)
+            })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

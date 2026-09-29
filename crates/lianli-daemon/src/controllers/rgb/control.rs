@@ -1,6 +1,64 @@
 use super::*;
 
 impl RgbController {
+    pub fn prepare_group_write(
+        &self,
+        id: &str,
+        effects: &[RgbEffect],
+    ) -> anyhow::Result<Arc<dyn RgbDevice>> {
+        self.ensure_individual_control(id)?;
+        anyhow::ensure!(
+            self.is_openrgb_controlled() || !self.thermal_override_active(),
+            "thermal alert currently controls RGB"
+        );
+        let device = self
+            .wired
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("RGB device is unavailable: {id}"))?;
+        anyhow::ensure!(!device.rf_owned(), "RGB device is controlled over RF");
+        let regions = device.hardware_regions();
+        anyhow::ensure!(
+            !effects.is_empty() && effects.len() <= regions.len(),
+            "Invalid group effects"
+        );
+        for (index, effect) in effects.iter().enumerate() {
+            anyhow::ensure!(
+                !effects[..index]
+                    .iter()
+                    .any(|other| other.scope == effect.scope),
+                "Duplicate group region"
+            );
+            let spec = regions
+                .iter()
+                .find(|region| region.scope == effect.scope)
+                .and_then(|region| region.effects.iter().find(|spec| spec.mode == effect.mode))
+                .ok_or_else(|| anyhow::anyhow!("Unsupported group mode or region"))?;
+            spec.validate_values(
+                effect.speed as u32,
+                effect.brightness as u32,
+                effect.colors.len(),
+                device.zone_info().len(),
+            )
+            .map_err(anyhow::Error::msg)?;
+        }
+        Ok(Arc::clone(device))
+    }
+
+    pub fn cache_group_effects(
+        &mut self,
+        id: String,
+        device: &Arc<dyn RgbDevice>,
+        effects: Vec<RgbEffect>,
+    ) {
+        if self
+            .wired
+            .get(&id)
+            .is_some_and(|current| Arc::ptr_eq(current, device))
+        {
+            self.last_group_effects.insert(id, effects);
+        }
+    }
+
     pub fn set_effect(&mut self, id: &str, zone: u8, effect: &RgbEffect) -> anyhow::Result<()> {
         self.ensure_individual_control(id)?;
         anyhow::ensure!(

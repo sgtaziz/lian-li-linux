@@ -168,6 +168,7 @@ asset, including images, video and fonts referenced by templates.
 - [LCD assets and managed storage](docs/lcd-assets.md)
 - [Startup image uploads](docs/startup-images.md)
 - [Configuration and template backups](docs/state-backups.md)
+- [OpenRGB and separate AL V2 regions](docs/openrgb.md)
 
 ## Configuration
 

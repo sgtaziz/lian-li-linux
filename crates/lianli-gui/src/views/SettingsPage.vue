@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from "vue";
+import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ExternalLink } from "lucide-vue-next";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
@@ -222,6 +223,7 @@ function onHidBackend(v: "hidraw" | "rusb") {
         <span class="status-tag"><StatusDot :color="openrgbDot" />{{ openrgbStatus }}</span>
       </div>
       <n-checkbox v-model:checked="openrgbEnabled" style="margin-top: 1rem;">Enable OpenRGB SDK server</n-checkbox>
+      <OpenRgbRegionsToggle v-if="openrgbEnabled" />
       <n-alert v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError" type="error" style="margin-top: 1rem;">{{ daemon.openrgbError }}</n-alert>
       <n-button v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError && !daemon.openrgbRunning" :loading="retryingOpenRgb" :disabled="retryingOpenRgb || !daemon.canWrite || !daemon.info?.capabilities.includes('openrgb_retry')" @click="retryOpenRgb">Retry OpenRGB</n-button>
       <p v-if="daemon.openrgbError && daemon.connected" class="hint">Retry uses the saved port. Save to apply edits.</p>

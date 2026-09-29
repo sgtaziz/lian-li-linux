@@ -4,6 +4,7 @@ import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import RgbDeviceCard from "@/components/rgb/RgbDeviceCard.vue";
 import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
+import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 
 const daemon = useDaemonStore();
@@ -66,6 +67,7 @@ const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
           The OpenRGB SDK server binds to a TCP port without authentication. Any local process
           can control your RGB devices. While enabled, the daemon will not apply its own RGB effects.
         </p>
+        <OpenRgbRegionsToggle v-if="openrgbEnabled" />
       </div>
     </section>
 

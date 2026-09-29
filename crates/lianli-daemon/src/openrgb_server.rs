@@ -15,6 +15,15 @@ use std::thread;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
+mod clients;
+#[cfg(test)]
+mod integration_tests;
+mod legacy;
+mod protocol;
+mod regions;
+use protocol::{Command, ModeData, DEFAULT_BRIGHTNESS, DEFAULT_SPEED, MAX_EFFECT_VALUE};
+use regions::Target;
+
 const MAGIC: &[u8; 4] = b"ORGB";
 const HEADER_SIZE: usize = 16;
 const MAX_CLIENTS: usize = 16;
@@ -69,15 +78,17 @@ fn read_packet_from(stream: &mut impl Read) -> anyhow::Result<(u32, u32, Vec<u8>
     stream.read_exact(&mut payload)?;
     Ok((dev_idx, pkt_id, payload))
 }
-/// We support up to protocol version 4 (segments, plugins).
-/// Version 3 adds brightness. Version 4 adds segments.
-const SERVER_PROTOCOL_VERSION: u32 = 4;
+// v3 adds brightness, v4 segments, v5 flags, and v6 independent zone modes.
+const SERVER_PROTOCOL_VERSION: u32 = 6;
 
 // Packet IDs
 const PKT_REQUEST_CONTROLLER_COUNT: u32 = 0;
 const PKT_REQUEST_CONTROLLER_DATA: u32 = 1;
 const PKT_REQUEST_PROTOCOL_VERSION: u32 = 40;
 const PKT_SET_CLIENT_NAME: u32 = 50;
+const PKT_SET_CLIENT_FLAGS: u32 = 52;
+const PKT_SET_SERVER_FLAGS: u32 = 53;
+const PKT_SET_CLIENT_HOSTNAME: u32 = 54;
 const PKT_REQUEST_PROFILE_LIST: u32 = 150;
 const PKT_REQUEST_PLUGIN_LIST: u32 = 200;
 const PKT_RESIZE_ZONE: u32 = 1000;
@@ -87,6 +98,8 @@ const PKT_UPDATE_SINGLE_LED: u32 = 1052;
 const PKT_SET_CUSTOM_MODE: u32 = 1100;
 const PKT_UPDATE_MODE: u32 = 1101;
 const PKT_SAVE_MODE: u32 = 1102;
+const PKT_UPDATE_ZONE_MODE: u32 = 1103;
+const PKT_SIGNAL_UPDATE: u32 = 1150;
 
 // OpenRGB DeviceType
 const DEVICE_TYPE_LED_STRIP: u32 = 4;
@@ -119,6 +132,7 @@ const ZONE_TYPE_LINEAR: u32 = 1;
 pub struct OpenRgbServerState {
     pub running: bool,
     pub port: Option<u16>,
+    pub regions_enabled: bool,
     pub error: Option<String>,
 }
 
@@ -127,11 +141,19 @@ pub fn start_openrgb_server(
     rgb: Arc<Mutex<RgbController>>,
     direct_buffer: Arc<Mutex<DirectColorBuffer>>,
     port: u16,
+    regions_enabled: bool,
     stop_flag: Arc<AtomicBool>,
     state: Arc<Mutex<OpenRgbServerState>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        if let Err(e) = run_server(rgb, direct_buffer, port, &stop_flag, &state) {
+        if let Err(e) = run_server(
+            rgb,
+            direct_buffer,
+            port,
+            regions_enabled,
+            &stop_flag,
+            &state,
+        ) {
             error!("OpenRGB server error: {e}");
             let mut s = state.lock();
             s.running = false;
@@ -148,6 +170,7 @@ fn run_server(
     rgb: Arc<Mutex<RgbController>>,
     direct_buffer: Arc<Mutex<DirectColorBuffer>>,
     port: u16,
+    regions_enabled: bool,
     stop_flag: &Arc<AtomicBool>,
     state: &Arc<Mutex<OpenRgbServerState>>,
 ) -> anyhow::Result<()> {
@@ -173,14 +196,81 @@ fn run_server(
         let mut s = state.lock();
         s.running = true;
         s.port = Some(port);
+        s.regions_enabled = regions_enabled;
         s.error = None;
     }
 
     let client_count = Arc::new(AtomicUsize::new(0));
     let mut clients = Clients::default();
+    let notifications = Arc::new(Mutex::new(clients::Notifications::default()));
+    let (mut caps, revision, mut observed_revision, mut groups) = {
+        let rgb = rgb.lock();
+        let caps = rgb.exposed_capabilities();
+        let revision = rgb.capabilities_revision();
+        let observed = revision.load(Ordering::Acquire);
+        let groups = regions::groups(&caps, &rgb, &Default::default(), regions_enabled);
+        (caps, revision, observed, groups)
+    };
+    let mut legacy_states = legacy::states(&caps, &Default::default());
+    let mut delivery_devices: std::collections::HashMap<_, _> = {
+        let rgb = rgb.lock();
+        groups
+            .keys()
+            .filter_map(|id| rgb.delivery_device(id).map(|device| (id.clone(), device)))
+            .collect()
+    };
 
     while !stop_flag.load(Ordering::Relaxed) {
         clients.reap();
+        let current_revision = revision.load(Ordering::Acquire);
+        if current_revision != observed_revision {
+            let current = rgb.lock().exposed_capabilities();
+            if current != caps {
+                // Existing clients must not send commands using reassigned device indexes.
+                clients = Clients::default();
+                notifications.lock().reset();
+                let retained: std::collections::HashSet<_> = current
+                    .iter()
+                    .filter(|cap| caps.contains(cap))
+                    .map(|cap| cap.device_id.clone())
+                    .collect();
+                direct_buffer.lock().retain_devices(&retained);
+                legacy_states = legacy::states(&current, &legacy_states);
+                groups = regions::groups(&current, &rgb.lock(), &groups, regions_enabled);
+                for (id, group) in &groups {
+                    if !retained.contains(id) {
+                        group.lock().queue_current(&direct_buffer);
+                    }
+                }
+                caps = current;
+            }
+            let current_devices: std::collections::HashMap<_, _> = {
+                let rgb = rgb.lock();
+                groups
+                    .keys()
+                    .filter_map(|id| rgb.delivery_device(id).map(|device| (id.clone(), device)))
+                    .collect()
+            };
+            let changed: std::collections::HashSet<_> = current_devices
+                .iter()
+                .filter(|(id, (device, generation))| {
+                    delivery_devices
+                        .get(*id)
+                        .is_some_and(|(previous, old_generation)| {
+                            !Arc::ptr_eq(device, previous) || generation != old_generation
+                        })
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in &changed {
+                if let Some(group) = groups.get(id) {
+                    group.lock().queue_current(&direct_buffer);
+                }
+            }
+            direct_buffer.lock().invalidate_group_delivery(&changed);
+            delivery_devices = current_devices;
+            observed_revision = current_revision;
+        }
         match listener.accept() {
             Ok((stream, addr)) => {
                 if clients.0.len() >= MAX_CLIENTS {
@@ -203,6 +293,23 @@ fn run_server(
                 let buf = Arc::clone(&direct_buffer);
                 let count = Arc::clone(&client_count);
                 let stop = Arc::clone(stop_flag);
+                let caps = caps.clone();
+                let groups = groups.clone();
+                let legacy_states = legacy_states.clone();
+                let notifications = notifications.clone();
+
+                let mut client = match ClientHandler::new(stream, rgb.clone(), buf, stop) {
+                    Ok(client) => client,
+                    Err(error) => {
+                        warn!(%addr, %error, "Could not initialize OpenRGB client");
+                        continue;
+                    }
+                };
+                client.cached_caps = Some(caps);
+                client.targets = Some(regions::targets(client.caps(), &groups, 0));
+                client.region_groups = groups;
+                client.legacy_states = legacy_states;
+                client.notifications = notifications;
 
                 let prev = count.fetch_add(1, Ordering::Relaxed);
                 if prev == 0 {
@@ -210,7 +317,6 @@ fn run_server(
                 }
 
                 let client = thread::spawn(move || {
-                    let mut client = ClientHandler::new(stream, rgb, buf, stop);
                     if let Err(e) = client.run() {
                         debug!("OpenRGB client disconnected: {e}");
                     }
@@ -241,14 +347,30 @@ fn run_server(
 
 struct ClientHandler {
     stream: TcpStream,
+    output: Arc<clients::Output>,
+    writer: Option<thread::JoinHandle<()>>,
     rgb: Arc<Mutex<RgbController>>,
     direct_buffer: Arc<Mutex<DirectColorBuffer>>,
     stop_flag: Arc<AtomicBool>,
     protocol_version: u32,
     client_name: String,
-    /// Cached capabilities — avoids locking RgbController on every UpdateLEDs packet.
-    /// Populated lazily on first use; static for the lifetime of a connection.
+    /// Index meanings remain fixed for the lifetime of a connection.
     cached_caps: Option<Vec<RgbDeviceCapabilities>>,
+    targets: Option<Vec<Target>>,
+    region_groups: regions::Groups,
+    legacy_states: legacy::States,
+    notifications: Arc<Mutex<clients::Notifications>>,
+}
+
+impl Drop for ClientHandler {
+    fn drop(&mut self) {
+        self.output.disconnect();
+        if let Some(writer) = self.writer.take() {
+            if writer.join().is_err() {
+                warn!("OpenRGB client writer panicked");
+            }
+        }
+    }
 }
 
 impl ClientHandler {
@@ -257,16 +379,23 @@ impl ClientHandler {
         rgb: Arc<Mutex<RgbController>>,
         direct_buffer: Arc<Mutex<DirectColorBuffer>>,
         stop_flag: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
+    ) -> std::io::Result<Self> {
+        let (output, writer) = clients::Output::start(&stream)?;
+        Ok(Self {
             stream,
+            output,
+            writer: Some(writer),
             rgb,
             direct_buffer,
             stop_flag,
             protocol_version: 0,
             client_name: String::new(),
             cached_caps: None,
-        }
+            targets: None,
+            region_groups: Default::default(),
+            legacy_states: Default::default(),
+            notifications: Default::default(),
+        })
     }
 
     /// Get capabilities, caching on first call to avoid mutex contention during streaming.
@@ -275,11 +404,6 @@ impl ClientHandler {
             self.cached_caps = Some(self.rgb.lock().exposed_capabilities());
         }
         self.cached_caps.as_ref().unwrap()
-    }
-
-    /// Force-refresh the cached capabilities (e.g., after mode changes).
-    fn refresh_caps(&mut self) {
-        self.cached_caps = Some(self.rgb.lock().exposed_capabilities());
     }
 
     fn run(&mut self) -> anyhow::Result<()> {
@@ -301,322 +425,189 @@ impl ClientHandler {
     }
 
     fn send_packet(&mut self, dev_idx: u32, pkt_id: u32, payload: &[u8]) -> anyhow::Result<()> {
-        let mut header = [0u8; HEADER_SIZE];
-        header[0..4].copy_from_slice(MAGIC);
-        header[4..8].copy_from_slice(&dev_idx.to_le_bytes());
-        header[8..12].copy_from_slice(&pkt_id.to_le_bytes());
-        header[12..16].copy_from_slice(&(payload.len() as u32).to_le_bytes());
-
-        self.stream.write_all(&header)?;
-        if !payload.is_empty() {
-            self.stream.write_all(payload)?;
-        }
-        self.stream.flush()?;
-        Ok(())
+        self.output.send(dev_idx, pkt_id, payload)
     }
 
     fn handle_packet(&mut self, dev_idx: u32, pkt_id: u32, payload: &[u8]) -> anyhow::Result<()> {
         match pkt_id {
             PKT_REQUEST_PROTOCOL_VERSION => {
-                let client_version = if payload.len() >= 4 {
-                    u32::from_le_bytes(payload[0..4].try_into()?)
-                } else {
-                    0
-                };
+                let client_version = payload
+                    .get(..4)
+                    .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+                    .unwrap_or(0);
                 self.protocol_version = client_version.min(SERVER_PROTOCOL_VERSION);
-                debug!(
-                    "OpenRGB protocol negotiated: v{} (client={}, server={})",
-                    self.protocol_version, client_version, SERVER_PROTOCOL_VERSION
+                let caps = self.caps().to_vec();
+                self.targets = Some(regions::targets(
+                    &caps,
+                    &self.region_groups,
+                    self.protocol_version,
+                ));
+                self.send_packet(0, pkt_id, &SERVER_PROTOCOL_VERSION.to_le_bytes())?;
+                if self.protocol_version >= 6 {
+                    self.send_packet(0, PKT_SET_SERVER_FLAGS, &1u32.to_le_bytes())?;
+                }
+                self.notifications.lock().subscribe(
+                    self.output.clone(),
+                    self.targets.as_deref().unwrap_or_default(),
+                    self.protocol_version,
                 );
-                let resp = SERVER_PROTOCOL_VERSION.to_le_bytes();
-                self.send_packet(0, PKT_REQUEST_PROTOCOL_VERSION, &resp)?;
+                Ok(())
             }
-
+            PKT_SET_CLIENT_FLAGS | PKT_SET_CLIENT_HOSTNAME => Ok(()),
             PKT_SET_CLIENT_NAME => {
-                // Raw string + null terminator, no u16 length prefix
                 self.client_name = String::from_utf8_lossy(payload)
                     .trim_end_matches('\0')
-                    .to_string();
-                info!("OpenRGB client name: '{}'", self.client_name);
-                // No response
+                    .to_owned();
+                debug!(name = %self.client_name, "OpenRGB client named");
+                Ok(())
             }
-
             PKT_REQUEST_CONTROLLER_COUNT => {
-                self.refresh_caps();
-                let count = self.caps().len() as u32;
-                self.send_packet(0, PKT_REQUEST_CONTROLLER_COUNT, &count.to_le_bytes())?;
-            }
-
-            PKT_REQUEST_CONTROLLER_DATA => {
-                let cap = self.caps().get(dev_idx as usize).cloned();
-                if let Some(cap) = cap {
-                    let data = ControllerSerializer {
-                        protocol_version: self.protocol_version,
+                let count = self
+                    .targets
+                    .as_ref()
+                    .map_or_else(|| self.cached_caps.as_ref().map_or(0, Vec::len), Vec::len)
+                    as u32;
+                let mut response = count.to_le_bytes().to_vec();
+                if self.protocol_version >= 6 {
+                    for id in 0..count {
+                        response.extend_from_slice(&id.to_le_bytes());
                     }
-                    .build_controller_data(&cap);
-                    self.send_packet(dev_idx, PKT_REQUEST_CONTROLLER_DATA, &data)?;
-                } else {
-                    // Empty response for invalid index
-                    self.send_packet(dev_idx, PKT_REQUEST_CONTROLLER_DATA, &[])?;
                 }
+                self.send_packet(0, pkt_id, &response)
             }
-
-            PKT_SET_CUSTOM_MODE => {
-                debug!("OpenRGB SetCustomMode for device {dev_idx} — direct mode active");
-                self.rgb.lock().set_openrgb_active(true);
-            }
-
-            PKT_UPDATE_LEDS => {
-                self.handle_update_leds(dev_idx, payload)?;
-            }
-
-            PKT_UPDATE_ZONE_LEDS => {
-                self.handle_update_zone_leds(dev_idx, payload)?;
-            }
-
-            PKT_UPDATE_SINGLE_LED => {
-                self.handle_update_single_led(dev_idx, payload)?;
-            }
-
-            PKT_UPDATE_MODE => {
-                self.handle_update_mode(dev_idx, payload)?;
-            }
-
-            PKT_SAVE_MODE => {
-                // Same as update mode for us (no persistent hardware save)
-                self.handle_update_mode(dev_idx, payload)?;
-            }
-
-            PKT_RESIZE_ZONE => {
-                let zone_idx = if payload.len() >= 4 {
-                    u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]))
-                } else {
-                    0
-                };
-                let actual_size = self
-                    .caps()
-                    .get(dev_idx as usize)
-                    .and_then(|cap| cap.zones.get(zone_idx as usize))
-                    .map(|z| z.led_count as u32)
-                    .unwrap_or(0);
-                let resp: Vec<u8> = [zone_idx.to_le_bytes(), actual_size.to_le_bytes()].concat();
-                self.send_packet(dev_idx, PKT_RESIZE_ZONE, &resp)?;
-            }
-
-            // We have no profiles or plugins, but clients block waiting for
-            // these replies (openrgb-python hangs during its handshake if
-            // they never arrive), so answer with empty lists:
-            // u32 data_size + u16 entry_count.
             PKT_REQUEST_PROFILE_LIST | PKT_REQUEST_PLUGIN_LIST => {
-                let mut resp = Vec::with_capacity(6);
-                resp.extend_from_slice(&6u32.to_le_bytes());
-                resp.extend_from_slice(&0u16.to_le_bytes());
-                self.send_packet(0, pkt_id, &resp)?;
+                self.send_packet(0, pkt_id, &[6, 0, 0, 0, 0, 0])
             }
-
-            _ => {
-                debug!(
-                    "OpenRGB unhandled packet: id={pkt_id} dev={dev_idx} size={}",
-                    payload.len()
-                );
-            }
+            _ => self.handle_controller_packet(dev_idx, pkt_id, payload),
         }
-
-        Ok(())
     }
 
-    fn handle_update_leds(&mut self, dev_idx: u32, payload: &[u8]) -> anyhow::Result<()> {
-        // data_size(u32) + num_colors(u16) + colors(4*n)
-        if payload.len() < 6 {
-            return Ok(());
+    fn resolve_target(&mut self, index: u32) -> Option<Target> {
+        if let Some(targets) = &self.targets {
+            targets.get(index as usize).cloned()
+        } else {
+            self.caps()
+                .get(index as usize)
+                .cloned()
+                .map(|cap| Target::Legacy(Arc::new(cap)))
         }
+    }
 
-        let num_colors = u16::from_le_bytes(payload[4..6].try_into()?) as usize;
-        let colors = parse_colors(&payload[6..], num_colors);
-
-        // Use cached caps — no RgbController lock needed in the hot path
-        if let Some(cap) = self.caps().get(dev_idx as usize) {
-            let device_id = cap.device_id.clone();
-            let zones: Vec<_> = cap.zones.iter().map(|z| z.led_count as usize).collect();
-            let mut buf = self.direct_buffer.lock();
-            let mut offset = 0;
-            for (zone_idx, count) in zones.iter().enumerate() {
-                let end = (offset + count).min(colors.len());
-                if offset < colors.len() {
-                    buf.set(
-                        device_id.clone(),
-                        zone_idx as u8,
-                        colors[offset..end].to_vec(),
-                    );
+    fn handle_controller_packet(
+        &mut self,
+        index: u32,
+        kind: u32,
+        payload: &[u8],
+    ) -> anyhow::Result<()> {
+        let target = self.resolve_target(index);
+        if kind == PKT_REQUEST_CONTROLLER_DATA {
+            let data = match target {
+                Some(Target::Legacy(cap)) => self
+                    .legacy_state(&cap)
+                    .lock()
+                    .description(self.protocol_version),
+                Some(Target::Region { group, region }) => {
+                    group.lock().description(self.protocol_version, region)
                 }
-                offset = end;
-            }
+                None => Vec::new(),
+            };
+            return self.send_packet(index, kind, &data);
         }
-
-        Ok(())
-    }
-
-    fn handle_update_zone_leds(&mut self, dev_idx: u32, payload: &[u8]) -> anyhow::Result<()> {
-        // data_size(u32) + zone_idx(u32) + num_colors(u16) + colors(4*n)
-        if payload.len() < 10 {
-            return Ok(());
-        }
-
-        let zone_idx = u32::from_le_bytes(payload[4..8].try_into()?) as u8;
-        let num_colors = u16::from_le_bytes(payload[8..10].try_into()?) as usize;
-        let colors = parse_colors(&payload[10..], num_colors);
-
-        if let Some(cap) = self.caps().get(dev_idx as usize) {
-            let device_id = cap.device_id.clone();
-            self.direct_buffer.lock().set(device_id, zone_idx, colors);
-        }
-
-        Ok(())
-    }
-
-    fn handle_update_single_led(&mut self, dev_idx: u32, payload: &[u8]) -> anyhow::Result<()> {
-        // led_idx(i32/u32) + color(4 bytes)
-        if payload.len() < 8 {
-            return Ok(());
-        }
-
-        let led_idx = u32::from_le_bytes(payload[0..4].try_into()?) as usize;
-        let r = payload[4];
-        let g = payload[5];
-        let b = payload[6];
-
-        if let Some(cap) = self.caps().get(dev_idx as usize) {
-            let device_id = cap.device_id.clone();
-            let zones: Vec<_> = cap.zones.iter().map(|z| z.led_count as usize).collect();
-            let mut offset = 0;
-            for (zone_idx, count) in zones.iter().enumerate() {
-                if led_idx < offset + count {
-                    let colors = vec![[r, g, b]];
-                    self.direct_buffer
-                        .lock()
-                        .set(device_id, zone_idx as u8, colors);
-                    break;
-                }
-                offset += count;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn handle_update_mode(&mut self, dev_idx: u32, payload: &[u8]) -> anyhow::Result<()> {
-        // data_size(u32) + mode_idx(u32) + ModeData...
-        if payload.len() < 8 {
-            return Ok(());
-        }
-
-        let mode_idx = u32::from_le_bytes(payload[4..8].try_into()?);
-        let mode_data = &payload[8..];
-
-        // Parse the mode data to extract what we need
-        if let Some(effect) = self.parse_mode_data(mode_data) {
-            if effect.mode == RgbMode::Direct {
-                debug!("OpenRGB UpdateMode: mode=Direct (ignored — use UpdateLEDs)");
+        let command = match Command::decode(kind, payload, self.protocol_version) {
+            Ok(Some(command)) => command,
+            Ok(None) => {
+                debug!(kind, index, "Unsupported OpenRGB command");
                 return Ok(());
             }
-
-            let mut rgb = self.rgb.lock();
-            let caps = rgb.exposed_capabilities();
-            if let Some(cap) = caps.get(dev_idx as usize) {
-                let device_id = cap.device_id.clone();
-                debug!(
-                    "OpenRGB UpdateMode: device={device_id} mode_idx={mode_idx} -> {:?}",
-                    effect.mode
-                );
-                for zone_idx in 0..cap.zones.len() {
-                    if let Err(e) = rgb.set_effect(&device_id, zone_idx as u8, &effect) {
-                        debug!("OpenRGB UpdateMode error for {device_id} zone {zone_idx}: {e}");
+            Err(error) => {
+                debug!(kind, index, %error, "Invalid OpenRGB command");
+                return Ok(());
+            }
+        };
+        let Some(target) = target else {
+            debug!(index, "Unknown OpenRGB controller");
+            return Ok(());
+        };
+        if let Command::Resize { zone, size } = command {
+            return self.handle_resize(index, &target, zone, size);
+        }
+        match target {
+            Target::Legacy(cap) => {
+                let state = self.legacy_state(&cap);
+                let update = if matches!(
+                    command,
+                    Command::Colors(_) | Command::ZoneColors { .. } | Command::SingleColor { .. }
+                ) {
+                    let mut state = state.lock();
+                    if let Err(error) = state.apply_colors(&command, &self.direct_buffer) {
+                        debug!(index, %error, "Rejected OpenRGB device colors");
+                        return Ok(());
                     }
-                }
+                    state.update(kind)
+                } else {
+                    let mut rgb = self.rgb.lock();
+                    let mut next = state.lock().clone();
+                    if let Err(error) = next.apply_mode(&command, &mut rgb) {
+                        debug!(index, %error, "Rejected OpenRGB device command");
+                        return Ok(());
+                    }
+                    let mut state = state.lock();
+                    state.commit_mode(next);
+                    state.update(kind)
+                };
+                self.notifications
+                    .lock()
+                    .publish(&cap.device_id, update, || {
+                        state.lock().update(PKT_UPDATE_MODE)
+                    });
+            }
+            Target::Region { group, region } => {
+                let (id, update) = {
+                    let mut group = group.lock();
+                    if let Err(error) = group.apply(&command, region, &self.direct_buffer) {
+                        debug!(index, %error, "Rejected OpenRGB region command");
+                        return Ok(());
+                    }
+                    (group.cap.device_id.clone(), group.update(kind))
+                };
+                self.notifications
+                    .lock()
+                    .publish(&id, update, || group.lock().update(PKT_UPDATE_MODE));
             }
         }
-
         Ok(())
     }
 
-    /// Parse a ModeData blob from the wire to extract an RgbEffect.
-    fn parse_mode_data(&self, data: &[u8]) -> Option<RgbEffect> {
-        let mut cursor = 0;
-
-        // name (u16 len + bytes + null)
-        let name_str = read_string(data, &mut cursor)?;
-
-        // value (i32)
-        let value = read_u32(data, &mut cursor)?;
-
-        // flags (u32)
-        let _flags = read_u32(data, &mut cursor)?;
-
-        // speed_min, speed_max (u32 each)
-        let _speed_min = read_u32(data, &mut cursor)?;
-        let _speed_max = read_u32(data, &mut cursor)?;
-
-        // brightness_min, brightness_max (proto >= 3)
-        if self.protocol_version >= 3 {
-            let _brightness_min = read_u32(data, &mut cursor)?;
-            let _brightness_max = read_u32(data, &mut cursor)?;
-        }
-
-        // colors_min, colors_max (u32 each)
-        let _colors_min = read_u32(data, &mut cursor)?;
-        let _colors_max = read_u32(data, &mut cursor)?;
-
-        // speed (u32)
-        let speed = read_u32(data, &mut cursor)?;
-
-        // brightness (proto >= 3)
-        let brightness = if self.protocol_version >= 3 {
-            read_u32(data, &mut cursor)?
-        } else {
-            4
-        };
-
-        // direction (u32)
-        let direction = read_u32(data, &mut cursor)?;
-
-        // color_mode (u32)
-        let _color_mode = read_u32(data, &mut cursor)?;
-
-        // colors (u16 count + 4 bytes each)
-        let color_count = read_u16(data, &mut cursor)? as usize;
-        let mut colors = Vec::new();
-        for _ in 0..color_count {
-            if cursor + 4 > data.len() {
-                break;
+    fn handle_resize(
+        &mut self,
+        index: u32,
+        target: &Target,
+        zone: usize,
+        _requested: u32,
+    ) -> anyhow::Result<()> {
+        let actual = match target {
+            Target::Legacy(cap) => cap.zones.get(zone).map_or(0, |zone| zone.led_count as u32),
+            Target::Region { group, region } => {
+                let group = group.lock();
+                if region.is_some() {
+                    u32::from(zone < group.count())
+                } else if zone < 2 {
+                    group.count() as u32
+                } else {
+                    0
+                }
             }
-            colors.push([data[cursor], data[cursor + 1], data[cursor + 2]]);
-            cursor += 4; // skip alpha
-        }
-
-        // Map the mode name to our RgbMode
-        let mode = mode_from_openrgb_name(&name_str, value);
-
-        // Map direction
-        let dir = match direction {
-            DIR_LEFT => RgbDirection::CounterClockwise,
-            DIR_RIGHT => RgbDirection::Clockwise,
-            DIR_UP => RgbDirection::Up,
-            DIR_DOWN => RgbDirection::Down,
-            _ => RgbDirection::Clockwise,
         };
+        let mut response = (zone as u32).to_le_bytes().to_vec();
+        response.extend_from_slice(&actual.to_le_bytes());
+        self.send_packet(index, PKT_RESIZE_ZONE, &response)
+    }
 
-        // Scale speed: OpenRGB 0..4 maps to our 0..4
-        let spd = (speed as u8).min(4);
-        let bri = (brightness as u8).min(4);
-
-        Some(RgbEffect {
-            mode,
-            colors,
-            speed: spd,
-            brightness: bri,
-            direction: dir,
-            ..RgbEffect::default()
-        })
+    fn legacy_state(&mut self, cap: &RgbDeviceCapabilities) -> Arc<Mutex<legacy::State>> {
+        self.legacy_states
+            .entry(cap.device_id.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(legacy::State::new(cap.clone()))))
+            .clone()
     }
 }
 
@@ -624,8 +615,31 @@ struct ControllerSerializer {
     protocol_version: u32,
 }
 
+struct ZoneModeData {
+    active_mode: i32,
+    modes: Vec<ModeData>,
+}
+
 impl ControllerSerializer {
+    #[cfg(test)]
     fn build_controller_data(&self, cap: &RgbDeviceCapabilities) -> Vec<u8> {
+        self.build_controller_zones(
+            cap,
+            &self.build_modes(cap),
+            0,
+            &vec![[255; 3]; cap.total_led_count as usize],
+            None,
+        )
+    }
+
+    fn build_controller_zones(
+        &self,
+        cap: &RgbDeviceCapabilities,
+        modes: &[ModeData],
+        active_mode: u32,
+        colors: &[[u8; 3]],
+        zone_modes: Option<&[ZoneModeData]>,
+    ) -> Vec<u8> {
         let mut buf = Vec::with_capacity(1024);
 
         // data_size placeholder — we'll fill it at the end
@@ -666,20 +680,30 @@ impl ControllerSerializer {
         write_string(&mut buf, &format!("HID: {}", cap.device_id));
 
         // Build modes
-        let modes = self.build_modes(cap);
         // num_modes (u16)
         buf.extend_from_slice(&(modes.len() as u16).to_le_bytes());
-        // active_mode (i32) — default to 0 (first mode)
-        buf.extend_from_slice(&0i32.to_le_bytes());
+        // active_mode (i32)
+        buf.extend_from_slice(&active_mode.to_le_bytes());
         // mode data (no u16 prefix — count was already written above)
-        for mode_buf in &modes {
-            buf.extend_from_slice(mode_buf);
+        for mode_buf in modes {
+            mode_buf.write(&mut buf, self.protocol_version);
         }
 
         // zones (u16 count + data)
         buf.extend_from_slice(&(cap.zones.len() as u16).to_le_bytes());
-        for zone in &cap.zones {
+        for (index, zone) in cap.zones.iter().enumerate() {
             self.write_zone(&mut buf, zone);
+            if self.protocol_version >= 6 {
+                let state = zone_modes.and_then(|zones| zones.get(index));
+                buf.extend_from_slice(&state.map_or(-1, |s| s.active_mode).to_le_bytes()); // active zone mode
+                buf.extend_from_slice(&(state.map_or(0, |s| s.modes.len()) as u16).to_le_bytes());
+                if let Some(state) = state {
+                    for mode in &state.modes {
+                        mode.write(&mut buf, self.protocol_version);
+                    }
+                }
+                write_string(&mut buf, ""); // zone alternate name
+            }
         }
 
         // LEDs (u16 count + data)
@@ -689,25 +713,37 @@ impl ControllerSerializer {
         for zone in &cap.zones {
             for i in 0..zone.led_count {
                 write_string(&mut buf, &format!("{} LED {}", zone.name, i));
-                buf.extend_from_slice(&(led_idx as u32).to_le_bytes()); // value
+                if self.protocol_version < 6 {
+                    buf.extend_from_slice(&(led_idx as u32).to_le_bytes());
+                }
                 led_idx += 1;
             }
         }
 
-        // colors (u16 count + 4 bytes each) — initialize to white
+        // colors (u16 count + 4 bytes each)
         buf.extend_from_slice(&(total_leds as u16).to_le_bytes());
-        for _ in 0..total_leds {
-            buf.extend_from_slice(&[255, 255, 255, 0]); // RGBA, A=0
+        for color in colors {
+            buf.extend_from_slice(color);
+            buf.push(0);
+        }
+        if self.protocol_version >= 5 {
+            buf.extend_from_slice(&0u16.to_le_bytes()); // alternate names
+            buf.extend_from_slice(&0u32.to_le_bytes()); // controller flags
+        }
+        if self.protocol_version >= 6 {
+            write_string(&mut buf, ""); // controller alternate name
+            buf.extend_from_slice(&1u32.to_le_bytes()); // configuration string length, including null
+            buf.push(0); // empty device-specific configuration
         }
 
-        // Fill in data_size (everything after the data_size field itself)
+        // SDK size includes the size field.
         let data_size = (buf.len()) as u32;
         buf[0..4].copy_from_slice(&data_size.to_le_bytes());
 
         buf
     }
 
-    fn build_modes(&self, cap: &RgbDeviceCapabilities) -> Vec<Vec<u8>> {
+    fn build_modes(&self, cap: &RgbDeviceCapabilities) -> Vec<ModeData> {
         let mut modes = Vec::new();
 
         // Always add a "Direct" mode first (mode index 0)
@@ -749,10 +785,16 @@ impl ControllerSerializer {
             };
 
             modes.push(self.build_mode_entry(
-                name, value, flags, color_mode, colors_min, colors_max, 0, // speed_min
+                name,
+                value,
+                flags,
+                color_mode,
+                colors_min,
+                colors_max,
+                0, // speed_min
                 4, // speed_max
-                2, // default speed
-                4, // default brightness
+                DEFAULT_SPEED,
+                DEFAULT_BRIGHTNESS,
             ));
         }
 
@@ -770,45 +812,25 @@ impl ControllerSerializer {
         colors_max: u32,
         speed_min: u32,
         speed_max: u32,
-        default_speed: u32,
-        default_brightness: u32,
-    ) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(128);
-
-        write_string(&mut buf, name);
-        buf.extend_from_slice(&(value as i32).to_le_bytes()); // value
-        buf.extend_from_slice(&flags.to_le_bytes());
-        buf.extend_from_slice(&speed_min.to_le_bytes());
-        buf.extend_from_slice(&speed_max.to_le_bytes());
-
-        if self.protocol_version >= 3 {
-            buf.extend_from_slice(&0u32.to_le_bytes()); // brightness_min
-            buf.extend_from_slice(&4u32.to_le_bytes()); // brightness_max
+        speed: u32,
+        brightness: u32,
+    ) -> ModeData {
+        ModeData {
+            name: name.into(),
+            value,
+            flags,
+            color_mode,
+            colors_min,
+            colors_max,
+            speed_min,
+            speed_max,
+            brightness_min: 0,
+            brightness_max: MAX_EFFECT_VALUE,
+            speed,
+            brightness,
+            direction: DIR_RIGHT,
+            colors: vec![[255; 3]; colors_min as usize],
         }
-
-        buf.extend_from_slice(&colors_min.to_le_bytes());
-        buf.extend_from_slice(&colors_max.to_le_bytes());
-        buf.extend_from_slice(&default_speed.to_le_bytes()); // speed
-
-        if self.protocol_version >= 3 {
-            buf.extend_from_slice(&default_brightness.to_le_bytes()); // brightness
-        }
-
-        buf.extend_from_slice(&(DIR_RIGHT).to_le_bytes()); // direction
-        buf.extend_from_slice(&color_mode.to_le_bytes());
-
-        // colors: include defaults when colors_min > 0
-        if colors_min > 0 {
-            let n = colors_min.max(1);
-            buf.extend_from_slice(&(n as u16).to_le_bytes());
-            for _ in 0..n {
-                buf.extend_from_slice(&[255, 255, 255, 0]);
-            }
-        } else {
-            buf.extend_from_slice(&0u16.to_le_bytes());
-        }
-
-        buf
     }
 
     fn write_zone(&self, buf: &mut Vec<u8>, zone: &lianli_shared::rgb::RgbZoneInfo) {
@@ -823,6 +845,9 @@ impl ControllerSerializer {
         if self.protocol_version >= 4 {
             buf.extend_from_slice(&0u16.to_le_bytes()); // 0 segments
         }
+        if self.protocol_version >= 5 {
+            buf.extend_from_slice(&0u32.to_le_bytes()); // zone flags
+        }
     }
 }
 
@@ -832,52 +857,6 @@ fn write_string(buf: &mut Vec<u8>, s: &str) {
     buf.extend_from_slice(&len.to_le_bytes());
     buf.extend_from_slice(s.as_bytes());
     buf.push(0); // null terminator
-}
-
-/// Read an OpenRGB-format string: u16 length + bytes + null.
-fn read_string(data: &[u8], cursor: &mut usize) -> Option<String> {
-    if *cursor + 2 > data.len() {
-        return None;
-    }
-    let len = u16::from_le_bytes(data[*cursor..*cursor + 2].try_into().ok()?) as usize;
-    *cursor += 2;
-    if *cursor + len > data.len() || len == 0 {
-        return None;
-    }
-    let bytes = &data[*cursor..*cursor + len - 1]; // exclude null
-    *cursor += len;
-    Some(String::from_utf8_lossy(bytes).to_string())
-}
-
-fn read_u32(data: &[u8], cursor: &mut usize) -> Option<u32> {
-    if *cursor + 4 > data.len() {
-        return None;
-    }
-    let val = u32::from_le_bytes(data[*cursor..*cursor + 4].try_into().ok()?);
-    *cursor += 4;
-    Some(val)
-}
-
-fn read_u16(data: &[u8], cursor: &mut usize) -> Option<u16> {
-    if *cursor + 2 > data.len() {
-        return None;
-    }
-    let val = u16::from_le_bytes(data[*cursor..*cursor + 2].try_into().ok()?);
-    *cursor += 2;
-    Some(val)
-}
-
-/// Parse colors from OpenRGB wire format (4 bytes each: R, G, B, A).
-fn parse_colors(data: &[u8], count: usize) -> Vec<[u8; 3]> {
-    let mut colors = Vec::with_capacity(count);
-    for i in 0..count {
-        let offset = i * 4;
-        if offset + 3 > data.len() {
-            break;
-        }
-        colors.push([data[offset], data[offset + 1], data[offset + 2]]);
-    }
-    colors
 }
 
 /// Map an OpenRGB mode name (from our own exposed modes) back to RgbMode.

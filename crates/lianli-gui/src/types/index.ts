@@ -368,6 +368,7 @@ export interface RgbAppConfig {
   enabled: boolean;
   openrgb_server: boolean;
   openrgb_port: number;
+  openrgb_regions?: boolean;
   devices: RgbDeviceConfig[];
   merge_lighting?: MergeLightingConfig | null;
 }

@@ -803,13 +803,6 @@ impl ServiceManager {
         if lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed) {
             return;
         }
-        let mut all_wired = if let Some(ref rgb) = self.controllers.rgb {
-            rgb.lock().drain_wired()
-        } else {
-            HashMap::new()
-        };
-        all_wired.extend(wired_rgb);
-
         let wireless = if self.wireless.has_discovered_devices() {
             Some(Arc::new(self.wireless.clone()))
         } else {
@@ -819,6 +812,8 @@ impl ServiceManager {
         if let Some(rgb) = &self.controllers.rgb {
             {
                 let mut controller = rgb.lock();
+                let mut all_wired = controller.drain_wired();
+                all_wired.extend(wired_rgb);
                 controller.replace_wired(all_wired);
                 controller.set_wireless(wireless);
                 controller.refresh_wireless_devices();
@@ -827,7 +822,7 @@ impl ServiceManager {
             return;
         }
 
-        let mut controller = RgbController::new(all_wired, wireless);
+        let mut controller = RgbController::new(wired_rgb, wireless);
 
         // Start thermal alert monitor and share override state with RGB controller
         let thermal_settings = self
@@ -901,18 +896,19 @@ impl ServiceManager {
 
     /// Start or restart the OpenRGB SDK server based on config.
     pub(super) fn start_openrgb_server(&mut self) {
-        let (enabled, port) = self
+        let (enabled, port, regions_enabled) = self
             .config
             .as_ref()
             .and_then(|c| c.rgb.as_ref())
-            .map(|rgb| (rgb.openrgb_server, rgb.openrgb_port))
-            .unwrap_or((false, 6743));
+            .map(|rgb| (rgb.openrgb_server, rgb.openrgb_port, rgb.openrgb_regions))
+            .unwrap_or((false, 6743, false));
 
         let current_state = self.openrgb.state.lock().clone();
         let needs_restart = self.openrgb.thread.as_ref().is_some_and(|thread| {
             thread.is_finished()
                 || current_state.error.is_some()
                 || current_state.port != Some(port)
+                || current_state.regions_enabled != regions_enabled
                 || !enabled
         });
 
@@ -925,7 +921,7 @@ impl ServiceManager {
             if let Some(thread) = self.controllers.direct_color_writer.take() {
                 let _ = thread.join();
             }
-            self.controllers.direct_color_buffer.lock().take_all();
+            self.controllers.direct_color_buffer.lock().clear();
             let mut s = self.openrgb.state.lock();
             *s = openrgb_server::OpenRgbServerState::default();
         }
@@ -944,6 +940,7 @@ impl ServiceManager {
                 Arc::clone(rgb),
                 Arc::clone(&self.controllers.direct_color_buffer),
                 port,
+                regions_enabled,
                 Arc::clone(&self.openrgb.stop),
                 Arc::clone(&self.openrgb.state),
             ));

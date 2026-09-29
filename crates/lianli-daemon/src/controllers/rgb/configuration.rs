@@ -85,6 +85,7 @@ impl RgbController {
                 .and_then(|saved| saved.fan_led_count);
             match device.configure_fan_led_count(count) {
                 Ok(true) => {
+                    self.capabilities_changed();
                     self.configured.remove(id);
                     self.mb_sync_state.remove(id);
                     self.applied.remove(id);
@@ -191,6 +192,19 @@ impl RgbController {
                 );
             }
         }
+    }
+
+    pub fn saved_group_effects(&self, id: &str) -> anyhow::Result<Vec<RgbEffect>> {
+        let Some(device) = self
+            .config
+            .as_ref()
+            .and_then(|config| config.devices.iter().find(|device| device.device_id == id))
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(self
+            .configured_group_effects(device, &self.presets)?
+            .unwrap_or_default())
     }
 
     fn configured_group_effects(
@@ -427,6 +441,10 @@ mod tests {
         }];
         controller.apply_config(&config, &presets);
         assert_eq!(
+            controller.saved_group_effects("ene:group0").unwrap(),
+            vec![effects[0].effect.clone()]
+        );
+        assert_eq!(
             received.try_recv().unwrap(),
             vec![effects[0].effect.clone()]
         );
@@ -438,6 +456,46 @@ mod tests {
             received.try_recv().unwrap(),
             vec![effects[0].effect.clone()]
         );
+        controller.stop();
+    }
+
+    #[test]
+    fn openrgb_initial_state_resolves_active_presets_without_hardware_writes() {
+        let (sender, received) = mpsc::channel();
+        let mut controller = RgbController::new(
+            HashMap::from([(
+                "ene:group0".into(),
+                Arc::new(GroupDevice(sender)) as Arc<dyn RgbDevice>,
+            )]),
+            None,
+        );
+        let mut device = saved_device("ene:group0");
+        device.active_preset = Some("saved".into());
+        let effect = RgbEffect {
+            mode: RgbMode::Breathing,
+            colors: vec![[255, 0, 0]],
+            ..Default::default()
+        };
+        let presets = [RgbPreset {
+            name: "saved".into(),
+            device_id: device.device_id.clone(),
+            zones: vec![],
+            regions: Some(vec![lianli_shared::rgb::RgbRegionConfig {
+                effect: effect.clone(),
+                flip: false,
+            }]),
+        }];
+        let config = RgbAppConfig {
+            openrgb_server: true,
+            devices: vec![device],
+            ..Default::default()
+        };
+        controller.apply_config(&config, &presets);
+        assert_eq!(
+            controller.saved_group_effects("ene:group0").unwrap(),
+            [effect]
+        );
+        assert!(received.try_recv().is_err());
         controller.stop();
     }
 
