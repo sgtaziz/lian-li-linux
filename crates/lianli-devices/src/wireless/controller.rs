@@ -12,7 +12,7 @@ use super::{
 use anyhow::{bail, Context, Result};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -20,9 +20,19 @@ use tracing::{debug, error, info, warn};
 
 const TX_FAILURE_THRESHOLD: u32 = 5;
 
-/// How many master-clock init frames to send before switching to steady state.
-/// L-Connect3 sends three; sending one leaves a single chance over a lossy link.
-const CLOCK_INIT_FRAMES: u8 = 3;
+/// Builds the RF_ClockSync frame. rf_data[14..64] always carries the vendor
+/// 0x14 "unset" sentinel: targeted frames read rx_type and channel from that
+/// region, and fans that latched sensor values there (rx = CPU temperature,
+/// channel 0) dropped off the receiver until power-cycled.
+fn master_clock_rf_data(master_mac: &[u8; 6], payload: &[u8; 220]) -> Vec<u8> {
+    let mut rf_data = vec![0u8; RF_DATA_SIZE];
+    rf_data[0] = RF_SELECT;
+    rf_data[1] = super::RF_CLOCK_SYNC;
+    rf_data[8..14].copy_from_slice(master_mac);
+    rf_data[14..64].fill(0x14);
+    rf_data[64..234].copy_from_slice(&payload[50..220]);
+    rf_data
+}
 
 struct RuntimeClaim(Arc<AtomicBool>);
 
@@ -56,7 +66,6 @@ pub struct WirelessController {
     pub(super) discovered_devices: Arc<Mutex<Vec<DiscoveredDevice>>>,
     pub(super) device_health: DeviceHealthMap,
     pub(super) master_entries: MasterEntryMap,
-    pub(super) clock_init_count: Arc<AtomicU8>,
     pub(super) tx_failures: Arc<AtomicU32>,
     pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
     pub(super) mb_rgb_targets: MbRgbTargetMap,
@@ -87,7 +96,6 @@ impl Clone for WirelessController {
             discovered_devices: Arc::clone(&self.discovered_devices),
             device_health: Arc::clone(&self.device_health),
             master_entries: Arc::clone(&self.master_entries),
-            clock_init_count: Arc::clone(&self.clock_init_count),
             tx_failures: Arc::clone(&self.tx_failures),
             desired_effects: Arc::clone(&self.desired_effects),
             mb_rgb_targets: Arc::clone(&self.mb_rgb_targets),
@@ -120,7 +128,6 @@ impl WirelessController {
             discovered_devices: Arc::new(Mutex::new(Vec::new())),
             device_health: Arc::new(Mutex::new(Default::default())),
             master_entries: Arc::new(Mutex::new(Default::default())),
-            clock_init_count: Arc::new(AtomicU8::new(0)),
             tx_failures: Arc::new(AtomicU32::new(0)),
             desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
             mb_rgb_targets: Arc::new(Mutex::new(Default::default())),
@@ -291,7 +298,6 @@ impl WirelessController {
         thread::sleep(Duration::from_millis(500));
 
         self.video_mode_active.store(false, Ordering::Release);
-        self.clock_init_count.store(0, Ordering::Release);
 
         let stop_flag = self.poll_stop.clone();
         let discovered_devices = Arc::clone(&self.discovered_devices);
@@ -449,40 +455,15 @@ impl WirelessController {
         Ok(())
     }
 
-    /// Broadcast a "master clock" sync packet (RF sub-command 0x14) carrying
-    /// 220 bytes of CPU/GPU info. This must be sent once per second; missing
+    /// Broadcast a "master clock" sync packet (RF sub-command 0x14). This
+    /// must be sent once per second; missing
     /// it appears to put the fan firmware into an autonomous fallback that
     /// occasionally spikes RPM.
     pub fn send_master_clock(&self, payload: &[u8; 220]) -> Result<()> {
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
 
-        let mut rf_data = vec![0u8; RF_DATA_SIZE];
-        rf_data[0] = RF_SELECT;
-        rf_data[1] = super::RF_CLOCK_SYNC;
-        rf_data[8..14].copy_from_slice(&master_mac);
-        // The vendor sends the init frame three times; this daemon sent it once.
-        //
-        // The init frame is the one that fills rf_data[14..64] with the 0x14
-        // "unset" sentinel rather than sensor data. rf_data[14] is also the
-        // offset targeted frames use for rx_type, and build_payload() puts
-        // cpu_temp at payload[0], so every steady-state broadcast carries a
-        // temperature in that field. Devices that never saw the sentinel appear
-        // to treat it as live: measured on this hardware, 11 of 12 unexplained
-        // rx changes matched the CPU temperature being broadcast at the time,
-        // and two chains latching the same temperature collide on one slot.
-        //
-        // Over a lossy RF link one attempt is one chance. L-Connect3 sends three
-        // (observed in capture); match that.
-        let sent = self.clock_init_count.load(Ordering::Acquire);
-        let init = sent < CLOCK_INIT_FRAMES;
-        if init {
-            // vendor init frame: fixedData region carries the 0x14 "unset" sentinel
-            rf_data[14..64].fill(0x14);
-            rf_data[64..234].copy_from_slice(&payload[50..220]);
-        } else {
-            rf_data[14..234].copy_from_slice(payload);
-        }
+        let rf_data = master_clock_rf_data(&master_mac, payload);
 
         self.tx_recover(|handle| {
             for chunk_idx in 0..RF_CHUNKS as u8 {
@@ -503,9 +484,6 @@ impl WirelessController {
             }
             Ok(())
         })?;
-        if init {
-            self.clock_init_count.fetch_add(1, Ordering::Release);
-        }
         Ok(())
     }
 
@@ -1027,9 +1005,6 @@ mod tests {
         let mut owner = WirelessController::new();
         owner.runtime_claim = Some(RuntimeClaim::acquire(&owner.runtime_claimed).unwrap());
         owner.poll_stop.store(true, Ordering::Release);
-        owner
-            .clock_init_count
-            .store(CLOCK_INIT_FRAMES, Ordering::Release);
         let mut clone = owner.clone();
 
         assert!(clone
@@ -1045,7 +1020,20 @@ mod tests {
         drop(clone);
         assert!(owner.runtime_claimed.load(Ordering::Acquire));
         assert!(owner.poll_stop.load(Ordering::Acquire));
-        assert!(owner.clock_init_count.load(Ordering::Acquire) >= CLOCK_INIT_FRAMES);
+    }
+
+    #[test]
+    fn master_clock_never_puts_sensor_data_in_addressing_bytes() {
+        let mut payload = [0u8; 220];
+        payload[0] = 82;
+        payload[1] = 0;
+        payload[50] = 0xAB;
+        let rf_data = master_clock_rf_data(&[1, 2, 3, 4, 5, 6], &payload);
+
+        assert_eq!(rf_data.len(), RF_DATA_SIZE);
+        assert_eq!(&rf_data[8..14], &[1, 2, 3, 4, 5, 6]);
+        assert!(rf_data[14..64].iter().all(|&b| b == 0x14));
+        assert_eq!(rf_data[64], 0xAB);
     }
 
     #[test]
