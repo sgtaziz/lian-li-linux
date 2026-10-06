@@ -52,22 +52,39 @@ async function recheck() {
       <n-button size="small" text type="primary" @click="guide(installation.report?.context.kind === 'distrobox' ? 'distrobox' : 'service_modes')">Setup guide</n-button>
     </div>
     <p v-if="!daemon.connected" class="muted">Start a service in Settings, then Recheck.</p>
-    <div class="checks-grid">
-      <n-card v-for="finding in needsAttention" :key="finding.code" :title="finding.title" size="small">
-        <template #header-extra><n-tag size="small" :type="finding.severity === 'error' ? 'error' : 'warning'">{{ stateLabels[finding.state] }}</n-tag></template>
-        <p>{{ finding.remediation || finding.evidence }}</p>
-        <details><summary>Details</summary><p class="check-context">{{ finding.context }} · {{ finding.feature }}</p><p>{{ finding.evidence }}</p></details>
-        <n-button size="small" text @click="guide(finding.guide)">Open guide</n-button>
-      </n-card>
+    <div v-if="needsAttention.length" class="check-list">
+      <details v-for="finding in needsAttention" :key="finding.code" class="check-row">
+        <summary>
+          <n-tag size="small" :type="finding.severity === 'error' ? 'error' : 'warning'">{{ stateLabels[finding.state] }}</n-tag>
+          <span class="check-text">
+            <span class="check-title">{{ finding.title }}</span>
+            <span class="check-sub">{{ finding.remediation || finding.evidence }}</span>
+          </span>
+        </summary>
+        <div class="check-details">
+          <p class="check-context">{{ finding.context }} · {{ finding.feature }}</p>
+          <p>{{ finding.evidence }}</p>
+          <n-button size="small" text type="primary" @click="guide(finding.guide)">Open guide</n-button>
+        </div>
+      </details>
     </div>
+    <p v-else-if="installation.report" class="all-good">All checks that need attention pass.</p>
     <details v-if="otherFindings.length" class="passed-checks">
       <summary>{{ otherFindings.length }} passed or non-applicable checks</summary>
-      <div class="checks-grid">
-        <n-card v-for="finding in otherFindings" :key="finding.code" size="small" :title="finding.title">
-          <template #header-extra><n-tag size="small" :type="finding.state === 'passed' ? 'success' : 'default'">{{ stateLabels[finding.state] }}</n-tag></template>
-          <p class="check-context">{{ finding.feature }}</p>
-          <details><summary>Details</summary><p>{{ finding.evidence }}</p><n-button size="small" text @click="guide(finding.guide)">Open guide</n-button></details>
-        </n-card>
+      <div class="check-list">
+        <details v-for="finding in otherFindings" :key="finding.code" class="check-row">
+          <summary>
+            <n-tag size="small" :type="finding.state === 'passed' ? 'success' : 'default'">{{ stateLabels[finding.state] }}</n-tag>
+            <span class="check-text">
+              <span class="check-title">{{ finding.title }}</span>
+              <span class="check-sub">{{ finding.feature }}</span>
+            </span>
+          </summary>
+          <div class="check-details">
+            <p>{{ finding.evidence }}</p>
+            <n-button size="small" text type="primary" @click="guide(finding.guide)">Open guide</n-button>
+          </div>
+        </details>
       </div>
     </details>
     <MediaStreamStatus />
@@ -83,7 +100,20 @@ async function recheck() {
 h1 { font-size: var(--font-size-2xl); margin: 0; }
 p { margin: var(--space-3) 0; overflow-wrap: anywhere; }
 .check-context { color: var(--text-secondary); }
-.checks-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--space-3); }
+.check-list { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface); }
+.check-row + .check-row { border-top: 1px solid var(--border); }
+.check-row > summary { display: flex; align-items: flex-start; gap: var(--space-3); margin: 0; padding: var(--space-2) var(--space-3); color: var(--text-primary); list-style: none; }
+.check-row > summary::-webkit-details-marker { display: none; }
+.check-row > summary:hover { background: var(--bg-hover); }
+.check-row > summary .n-tag { flex-shrink: 0; width: 82px; justify-content: center; }
+.check-text { display: flex; flex-direction: column; min-width: 0; }
+.check-title { font-weight: 600; font-size: var(--font-size-sm); }
+.check-sub { font-size: var(--font-size-xs); color: var(--text-secondary); overflow-wrap: anywhere; }
+.check-row:not([open]) .check-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.check-details { padding: 0 var(--space-3) var(--space-2) calc(82px + var(--space-3) * 2); font-size: var(--font-size-sm); }
+.check-details p { margin: var(--space-1) 0; }
+.passed-checks > .check-list { margin-top: var(--space-2); }
+.all-good { color: var(--success); margin: 0; }
 .connection-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 summary { cursor: pointer; color: var(--text-secondary); margin-bottom: var(--space-2); }
 </style>

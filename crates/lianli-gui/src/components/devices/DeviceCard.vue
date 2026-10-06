@@ -8,6 +8,7 @@ import { useFansStore } from "@/stores/fans";
 import { useLcdStore } from "@/stores/lcd";
 import { useAioStore } from "@/stores/aio";
 import { useConfigStore } from "@/stores/config";
+import { useDaemonStore } from "@/stores/daemon";
 import { useIpc } from "@/composables/useIpc";
 import { fanQuantityKey, fanQuantityPort, stageFanQuantity } from "@/utils/fanQuantity";
 import {
@@ -24,6 +25,7 @@ const fans = useFansStore();
 const lcd = useLcdStore();
 const aio = useAioStore();
 const config = useConfigStore();
+const daemon = useDaemonStore();
 const dialog = useDialog();
 const ipc = useIpc();
 
@@ -153,13 +155,57 @@ async function onUnbind() {
 }
 
 async function refreshSoon() {
-  const { useDaemonStore } = await import("@/stores/daemon");
-  await useDaemonStore().refresh();
+  await daemon.refresh();
 }
 
-function badgeClass(kind: string) {
-  return `badge-${kind}`;
-}
+const primaryIcon = computed(() => {
+  if (caps.value.lcd) return Monitor;
+  if (caps.value.pump) return Droplet;
+  if (caps.value.fan) return Fan;
+  return Palette;
+});
+
+const role = computed(() => {
+  if (caps.value.fan && fanRpms.value.length > 1) return `Fan group · ${fanRpms.value.length} fans`;
+  if (caps.value.lcd && !caps.value.fan && !caps.value.pump) return "LCD screen";
+  return null;
+});
+
+const subtitle = computed(() =>
+  [
+    role.value,
+    familyName.value,
+    isBoundWireless.value || isUnboundWireless.value ? "Wireless" : null,
+    d.value.serial ? `SN ${d.value.serial}` : null,
+    d.value.firmware_version ? `FW ${d.value.firmware_version}` : null,
+  ].filter(Boolean).join(" · "),
+);
+
+type StatusTone = "success" | "warning" | "danger" | "muted" | "info";
+const status = computed<{ label: string; tone: StatusTone; busy?: boolean }>(() => {
+  if (!daemon.connected) return { label: "Offline", tone: "muted" };
+  switch (pending.value) {
+    case "switch": return { label: "Switching…", tone: "warning", busy: true };
+    case "bind": return { label: "Binding…", tone: "warning", busy: true };
+    case "unbind": return { label: "Unbinding…", tone: "warning", busy: true };
+    case "fan-quantity": return { label: "Applying…", tone: "warning", busy: true };
+  }
+  if (isUnboundWireless.value) {
+    return isBindOther.value
+      ? { label: foreignOnline.value ? "Other PC (online)" : "Other PC (offline)", tone: "muted" }
+      : { label: "Not bound", tone: "muted" };
+  }
+  if (d.value.telemetry?.error) return { label: "Telemetry error", tone: "danger" };
+  if (isDesktop.value) return { label: "Desktop mode", tone: "info" };
+  return { label: "Online", tone: "success" };
+});
+
+const temperatureReadings = computed(() =>
+  (d.value.telemetry?.temperatures ?? []).map((reading) => ({
+    name: reading.name,
+    text: reading.celsius == null ? (reading.abnormal ? "Abnormal" : "N/A") : `${reading.celsius.toFixed(1)}°C`,
+  })),
+);
 
 async function ping() {
   try {
@@ -175,220 +221,241 @@ async function ping() {
 </script>
 
 <template>
-  <div class="card device-card">
-    <div class="head">
-      <div class="head-text">
-        <div class="name">{{ d.name }}</div>
-        <div class="family">{{ familyName }}</div>
+  <div class="device-row">
+    <div class="icon-box"><component :is="primaryIcon" :size="18" /></div>
+
+    <div class="identity">
+      <div class="name-line">
+        <span class="name">{{ d.name }}</span>
+        <span class="caps">
+          <Monitor v-if="caps.lcd" :size="12" class="cap-lcd" title="LCD" />
+          <Fan v-if="caps.fan" :size="12" class="cap-fan" title="Fan" />
+          <Droplet v-if="caps.pump" :size="12" class="cap-pump" title="Pump" />
+          <Palette v-if="caps.rgb" :size="12" class="cap-rgb" title="RGB" />
+        </span>
       </div>
-      <button v-if="caps.rgb" class="ping-btn" title="Identify device" @click="ping">
-        <Locate :size="15" />
-      </button>
+      <div class="subtitle">{{ subtitle }}</div>
+      <p v-if="d.telemetry?.error" class="error-text">{{ d.telemetry.error }}</p>
+      <p v-if="isUnboundWireless && isBindOther" class="subtitle">Owned by another controller</p>
     </div>
 
-    <div class="badges">
-      <span v-if="caps.lcd" class="badge" :class="badgeClass('lcd')">
-        <Monitor :size="11" /> LCD
+    <span class="status" :class="`tone-${status.tone}`">
+      <Loader2 v-if="status.busy" :size="11" class="spin" />
+      <span v-else class="dot" />
+      {{ status.label }}
+    </span>
+
+    <div class="readings">
+      <span v-if="fanRpmText" class="reading" :title="`Fan RPM: ${fanRpmText}`">
+        <Fan :size="12" /><span class="mono">{{ fanRpmText }}</span>
       </span>
-      <span v-if="caps.fan" class="badge" :class="badgeClass('fan')">
-        <Fan :size="11" /> Fan
+      <span v-if="coolantText" class="reading" title="Coolant">
+        <Droplet :size="12" /><span class="mono">{{ coolantText }}</span>
       </span>
-      <span v-if="caps.pump" class="badge" :class="badgeClass('pump')">
-        <Droplet :size="11" /> Pump
+      <span v-for="reading in temperatureReadings" :key="reading.name" class="reading" :title="reading.name">
+        <span class="reading-label">{{ reading.name }}</span><span class="mono">{{ reading.text }}</span>
       </span>
-      <span v-if="caps.rgb" class="badge" :class="badgeClass('rgb')">
-        <Palette :size="11" /> RGB
+      <span v-if="resolution" class="reading" title="Screen">
+        <Monitor :size="12" /><span class="mono">{{ resolution }}</span>
       </span>
     </div>
 
-    <div class="meta">
-      <div v-if="d.serial" class="meta-row">
-        <span class="muted">Serial</span>
-        <span class="mono">{{ d.serial }}</span>
-      </div>
-      <div v-if="resolution" class="meta-row">
-        <span class="muted">Screen</span>
-        <span class="mono">{{ resolution }}</span>
-      </div>
-      <div v-if="fanRpmText" class="meta-row">
-        <span class="muted">Fan RPM</span>
-        <span class="mono">{{ fanRpmText }}</span>
-      </div>
-      <div v-if="coolantText" class="meta-row">
-        <span class="muted">Coolant</span>
-        <span class="mono">{{ coolantText }}</span>
-      </div>
-      <template v-if="d.telemetry">
-        <div v-if="d.telemetry.serial" class="meta-row">
-          <span class="muted">Hub serial</span><span class="mono">{{ d.telemetry.serial }}</span>
-        </div>
-        <div v-for="reading in d.telemetry.temperatures" :key="reading.name" class="meta-row">
-          <span class="muted">{{ reading.name }}</span>
-          <span class="mono">{{ reading.celsius == null ? (reading.abnormal ? 'Abnormal / unavailable' : 'Unavailable') : `${reading.celsius.toFixed(2)}°C` }}</span>
-        </div>
-        <p v-if="d.telemetry.error" class="hint">{{ d.telemetry.error }}</p>
-      </template>
-      <div v-if="d.firmware_version" class="meta-row">
-        <span class="muted">Firmware</span>
-        <span class="mono">{{ d.firmware_version }}</span>
-      </div>
-    </div>
-
-    <!-- Fan quantity stepper (ENE 6K77) -->
-    <div v-if="supportsFanQuantity" class="action-row">
-      <span class="muted">Fan quantity</span>
-      <n-input-number
-        :value="fanQty"
-        size="small"
-        :min="0"
-        :max="d.max_fan_quantity ?? 0"
-        :disabled="pending === 'fan-quantity'"
-        @update:value="onFanQty"
-      />
-    </div>
-
-    <!-- Display-mode switch -->
-    <div v-if="supportsDisplaySwitch" class="action-row">
+    <div class="actions">
+      <label v-if="supportsFanQuantity" class="qty">
+        <span class="muted">Fans</span>
+        <n-input-number
+          :value="fanQty"
+          size="tiny"
+          :min="0"
+          :max="d.max_fan_quantity ?? 0"
+          :disabled="pending === 'fan-quantity'"
+          @update:value="onFanQty"
+        />
+      </label>
       <n-button
-        block
-        size="small"
+        v-if="supportsDisplaySwitch"
+        size="tiny"
         :loading="pending === 'switch'"
         :disabled="pending === 'switch'"
         @click="onSwitchDisplay"
-      >
-        <template v-if="pending === 'switch'" #icon><Loader2 :size="14" class="spin" /></template>
-        {{ pending === "switch" ? "Switching..." : displayModeLabel }}
-      </n-button>
-    </div>
-
-    <!-- Bind / unbind -->
-    <div class="action-row">
-      <div v-if="isUnboundWireless && isBindOther" class="bind-other-note">
-        {{ foreignOnline ? "Owned by another controller (online)" : "Owned by another controller (offline)" }}
-      </div>
+      >{{ pending === "switch" ? "Switching…" : displayModeLabel }}</n-button>
       <n-button
         v-if="isUnboundWireless"
-        block
-        size="small"
+        size="tiny"
         :type="isBindOther ? 'warning' : 'primary'"
         :loading="pending === 'bind'"
         :disabled="pending === 'bind' || (isBindOther && foreignOnline)"
         @click="onBind"
-      >
-        <template v-if="pending === 'bind'" #icon><Loader2 :size="14" class="spin" /></template>
-        {{ bindLabel }}
-      </n-button>
+      >{{ bindLabel }}</n-button>
       <n-button
         v-if="isBoundWireless"
-        block
-        size="small"
+        size="tiny"
         :loading="pending === 'unbind'"
         :disabled="pending === 'unbind'"
         @click="onUnbind"
-      >
-        <template v-if="pending === 'unbind'" #icon><Loader2 :size="14" class="spin" /></template>
-        {{ pending === "unbind" ? "Unbinding..." : "Unbind" }}
-      </n-button>
+      >{{ pending === "unbind" ? "Unbinding…" : "Unbind" }}</n-button>
+      <button v-if="caps.rgb" class="ping-btn" title="Identify device" @click="ping">
+        <Locate :size="15" />
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.device-card {
-  /* Tighter than the default card padding to reduce empty space. */
-  padding: var(--space-4);
+.device-row {
+  display: grid;
+  grid-template-columns: 36px minmax(180px, 1.4fr) 130px minmax(0, 1.6fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+.device-row + .device-row {
+  border-top: 1px solid var(--border);
+}
+.icon-box {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+.identity {
+  min-width: 0;
+}
+.name-line {
+  display: flex;
+  align-items: center;
   gap: var(--space-2);
 }
-.head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-.head-text {
-  display: flex;
-  flex-direction: column;
-}
-.head .name {
+.name {
   font-weight: 600;
-  font-size: var(--font-size-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.head .family {
+.caps {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.cap-lcd { color: var(--purple); }
+.cap-fan { color: var(--accent); }
+.cap-pump { color: var(--teal); }
+.cap-rgb { color: var(--pink); }
+.subtitle {
+  margin: 0;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.error-text {
+  margin: 2px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.tone-success { color: var(--success); }
+.tone-warning { color: var(--warning); }
+.tone-danger { color: var(--danger); }
+.tone-info { color: var(--accent); }
+.tone-muted { color: var(--text-muted); }
+.readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
   font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+.reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.reading .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.reading-label {
+  font-size: var(--font-size-xs);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.qty {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+}
+.qty .n-input-number {
+  width: 84px;
 }
 .ping-btn {
-  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
 }
 .ping-btn:hover {
   background: var(--bg-elevated);
   color: var(--text-primary);
 }
-.badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-.badge {
-  font-size: var(--font-size-xs);
-}
-.badge-lcd {
-  background: rgba(167, 139, 250, 0.15);
-  color: var(--purple);
-}
-.badge-fan {
-  background: rgba(79, 158, 255, 0.15);
-  color: var(--accent);
-}
-.badge-pump {
-  background: rgba(45, 212, 191, 0.15);
-  color: var(--teal);
-}
-.badge-rgb {
-  background: rgba(244, 114, 182, 0.15);
-  color: var(--pink);
-}
-.meta {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-.meta-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--font-size-sm);
-}
-.mono {
-  font-family: var(--font-mono);
-}
-.action-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-.bind-other-note {
-  font-size: var(--font-size-sm);
-  opacity: 0.75;
-}
 .spin {
   animation: spin 1s linear infinite;
 }
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
+  to { transform: rotate(360deg); }
+}
+@container (max-width: 760px) {
+  .device-row {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+  .readings {
+    grid-column: 2 / -1;
+  }
+  .actions {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
   }
 }
 </style>

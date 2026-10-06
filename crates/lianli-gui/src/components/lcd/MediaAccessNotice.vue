@@ -7,6 +7,7 @@ import { useDaemonStore } from "@/stores/daemon";
 import type { AssetAccessReport, LcdConfig, LcdTemplate } from "@/types";
 
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
+const emit = defineEmits<{ issues: [present: boolean] }>();
 const ipc = useIpc();
 const daemon = useDaemonStore();
 const report = ref<AssetAccessReport | null>(null);
@@ -59,6 +60,7 @@ async function check() {
 }
 
 watch([selection, supported, () => daemon.info?.instance_id, () => daemon.socketPath], schedule, { immediate: true });
+watch(() => !!report.value?.failed, (present) => emit("issues", present), { immediate: true });
 onUnmounted(() => {
   disposed = true;
   revision++;
@@ -76,6 +78,7 @@ onUnmounted(() => {
       <span class="access-summary" role="status" aria-live="polite">{{ summary }}</span>
       <n-button v-if="supported" size="tiny" quaternary :disabled="checking" @click="schedule">Recheck</n-button>
       <n-button v-if="report?.failed" size="tiny" secondary @click="open('https://github.com/sgtaziz/lian-li-linux/blob/main/docs/lcd-assets.md')">File access guide</n-button>
+      <slot name="actions" />
     </div>
     <details v-if="report?.failed || error" class="access-details">
       <summary>View details</summary>

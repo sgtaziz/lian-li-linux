@@ -64,7 +64,7 @@ export const useConfigStore = defineStore("config", () => {
 
   /** Replace the entire config object (used after a daemon reload). */
   function replace(next: AppConfig) {
-    savedLcds.value = next.lcds.map((entry) => ({ ...entry }));
+    savedLcds.value = structuredClone(next.lcds);
     Object.assign(config, defaultConfig(), next);
     dirty.value = false;
     loaded.value = true;

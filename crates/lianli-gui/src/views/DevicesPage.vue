@@ -18,7 +18,7 @@ async function refresh() {
 <template>
   <div class="page devices-page">
     <div class="page-head">
-      <span class="muted">{{ devices.visible.length }} device(s) detected</span>
+      <span class="muted">{{ devices.summary }}</span>
       <n-button quaternary size="small" @click="refresh">
         <template #icon><RefreshCw :size="15" /></template>
       </n-button>
@@ -33,7 +33,7 @@ async function refresh() {
       <n-button size="small" @click="refresh">Retry</n-button>
     </div>
 
-    <div v-else class="grid">
+    <div v-else class="card device-list">
       <DeviceCard
         v-for="d in devices.displayCards"
         :key="d.device_id"
@@ -44,10 +44,9 @@ async function refresh() {
 </template>
 
 <style scoped>
-/* No max-width: let the auto-fit grid use the full content width so wide
-   screens show 4+ cards per row instead of leaving empty space. */
 .page {
   width: 100%;
+  max-width: 1100px;
 }
 .page-head {
   display: flex;
@@ -55,12 +54,9 @@ async function refresh() {
   justify-content: space-between;
   margin-bottom: var(--space-4);
 }
-.grid {
-  display: grid;
-  /* auto-fit collapses empty tracks so cards stretch to fill the row when the
-     window is wide enough for more tracks than there are devices. */
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--space-2);
+.device-list {
+  container-type: inline-size;
+  padding: var(--space-1) 0;
 }
 .empty-state {
   display: flex;

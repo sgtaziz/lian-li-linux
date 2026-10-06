@@ -6,6 +6,7 @@ import { useConfigStore } from "@/stores/config";
 import type { LcdConfig, LcdTemplate } from "@/types";
 
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
+const emit = defineEmits<{ inProgress: [active: boolean] }>();
 interface Result { import_id: string; lcds: LcdConfig[]; templates: LcdTemplate[] }
 interface Status { id: string; active: boolean; result: Result | null; error: string | null }
 const daemon = useDaemonStore();
@@ -16,6 +17,7 @@ const error = ref("");
 const notice = ref("");
 const confirmed = ref(false);
 const pending = ref("");
+const stagedId = ref("");
 let revision = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pendingChecks = 0;
@@ -25,6 +27,7 @@ function reset() {
   clearTimeout(timer);
   status.value = null;
   pending.value = "";
+  stagedId.value = "";
   pendingChecks = 0;
   busy.value = false;
   error.value = "";
@@ -32,6 +35,15 @@ function reset() {
   confirmed.value = false;
 }
 watch([() => daemon.connected, () => daemon.info?.instance_id], reset);
+watch(
+  () =>
+    busy.value ||
+    !!pending.value ||
+    !!status.value?.active ||
+    (!!status.value?.result && status.value.id !== stagedId.value),
+  (active) => emit("inProgress", active),
+  { immediate: true },
+);
 onUnmounted(reset);
 
 async function check() {
@@ -94,6 +106,7 @@ async function stage() {
     const result = await invoke<Result>("managed_import_result", { instance, id: status.value.id });
     if (current !== revision) return;
     config.stageImportedMedia(result.lcds, result.templates, instance);
+    stagedId.value = status.value?.id ?? "";
     confirmed.value = false;
     notice.value = "Copied paths are staged. Save the configuration to apply them, or Reload to discard these drafts.";
   } catch (reason) {

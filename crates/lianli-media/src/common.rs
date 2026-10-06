@@ -1,7 +1,9 @@
 use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
-use image::imageops::{rotate180, rotate270, rotate90};
+use image::imageops::{crop_imm, overlay, resize, rotate180, rotate270, rotate90, FilterType};
 use image::{RgbImage, RgbaImage};
+use lianli_shared::media::MediaFraming;
 use lianli_shared::screen::ScreenInfo;
+use lianli_shared::template::ImageFit;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -133,6 +135,30 @@ fn encode_png_bytes(img: &turbojpeg::Image<&[u8]>) -> Result<Vec<u8>, MediaError
         }
     }
     Ok(buf)
+}
+
+pub fn frame_rgb(source: &RgbImage, framing: &MediaFraming, width: u32, height: u32) -> RgbImage {
+    let framing = framing.sanitized();
+    if framing.is_default() {
+        return resize(source, width, height, FilterType::Lanczos3);
+    }
+    let crop = framing.source_crop(source.dimensions(), (width, height));
+    let region = crop_imm(source, crop.x, crop.y, crop.width, crop.height).to_image();
+    if framing.fit != ImageFit::Contain {
+        return resize(&region, width, height, FilterType::Lanczos3);
+    }
+    let scale = (width as f64 / crop.width as f64).min(height as f64 / crop.height as f64);
+    let fitted_w = ((crop.width as f64 * scale).round() as u32).clamp(1, width);
+    let fitted_h = ((crop.height as f64 * scale).round() as u32).clamp(1, height);
+    let fitted = resize(&region, fitted_w, fitted_h, FilterType::Lanczos3);
+    let mut canvas = RgbImage::new(width, height);
+    overlay(
+        &mut canvas,
+        &fitted,
+        ((width - fitted_w) / 2).into(),
+        ((height - fitted_h) / 2).into(),
+    );
+    canvas
 }
 
 pub fn render_dimensions(screen: &ScreenInfo, orientation: f32) -> (u32, u32) {

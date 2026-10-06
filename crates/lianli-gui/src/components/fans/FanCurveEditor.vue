@@ -237,7 +237,7 @@ function pointPx(pt: [number, number]) {
   display: block;
   /* Fixed height keeps the plot compact instead of stretching to fill the
      full card width (which made it ~650px tall). Width follows the viewBox. */
-  height: 360px;
+  height: 260px;
   width: auto;
   max-width: 100%;
   margin: 0 auto;

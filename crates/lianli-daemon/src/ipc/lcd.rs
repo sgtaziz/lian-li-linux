@@ -1,10 +1,17 @@
-//! LCD IPC handlers: `SwitchDisplayMode`, `RenderTemplatePreview`.
+//! LCD IPC handlers: `SwitchDisplayMode`, `RenderTemplatePreview`, `RenderSensorPreview`.
 
 use super::EventSender;
 
-use lianli_media::CustomAsset;
+use lianli_media::{CustomAsset, SensorAsset};
+use lianli_shared::config::LcdConfig;
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::media::{MediaType, SensorDescriptor};
 use lianli_shared::screen::ScreenInfo;
+use lianli_shared::sensors::SensorInfo;
+use parking_lot::Mutex;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::ipc::SharedState;
 use crate::service::DaemonEvent;
@@ -216,8 +223,197 @@ pub fn render_template_preview(
     response
 }
 
+const SENSOR_PREVIEW_MAX_EDGE: u32 = 1024;
+const SENSOR_LIST_TTL: Duration = Duration::from_secs(60);
+
+struct CachedSensorPreview {
+    key: String,
+    asset: Arc<SensorAsset>,
+}
+
+static SENSOR_LIST: Mutex<Option<(Instant, Arc<Vec<SensorInfo>>)>> = Mutex::new(None);
+static SENSOR_PREVIEW: Mutex<Option<CachedSensorPreview>> = Mutex::new(None);
+
+fn cached_sensor_list() -> Arc<Vec<SensorInfo>> {
+    if let Some((created, sensors)) = SENSOR_LIST.lock().as_ref() {
+        if created.elapsed() < SENSOR_LIST_TTL {
+            return sensors.clone();
+        }
+    }
+    let sensors = Arc::new(lianli_shared::sensors::enumerate_sensors());
+    *SENSOR_LIST.lock() = Some((Instant::now(), sensors.clone()));
+    sensors
+}
+
+/// Reuses the previous asset while the inputs are unchanged so rate sensors
+/// keep their counter history and fonts are not reloaded on every refresh.
+fn sensor_preview_asset(
+    descriptor: &SensorDescriptor,
+    background: Option<&Path>,
+    screen: &ScreenInfo,
+) -> Result<Arc<SensorAsset>, String> {
+    let key = serde_json::to_string(&(descriptor, background, screen.width, screen.height))
+        .map_err(|error| error.to_string())?;
+    if let Some(cached) = SENSOR_PREVIEW.lock().as_ref() {
+        if cached.key == key {
+            return Ok(cached.asset.clone());
+        }
+    }
+    let asset = SensorAsset::new(
+        descriptor,
+        0.0,
+        screen,
+        &cached_sensor_list(),
+        background,
+        1000,
+    )
+    .map_err(|error| error.to_string())?;
+    *SENSOR_PREVIEW.lock() = Some(CachedSensorPreview {
+        key,
+        asset: asset.clone(),
+    });
+    Ok(asset)
+}
+
+pub fn render_sensor_preview(
+    state: &SharedState,
+    mut lcd: LcdConfig,
+    width: u32,
+    height: u32,
+) -> IpcResponse {
+    if lcd.media_type != MediaType::Sensor {
+        return IpcResponse::error("Sensor preview requires a sensor gauge LCD entry");
+    }
+    if !(1..=SENSOR_PREVIEW_MAX_EDGE).contains(&width)
+        || !(1..=SENSOR_PREVIEW_MAX_EDGE).contains(&height)
+    {
+        return IpcResponse::error(format!(
+            "Sensor preview size must be between 1 and {SENSOR_PREVIEW_MAX_EDGE} pixels"
+        ));
+    }
+    let (config_directory, catalog_runtime) = {
+        let state = state.lock();
+        (
+            state
+                .config_path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+            state.catalog_runtime.clone(),
+        )
+    };
+    lcd.resolve_paths(&config_directory);
+    let Some(descriptor) = lcd.sensor.clone() else {
+        return IpcResponse::error("Sensor preview requires sensor settings");
+    };
+    if let Err(error) = descriptor.validate() {
+        return IpcResponse::error(error.to_string());
+    }
+    let dependencies = lianli_shared::media_dependencies::stored_lcd_dependencies(&lcd);
+    if let Err(error) = lianli_shared::media_dependencies::validate_dependency_paths(&dependencies)
+    {
+        return IpcResponse::error(error);
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let usage = match catalog_runtime.enter(|| {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "Catalog review is busy. Retry this sensor preview shortly"
+        );
+        Ok(())
+    }) {
+        Ok(usage) => usage,
+        Err(error) => return IpcResponse::error(error.to_string()),
+    };
+    usage.record(&dependencies);
+
+    let upright = ScreenInfo {
+        width,
+        height,
+        max_fps: 30,
+        jpeg_quality: 90,
+        max_payload: 4 * 1024 * 1024,
+        h264: false,
+        needs_keepalive: false,
+        png: false,
+        play_count: 0,
+    };
+    let (width, height) = lianli_media::common::render_dimensions(&upright, lcd.orientation);
+    let screen = ScreenInfo {
+        width,
+        height,
+        ..upright
+    };
+    let response = match sensor_preview_asset(&descriptor, lcd.path.as_deref(), &screen) {
+        Ok(asset) => match asset.render_frame(true) {
+            Ok(Some(frame)) => IpcResponse::ok(serde_json::json!({
+                "jpeg_base64": super::server::base64_encode(&frame.data),
+            })),
+            Ok(None) => IpcResponse::error("Sensor preview produced no frame"),
+            Err(error) => IpcResponse::error(format!("Sensor preview failed: {error}")),
+        },
+        Err(error) => IpcResponse::error(format!("Sensor preview failed: {error}")),
+    };
+    usage.record(&dependencies);
+    response
+}
+
 #[cfg(test)]
 mod tests {
+    fn sensor_preview(
+        lcd: serde_json::Value,
+        width: u32,
+        height: u32,
+    ) -> Result<image::DynamicImage, String> {
+        use base64::Engine;
+        let directory = tempfile::tempdir().unwrap();
+        let state = super::super::DaemonState::new(directory.path().join("config.json"));
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(state));
+        let lcd = serde_json::from_value(lcd).unwrap();
+        match super::render_sensor_preview(&state, lcd, width, height) {
+            IpcResponse::Ok { data } => {
+                let encoded = data["jpeg_base64"].as_str().unwrap();
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .unwrap();
+                Ok(image::load_from_memory(&bytes).unwrap())
+            }
+            IpcResponse::Error { message } => Err(message),
+        }
+    }
+
+    fn sensor_entry(orientation: f32) -> serde_json::Value {
+        serde_json::json!({
+            "serial": "lcd", "type": "sensor", "path": null, "fps": null, "rgb": null,
+            "orientation": orientation,
+            "sensor": {
+                "label": "RAM", "unit": "%", "font_path": null,
+                "source": {"type": "constant", "value": 42.0}
+            }
+        })
+    }
+
+    #[test]
+    fn sensor_preview_renders_unsaved_entry_at_requested_size() {
+        let preview = sensor_preview(sensor_entry(0.0), 400, 400).unwrap();
+        assert_eq!((preview.width(), preview.height()), (400, 400));
+    }
+
+    #[test]
+    fn sensor_preview_shows_rotated_screens_upright() {
+        let preview = sensor_preview(sensor_entry(90.0), 480, 320).unwrap();
+        assert_eq!((preview.width(), preview.height()), (320, 480));
+    }
+
+    #[test]
+    fn sensor_preview_rejects_other_media_and_unbounded_sizes() {
+        let mut image_entry = sensor_entry(0.0);
+        image_entry["type"] = "image".into();
+        assert!(sensor_preview(image_entry, 400, 400).is_err());
+        assert!(sensor_preview(sensor_entry(0.0), 0, 400).is_err());
+        assert!(sensor_preview(sensor_entry(0.0), 400, 4096).is_err());
+    }
+
     #[test]
     fn startup_requests_are_bounded_exclusive_and_cancel_by_job_identity() {
         use base64::Engine;

@@ -46,8 +46,6 @@ export const useDaemonStore = defineStore("daemon", () => {
   let wasConnected = false;
   let lastDeviceCount = -1;
 
-  const visibleDeviceCount = computed(() => devices.list.length);
-
   async function tick() {
     try {
       const result = await ipc.poll();
@@ -128,7 +126,6 @@ export const useDaemonStore = defineStore("daemon", () => {
     openrgbEnabled,
     openrgbError,
     openrgbPort,
-    visibleDeviceCount,
     refresh,
     start,
     stop,

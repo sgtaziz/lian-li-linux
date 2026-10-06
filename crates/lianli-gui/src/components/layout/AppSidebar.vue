@@ -5,8 +5,10 @@ import { invoke } from "@tauri-apps/api/core";
 import * as icons from "lucide-vue-next";
 import { MAIN_ROUTES } from "@/router";
 import { useDaemonStore } from "@/stores/daemon";
+import { useDevicesStore } from "@/stores/devices";
 
 const daemon = useDaemonStore();
+const devices = useDevicesStore();
 const APP_VERSION = ref("...");
 
 onMounted(async () => {
@@ -55,7 +57,7 @@ function iconFor(name: string) {
         <span class="dot" />
         {{ daemon.connected ? "Connected" : "Offline" }}
       </div>
-      <div class="device-count">{{ daemon.visibleDeviceCount }} device(s)</div>
+      <div class="device-count">{{ daemon.connected ? devices.summary : `Last seen: ${devices.summary}` }}</div>
     </div>
   </aside>
 </template>

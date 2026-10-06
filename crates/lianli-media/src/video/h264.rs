@@ -3,6 +3,7 @@ use super::target_dimensions;
 use crate::common::{render_dimensions, MediaError};
 use crate::PreparationControl;
 use crate::TemporaryMedia;
+use lianli_shared::media::MediaFraming;
 use lianli_shared::screen::ScreenInfo;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
@@ -26,7 +27,14 @@ pub fn encode_h264(
     screen: &ScreenInfo,
     control: impl Into<PreparationControl>,
 ) -> Result<(PathBuf, TemporaryMedia, f32), MediaError> {
-    let (path, temp, fps, _) = encode_h264_with_status(input, fps, orientation, screen, control)?;
+    let (path, temp, fps, _) = encode_h264_with_status(
+        input,
+        fps,
+        orientation,
+        &MediaFraming::default(),
+        screen,
+        control,
+    )?;
     Ok((path, temp, fps))
 }
 
@@ -34,6 +42,7 @@ pub fn encode_h264_with_status(
     input: &Path,
     fps: f32,
     orientation: f32,
+    framing: &MediaFraming,
     screen: &ScreenInfo,
     control: impl Into<PreparationControl>,
 ) -> Result<
@@ -60,7 +69,7 @@ pub fn encode_h264_with_status(
     );
 
     let (rw, rh) = render_dimensions(screen, orientation);
-    let mut vf_parts = vec![format!("scale={rw}:{rh}:flags=lanczos")];
+    let mut vf_parts = vec![super::ffmpeg::framing_filter(framing, rw, rh)];
     let rot = (orientation % 360.0 + 360.0) % 360.0;
     if (rot - 90.0).abs() < 1.0 {
         vf_parts.push("transpose=1".into());
@@ -449,14 +458,60 @@ mod tests {
     }
 
     #[test]
+    fn framed_transcode_produces_screen_sized_stream() {
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("wide.png");
+        image::RgbaImage::from_pixel(64, 16, image::Rgba([100, 80, 60, 255]))
+            .save(&input)
+            .unwrap();
+        for fit in [
+            lianli_shared::template::ImageFit::Cover,
+            lianli_shared::template::ImageFit::Contain,
+        ] {
+            let framing = MediaFraming {
+                fit,
+                zoom: 2.0,
+                offset_x: -0.5,
+                offset_y: 0.5,
+            };
+            let (output, _temp, _, _) =
+                encode_h264_with_status(&input, 10.0, 0.0, &framing, &ScreenInfo::TLLCD, false)
+                    .unwrap();
+            let probe = Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "stream=width,height",
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(&output)
+                .output()
+                .unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&probe.stdout).trim(),
+                format!("{},{}", ScreenInfo::TLLCD.width, ScreenInfo::TLLCD.height)
+            );
+        }
+    }
+
+    #[test]
     fn software_transcode_retains_the_encoder_that_produced_the_file() {
         let root = tempfile::tempdir().unwrap();
         let input = root.path().join("frame.png");
         image::RgbaImage::from_pixel(16, 16, image::Rgba([100, 80, 60, 255]))
             .save(&input)
             .unwrap();
-        let (output, _temp, fps, encoder) =
-            encode_h264_with_status(&input, 10.9, 0.0, &ScreenInfo::TLLCD, false).unwrap();
+        let (output, _temp, fps, encoder) = encode_h264_with_status(
+            &input,
+            10.9,
+            0.0,
+            &MediaFraming::default(),
+            &ScreenInfo::TLLCD,
+            false,
+        )
+        .unwrap();
         assert!(std::fs::metadata(&output).unwrap().len() > 0);
         assert_eq!(fps, 10.0);
         let mut probe = Command::new("ffprobe");

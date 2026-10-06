@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useDialog, useMessage } from "naive-ui";
+import { invoke } from "@tauri-apps/api/core";
 import { FolderOpen, Sparkles, Trash2, Info } from "lucide-vue-next";
-import type { DeviceInfo, LcdConfig, MediaType, SensorDescriptor } from "@/types";
+import type { DeviceInfo, LcdConfig, MediaFraming, MediaType, SensorDescriptor } from "@/types";
+import { clampFraming, defaultFraming, isDefaultFraming, MAX_ZOOM, panBy, previewPlacement } from "@/utils/mediaFraming";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useLcdStore } from "@/stores/lcd";
+import { useDaemonStore } from "@/stores/daemon";
 import { useIpc } from "@/composables/useIpc";
 import { useDebounce } from "@/composables/useDebounce";
 import { hasSavedLcdDevice, resolveLcdDevice } from "@/utils/lcdSelection";
@@ -16,7 +19,7 @@ import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import OrientationPicker from "@/components/common/OrientationPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
-import { enumerateSensorsAsOptions, optionForConfig, decodeOption } from "@/stores/sensorOptions";
+import { enumerateSensorsAsOptions, optionForConfig, decodeOption, gaugeTextForSource } from "@/stores/sensorOptions";
 import { screenSupportsH264, aio512FrameDefault } from "@/constants/screen";
 import StartupImageDialog from "./StartupImageDialog.vue";
 import { PIXEL_CLEANER_DURATION_OPTIONS } from "@/constants";
@@ -79,10 +82,12 @@ const mediaTypeOptions = [
 ] as const;
 
 function onMediaType(v: MediaType) {
-  if ((v === "image" || v === "video" || v === "gif") && props.entry.path && !matchesMediaFile(props.entry.path, v)) {
+  const pathKind = v === "sensor" ? "image" : v;
+  if ((pathKind === "image" || pathKind === "video" || pathKind === "gif") && props.entry.path && !matchesMediaFile(props.entry.path, pathKind)) {
     props.entry.path = null;
   }
   props.entry.type = v;
+  if (v === "sensor") ensureSensor();
   config.markDirty();
 }
 
@@ -95,11 +100,11 @@ function commitPath() {
 }
 
 async function browsePath() {
-  const type = props.entry.type;
+  const type = props.entry.type === "sensor" ? "image" : props.entry.type;
   if (type !== "image" && type !== "video" && type !== "gif") return;
   try {
     const selected = await pickMediaFile(type);
-    if (selected && props.entry.type === type) {
+    if (selected && (props.entry.type === type || props.entry.type === "sensor")) {
       localPath.value = selected;
       commitPath();
     }
@@ -113,8 +118,8 @@ const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, t
 function ensureSensor(): SensorDescriptor {
   if (!props.entry.sensor) {
     props.entry.sensor = {
-      label: "CPU Temp",
-      unit: "°C",
+      label: "CPU",
+      unit: "%",
       source: { type: "cpu_usage" },
       text_color: [255, 255, 255],
       background_color: [0, 0, 0],
@@ -148,6 +153,11 @@ function sensorSourceValue(): string {
 function onSensorSource(v: string) {
   const s = ensureSensor();
   s.source = decodeOption(v) ?? { type: "command", cmd: "" };
+  const text = gaugeTextForSource(config.sensors, s.source);
+  if (text) {
+    s.label = text.label;
+    s.unit = text.unit;
+  }
   config.markDirty();
 }
 const localCommand = ref("");
@@ -160,6 +170,231 @@ function commitCommand() {
   if (localCommand.value) s.source = { type: "command", cmd: localCommand.value };
   config.markDirty();
 }
+
+const daemon = useDaemonStore();
+const sensorPreview = ref("");
+const sensorPreviewError = ref("");
+const sensorPreviewSupported = computed(
+  () => daemon.connected && (daemon.info?.capabilities.includes("sensor_preview") ?? false),
+);
+const previewSize = computed(() => {
+  const device = selectedDevice.value;
+  return device?.screen_width && device?.screen_height
+    ? { width: device.screen_width, height: device.screen_height }
+    : null;
+});
+const previewTarget = computed<[number, number]>(() => {
+  const size = previewSize.value;
+  if (!size) return [1, 1];
+  const quarterTurn = Math.round((((props.entry.orientation % 360) + 360) % 360) / 90) % 2 === 1;
+  return quarterTurn ? [size.height, size.width] : [size.width, size.height];
+});
+const previewAspect = computed(() => `${previewTarget.value[0]} / ${previewTarget.value[1]}`);
+
+const entryChanged = computed(
+  () => config.dirty && JSON.stringify(config.savedLcds[props.index] ?? null) !== JSON.stringify(props.entry),
+);
+const applying = ref(false);
+async function applyChanges() {
+  if (applying.value) return;
+  applying.value = true;
+  try {
+    await config.save();
+    message.success("Saved and sent to the LCD");
+  } catch (error) {
+    message.error(`Save failed: ${error instanceof Error ? error.message : String(error)}`, { duration: 10000 });
+  } finally {
+    applying.value = false;
+  }
+}
+
+const FIT_OPTIONS = [
+  { label: "Stretch", value: "stretch" },
+  { label: "Fit", value: "contain" },
+  { label: "Fill", value: "cover" },
+];
+const framing = computed(() => props.entry.framing ?? defaultFraming());
+function setFraming(next: MediaFraming, commit = true) {
+  const value = clampFraming(next);
+  if (isDefaultFraming(value)) delete props.entry.framing;
+  else props.entry.framing = value;
+  if (commit) config.markDirty();
+}
+
+const sourceSize = ref<[number, number] | null>(null);
+function onMediaLoaded(event: Event) {
+  const element = event.target as HTMLImageElement | HTMLVideoElement;
+  const width = element instanceof HTMLVideoElement ? element.videoWidth : element.naturalWidth;
+  const height = element instanceof HTMLVideoElement ? element.videoHeight : element.naturalHeight;
+  if (width && height) sourceSize.value = [width, height];
+}
+const placement = computed(() =>
+  sourceSize.value ? previewPlacement(framing.value, sourceSize.value, previewTarget.value) : null,
+);
+const percentRect = (rect: { x: number; y: number; width: number; height: number }) => ({
+  left: `${rect.x}%`,
+  top: `${rect.y}%`,
+  width: `${rect.width}%`,
+  height: `${rect.height}%`,
+});
+
+let drag: { x: number; y: number; start: MediaFraming; width: number; height: number } | null = null;
+function onPreviewPointerDown(event: PointerEvent) {
+  if (!isFileMedia.value || !sourceSize.value || !placement.value) return;
+  const element = event.currentTarget as HTMLElement;
+  drag = {
+    x: event.clientX,
+    y: event.clientY,
+    start: { ...framing.value },
+    width: (element.clientWidth * placement.value.box.width) / 100,
+    height: (element.clientHeight * placement.value.box.height) / 100,
+  };
+  element.setPointerCapture(event.pointerId);
+}
+function onPreviewPointerMove(event: PointerEvent) {
+  if (!drag || !sourceSize.value) return;
+  const dx = (event.clientX - drag.x) / Math.max(1, drag.width);
+  const dy = (event.clientY - drag.y) / Math.max(1, drag.height);
+  setFraming(panBy(drag.start, sourceSize.value, previewTarget.value, dx, dy), false);
+}
+function onPreviewPointerUp() {
+  if (!drag) return;
+  drag = null;
+  config.markDirty();
+}
+function onPreviewWheel(event: WheelEvent) {
+  if (!isFileMedia.value || !mediaPreviewUrl.value) return;
+  event.preventDefault();
+  setFraming({ ...framing.value, zoom: framing.value.zoom * Math.exp(-event.deltaY * 0.0015) });
+}
+const showSensorPreview = computed(
+  () => props.entry.type === "sensor" && sensorPreviewSupported.value && !!previewSize.value,
+);
+const isFileMedia = computed(() => ["image", "gif", "video"].includes(props.entry.type));
+const showPreview = computed(
+  () => !!previewSize.value && (showSensorPreview.value || isFileMedia.value || props.entry.type === "color"),
+);
+
+const MEDIA_MIME: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", bmp: "image/bmp", gif: "image/gif",
+  mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+  mkv: "video/x-matroska", avi: "video/x-msvideo",
+};
+const mediaPreviewUrl = ref("");
+const mediaPreviewError = ref("");
+let mediaPreviewRevision = 0;
+
+function clearMediaPreview() {
+  if (mediaPreviewUrl.value) URL.revokeObjectURL(mediaPreviewUrl.value);
+  mediaPreviewUrl.value = "";
+  sourceSize.value = null;
+}
+
+watch(
+  () => [isFileMedia.value && showPreview.value, props.entry.path] as const,
+  async ([visible, path]) => {
+    const revision = ++mediaPreviewRevision;
+    clearMediaPreview();
+    mediaPreviewError.value = "";
+    if (!visible || !path) return;
+    try {
+      const bytes = await invoke<ArrayBuffer>("media_preview", { path });
+      if (revision !== mediaPreviewRevision) return;
+      const extension = path.split(".").pop()?.toLowerCase() ?? "";
+      mediaPreviewUrl.value = URL.createObjectURL(new Blob([bytes], { type: MEDIA_MIME[extension] ?? "" }));
+    } catch (error) {
+      if (revision === mediaPreviewRevision) mediaPreviewError.value = String(error);
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => {
+  mediaPreviewRevision++;
+  clearMediaPreview();
+});
+
+const previewError = computed(() => {
+  if (props.entry.type === "sensor") return sensorPreviewError.value;
+  return isFileMedia.value ? mediaPreviewError.value : "";
+});
+const previewCaption = computed(() => {
+  const size = previewSize.value ? `${previewSize.value.width}×${previewSize.value.height}` : "";
+  if (previewError.value) return "Preview unavailable";
+  if (props.entry.type === "sensor") return `${size} · live, unsaved`;
+  if (isFileMedia.value) {
+    if (!props.entry.path) return `${size} · no file selected`;
+    const fit = FIT_OPTIONS.find((option) => option.value === framing.value.fit)?.label ?? "";
+    const zoom = framing.value.zoom > 1 ? ` · ${framing.value.zoom.toFixed(1)}×` : "";
+    return `${size} · ${fit}${zoom}`;
+  }
+  return size;
+});
+let previewInFlight = false;
+let previewQueued = false;
+
+async function refreshSensorPreview() {
+  if (!showSensorPreview.value || !props.entry.sensor) {
+    sensorPreview.value = "";
+    return;
+  }
+  if (previewInFlight) {
+    previewQueued = true;
+    return;
+  }
+  previewInFlight = true;
+  try {
+    const res = await ipc.request<{ jpeg_base64: string }>("RenderSensorPreview", {
+      lcd: JSON.parse(JSON.stringify(props.entry)),
+      ...previewSize.value,
+    });
+    sensorPreview.value = res.jpeg_base64 ?? "";
+    sensorPreviewError.value = "";
+  } catch (error) {
+    sensorPreviewError.value = String(error);
+  } finally {
+    previewInFlight = false;
+    if (previewQueued) {
+      previewQueued = false;
+      void refreshSensorPreview();
+    }
+  }
+}
+
+const scheduleSensorPreview = useDebounce(() => void refreshSensorPreview(), 300);
+watch(
+  () => [
+    showSensorPreview.value,
+    JSON.stringify(props.entry.sensor),
+    props.entry.path,
+    props.entry.orientation,
+    previewSize.value?.width,
+    previewSize.value?.height,
+  ],
+  () => scheduleSensorPreview(),
+  { immediate: true },
+);
+
+let livePreviewTimer: ReturnType<typeof setInterval> | undefined;
+watch(
+  () => [showSensorPreview.value, props.entry.update_interval_ms] as const,
+  ([visible, interval]) => {
+    clearInterval(livePreviewTimer);
+    livePreviewTimer = undefined;
+    if (!visible) return;
+    livePreviewTimer = setInterval(() => {
+      if (!document.hidden && document.hasFocus()) void refreshSensorPreview();
+    }, Math.max(1000, interval ?? 1000));
+  },
+  { immediate: true },
+);
+function onWindowFocus() {
+  if (showSensorPreview.value) void refreshSensorPreview();
+}
+window.addEventListener("focus", onWindowFocus);
+onUnmounted(() => {
+  clearInterval(livePreviewTimer);
+  window.removeEventListener("focus", onWindowFocus);
+});
 
 // Custom template sub-section
 const templateOptions = computed(() =>
@@ -381,6 +616,17 @@ async function handleStopClean() {
     <div class="head">
       <span class="title">LCD {{ index + 1 }}</span>
       <div class="head-actions">
+        <template v-if="entryChanged">
+          <span class="unsaved">Unsaved changes</span>
+          <n-button
+            size="small"
+            type="primary"
+            :loading="applying"
+            :disabled="!daemon.canWrite || settingsLocked"
+            title="Saves every pending change in the app, including other pages, and sends this LCD its new settings"
+            @click="applyChanges"
+          >Save all</n-button>
+        </template>
         <StartupImageDialog v-if="selectedDevice?.startup_image" :device="selectedDevice" />
         <n-button
           v-if="isPreparingThis"
@@ -457,35 +703,140 @@ async function handleStopClean() {
         <label class="muted">Media type</label>
         <n-select :value="entry.type" :options="mediaTypeOptions" size="small" @update:value="onMediaType" />
       </div>
-    </div>
-
-    <!-- Image / Video / GIF -->
-    <div v-if="['image', 'video', 'gif'].includes(entry.type)" class="field">
-      <label class="muted">Path</label>
-      <div class="path-row">
-        <n-input v-model:value="localPath" @blur="commitPath" size="small" placeholder="/path/to/media" />
-        <n-button size="small" @click="browsePath"><template #icon><FolderOpen :size="14" /></template></n-button>
+      <div v-if="['video', 'gif'].includes(entry.type)" class="field">
+        <label class="muted">FPS</label>
+        <n-input-number :value="entry.fps ?? 30" size="small" :min="1" :max="120" @update:value="onFps" />
+      </div>
+      <div v-if="entry.type === 'sensor'" class="field">
+        <label class="muted">Update interval (ms)</label>
+        <n-input-number :value="entry.update_interval_ms ?? 1000" size="small" :min="100" :max="10000" :step="100" @update:value="onUpdateInterval" />
       </div>
     </div>
 
-    <!-- Solid Color -->
-    <div v-if="entry.type === 'color'" class="field">
-      <label class="muted">Color</label>
-      <ColorPicker :model-value="entry.rgb ?? [0,0,0]" @update:model-value="(v: any) => { entry.rgb = v; config.markDirty(); }" />
-    </div>
-
-    <!-- Sensor Gauge -->
-    <template v-if="entry.type === 'sensor'">
+    <div class="screen-row">
       <div class="field">
-        <label class="muted">Sensor source</label>
-        <SensorSelect :value="sensorSourceValue()" :options="sensorOptions" size="small" filterable @update:value="onSensorSource" />
+        <label class="muted">Orientation</label>
+        <OrientationPicker :model-value="entry.orientation" @update:model-value="onOrientation" />
       </div>
-      <div v-if="entry.sensor?.source?.type === 'command'" class="field">
-        <label class="muted">Custom command</label>
-        <n-input v-model:value="localCommand" @blur="commitCommand" size="small" />
+      <div class="field brightness">
+        <label class="muted">Brightness</label>
+        <LabeledSlider
+          :model-value="brightness"
+          :min="0"
+          :max="100"
+          suffix="%"
+          @update:model-value="(v: number) => brightness = v"
+        />
       </div>
-      <SensorGaugeEditor :sensor="ensureSensor()" />
-    </template>
+    </div>
+    <n-alert v-if="currentBrightnessError" type="error">
+      Could not change screen brightness: {{ currentBrightnessError }}
+    </n-alert>
+    <p v-if="selectedDeviceId && !brightnessConfigured" class="hint">
+      Save this LCD configuration to apply brightness.
+    </p>
+
+    <div class="divider" />
+
+    <div v-if="entry.type !== 'custom'" class="media-layout" :class="{ 'with-preview': showPreview }">
+      <div class="media-settings">
+        <div v-if="isFileMedia" class="field">
+          <label class="muted">Path</label>
+          <div class="path-row">
+            <n-input v-model:value="localPath" @blur="commitPath" size="small" placeholder="/path/to/media" />
+            <n-button size="small" @click="browsePath"><template #icon><FolderOpen :size="14" /></template></n-button>
+          </div>
+        </div>
+        <div v-if="isFileMedia" class="framing-row">
+          <div class="field">
+            <label class="muted">Fit</label>
+            <n-radio-group :value="framing.fit" size="small" @update:value="(fit) => setFraming({ ...framing, fit })">
+              <n-radio-button v-for="option in FIT_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</n-radio-button>
+            </n-radio-group>
+          </div>
+          <div class="field zoom">
+            <label class="muted">Zoom</label>
+            <LabeledSlider
+              :model-value="framing.zoom"
+              :min="1"
+              :max="MAX_ZOOM"
+              :step="0.05"
+              :format="(v: number) => `${v.toFixed(2)}×`"
+              @update:model-value="(zoom: number) => setFraming({ ...framing, zoom })"
+            />
+          </div>
+          <n-button size="small" quaternary :disabled="isDefaultFraming(entry.framing)" @click="setFraming(defaultFraming())">Reset</n-button>
+        </div>
+        <p v-if="isFileMedia && mediaPreviewUrl" class="hint">Drag the preview to move the image, scroll on it to zoom.</p>
+
+        <div v-if="entry.type === 'color'" class="field">
+          <label class="muted">Color</label>
+          <ColorPicker :model-value="entry.rgb ?? [0,0,0]" @update:model-value="(v: any) => { entry.rgb = v; config.markDirty(); }" />
+        </div>
+
+        <template v-if="entry.type === 'sensor'">
+          <div class="grid">
+            <div class="field">
+              <label class="muted">Sensor source</label>
+              <SensorSelect :value="sensorSourceValue()" :options="sensorOptions" size="small" filterable @update:value="onSensorSource" />
+            </div>
+            <div class="field">
+              <label class="muted">Background image</label>
+              <div class="path-row">
+                <n-input v-model:value="localPath" @blur="commitPath" size="small" placeholder="None (solid color)" clearable @clear="localPath = ''; commitPath()" />
+                <n-button size="small" @click="browsePath"><template #icon><FolderOpen :size="14" /></template></n-button>
+              </div>
+            </div>
+          </div>
+          <div v-if="entry.sensor?.source?.type === 'command'" class="field">
+            <label class="muted">Custom command</label>
+            <n-input v-model:value="localCommand" @blur="commitCommand" size="small" />
+          </div>
+          <SensorGaugeEditor v-if="entry.sensor" :sensor="entry.sensor" />
+        </template>
+      </div>
+
+      <aside v-if="showPreview" class="media-preview">
+        <div
+          class="preview-frame"
+          :class="{ pannable: isFileMedia && !!mediaPreviewUrl }"
+          :style="{ aspectRatio: previewAspect, '--preview-brightness': brightness / 100 }"
+          @pointerdown="onPreviewPointerDown"
+          @pointermove="onPreviewPointerMove"
+          @pointerup="onPreviewPointerUp"
+          @pointercancel="onPreviewPointerUp"
+          @wheel="onPreviewWheel"
+        >
+          <img v-if="entry.type === 'sensor' && sensorPreview" :src="`data:image/jpeg;base64,${sensorPreview}`" alt="Sensor gauge preview" />
+          <div v-else-if="isFileMedia && mediaPreviewUrl" class="framing-box" :style="placement ? percentRect(placement.box) : undefined">
+            <video
+              v-if="entry.type === 'video'"
+              class="framed-media"
+              :src="mediaPreviewUrl"
+              :style="placement ? percentRect(placement.media) : undefined"
+              autoplay
+              muted
+              loop
+              playsinline
+              @loadedmetadata="onMediaLoaded"
+              @error="mediaPreviewError = 'This video format cannot be previewed here'"
+            />
+            <img
+              v-else
+              class="framed-media"
+              :src="mediaPreviewUrl"
+              :style="placement ? percentRect(placement.media) : undefined"
+              alt="Media preview"
+              draggable="false"
+              @load="onMediaLoaded"
+            />
+          </div>
+          <div v-else-if="entry.type === 'color'" class="preview-color" :style="{ background: `rgb(${(entry.rgb ?? [0, 0, 0]).join(',')})` }" />
+          <span v-else class="muted">{{ previewError ? "!" : "…" }}</span>
+        </div>
+        <span class="preview-caption" :class="{ error: previewError }" :title="previewError">{{ previewCaption }}</span>
+      </aside>
+    </div>
 
     <!-- Custom template -->
     <template v-if="entry.type === 'custom'">
@@ -493,7 +844,7 @@ async function handleStopClean() {
         <label class="muted">Template</label>
         <!-- Preview thumbnail + dropdown/buttons on the same row (mirrors Slint). -->
         <div class="template-row">
-          <div class="template-preview">
+          <div class="template-preview" :style="{ '--preview-brightness': brightness / 100 }">
             <img v-if="previewJpeg" :src="`data:image/jpeg;base64,${previewJpeg}`" alt="template preview" />
             <div v-else class="preview-ph muted">{{ previewLoading ? "…" : "—" }}</div>
           </div>
@@ -525,39 +876,6 @@ async function handleStopClean() {
       <n-checkbox :checked="entry.aio_512_frame ?? aio512Default" @update:checked="(v) => { entry.aio_512_frame = v; config.markDirty(); }">512-byte HID frame</n-checkbox>
     </div>
 
-    <!-- FPS (video/gif) / update interval (sensor) -->
-    <div class="grid">
-      <div v-if="['video', 'gif'].includes(entry.type)" class="field">
-        <label class="muted">FPS</label>
-        <n-input-number :value="entry.fps ?? 30" size="small" :min="1" :max="120" @update:value="onFps" />
-      </div>
-      <div v-if="entry.type === 'sensor'" class="field">
-        <label class="muted">Update interval (ms)</label>
-        <n-input-number :value="entry.update_interval_ms ?? 1000" size="small" :min="100" :max="10000" :step="100" @update:value="onUpdateInterval" />
-      </div>
-    </div>
-
-    <div class="field">
-      <label class="muted">Orientation</label>
-      <OrientationPicker :model-value="entry.orientation" @update:model-value="onOrientation" />
-    </div>
-
-    <div class="field">
-      <label class="muted">Brightness</label>
-      <LabeledSlider
-        :model-value="brightness"
-        :min="0"
-        :max="100"
-        suffix="%"
-        @update:model-value="(v: number) => brightness = v"
-      />
-      <n-alert v-if="currentBrightnessError" type="error">
-        Could not change screen brightness: {{ currentBrightnessError }}
-      </n-alert>
-      <p v-if="selectedDeviceId && !brightnessConfigured" class="hint">
-        Save this LCD configuration to apply brightness.
-      </p>
-    </div>
     </div>
   </div>
 </template>
@@ -566,7 +884,7 @@ async function handleStopClean() {
 .lcd-config {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .head {
   display: flex;
@@ -580,6 +898,11 @@ async function handleStopClean() {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+}
+.unsaved {
+  margin-right: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--warning);
 }
 .cleaner-btn {
   color: var(--warning);
@@ -621,7 +944,7 @@ async function handleStopClean() {
 .card-content {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   transition: opacity 0.2s ease;
 }
 .card-body-locked {
@@ -631,8 +954,114 @@ async function handleStopClean() {
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+.screen-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+}
+.screen-row .brightness {
+  flex: 1;
+  min-width: 180px;
+}
+.divider {
+  border-top: 1px solid var(--border);
+}
+.media-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.media-layout.with-preview {
+  grid-template-columns: minmax(0, 1fr) 200px;
+}
+.media-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.media-preview {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+.framing-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+}
+.framing-row .zoom {
+  flex: 1;
+  min-width: 160px;
+}
+.framing-box {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.preview-frame .framed-media {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  user-select: none;
+  pointer-events: none;
+}
+.preview-frame.pannable {
+  cursor: grab;
+  touch-action: none;
+}
+.preview-frame.pannable:active {
+  cursor: grabbing;
+}
+.preview-frame > * {
+  filter: brightness(var(--preview-brightness, 1));
+}
+.preview-frame {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.preview-frame img,
+.preview-frame video,
+.preview-color {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+.preview-caption {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.preview-caption.error {
+  color: var(--warning);
+  cursor: help;
+}
+@media (max-width: 760px) {
+  .media-layout.with-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .media-preview {
+    position: static;
+    order: -1;
+    width: 200px;
+    justify-self: center;
+  }
 }
 .field {
   display: flex;
@@ -667,6 +1096,7 @@ async function handleStopClean() {
   justify-content: center;
 }
 .template-preview img {
+  filter: brightness(var(--preview-brightness, 1));
   width: 100%;
   height: 100%;
   object-fit: contain;

@@ -211,6 +211,12 @@ pub enum IpcRequest {
         width: u32,
         height: u32,
     },
+    /// Returns `{ "jpeg_base64": "..." }` for an unsaved sensor gauge entry.
+    RenderSensorPreview {
+        lcd: Box<LcdConfig>,
+        width: u32,
+        height: u32,
+    },
     Ping,
     GetDaemonInfo,
     GetInstallationHealth,
@@ -288,6 +294,7 @@ impl IpcRequest {
             | Self::ListPwmHeaders
             | Self::GetLcdTemplates
             | Self::RenderTemplatePreview { .. }
+            | Self::RenderSensorPreview { .. }
             | Self::Ping
             | Self::GetDaemonInfo
             | Self::GetInstallationHealth

@@ -61,6 +61,19 @@ const assignmentGroups = computed(() => {
   return result;
 });
 
+const curveUsers = computed(() => {
+  const name = current.value?.name;
+  if (!name) return [];
+  return fanCfg.value.speeds.flatMap((group) => {
+    const device = group.device_id ? devices.byId(group.device_id) : undefined;
+    const slots = device ? group.speeds.slice(0, device.fan_count ?? 1) : group.speeds;
+    const count = slots.filter((speed) => speed === name).length;
+    if (!count) return [];
+    if (!device) return [`${group.device_id ?? "Unknown device"} (offline)`];
+    return [`${device.name} (${count} fan${count === 1 ? "" : "s"})`];
+  });
+});
+
 const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, true, true));
 
 function onCurveChange(value: [number, number][]) {
@@ -161,12 +174,12 @@ function onUpdateInterval(v: number | null) {
 }
 function onHysteresisTemp(v: number | null) {
   if (v === null) return;
-  fanCfg.value.hysteresis_temp = v / 10; // displayed as x0.1 °C
+  fanCfg.value.hysteresis_temp = Math.round(v * 10) / 10;
   config.markDirty();
 }
-function onHysteresisPwm(v: number | null) {
-  if (v === null) return;
-  fanCfg.value.hysteresis_pwm = v; // 0-50 stored /255
+function onHysteresisPwm(percent: number | null) {
+  if (percent === null) return;
+  fanCfg.value.hysteresis_pwm = Math.min(50, Math.round((percent / 100) * 255));
   config.markDirty();
 }
 </script>
@@ -203,12 +216,12 @@ function onHysteresisPwm(v: number | null) {
         </button>
       </div>
 
-      <template v-if="current">
+      <div v-if="current" class="curve-body">
         <FanCurveEditor
           :model-value="current.curve"
           @update:model-value="onCurveChange"
         />
-        <div class="curve-source">
+        <div class="curve-side">
           <div class="field">
             <label class="muted">Name</label>
             <n-input
@@ -237,8 +250,12 @@ function onHysteresisPwm(v: number | null) {
               placeholder="e.g. cat /sys/class/thermal/thermal_zone0/temp"
             />
           </div>
+          <div class="field">
+            <label class="muted">Used by</label>
+            <span class="used-by">{{ curveUsers.length ? curveUsers.join(", ") : "No fans use this curve" }}</span>
+          </div>
         </div>
-      </template>
+      </div>
       <div v-else class="empty muted">No fan curves. Click "Add" to create one.</div>
     </section>
 
@@ -258,41 +275,42 @@ function onHysteresisPwm(v: number | null) {
       <div v-else class="empty muted">No fan devices detected.</div>
     </section>
 
-    <!-- Section 3: Fan controller settings -->
-    <section class="card section">
-      <h2 class="section-title">Fan Controller Settings</h2>
-      <div class="settings-grid">
-        <div class="field">
-          <label class="muted">Update interval (ms)</label>
-          <n-input-number
-            size="small"
-            :value="fanCfg.update_interval_ms"
-            :min="100"
-            :max="10000"
-            :step="100"
-            @update:value="onUpdateInterval"
-          />
-        </div>
-        <div class="field">
-          <label class="muted">Temp hysteresis (×0.1 °C)</label>
-          <n-input-number
-            size="small"
-            :value="Math.round(fanCfg.hysteresis_temp * 10)"
-            :min="0"
-            :max="100"
-            @update:value="onHysteresisTemp"
-          />
-        </div>
-        <div class="field">
-          <label class="muted">PWM hysteresis (/255)</label>
-          <n-input-number
-            size="small"
-            :value="fanCfg.hysteresis_pwm"
-            :min="0"
-            :max="50"
-            @update:value="onHysteresisPwm"
-          />
-        </div>
+    <section class="card settings-row">
+      <h2 class="section-title">Controller</h2>
+      <div class="field">
+        <label class="muted">Update interval</label>
+        <n-input-number
+          size="small"
+          :value="fanCfg.update_interval_ms"
+          :min="100"
+          :max="10000"
+          :step="100"
+          @update:value="onUpdateInterval"
+        ><template #suffix>ms</template></n-input-number>
+      </div>
+      <div class="field">
+        <label class="muted" title="Ignore temperature changes smaller than this">Temperature hysteresis</label>
+        <n-input-number
+          size="small"
+          :value="fanCfg.hysteresis_temp"
+          :min="0"
+          :max="10"
+          :step="0.1"
+          :precision="1"
+          @update:value="onHysteresisTemp"
+        ><template #suffix>°C</template></n-input-number>
+      </div>
+      <div class="field">
+        <label class="muted" title="Ignore speed changes smaller than this">Speed hysteresis</label>
+        <n-input-number
+          size="small"
+          :value="Math.round((fanCfg.hysteresis_pwm / 255) * 1000) / 10"
+          :min="0"
+          :max="19.6"
+          :step="0.4"
+          :precision="1"
+          @update:value="onHysteresisPwm"
+        ><template #suffix>%</template></n-input-number>
       </div>
     </section>
   </div>
@@ -375,10 +393,26 @@ function onHysteresisPwm(v: number | null) {
   padding: var(--space-1) var(--space-3);
   cursor: pointer;
 }
-.curve-source {
+.curve-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: auto minmax(220px, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.curve-side {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
+  min-width: 0;
+}
+.used-by {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+@media (max-width: 860px) {
+  .curve-body {
+    grid-template-columns: 1fr;
+  }
 }
 .field {
   display: flex;
@@ -388,12 +422,19 @@ function onHysteresisPwm(v: number | null) {
 .groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 0;
 }
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-3);
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+}
+.settings-row .section-title {
+  margin: 0 var(--space-2) 6px 0;
+}
+.settings-row .field {
+  width: 150px;
 }
 .empty {
   padding: var(--space-4);
