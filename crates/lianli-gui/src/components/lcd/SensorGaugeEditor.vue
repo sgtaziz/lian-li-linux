@@ -78,9 +78,6 @@ function removeRange(i: number) {
         <label class="muted">Decimal places</label>
         <n-input-number :value="sensor.decimal_places" :min="0" :max="10" size="small" @update:value="(v) => patch({ decimal_places: v ?? 0 })" />
       </div>
-    </div>
-
-    <div class="grid">
       <div class="field">
         <label class="muted">Font</label>
         <n-select
@@ -93,72 +90,82 @@ function removeRange(i: number) {
       </div>
     </div>
 
-    <div class="grid">
-      <div class="field"><label class="muted">Value font size</label>
-        <n-input-number :value="sensor.value_font_size" size="small" :min="1" @update:value="(v) => patch({ value_font_size: v ?? 72 })" />
-      </div>
-      <div class="field"><label class="muted">Unit font size</label>
-        <n-input-number :value="sensor.unit_font_size" size="small" :min="1" @update:value="(v) => patch({ unit_font_size: v ?? 32 })" />
-      </div>
-      <div class="field"><label class="muted">Label font size</label>
-        <n-input-number :value="sensor.label_font_size" size="small" :min="1" @update:value="(v) => patch({ label_font_size: v ?? 28 })" />
-      </div>
-    </div>
+    <n-collapse class="sections">
+      <n-collapse-item title="Colors and ranges" name="colors">
+        <div class="section-body">
+          <div class="grid">
+            <div class="field"><label class="muted">Text color</label>
+              <ColorPicker :model-value="sensor.text_color" @update:model-value="(v: any) => patch({ text_color: v })" />
+            </div>
+            <div class="field"><label class="muted">Background</label>
+              <ColorPicker :model-value="sensor.background_color" @update:model-value="(v: any) => patch({ background_color: v })" />
+            </div>
+            <div class="field"><label class="muted">Gauge track</label>
+              <ColorPicker :model-value="sensor.gauge_background_color" @update:model-value="(v: any) => patch({ gauge_background_color: v })" />
+            </div>
+          </div>
 
-    <div class="grid">
-      <div class="field"><label class="muted">Start angle</label>
-        <n-input-number :value="sensor.gauge_start_angle" size="small" @update:value="(v) => patch({ gauge_start_angle: v ?? 90 })" />
-      </div>
-      <div class="field"><label class="muted">Sweep angle</label>
-        <n-input-number :value="sensor.gauge_sweep_angle" size="small" :min="1" :max="360" @update:value="(v) => patch({ gauge_sweep_angle: v ?? 330 })" />
-      </div>
-      <div class="field"><label class="muted">Outer radius</label>
-        <n-input-number :value="sensor.gauge_outer_radius" size="small" :min="1" @update:value="(v) => patch({ gauge_outer_radius: v ?? 180 })" />
-      </div>
-      <div class="field"><label class="muted">Thickness</label>
-        <n-input-number :value="sensor.gauge_thickness" size="small" :min="1" @update:value="(v) => patch({ gauge_thickness: v ?? 40 })" />
-      </div>
-      <div class="field"><label class="muted">Corner radius</label>
-        <n-input-number :value="sensor.bar_corner_radius" size="small" :min="0" @update:value="(v) => patch({ bar_corner_radius: v ?? 0 })" />
-      </div>
-    </div>
+          <div class="ranges">
+            <div class="ranges-head">
+              <label class="muted">Gauge colors by value (up to)</label>
+              <n-button size="tiny" quaternary @click="addRange"><template #icon><Plus :size="12" /></template>Add</n-button>
+            </div>
+            <div v-for="(r, i) in ranges" :key="i" class="range-row">
+              <n-input-number :value="r.max" size="small" :min="0" placeholder="no limit" class="range-max" @update:value="(v) => onRange(i, { max: v })" />
+              <ColorPicker class="range-color" :model-value="[r.color[0], r.color[1], r.color[2], r.alpha ?? 255]" alpha @update:model-value="(v: any) => onRange(i, { color: [v[0], v[1], v[2]], alpha: v[3] ?? 255 })" />
+              <n-button size="tiny" quaternary type="error" @click="removeRange(i)"><template #icon><Trash2 :size="12" /></template></n-button>
+            </div>
+          </div>
+        </div>
+      </n-collapse-item>
 
-    <div class="grid">
-      <div class="field"><label class="muted">Value offset</label>
-        <n-input-number :value="sensor.value_offset" size="small" @update:value="(v) => patch({ value_offset: v ?? 0 })" />
-      </div>
-      <div class="field"><label class="muted">Unit offset</label>
-        <n-input-number :value="sensor.unit_offset" size="small" @update:value="(v) => patch({ unit_offset: v ?? 60 })" />
-      </div>
-      <div class="field"><label class="muted">Label offset</label>
-        <n-input-number :value="sensor.label_offset" size="small" @update:value="(v) => patch({ label_offset: v ?? -60 })" />
-      </div>
-    </div>
+      <n-collapse-item title="Text size and position" name="text">
+        <div class="section-body">
+          <div class="grid">
+            <div class="field"><label class="muted">Value size</label>
+              <n-input-number :value="sensor.value_font_size" size="small" :min="1" @update:value="(v) => patch({ value_font_size: v ?? 72 })" />
+            </div>
+            <div class="field"><label class="muted">Unit size</label>
+              <n-input-number :value="sensor.unit_font_size" size="small" :min="1" @update:value="(v) => patch({ unit_font_size: v ?? 32 })" />
+            </div>
+            <div class="field"><label class="muted">Label size</label>
+              <n-input-number :value="sensor.label_font_size" size="small" :min="1" @update:value="(v) => patch({ label_font_size: v ?? 28 })" />
+            </div>
+          </div>
+          <div class="grid">
+            <div class="field"><label class="muted">Value offset</label>
+              <n-input-number :value="sensor.value_offset" size="small" @update:value="(v) => patch({ value_offset: v ?? 0 })" />
+            </div>
+            <div class="field"><label class="muted">Unit offset</label>
+              <n-input-number :value="sensor.unit_offset" size="small" @update:value="(v) => patch({ unit_offset: v ?? 60 })" />
+            </div>
+            <div class="field"><label class="muted">Label offset</label>
+              <n-input-number :value="sensor.label_offset" size="small" @update:value="(v) => patch({ label_offset: v ?? -60 })" />
+            </div>
+          </div>
+        </div>
+      </n-collapse-item>
 
-    <div class="grid colors-row">
-      <div class="field"><label class="muted">Text color</label>
-        <ColorPicker :model-value="sensor.text_color" @update:model-value="(v: any) => patch({ text_color: v })" />
-      </div>
-      <div class="field"><label class="muted">Background</label>
-        <ColorPicker :model-value="sensor.background_color" @update:model-value="(v: any) => patch({ background_color: v })" />
-      </div>
-      <div class="field"><label class="muted">Gauge bg</label>
-        <ColorPicker :model-value="sensor.gauge_background_color" @update:model-value="(v: any) => patch({ gauge_background_color: v })" />
-      </div>
-    </div>
-
-    <!-- Gauge range editor -->
-    <div class="ranges">
-      <div class="ranges-head">
-        <label class="muted">Gauge ranges</label>
-        <n-button size="tiny" quaternary @click="addRange"><template #icon><Plus :size="12" /></template>Add</n-button>
-      </div>
-      <div v-for="(r, i) in ranges" :key="i" class="range-row">
-        <n-input-number :value="r.max" size="small" :min="0" :max="100" placeholder="max %" @update:value="(v) => onRange(i, { max: v })" />
-        <ColorPicker class="range-color" :model-value="[r.color[0], r.color[1], r.color[2], r.alpha ?? 255]" alpha @update:model-value="(v: any) => onRange(i, { color: [v[0], v[1], v[2]], alpha: v[3] ?? 255 })" />
-        <n-button size="tiny" quaternary type="error" @click="removeRange(i)"><template #icon><Trash2 :size="12" /></template></n-button>
-      </div>
-    </div>
+      <n-collapse-item title="Gauge shape" name="shape">
+        <div class="grid section-body">
+          <div class="field"><label class="muted">Start angle</label>
+            <n-input-number :value="sensor.gauge_start_angle" size="small" @update:value="(v) => patch({ gauge_start_angle: v ?? 90 })" />
+          </div>
+          <div class="field"><label class="muted">Sweep angle</label>
+            <n-input-number :value="sensor.gauge_sweep_angle" size="small" :min="1" :max="360" @update:value="(v) => patch({ gauge_sweep_angle: v ?? 330 })" />
+          </div>
+          <div class="field"><label class="muted">Outer radius</label>
+            <n-input-number :value="sensor.gauge_outer_radius" size="small" :min="1" @update:value="(v) => patch({ gauge_outer_radius: v ?? 180 })" />
+          </div>
+          <div class="field"><label class="muted">Thickness</label>
+            <n-input-number :value="sensor.gauge_thickness" size="small" :min="1" @update:value="(v) => patch({ gauge_thickness: v ?? 40 })" />
+          </div>
+          <div class="field"><label class="muted">Corner radius</label>
+            <n-input-number :value="sensor.bar_corner_radius" size="small" :min="0" @update:value="(v) => patch({ bar_corner_radius: v ?? 0 })" />
+          </div>
+        </div>
+      </n-collapse-item>
+    </n-collapse>
   </div>
 </template>
 
@@ -166,24 +173,30 @@ function removeRange(i: number) {
 .gauge-editor {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--space-3);
-}
-.colors-row {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-2);
 }
 .field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
-.path-row {
+.sections {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+.section-body {
   display: flex;
-  gap: var(--space-1);
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+.grid.section-body {
+  display: grid;
 }
 .ranges {
   display: flex;
@@ -199,6 +212,9 @@ function removeRange(i: number) {
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
+}
+.range-max {
+  width: 130px;
 }
 /* Give the color picker a definite width so its swatch renders (in a flex row
    it otherwise collapses to just the hex text). */

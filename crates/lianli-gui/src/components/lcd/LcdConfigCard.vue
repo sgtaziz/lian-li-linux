@@ -16,7 +16,7 @@ import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import OrientationPicker from "@/components/common/OrientationPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
-import { enumerateSensorsAsOptions, optionForConfig, decodeOption } from "@/stores/sensorOptions";
+import { enumerateSensorsAsOptions, optionForConfig, decodeOption, gaugeTextForSource } from "@/stores/sensorOptions";
 import { screenSupportsH264, aio512FrameDefault } from "@/constants/screen";
 import StartupImageDialog from "./StartupImageDialog.vue";
 import { PIXEL_CLEANER_DURATION_OPTIONS } from "@/constants";
@@ -79,10 +79,12 @@ const mediaTypeOptions = [
 ] as const;
 
 function onMediaType(v: MediaType) {
-  if ((v === "image" || v === "video" || v === "gif") && props.entry.path && !matchesMediaFile(props.entry.path, v)) {
+  const pathKind = v === "sensor" ? "image" : v;
+  if ((pathKind === "image" || pathKind === "video" || pathKind === "gif") && props.entry.path && !matchesMediaFile(props.entry.path, pathKind)) {
     props.entry.path = null;
   }
   props.entry.type = v;
+  if (v === "sensor") ensureSensor();
   config.markDirty();
 }
 
@@ -95,11 +97,11 @@ function commitPath() {
 }
 
 async function browsePath() {
-  const type = props.entry.type;
+  const type = props.entry.type === "sensor" ? "image" : props.entry.type;
   if (type !== "image" && type !== "video" && type !== "gif") return;
   try {
     const selected = await pickMediaFile(type);
-    if (selected && props.entry.type === type) {
+    if (selected && (props.entry.type === type || props.entry.type === "sensor")) {
       localPath.value = selected;
       commitPath();
     }
@@ -113,8 +115,8 @@ const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, t
 function ensureSensor(): SensorDescriptor {
   if (!props.entry.sensor) {
     props.entry.sensor = {
-      label: "CPU Temp",
-      unit: "°C",
+      label: "CPU",
+      unit: "%",
       source: { type: "cpu_usage" },
       text_color: [255, 255, 255],
       background_color: [0, 0, 0],
@@ -148,6 +150,11 @@ function sensorSourceValue(): string {
 function onSensorSource(v: string) {
   const s = ensureSensor();
   s.source = decodeOption(v) ?? { type: "command", cmd: "" };
+  const text = gaugeTextForSource(config.sensors, s.source);
+  if (text) {
+    s.label = text.label;
+    s.unit = text.unit;
+  }
   config.markDirty();
 }
 const localCommand = ref("");
@@ -457,7 +464,40 @@ async function handleStopClean() {
         <label class="muted">Media type</label>
         <n-select :value="entry.type" :options="mediaTypeOptions" size="small" @update:value="onMediaType" />
       </div>
+      <div v-if="['video', 'gif'].includes(entry.type)" class="field">
+        <label class="muted">FPS</label>
+        <n-input-number :value="entry.fps ?? 30" size="small" :min="1" :max="120" @update:value="onFps" />
+      </div>
+      <div v-if="entry.type === 'sensor'" class="field">
+        <label class="muted">Update interval (ms)</label>
+        <n-input-number :value="entry.update_interval_ms ?? 1000" size="small" :min="100" :max="10000" :step="100" @update:value="onUpdateInterval" />
+      </div>
     </div>
+
+    <div class="screen-row">
+      <div class="field">
+        <label class="muted">Orientation</label>
+        <OrientationPicker :model-value="entry.orientation" @update:model-value="onOrientation" />
+      </div>
+      <div class="field brightness">
+        <label class="muted">Brightness</label>
+        <LabeledSlider
+          :model-value="brightness"
+          :min="0"
+          :max="100"
+          suffix="%"
+          @update:model-value="(v: number) => brightness = v"
+        />
+      </div>
+    </div>
+    <n-alert v-if="currentBrightnessError" type="error">
+      Could not change screen brightness: {{ currentBrightnessError }}
+    </n-alert>
+    <p v-if="selectedDeviceId && !brightnessConfigured" class="hint">
+      Save this LCD configuration to apply brightness.
+    </p>
+
+    <div class="divider" />
 
     <!-- Image / Video / GIF -->
     <div v-if="['image', 'video', 'gif'].includes(entry.type)" class="field">
@@ -476,15 +516,24 @@ async function handleStopClean() {
 
     <!-- Sensor Gauge -->
     <template v-if="entry.type === 'sensor'">
-      <div class="field">
-        <label class="muted">Sensor source</label>
-        <SensorSelect :value="sensorSourceValue()" :options="sensorOptions" size="small" filterable @update:value="onSensorSource" />
+      <div class="grid">
+        <div class="field">
+          <label class="muted">Sensor source</label>
+          <SensorSelect :value="sensorSourceValue()" :options="sensorOptions" size="small" filterable @update:value="onSensorSource" />
+        </div>
+        <div class="field">
+          <label class="muted">Background image</label>
+          <div class="path-row">
+            <n-input v-model:value="localPath" @blur="commitPath" size="small" placeholder="None (solid color)" clearable @clear="localPath = ''; commitPath()" />
+            <n-button size="small" @click="browsePath"><template #icon><FolderOpen :size="14" /></template></n-button>
+          </div>
+        </div>
       </div>
       <div v-if="entry.sensor?.source?.type === 'command'" class="field">
         <label class="muted">Custom command</label>
         <n-input v-model:value="localCommand" @blur="commitCommand" size="small" />
       </div>
-      <SensorGaugeEditor :sensor="ensureSensor()" />
+      <SensorGaugeEditor v-if="entry.sensor" :sensor="entry.sensor" />
     </template>
 
     <!-- Custom template -->
@@ -525,39 +574,6 @@ async function handleStopClean() {
       <n-checkbox :checked="entry.aio_512_frame ?? aio512Default" @update:checked="(v) => { entry.aio_512_frame = v; config.markDirty(); }">512-byte HID frame</n-checkbox>
     </div>
 
-    <!-- FPS (video/gif) / update interval (sensor) -->
-    <div class="grid">
-      <div v-if="['video', 'gif'].includes(entry.type)" class="field">
-        <label class="muted">FPS</label>
-        <n-input-number :value="entry.fps ?? 30" size="small" :min="1" :max="120" @update:value="onFps" />
-      </div>
-      <div v-if="entry.type === 'sensor'" class="field">
-        <label class="muted">Update interval (ms)</label>
-        <n-input-number :value="entry.update_interval_ms ?? 1000" size="small" :min="100" :max="10000" :step="100" @update:value="onUpdateInterval" />
-      </div>
-    </div>
-
-    <div class="field">
-      <label class="muted">Orientation</label>
-      <OrientationPicker :model-value="entry.orientation" @update:model-value="onOrientation" />
-    </div>
-
-    <div class="field">
-      <label class="muted">Brightness</label>
-      <LabeledSlider
-        :model-value="brightness"
-        :min="0"
-        :max="100"
-        suffix="%"
-        @update:model-value="(v: number) => brightness = v"
-      />
-      <n-alert v-if="currentBrightnessError" type="error">
-        Could not change screen brightness: {{ currentBrightnessError }}
-      </n-alert>
-      <p v-if="selectedDeviceId && !brightnessConfigured" class="hint">
-        Save this LCD configuration to apply brightness.
-      </p>
-    </div>
     </div>
   </div>
 </template>
@@ -566,7 +582,7 @@ async function handleStopClean() {
 .lcd-config {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .head {
   display: flex;
@@ -621,7 +637,7 @@ async function handleStopClean() {
 .card-content {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   transition: opacity 0.2s ease;
 }
 .card-body-locked {
@@ -631,8 +647,21 @@ async function handleStopClean() {
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+.screen-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+}
+.screen-row .brightness {
+  flex: 1;
+  min-width: 180px;
+}
+.divider {
+  border-top: 1px solid var(--border);
 }
 .field {
   display: flex;

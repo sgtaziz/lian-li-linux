@@ -67,6 +67,38 @@ function formatSensorLabel(s: SensorInfo): string {
   return unit ? `${name} (${unit})` : name;
 }
 
+const GAUGE_LABELS: Record<string, string> = {
+  cpu_usage: "CPU",
+  cpu_temp: "CPU",
+  mem_usage: "RAM",
+  mem_used: "RAM Used",
+  mem_free: "RAM Free",
+  gpu_usage: "GPU",
+  gpu_temp: "GPU",
+  network_rx: "Net RX",
+  network_tx: "Net TX",
+  disk_read: "Disk Read",
+  disk_write: "Disk Write",
+};
+
+const MAX_GAUGE_LABEL_LENGTH = 16;
+
+export function gaugeTextForSource(
+  sensors: SensorInfo[],
+  cfg: SensorSourceConfig,
+): { label: string; unit: string } | null {
+  const json = JSON.stringify(cfg);
+  const sensor = sensors.find((s) => JSON.stringify(sourceToConfig(s.source)) === json);
+  if (!sensor) return null;
+  const category = inferSensorCategory(cfg);
+  const fallback = sensor.sensor_name?.sensor_name ?? sensor.display_name ?? "";
+  const label = (category ? GAUGE_LABELS[category] : undefined) ?? fallback;
+  return {
+    label: label.slice(0, MAX_GAUGE_LABEL_LENGTH),
+    unit: UNIT_LABELS[sensor.unit] ?? "",
+  };
+}
+
 const UNIT_LABELS: Record<string, string> = {
   C: "\u00b0C",
   RPM: "RPM",
