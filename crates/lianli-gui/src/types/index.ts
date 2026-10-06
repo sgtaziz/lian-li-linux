@@ -272,6 +272,16 @@ export interface LcdConfig {
   custom_h264?: boolean | null;
   aio_512_frame?: boolean | null;
   brightness?: number | null;
+  framing?: MediaFraming;
+}
+
+export type MediaFit = "stretch" | "contain" | "cover";
+
+export interface MediaFraming {
+  fit: MediaFit;
+  zoom: number;
+  offset_x: number;
+  offset_y: number;
 }
 
 // ─── Fans ────────────────────────────────────────────────────────────────────

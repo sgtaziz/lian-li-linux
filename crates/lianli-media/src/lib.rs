@@ -94,7 +94,7 @@ pub fn prepare_media_asset(
             let path = cfg.path.as_ref().ok_or(MediaError::InvalidConfig(
                 "image entry requires a 'path' field".into(),
             ))?;
-            let frame = image::load_image_frame(path, cfg.orientation, screen)?;
+            let frame = image::load_image_frame(path, cfg.orientation, &cfg.framing, screen)?;
             Ok(MediaAssetKind::Static {
                 frame: Retained::frame(frame)?,
             })
@@ -117,8 +117,14 @@ pub fn prepare_media_asset(
                 cfg.fps.unwrap_or(default_fps).min(fps_cap),
                 &control,
             )?;
-            let (h264_path, temp, encoded_fps, encoder) =
-                video::encode_h264_with_status(path, fps, cfg.orientation, screen, &control)?;
+            let (h264_path, temp, encoded_fps, encoder) = video::encode_h264_with_status(
+                path,
+                fps,
+                cfg.orientation,
+                &cfg.framing,
+                screen,
+                &control,
+            )?;
             Ok(MediaAssetKind::H264Stream {
                 encoder: Some(encoder),
                 path: h264_path,
@@ -136,8 +142,14 @@ pub fn prepare_media_asset(
                 "video entry requires a 'path' field".into(),
             ))?;
             let desired_fps = video::ffmpeg::cap_fps_cancellable(path, desired_fps, &control)?;
-            let (frames, durations) =
-                video::build_video_frames(path, desired_fps, cfg.orientation, screen, &control)?;
+            let (frames, durations) = video::build_video_frames(
+                path,
+                desired_fps,
+                cfg.orientation,
+                &cfg.framing,
+                screen,
+                &control,
+            )?;
             Ok(MediaAssetKind::Video {
                 frames: Retained::frames(frames)?,
                 frame_durations: Arc::new(durations),
@@ -157,6 +169,7 @@ pub fn prepare_media_asset(
                 cfg.orientation,
                 screen,
                 capped_fps,
+                &cfg.framing,
                 &control,
             )?;
             Ok(MediaAssetKind::Video {

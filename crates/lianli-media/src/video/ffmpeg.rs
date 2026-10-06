@@ -1,6 +1,7 @@
 use super::process::PROBE_TIMEOUT;
 use crate::common::MediaError;
 use crate::PreparationControl;
+use lianli_shared::media::MediaFraming;
 use lianli_shared::template::ImageFit;
 use std::path::Path;
 use std::process::Command;
@@ -74,6 +75,7 @@ pub(super) fn stream_rgba(
     fps: f32,
     width: u32,
     height: u32,
+    framing: &MediaFraming,
     control: &PreparationControl,
     consume: impl FnMut(&[u8]) -> Result<(), MediaError>,
 ) -> Result<(), MediaError> {
@@ -81,11 +83,10 @@ pub(super) fn stream_rgba(
         return Err(MediaError::InvalidFps);
     }
     let frame_bytes = super::frame_budget::rgba_bytes(width, height)?;
-    let command = rgba_command(
+    let command = filtered_rgba_command(
         input,
         fps,
-        (width, height),
-        ImageFit::Stretch,
+        &framing_filter(framing, width, height),
         false,
         control.hardware_video,
     );
@@ -104,6 +105,34 @@ pub(super) fn check_rgba_output(output: std::process::Output) -> Result<(), Medi
     Ok(())
 }
 
+/// ffmpeg equivalent of `common::frame_rgb` for LCD video and H.264 paths.
+pub(super) fn framing_filter(framing: &MediaFraming, width: u32, height: u32) -> String {
+    let framing = framing.sanitized();
+    let scale = format!("scale={width}:{height}:flags=lanczos");
+    if framing.is_default() {
+        return scale;
+    }
+    let zoom = framing.zoom;
+    let (crop_w, crop_h) = if framing.fit == ImageFit::Cover {
+        (
+            format!("min(iw\\,ih*{width}/{height})/{zoom}"),
+            format!("min(ih\\,iw*{height}/{width})/{zoom}"),
+        )
+    } else {
+        (format!("iw/{zoom}"), format!("ih/{zoom}"))
+    };
+    let crop = format!(
+        "crop=w={crop_w}:h={crop_h}:x=(iw-ow)/2*(1+({})):y=(ih-oh)/2*(1+({}))",
+        framing.offset_x, framing.offset_y
+    );
+    let place = if framing.fit == ImageFit::Contain {
+        format!("scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black")
+    } else {
+        scale
+    };
+    format!("{crop},{place}")
+}
+
 pub(super) fn rgba_command(
     input: &Path,
     fps: f32,
@@ -118,6 +147,16 @@ pub(super) fn rgba_command(
         ImageFit::Contain => format!("scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0"),
         ImageFit::Cover => format!("scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height}"),
     };
+    filtered_rgba_command(input, fps, &scale, looping, hardware)
+}
+
+fn filtered_rgba_command(
+    input: &Path,
+    fps: f32,
+    filter: &str,
+    looping: bool,
+    hardware: bool,
+) -> Command {
     let mut command = Command::new("ffmpeg");
     command.args([
         "-hide_banner",
@@ -149,7 +188,7 @@ pub(super) fn rgba_command(
         "-sn",
         "-dn",
         "-vf",
-        &scale,
+        filter,
         "-r",
         &fps.to_string(),
         "-pix_fmt",

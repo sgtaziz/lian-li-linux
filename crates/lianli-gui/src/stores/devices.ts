@@ -129,6 +129,23 @@ export const useDevicesStore = defineStore("devices", () => {
     ...Object.values(displaySwitches.value).filter((device) => !visible.value.some((current) => current.device_id === device.device_id)),
   ]);
 
+  const summary = computed(() => {
+    let fanGroups = 0;
+    let screens = 0;
+    let other = 0;
+    for (const device of visible.value) {
+      if (device.has_fan || device.has_pump) fanGroups++;
+      else if (device.has_lcd) screens++;
+      else other++;
+    }
+    const parts = [
+      fanGroups && `${fanGroups} fan group${fanGroups === 1 ? "" : "s"}`,
+      screens && `${screens} LCD${screens === 1 ? "" : "s"}`,
+      other && `${other} other`,
+    ].filter(Boolean);
+    return parts.length ? parts.join(" · ") : "No devices";
+  });
+
   /** Device lookup by id. */
   function byId(id: string): DeviceInfo | undefined {
     return allDevices.value.find((d) => d.device_id === id);
@@ -183,6 +200,7 @@ export const useDevicesStore = defineStore("devices", () => {
     telemetry,
     visible,
     displayCards,
+    summary,
     lcdDevices,
     fanDevices,
     aioDevices,

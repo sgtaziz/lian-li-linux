@@ -1,3 +1,4 @@
+use crate::template::ImageFit;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -119,6 +120,80 @@ impl SensorSourceConfig {
                 device: device.clone(),
                 direction: crate::sensors::DiskDirection::Write,
             },
+        }
+    }
+}
+
+/// How image, GIF and video sources are placed on an LCD. Zoom and offsets
+/// select a region of the source; `fit` maps that region onto the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MediaFraming {
+    pub fit: ImageFit,
+    pub zoom: f32,
+    pub offset_x: f32,
+    pub offset_y: f32,
+}
+
+impl Default for MediaFraming {
+    fn default() -> Self {
+        Self {
+            fit: ImageFit::Stretch,
+            zoom: 1.0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CropRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl MediaFraming {
+    pub const MAX_ZOOM: f32 = 8.0;
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn sanitized(self) -> Self {
+        let finite = |value: f32, fallback: f32| if value.is_finite() { value } else { fallback };
+        Self {
+            fit: self.fit,
+            zoom: finite(self.zoom, 1.0).clamp(1.0, Self::MAX_ZOOM),
+            offset_x: finite(self.offset_x, 0.0).clamp(-1.0, 1.0),
+            offset_y: finite(self.offset_y, 0.0).clamp(-1.0, 1.0),
+        }
+    }
+
+    pub fn source_crop(&self, source: (u32, u32), target: (u32, u32)) -> CropRect {
+        let framing = self.sanitized();
+        let (sw, sh) = (source.0.max(1) as f64, source.1.max(1) as f64);
+        let (tw, th) = (target.0.max(1) as f64, target.1.max(1) as f64);
+        let (base_w, base_h) = if framing.fit == ImageFit::Cover {
+            (sw.min(sh * tw / th), sh.min(sw * th / tw))
+        } else {
+            (sw, sh)
+        };
+        let zoom = framing.zoom as f64;
+        let width = (base_w / zoom).round().clamp(1.0, sw);
+        let height = (base_h / zoom).round().clamp(1.0, sh);
+        let x = ((sw - width) / 2.0 * (1.0 + framing.offset_x as f64))
+            .round()
+            .clamp(0.0, sw - width);
+        let y = ((sh - height) / 2.0 * (1.0 + framing.offset_y as f64))
+            .round()
+            .clamp(0.0, sh - height);
+        CropRect {
+            x: x as u32,
+            y: y as u32,
+            width: width as u32,
+            height: height as u32,
         }
     }
 }
@@ -431,4 +506,85 @@ fn default_percent() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod framing_tests {
+    use super::{CropRect, MediaFraming};
+    use crate::template::ImageFit;
+
+    fn framing(fit: ImageFit, zoom: f32, offset_x: f32, offset_y: f32) -> MediaFraming {
+        MediaFraming {
+            fit,
+            zoom,
+            offset_x,
+            offset_y,
+        }
+    }
+
+    #[test]
+    fn default_framing_shows_the_whole_source() {
+        let crop = MediaFraming::default().source_crop((1920, 1080), (400, 400));
+        assert_eq!(
+            crop,
+            CropRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080
+            }
+        );
+    }
+
+    #[test]
+    fn cover_crops_the_source_to_the_screen_aspect() {
+        let centered = framing(ImageFit::Cover, 1.0, 0.0, 0.0).source_crop((1600, 900), (400, 400));
+        assert_eq!(
+            (centered.x, centered.width, centered.height),
+            (350, 900, 900)
+        );
+        let left = framing(ImageFit::Cover, 1.0, -1.0, 0.0).source_crop((1600, 900), (400, 400));
+        assert_eq!(left.x, 0);
+    }
+
+    #[test]
+    fn zoom_and_offsets_select_a_region_within_bounds() {
+        let crop = framing(ImageFit::Stretch, 2.0, 1.0, -1.0).source_crop((1000, 500), (400, 400));
+        assert_eq!(
+            crop,
+            CropRect {
+                x: 500,
+                y: 0,
+                width: 500,
+                height: 250
+            }
+        );
+    }
+
+    #[test]
+    fn out_of_range_values_are_clamped() {
+        let crop = framing(ImageFit::Contain, f32::NAN, 9.0, f32::INFINITY)
+            .source_crop((800, 600), (400, 400));
+        assert_eq!((crop.x, crop.y, crop.width, crop.height), (0, 0, 800, 600));
+        let zoomed =
+            framing(ImageFit::Stretch, 100.0, 0.0, 0.0).source_crop((800, 800), (400, 400));
+        assert_eq!(zoomed.width, 100);
+    }
+
+    #[test]
+    fn lcd_entries_without_framing_keep_their_serialized_form() {
+        let legacy = serde_json::json!({"serial": "lcd", "type": "image", "path": "/a.png", "fps": null, "rgb": null});
+        let config: crate::config::LcdConfig = serde_json::from_value(legacy).unwrap();
+        assert!(config.framing.is_default());
+        assert!(serde_json::to_value(&config)
+            .unwrap()
+            .get("framing")
+            .is_none());
+        let mut framed = config.clone();
+        framed.framing.fit = ImageFit::Cover;
+        let encoded = serde_json::to_value(&framed).unwrap();
+        assert_eq!(encoded["framing"]["fit"], "cover");
+        let decoded: crate::config::LcdConfig = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.framing.fit, ImageFit::Cover);
+    }
 }

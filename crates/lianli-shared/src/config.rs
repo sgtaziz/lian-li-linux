@@ -1,7 +1,9 @@
 use crate::aio::AioConfig;
 use crate::device_id::DeviceFamily;
 use crate::fan::{FanConfig, FanCurve};
-use crate::media::{DoublegaugeDescriptor, MediaType, SensorDescriptor, SensorSourceConfig};
+use crate::media::{
+    DoublegaugeDescriptor, MediaFraming, MediaType, SensorDescriptor, SensorSourceConfig,
+};
 use crate::rgb::RgbAppConfig;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -46,6 +48,8 @@ pub struct LcdConfig {
     pub aio_512_frame: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<u8>,
+    #[serde(default, skip_serializing_if = "MediaFraming::is_default")]
+    pub framing: MediaFraming,
 }
 
 impl LcdConfig {

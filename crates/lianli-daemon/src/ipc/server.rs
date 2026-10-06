@@ -78,6 +78,7 @@ pub fn build_info() -> lianli_shared::daemon::DaemonBuildInfo {
             lianli_shared::daemon::MEDIA_DECODE.into(),
             lianli_shared::daemon::INSTALLATION_HEALTH.into(),
             lianli_shared::daemon::DESKTOP_RETRY.into(),
+            lianli_shared::daemon::SENSOR_PREVIEW.into(),
             "daemon_info".into(),
             "hardware_video".into(),
             "media_preparation".into(),
@@ -667,6 +668,9 @@ fn handle_request(
                 hardware_video,
                 &catalog_runtime,
             )
+        }
+        IpcRequest::RenderSensorPreview { lcd, width, height } => {
+            super::lcd::render_sensor_preview(state, *lcd, width, height)
         }
 
         IpcRequest::SetLedColor {

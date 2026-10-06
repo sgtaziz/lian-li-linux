@@ -137,6 +137,7 @@ fn prepare_media_asset_image_produces_static_even_when_h264_screen() {
         custom_h264: None,
         aio_512_frame: None,
         brightness: None,
+        framing: Default::default(),
     };
 
     let asset =
@@ -167,6 +168,7 @@ fn prepare_media_asset_color_produces_static_even_when_h264_screen() {
         custom_h264: None,
         aio_512_frame: None,
         brightness: None,
+        framing: Default::default(),
     };
 
     let asset =

@@ -4,6 +4,7 @@ mod diagnostic_export;
 mod installation;
 mod ipc;
 mod managed_import;
+mod media_preview;
 mod service_operations;
 mod session_worker;
 mod startup_image_input;
@@ -167,6 +168,14 @@ async fn managed_import_status() -> Result<Option<lianli_control::media_import_j
     })
     .await
     .map_err(|error| format!("Import status worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn media_preview(path: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || media_preview::read(std::path::Path::new(&path)))
+        .await
+        .map_err(|error| format!("Preview worker failed: {error}"))?
+        .map(tauri::ipc::Response::new)
 }
 
 #[tauri::command]
@@ -359,6 +368,7 @@ pub fn run() {
             managed_import_start,
             managed_import_status,
             managed_import_result,
+            media_preview,
             service_action,
             service_change,
             container_setup_proposal,

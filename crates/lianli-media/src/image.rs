@@ -1,6 +1,6 @@
 use super::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
-use image::imageops::FilterType;
 use image::{DynamicImage, ImageBuffer, ImageReader, ImageResult, Rgb};
+use lianli_shared::media::MediaFraming;
 use lianli_shared::screen::ScreenInfo;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek};
@@ -48,11 +48,12 @@ pub(crate) fn open_image(path: &Path) -> ImageResult<DynamicImage> {
 pub fn load_image_frame(
     path: &Path,
     orientation: f32,
+    framing: &MediaFraming,
     screen: &ScreenInfo,
 ) -> Result<Vec<u8>, MediaError> {
     let rgb = open_image(path)?.to_rgb8();
     let (w, h) = render_dimensions(screen, orientation);
-    let resized = image::imageops::resize(&rgb, w, h, FilterType::Lanczos3);
+    let resized = crate::common::frame_rgb(&rgb, framing, w, h);
     let oriented = apply_orientation(resized, orientation);
     encode_jpeg(oriented, screen)
 }

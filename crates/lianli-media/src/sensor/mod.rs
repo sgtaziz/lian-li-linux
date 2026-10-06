@@ -140,9 +140,7 @@ impl SensorAsset {
         let ranges = ranges.into_iter().map(|r| (r.max, r.color)).collect();
 
         let source = match &descriptor.source {
-            SensorSourceConfig::Constant { value } => {
-                SensorSource::Constant(value.clamp(0.0, 100.0))
-            }
+            SensorSourceConfig::Constant { value } => SensorSource::Constant(*value),
             SensorSourceConfig::Command { .. }
             | SensorSourceConfig::Hwmon { .. }
             | SensorSourceConfig::NvidiaGpu { .. }
@@ -242,12 +240,12 @@ impl SensorAsset {
     /// previous frame and `force` is false. Returns `Ok(None)` when skipped.
     pub fn render_frame(&self, force: bool) -> Result<Option<FrameInfo>, MediaError> {
         let text_work = crate::text_work::FrameTextWork::begin();
-        let value = self.read_value()?.clamp(0.0, 100.0);
-
-        let value_text = if self.decimal_places > 0 {
-            format!("{:.prec$}", value, prec = self.decimal_places as usize)
+        let reading = self.read_value()?;
+        let value_text = self.format_value(reading);
+        let value = if reading.is_finite() {
+            reading.clamp(0.0, 100.0)
         } else {
-            format!("{:.0}", value.round())
+            0.0
         };
 
         let mut prev = self.previous_value.lock();
@@ -255,7 +253,7 @@ impl SensorAsset {
             return Ok(None);
         }
 
-        let gauge_color = self.color_for_value(value);
+        let gauge_color = self.color_for_value(if reading.is_finite() { reading } else { value });
         let w = self.render_width;
         let h = self.render_height;
 
@@ -312,12 +310,12 @@ impl SensorAsset {
 
     pub fn render_frame_rgba(&self, force: bool) -> Result<Option<RgbaImage>, MediaError> {
         let text_work = crate::text_work::FrameTextWork::begin();
-        let value = self.read_value()?.clamp(0.0, 100.0);
-
-        let value_text = if self.decimal_places > 0 {
-            format!("{:.prec$}", value, prec = self.decimal_places as usize)
+        let reading = self.read_value()?;
+        let value_text = self.format_value(reading);
+        let value = if reading.is_finite() {
+            reading.clamp(0.0, 100.0)
         } else {
-            format!("{:.0}", value.round())
+            0.0
         };
 
         let mut prev = self.previous_value.lock();
@@ -325,7 +323,7 @@ impl SensorAsset {
             return Ok(None);
         }
 
-        let gauge_color = self.color_for_value(value);
+        let gauge_color = self.color_for_value(if reading.is_finite() { reading } else { value });
         let w = self.render_width;
         let h = self.render_height;
 
@@ -398,6 +396,17 @@ impl SensorAsset {
         }
     }
 
+    fn format_value(&self, value: f32) -> String {
+        if !value.is_finite() {
+            return "-".into();
+        }
+        if self.decimal_places > 0 {
+            format!("{:.prec$}", value, prec = self.decimal_places as usize)
+        } else {
+            format!("{:.0}", value.round())
+        }
+    }
+
     fn color_for_value(&self, value: f32) -> [u8; 3] {
         for (max, color) in &self.ranges {
             if max.map(|m| value <= m).unwrap_or(true) {
@@ -420,4 +429,38 @@ impl SensorAsset {
 enum SensorSource {
     Constant(f32),
     Resolved(lianli_shared::sensors::ResolvedSensor),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn asset_reading(value: f32) -> SensorAsset {
+        let configured = if value.is_finite() { value } else { 0.0 };
+        let descriptor = serde_json::from_value(serde_json::json!({
+            "label": "RAM Used", "unit": "GB", "source": {"type": "constant", "value": configured}
+        }))
+        .unwrap();
+        let asset =
+            SensorAsset::new(&descriptor, 0.0, &ScreenInfo::TLLCD, &[], None, 1000).unwrap();
+        let mut asset = Arc::try_unwrap(asset).unwrap();
+        if !value.is_finite() {
+            asset.source = SensorSource::Constant(value);
+        }
+        asset
+    }
+
+    #[test]
+    fn displayed_value_is_not_limited_to_gauge_range() {
+        let asset = asset_reading(512.4);
+        assert!(asset.render_frame(true).unwrap().is_some());
+        assert_eq!(*asset.previous_value.lock(), "512");
+    }
+
+    #[test]
+    fn non_finite_reading_renders_placeholder() {
+        let asset = asset_reading(f32::NAN);
+        assert!(asset.render_frame_rgba(true).unwrap().is_some());
+        assert_eq!(*asset.previous_value.lock(), "-");
+    }
 }

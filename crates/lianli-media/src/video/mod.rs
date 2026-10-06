@@ -21,6 +21,7 @@ use image::codecs::gif::GifDecoder;
 use image::codecs::png::PngDecoder;
 use image::imageops::FilterType;
 use image::{AnimationDecoder, DynamicImage, Frames, ImageDecoder, RgbaImage};
+use lianli_shared::media::MediaFraming;
 use lianli_shared::screen::ScreenInfo;
 use std::io::BufReader;
 use std::path::Path;
@@ -30,6 +31,7 @@ pub fn build_video_frames(
     path: &Path,
     fps: f32,
     orientation: f32,
+    framing: &MediaFraming,
     screen: &ScreenInfo,
     control: impl Into<PreparationControl>,
 ) -> Result<(Vec<Vec<u8>>, Vec<Duration>), MediaError> {
@@ -38,7 +40,7 @@ pub fn build_video_frames(
     let (rw, rh) = render_dimensions(screen, orientation);
     let mut frames = Vec::new();
     let mut budget = frame_budget::FrameBudget::default();
-    stream_rgba(path, fps, rw, rh, &control, |rgba| {
+    stream_rgba(path, fps, rw, rh, framing, &control, |rgba| {
         control.check()?;
         let frame = crate::common::encode_jpeg_rgba(rgba, rw, rh, orientation, screen)?;
         budget.reserve(frame.len())?;
@@ -65,6 +67,7 @@ pub fn build_gif_frames(
         orientation,
         screen,
         desired_fps,
+        &MediaFraming::default(),
         &PreparationControl::new(false),
     )
 }
@@ -74,6 +77,7 @@ pub(crate) fn build_gif_frames_cancellable(
     orientation: f32,
     screen: &ScreenInfo,
     desired_fps: Option<f32>,
+    framing: &MediaFraming,
     control: &PreparationControl,
 ) -> Result<(Vec<Vec<u8>>, Vec<Duration>), MediaError> {
     control.check()?;
@@ -116,7 +120,7 @@ pub(crate) fn build_gif_frames_cancellable(
 
         let rgba = frame.into_buffer();
         let rgb = DynamicImage::ImageRgba8(rgba).to_rgb8();
-        let resized = image::imageops::resize(&rgb, rw, rh, FilterType::Lanczos3);
+        let resized = crate::common::frame_rgb(&rgb, framing, rw, rh);
         let oriented = apply_orientation(resized, orientation);
         let jpeg = encode_jpeg(oriented, screen)?;
         budget.reserve(jpeg.len())?;
@@ -173,14 +177,22 @@ pub fn decode_frames_to_rgba(
 
     let mut frames = Vec::new();
     let mut budget = frame_budget::FrameBudget::default();
-    stream_rgba(path, fps, width, height, &control, |rgba| {
-        control.check()?;
-        budget.reserve(rgba.len())?;
-        let frame = RgbaImage::from_raw(width, height, rgba.to_vec())
-            .ok_or_else(|| MediaError::ImageError("Invalid decoded RGBA frame size".into()))?;
-        frames.push(frame);
-        Ok(())
-    })?;
+    stream_rgba(
+        path,
+        fps,
+        width,
+        height,
+        &MediaFraming::default(),
+        &control,
+        |rgba| {
+            control.check()?;
+            budget.reserve(rgba.len())?;
+            let frame = RgbaImage::from_raw(width, height, rgba.to_vec())
+                .ok_or_else(|| MediaError::ImageError("Invalid decoded RGBA frame size".into()))?;
+            frames.push(frame);
+            Ok(())
+        },
+    )?;
     if frames.is_empty() {
         return Err(MediaError::EmptyVideo);
     }
@@ -275,7 +287,9 @@ mod animation_budget_tests {
             height: 16,
             ..ScreenInfo::WIRELESS_LCD
         };
-        let (frames, durations) = build_video_frames(&path, 10.0, 90.0, &screen, false).unwrap();
+        let (frames, durations) =
+            build_video_frames(&path, 10.0, 90.0, &MediaFraming::default(), &screen, false)
+                .unwrap();
         assert_eq!(durations.len(), 2);
         assert!(durations
             .iter()
@@ -289,7 +303,15 @@ mod animation_budget_tests {
             png: true,
             ..screen
         };
-        let (frames, _) = build_video_frames(&path, 10.0, 0.0, &png_screen, false).unwrap();
+        let (frames, _) = build_video_frames(
+            &path,
+            10.0,
+            0.0,
+            &MediaFraming::default(),
+            &png_screen,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             image::guess_format(&frames[0]).unwrap(),
             image::ImageFormat::Png
@@ -303,7 +325,14 @@ mod animation_budget_tests {
         assert_eq!(frames[0].get_pixel(0, 0).0, [255, 0, 0, 255]);
         assert_eq!(frames[1].get_pixel(0, 0).0, [0, 0, 255, 255]);
         assert!(matches!(
-            build_video_frames(&path, f32::NAN, 0.0, &screen, false),
+            build_video_frames(
+                &path,
+                f32::NAN,
+                0.0,
+                &MediaFraming::default(),
+                &screen,
+                false
+            ),
             Err(MediaError::InvalidFps)
         ));
     }
@@ -389,6 +418,110 @@ mod animation_budget_tests {
         };
         assert!(
             matches!(build_gif_frames(&path, 0.0, &screen, None), Err(MediaError::InvalidConfig(message)) if message.contains("8,192"))
+        );
+    }
+}
+
+#[cfg(test)]
+mod framing_tests {
+    use super::*;
+    use lianli_shared::template::ImageFit;
+    use std::fs::File;
+
+    const RED: [u8; 3] = [255, 0, 0];
+    const BLUE: [u8; 3] = [0, 0, 255];
+
+    fn two_tone() -> RgbaImage {
+        RgbaImage::from_fn(32, 16, |x, _| {
+            let [r, g, b] = if x < 16 { RED } else { BLUE };
+            image::Rgba([r, g, b, 255])
+        })
+    }
+
+    fn sources(directory: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        let png = directory.join("source.png");
+        two_tone().save(&png).unwrap();
+        let gif = directory.join("source.gif");
+        let mut encoder = image::codecs::gif::GifEncoder::new(File::create(&gif).unwrap());
+        encoder
+            .encode_frame(image::Frame::from_parts(
+                two_tone(),
+                0,
+                0,
+                image::Delay::from_numer_denom_ms(100, 1),
+            ))
+            .unwrap();
+        drop(encoder);
+        (png, gif)
+    }
+
+    fn frames(directory: &Path, framing: &MediaFraming) -> Vec<image::RgbImage> {
+        let (png, gif) = sources(directory);
+        let screen = ScreenInfo {
+            width: 16,
+            height: 16,
+            ..ScreenInfo::WIRELESS_LCD
+        };
+        let control = PreparationControl::new(false);
+        let image_frame = crate::image::load_image_frame(&png, 0.0, framing, &screen).unwrap();
+        let (gif_frames, _) =
+            build_gif_frames_cancellable(&gif, 0.0, &screen, None, framing, &control).unwrap();
+        let (video_frames, _) =
+            build_video_frames(&gif, 10.0, 0.0, framing, &screen, false).unwrap();
+        [&image_frame, &gif_frames[0], &video_frames[0]]
+            .into_iter()
+            .map(|jpeg| image::load_from_memory(jpeg).unwrap().to_rgb8())
+            .collect()
+    }
+
+    fn dominant(pixel: &image::Rgb<u8>) -> [u8; 3] {
+        let [r, g, b] = pixel.0;
+        if r < 40 && g < 40 && b < 40 {
+            [0, 0, 0]
+        } else if r > b {
+            RED
+        } else {
+            BLUE
+        }
+    }
+
+    fn cover(offset_x: f32) -> MediaFraming {
+        MediaFraming {
+            fit: ImageFit::Cover,
+            offset_x,
+            ..MediaFraming::default()
+        }
+    }
+
+    #[test]
+    fn every_lcd_path_pans_to_the_same_region() {
+        let directory = tempfile::tempdir().unwrap();
+        for (offset, expected) in [(-1.0, RED), (1.0, BLUE)] {
+            for frame in frames(directory.path(), &cover(offset)) {
+                assert_eq!(dominant(frame.get_pixel(8, 8)), expected, "offset {offset}");
+            }
+        }
+    }
+
+    #[test]
+    fn contain_letterboxes_wide_sources_on_every_lcd_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let contain = MediaFraming {
+            fit: ImageFit::Contain,
+            ..MediaFraming::default()
+        };
+        for frame in frames(directory.path(), &contain) {
+            assert_eq!(dominant(frame.get_pixel(8, 0)), [0, 0, 0]);
+            assert_eq!(dominant(frame.get_pixel(2, 8)), RED);
+            assert_eq!(dominant(frame.get_pixel(13, 8)), BLUE);
+        }
+    }
+
+    #[test]
+    fn default_framing_keeps_the_existing_scale_filter() {
+        assert_eq!(
+            ffmpeg::framing_filter(&MediaFraming::default(), 400, 400),
+            "scale=400:400:flags=lanczos"
         );
     }
 }
