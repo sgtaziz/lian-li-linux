@@ -173,6 +173,55 @@
       "base_height": 1080,
       "rotated": false,
       "files": []
+    },
+    {
+      "id": "rx78-ice",
+      "name": "RX-78 ICE Community",
+      "description": "Space-themed unofficial fan dashboard: CPU/GPU temperatures and load, RAM and seconds clock.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.1.6",
+      "folder": "rx78-ice",
+      "template_file": "template.json",
+      "template_sha256": "4179a52830351875682e25cd0724e675be218f57186270ba898804dbb6034470",
+      "preview": "preview.png",
+      "preview_sha256": "8fd0eda296217c980c02377e6356d3a1d32ce74f7812edd715b94cbbc0be45dc",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "Amuro-OFL.txt",
+          "sha256": "b33764c95f1fb36567af758f20cf217d9993faa3c8cb47d5bf19b3ab098d1a99"
+        },
+        {
+          "path": "Amuro-Readme.txt",
+          "sha256": "7db3f0ebbc952d448f08416038d552b90d51547ab3fff8caec3086bac5370768"
+        },
+        {
+          "path": "Amuro.otf",
+          "sha256": "6097d5cd8c054f2fa82147e1632819e3497059b13c3f7a6cc9292c319e95935d"
+        },
+        {
+          "path": "CC-BY-NC-3.0.txt",
+          "sha256": "45526cb7a15234d8d686a3ba5f11b607516f90662d125d5423eb2b57f474e5e4"
+        },
+        {
+          "path": "CREDITS.md",
+          "sha256": "c938e9ba7d04e0c394056fc8d7457c7867c200ffd9ab86952a5398a9eac563f9"
+        },
+        {
+          "path": "README.md",
+          "sha256": "4d9b8b1e4bd72b1998ff1e0bc8de51427e2aff8595defca01c844d8c63a9f61e"
+        },
+        {
+          "path": "background.png",
+          "sha256": "aa73db76984bf4cfba4411696ff4e086710b3d17e349e63e2d75d61f500e0c0d"
+        },
+        {
+          "path": "gundam-head.png",
+          "sha256": "bed7a9b44078b609b540179cf3665dff1fc22c8527b730dfa3d5ba3b89c0bcce"
+        }
+      ]
     }
   ]
 }
