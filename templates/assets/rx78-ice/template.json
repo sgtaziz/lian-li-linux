@@ -1,0 +1,420 @@
+{
+  "id": "rx78-ice",
+  "name": "RX-78 ICE Community",
+  "base_width": 1920,
+  "base_height": 480,
+  "rotated": true,
+  "target_device": "Universal Screen 8.8\" (480×1920)",
+  "background": {
+    "type": "image",
+    "path": "background.png"
+  },
+  "widgets": [
+    {
+      "id": "title",
+      "x": 405,
+      "y": 50,
+      "width": 650,
+      "height": 90,
+      "kind": {
+        "type": "label",
+        "text": "RX-78-2 / E.F.S.F.",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 52,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      }
+    },
+    {
+      "id": "CPU label",
+      "x": 220,
+      "y": 152,
+      "width": 280,
+      "height": 90,
+      "kind": {
+        "type": "label",
+        "text": "CPU",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 70,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      }
+    },
+    {
+      "id": "CPU temperature",
+      "x": 285,
+      "y": 257,
+      "width": 430,
+      "height": 182,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 134,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "left",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [],
+        "letter_spacing": 0
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "CPU load label",
+      "x": 180,
+      "y": 378,
+      "width": 200,
+      "height": 80,
+      "kind": {
+        "type": "label",
+        "text": "LOAD",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 52,
+        "color": [
+          152,
+          175,
+          202,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      }
+    },
+    {
+      "id": "CPU load",
+      "x": 450,
+      "y": 376,
+      "width": 320,
+      "height": 94,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": " %",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 70,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "left",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [],
+        "letter_spacing": 0
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "CPU gauge",
+      "x": 604,
+      "y": 277,
+      "width": 210,
+      "height": 210,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 90,
+        "sweep_angle": 360,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          80,
+          112,
+          148,
+          255
+        ],
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              88,
+              177,
+              246
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0,
+        "value_corner_radius": 0
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "GPU label",
+      "x": 915,
+      "y": 152,
+      "width": 280,
+      "height": 90,
+      "kind": {
+        "type": "label",
+        "text": "GPU",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 70,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      }
+    },
+    {
+      "id": "GPU temperature",
+      "x": 985,
+      "y": 257,
+      "width": 420,
+      "height": 182,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 131,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "left",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [],
+        "letter_spacing": 0
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "GPU load label",
+      "x": 875,
+      "y": 378,
+      "width": 200,
+      "height": 80,
+      "kind": {
+        "type": "label",
+        "text": "LOAD",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 52,
+        "color": [
+          152,
+          175,
+          202,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      }
+    },
+    {
+      "id": "GPU load",
+      "x": 1120,
+      "y": 376,
+      "width": 320,
+      "height": 94,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": " %",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 70,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "left",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [],
+        "letter_spacing": 0
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "GPU gauge",
+      "x": 1280,
+      "y": 277,
+      "width": 210,
+      "height": 210,
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 90,
+        "sweep_angle": 360,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          80,
+          112,
+          148,
+          255
+        ],
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              232,
+              72,
+              79
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 0,
+        "value_corner_radius": 0
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "ram label",
+      "x": 1560,
+      "y": 145,
+      "width": 180,
+      "height": 90,
+      "kind": {
+        "type": "label",
+        "text": "RAM",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 60,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      }
+    },
+    {
+      "id": "ram usage",
+      "x": 1760,
+      "y": 145,
+      "width": 240,
+      "height": 100,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "mem_usage"
+        },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 80,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "left",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [],
+        "letter_spacing": 0
+      },
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "clock",
+      "x": 1670,
+      "y": 50,
+      "width": 440,
+      "height": 100,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%H:%M:%S",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 80,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      },
+      "update_interval_ms": 1000
+    },
+    {
+      "id": "gundam head",
+      "x": 1720,
+      "y": 300,
+      "width": 270,
+      "height": 260,
+      "kind": {
+        "type": "image",
+        "path": "gundam-head.png",
+        "opacity": 1.0,
+        "fit": "contain"
+      }
+    }
+  ]
+}
