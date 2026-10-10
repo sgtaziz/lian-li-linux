@@ -65,7 +65,10 @@
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "hwmon",
+          "name": "__rx78_unavailable_cpu_temp__",
+          "label": "unavailable",
+          "device_path": ""
         },
         "format": "{:.0}",
         "unit": "°C",
@@ -211,7 +214,10 @@
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "hwmon",
+          "name": "__rx78_unavailable_gpu_temp__",
+          "label": "unavailable",
+          "device_path": ""
         },
         "format": "{:.0}",
         "unit": "°C",
@@ -265,7 +271,10 @@
       "kind": {
         "type": "value_text",
         "source": {
-          "type": "cpu_usage"
+          "type": "hwmon",
+          "name": "__rx78_unavailable_gpu_usage__",
+          "label": "unavailable",
+          "device_path": ""
         },
         "format": "{:.0}",
         "unit": " %",
@@ -296,7 +305,10 @@
       "kind": {
         "type": "radial_gauge",
         "source": {
-          "type": "cpu_usage"
+          "type": "hwmon",
+          "name": "__rx78_unavailable_gpu_usage__",
+          "label": "unavailable",
+          "device_path": ""
         },
         "value_min": 0,
         "value_max": 100,

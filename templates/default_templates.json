@@ -182,7 +182,7 @@
       "min_daemon_version": "1.1.6",
       "folder": "rx78-ice",
       "template_file": "template.json",
-      "template_sha256": "0c9179947b14b11de4183f77996ae7951fac0a41ecd7b6f248fb142ce3470dfe",
+      "template_sha256": "4179a52830351875682e25cd0724e675be218f57186270ba898804dbb6034470",
       "preview": "preview.png",
       "preview_sha256": "8fd0eda296217c980c02377e6356d3a1d32ce74f7812edd715b94cbbc0be45dc",
       "base_width": 1920,
@@ -208,6 +208,10 @@
         {
           "path": "CREDITS.md",
           "sha256": "c938e9ba7d04e0c394056fc8d7457c7867c200ffd9ab86952a5398a9eac563f9"
+        },
+        {
+          "path": "README.md",
+          "sha256": "4d9b8b1e4bd72b1998ff1e0bc8de51427e2aff8595defca01c844d8c63a9f61e"
         },
         {
           "path": "background.png",
