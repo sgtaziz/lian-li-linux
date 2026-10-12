@@ -1,7 +1,7 @@
 name: Release Notes
 
 # Publishing waits for all distribution packages. Manual notes previews remain
-# read-only and do not build packages; Debian packages also has an artifact-only run.
+# read-only and do not build packages; Debian and Arch packages also have artifact-only runs.
 
 on:
   push:
@@ -181,8 +181,17 @@ jobs:
     permissions:
       contents: read
 
+  arch-package:
+    needs: notes
+    if: github.event_name == 'push' || inputs.publish
+    uses: ./.github/workflows/arch-package.yml
+    with:
+      ref: ${{ needs.notes.outputs.commit }}
+    permissions:
+      contents: read
+
   publish:
-    needs: [notes, packages]
+    needs: [notes, packages, arch-package]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-latest
     permissions:
@@ -199,6 +208,10 @@ jobs:
           pattern: deb-*-amd64
           path: artifacts
           merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          name: arch-x86_64
+          path: artifacts
       - name: Publish checked release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -213,7 +226,9 @@ jobs:
             test -f "$package"
             test "$(dpkg-deb -f "$package" Version)" = "${TAG#v}+${distribution}"
           done
-          (cd artifacts && sha256sum ./*.deb > SHA256SUMS)
+          arch_package="artifacts/lianli-linux-${TAG#v}-1-x86_64.pkg.tar.zst"
+          test -f "$arch_package"
+          (cd artifacts && sha256sum ./*.deb ./*.pkg.tar.zst > SHA256SUMS)
           created=false
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file notes.md
@@ -221,7 +236,7 @@ jobs:
             gh release create "$TAG" --verify-tag --draft --title "$TAG" --notes-file notes.md
             created=true
           fi
-          gh release upload "$TAG" artifacts/*.deb artifacts/SHA256SUMS --clobber
+          gh release upload "$TAG" artifacts/*.deb "$arch_package" artifacts/SHA256SUMS --clobber
           if [ "$created" = true ]; then
             gh release edit "$TAG" --draft=false
           fi

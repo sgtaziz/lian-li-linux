@@ -103,6 +103,17 @@ If you have tested a device not marked above, please
 yay -S lianli-linux-git
 ```
 
+Each release also ships a prebuilt package, so updating does not compile the
+project locally:
+
+```sh
+sudo pacman -U https://github.com/sgtaziz/lian-li-linux/releases/download/vVERSION/lianli-linux-VERSION-1-x86_64.pkg.tar.zst
+```
+
+It conflicts with `lianli-linux-git`; pacman offers to replace one with the other.
+Like other prebuilt Arch packages it expects current Arch libraries, so rebuild
+from source if a partial upgrade leaves FFmpeg or WebKit at a different soname.
+
 To build the package directly:
 
 ```sh
