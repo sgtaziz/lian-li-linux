@@ -1,6 +1,18 @@
 import type en from "../en/settings";
 
 const messages: typeof en = {
+  updates: {
+    title: "检查更新",
+    hint: "适用于使用用户守护进程和 KDE Konsole 的 Fedora Distrobox 安装。检查已配置的 DNF 软件仓库。",
+    check: "检查更新",
+    install: "在终端中更新",
+    cancel: "取消",
+    installed: "已安装：{version}",
+    available: "可用版本：{version}",
+    current: "没有可用更新。",
+    saveFirst: "请先保存更改，再进行更新。",
+    confirm: "应用将关闭。独立终端将请求管理员凭据、停止守护进程、升级软件包、恢复服务并重新打开应用。完成前请勿关闭终端。",
+  },
   configuration: {
     title: "配置",
     hidBackend: "HID 后端",

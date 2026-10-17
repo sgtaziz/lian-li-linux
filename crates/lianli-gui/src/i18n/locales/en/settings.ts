@@ -1,4 +1,16 @@
 export default {
+  updates: {
+    title: "Check for updates",
+    hint: "For Fedora Distrobox installations with a user daemon and KDE Konsole. Checks the configured DNF repositories.",
+    check: "Check for updates",
+    install: "Update in terminal",
+    cancel: "Cancel",
+    installed: "Installed: {version}",
+    available: "Available: {version}",
+    current: "No updates available.",
+    saveFirst: "Save your changes before updating.",
+    confirm: "The app will close. A separate terminal will request administrator credentials, stop the daemon, upgrade the package, restore services, and reopen the app. Keep the terminal open until it finishes.",
+  },
   configuration: {
     title: "Configuration",
     hidBackend: "HID Backend",

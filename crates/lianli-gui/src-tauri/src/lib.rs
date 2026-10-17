@@ -1,5 +1,6 @@
 //! Tauri command handlers + multi-window setup for the Lian Li Linux GUI.
 
+mod app_update;
 mod command_error;
 mod diagnostic_export;
 mod external_link;
@@ -387,6 +388,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
+            app_update::check_package_update,
+            app_update::start_package_update,
             startup_image_input::pick_startup_image,
             ipc_request,
             poll_daemon,

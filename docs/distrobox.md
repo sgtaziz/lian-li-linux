@@ -123,6 +123,10 @@ permissions does not verify container device policies or driver interface claims
 Refresh the copied host rules after package updates. They override native vendor rules
 with the same filename. Review them if you later switch to a native installation.
 
+For Fedora boxes using the user daemon and KDE Konsole, Settings provides
+[update controls](app-updates.md) that coordinate the terminal package upgrade,
+host rules, daemon shutdown and restart.
+
 The daemon inside the box must see `/run/host/run/lianli-daemon.lock`. Do not create a
 private container lock to bypass an integration error, or remove an active host lock.
 See [ownership recovery](service-modes.md).

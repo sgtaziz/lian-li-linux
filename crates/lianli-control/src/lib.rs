@@ -1,4 +1,5 @@
 pub mod account;
+pub mod app_update;
 pub mod account_publication;
 pub mod authorized_service;
 pub mod automatic_recovery;

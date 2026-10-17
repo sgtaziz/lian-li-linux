@@ -1,4 +1,5 @@
 export default {
+  appUpdate: { failed: "Application update failed: {error}", ready: "Update terminal is ready." },
   compatibility: {
     versionMismatch:
       "Changes are disabled: GUI/client {client} and daemon {daemon} must use matching versions. Update both and restart the selected daemon cleanly.",

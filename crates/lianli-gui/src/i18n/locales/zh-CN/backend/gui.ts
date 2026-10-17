@@ -1,6 +1,7 @@
 import type en from "../../en/backend/gui";
 
 const messages: typeof en = {
+  appUpdate: { failed: "应用更新失败：{error}", ready: "更新终端已就绪。" },
   compatibility: {
     versionMismatch:
       "已禁用更改：GUI/客户端 {client} 与守护进程 {daemon} 的版本必须一致。请同时更新两者，并正常重启所选守护进程。",

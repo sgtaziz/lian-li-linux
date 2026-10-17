@@ -20,6 +20,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     #[command(hide = true)]
+    VerifyPackageUpdate,
+    #[command(hide = true)]
     RepairContainerAccess {
         #[arg(long)]
         expected_box: String,
@@ -416,6 +418,7 @@ fn main() -> anyhow::Result<()> {
                 previous.as_ref(),
             )?;
         }
+        Command::VerifyPackageUpdate => lianli_control::app_update::verify()?,
         Command::CheckContainerServices { expected_box } => {
             lianli_control::container_change::verify_host_request(&expected_box)?;
             lianli_control::container_deployment::load()?

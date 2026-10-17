@@ -127,6 +127,24 @@ impl Operation {
         }
     }
 
+    pub fn run_package_update(self) -> Result<(), CommandError> {
+        self.submit(|| {
+            lianli_control::app_update::launch().map_err(|error| {
+                let error = format!("{error:#}");
+                CommandError::ui(
+                    &error,
+                    UiMessage::new("gui.appUpdate.failed").param("error", &error),
+                )
+            })?;
+            Ok(ServiceOperationStatus {
+                active: false,
+                success: Some(true),
+                message: "Update terminal is ready.".into(),
+                message_ui: Some(UiMessage::new("gui.appUpdate.ready")),
+            })
+        })
+    }
+
     pub fn run(self, request: ServiceActionRequest) -> Result<(), CommandError> {
         self.submit(|| {
             let id = lianli_control::operation_job::start(&InstallationContext::detect(), request)
