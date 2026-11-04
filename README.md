@@ -135,6 +135,11 @@ Use the release artifact matching your distribution: Ubuntu 24.04, Ubuntu 26.04
 or Debian 13, amd64. These packages are distribution-specific because their linked
 libraries differ. See [download verification and installation](docs/debian-packages.md).
 
+### NixOS
+
+The repository is a flake. Import `nixosModules.default` and set
+`services.lian-li-linux.enable = true`. See the [NixOS guide](docs/nixos.md).
+
 ### Distrobox and immutable hosts
 
 **We strongly recommend Distrobox on immutable distributions such as Bazzite,
