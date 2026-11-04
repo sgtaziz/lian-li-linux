@@ -14,12 +14,12 @@ Add the flake to your system flake and import the module:
 
   outputs = { nixpkgs, lian-li-linux, ... }: {
     nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
       modules = [
         lian-li-linux.nixosModules.default
         {
           services.lian-li-linux = {
             enable = true;
-            serviceMode = "user";
             evdi.enable = true;
           };
         }
@@ -32,13 +32,25 @@ Add the flake to your system flake and import the module:
 | Option | Default | Description |
 | --- | --- | --- |
 | `enable` | `false` | Install the package, udev rules, units, Polkit rule and `lianli` account |
-| `serviceMode` | `null` | `"user"` or `"system"` starts that daemon automatically. `null` leaves both stopped so you can choose in the GUI |
+| `systemService.enable` | `false` | Run the system daemon at boot as `lianli` instead of the user daemon |
 | `evdi.enable` | `false` | Load the EVDI kernel module for [desktop-mode LCDs](desktop-backends.md) |
 | `package` | flake package | Override the package |
 
 Rebuild with `sudo nixos-rebuild switch`, then log out and back in so `uaccess` applies
 to the USB devices. See [Service modes](service-modes.md) for the difference between the
 user and system daemon.
+
+## Service mode
+
+Without `systemService.enable`, choose **User (at login)** in the GUI on first launch.
+That enables the user daemon in `~/.config/systemd/user`, which works as on other
+distributions.
+
+NixOS generates `/etc/systemd` read-only, so the GUI cannot enable or disable the
+system daemon. Set `systemService.enable = true` for system mode and rebuild. To move
+between modes, disable the user daemon (`systemctl --user disable --now lianli-daemon`)
+before turning `systemService.enable` on, or turn it off before choosing user mode in
+the GUI. The GUI's mode switch is not available while the system daemon is declared.
 
 ## Package only
 
@@ -55,6 +67,8 @@ install.
 
 - Absolute paths to `systemctl`, `systemd-run`, `pkexec` and the project binaries are
   patched to Nix store and `/run/wrappers` paths at build time.
+- The desktop capture helper starts from its XDG autostart entry, as on other
+  distributions.
 - `ffmpeg` and `ffprobe` are added to the binaries' `PATH`.
 - `libevdi` and the GL/GBM libraries are added to the runpath, along with the driver
   directory in `/run/opengl-driver`.

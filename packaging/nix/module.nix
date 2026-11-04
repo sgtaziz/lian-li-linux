@@ -14,20 +14,11 @@ in
 
     package = lib.mkPackageOption pkgs "lian-li-linux" { };
 
-    serviceMode = lib.mkOption {
-      type = lib.types.nullOr (
-        lib.types.enum [
-          "user"
-          "system"
-        ]
-      );
-      default = null;
-      description = ''
-        Daemon to start automatically. `user` runs it in the graphical session,
-        `system` runs it at boot as the `lianli` account. `null` leaves both
-        stopped so the mode can be chosen from the GUI.
-      '';
-    };
+    systemService.enable = lib.mkEnableOption ''
+      the system daemon, which runs at boot as the `lianli` account. NixOS keeps
+      system units read-only, so this mode cannot be selected from the GUI. Leave
+      it disabled to choose the user daemon from the GUI instead
+    '';
 
     evdi.enable = lib.mkEnableOption "the EVDI kernel module for desktop-mode LCD panels";
   };
@@ -40,6 +31,7 @@ in
     systemd.tmpfiles.packages = [ cfg.package ];
 
     security.polkit.enable = true;
+    security.polkit.enablePkexecWrapper = true;
     environment.etc."polkit-1/rules.d/49-lianli-recovery.rules".source =
       "${cfg.package}/share/polkit-1/rules.d/49-lianli-recovery.rules";
 
@@ -51,13 +43,9 @@ in
     users.groups.lianli = { };
 
     systemd.services.lianli-control-recovery.wantedBy = [ "multi-user.target" ];
-    systemd.services.lianli-daemon-system.wantedBy = lib.mkIf (cfg.serviceMode == "system") [
+    systemd.services.lianli-daemon-system.wantedBy = lib.mkIf cfg.systemService.enable [
       "multi-user.target"
     ];
-    systemd.user.services.lianli-daemon.wantedBy = lib.mkIf (cfg.serviceMode == "user") [
-      "default.target"
-    ];
-    systemd.user.services.lianli-session.wantedBy = [ "default.target" ];
 
     boot.extraModulePackages = lib.mkIf cfg.evdi.enable [ config.boot.kernelPackages.evdi ];
     boot.kernelModules = lib.mkIf cfg.evdi.enable [ "evdi" ];
