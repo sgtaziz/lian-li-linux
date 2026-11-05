@@ -7,8 +7,11 @@ use std::time::Duration;
 use super::core::{SharedTransport, WinUsbLcdCore};
 use super::trait_::{BoxedWinUsbLcd, WinUsbLcd};
 
+const BLANK_CLIP: &[u8] = include_bytes!("../../../assets/blank_480.h264");
+
 pub struct H2WinUsbLcd {
     core: WinUsbLcdCore,
+    play_started: bool,
 }
 
 impl H2WinUsbLcd {
@@ -19,7 +22,10 @@ impl H2WinUsbLcd {
     ) -> Result<Self> {
         let core = WinUsbLcdCore::open(device, screen, name, WRITE_TIMEOUT, READ_TIMEOUT, true)?
             .without_stalled_chunk_resend();
-        Ok(Self { core })
+        Ok(Self {
+            core,
+            play_started: false,
+        })
     }
 
     pub(crate) fn from_shared(
@@ -28,6 +34,7 @@ impl H2WinUsbLcd {
         name: String,
     ) -> Self {
         Self {
+            play_started: false,
             core: WinUsbLcdCore::from_shared(
                 transport,
                 screen,
@@ -37,6 +44,20 @@ impl H2WinUsbLcd {
                 true,
             )
             .without_stalled_chunk_resend(),
+        }
+    }
+
+    /// The firmware keeps its coolant and pump overlay on top of JPEG frames
+    /// until an H.264 play session has run; the clip is 15 black 480x480
+    /// frames encoded with the daemon's libx264 live settings.
+    fn hide_firmware_overlay(&mut self) {
+        if self.play_started {
+            return;
+        }
+        let stop = AtomicBool::new(false);
+        let mut clip: &[u8] = BLANK_CLIP;
+        if let Err(error) = WinUsbLcd::stream_h264_reader(self, &mut clip, &stop, 30.0) {
+            tracing::warn!("Hiding the firmware overlay failed: {error:#}");
         }
     }
 
@@ -87,12 +108,14 @@ impl WinUsbLcd for H2WinUsbLcd {
         Ok(())
     }
     fn send_frame(&mut self, frame: &[u8]) -> Result<()> {
+        self.hide_firmware_overlay();
         if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
         self.core.send_frame(frame)
     }
     fn send_frame_verified(&mut self, frame: &[u8]) -> Result<()> {
+        self.hide_firmware_overlay();
         if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
@@ -111,6 +134,7 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
+        self.play_started = true;
         if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
@@ -124,6 +148,7 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
+        self.play_started = true;
         if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
