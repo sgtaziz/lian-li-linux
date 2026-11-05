@@ -176,3 +176,37 @@ fn prepare_media_asset_color_produces_static_even_when_h264_screen() {
             .unwrap();
     assert!(matches!(asset, lianli_media::MediaAssetKind::Static { .. }));
 }
+
+fn noise_image(width: u32, height: u32) -> RgbImage {
+    let mut state = 0x2545_f491_u32;
+    ImageBuffer::from_fn(width, height, |_, _| {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        let [r, g, b, _] = state.to_le_bytes();
+        Rgb([r, g, b])
+    })
+}
+
+#[test]
+fn encode_jpeg_lowers_quality_to_fit_payload() {
+    let image = noise_image(480, 480);
+    let mut screen = test_screen();
+    screen.jpeg_quality = 95;
+    screen.max_payload = usize::MAX;
+    let full = encode_jpeg(image.clone(), &screen).unwrap().len();
+    screen.max_payload = full * 2 / 3;
+    let fitted = encode_jpeg(image, &screen).unwrap();
+    assert!(fitted.len() <= screen.max_payload);
+    assert_eq!(&fitted[..2], &[0xFF, 0xD8]);
+}
+
+#[test]
+fn encode_jpeg_reports_payload_too_large_below_lowest_quality() {
+    let mut screen = test_screen();
+    screen.max_payload = 1024;
+    assert!(matches!(
+        encode_jpeg(noise_image(480, 480), &screen),
+        Err(MediaError::PayloadTooLarge { .. })
+    ));
+}
