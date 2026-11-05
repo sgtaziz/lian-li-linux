@@ -47,10 +47,27 @@ That enables the user daemon in `~/.config/systemd/user`, which works as on othe
 distributions.
 
 NixOS generates `/etc/systemd` read-only, so the GUI cannot enable or disable the
-system daemon. Set `systemService.enable = true` for system mode and rebuild. To move
-between modes, disable the user daemon (`systemctl --user disable --now lianli-daemon`)
-before turning `systemService.enable` on, or turn it off before choosing user mode in
-the GUI. The GUI's mode switch is not available while the system daemon is declared.
+system daemon. Set `systemService.enable = true` for system mode and rebuild. The GUI's
+mode switch is not available while the system daemon is declared.
+
+An existing install keeps its saved mode in `/etc/lianli/service-selection.json`, so
+update it when moving between modes. A fresh install has no selection and needs neither
+step.
+
+From user to system mode, stop the user daemon, record the selection, then rebuild with
+`systemService.enable = true`:
+
+```sh
+systemctl --user disable --now lianli-daemon
+sudo lianli-control select-mode --scope system
+```
+
+From system to user mode, rebuild with `systemService.enable = false`, then record the
+selection and choose **User (at login)** in the GUI:
+
+```sh
+sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
+```
 
 ## Package only
 
