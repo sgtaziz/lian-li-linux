@@ -421,10 +421,12 @@ impl LcdLink {
     }
 
     pub(crate) fn ring_is_queued(&self, key: &(Vec<u8>, u8)) -> bool {
-        self.pending
-            .lock()
-            .iter()
-            .any(|cmd| !cmd.is_cancelled() && cmd.ring_key.as_ref() == Some(key))
+        self.ring.lock().in_flight.contains(key)
+            || self
+                .pending
+                .lock()
+                .iter()
+                .any(|cmd| !cmd.is_cancelled() && cmd.ring_key.as_ref() == Some(key))
     }
 
     /// Queue a control command for the stream thread. Latest wins per label:
@@ -531,7 +533,7 @@ const WAKE_STEP: Duration = Duration::from_millis(150);
 const WAKE_REPLY_WAIT: Duration = Duration::from_millis(100);
 /// After a PushRgbData and reopen: how long to poll GetVer for the panel
 /// to answer, the gap between polls, and each poll's reply wait.
-const RING_TRANSACTION_BUDGET: Duration = Duration::from_secs(3);
+const RING_TRANSACTION_BUDGET: Duration = Duration::from_secs(10);
 const PANEL_POLL_GAP: Duration = Duration::from_millis(250);
 const PANEL_POLL_READ: Duration = Duration::from_millis(500);
 /// Minimum spacing between push-and-recover cycles while streaming.
@@ -1259,6 +1261,8 @@ impl WinUsbLcdCore {
             self.stop_playback()?;
         }
         let cmds = self.transport.take_unsafe();
+        self.transport.ring.lock().in_flight =
+            cmds.iter().filter_map(|cmd| cmd.ring_key.clone()).collect();
         info!(
             "H2 ring: stopping play for {} queued command(s)",
             cmds.len()
@@ -1276,8 +1280,9 @@ impl WinUsbLcdCore {
             for cmd in cmds {
                 self.transport.defer(cmd);
             }
-            result?;
         }
+        self.transport.ring.lock().in_flight.clear();
+        result?;
         self.h2_control_init()?;
         // The init just reset the panel rate to 30, restore the stream rate
         if let Some(fps) = self.stream_fps {
