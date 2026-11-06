@@ -89,21 +89,31 @@ pub(crate) fn encode_compressed(
     tj_image: turbojpeg::Image<&[u8]>,
     screen: &ScreenInfo,
 ) -> Result<Vec<u8>, MediaError> {
-    let buf = if screen.png {
-        encode_png_bytes(&tj_image)?
-    } else {
-        turbojpeg::compress(
-            tj_image,
-            screen.jpeg_quality as i32,
-            turbojpeg::Subsamp::Sub2x2,
-        )
-        .map_err(|e| MediaError::ImageError(format!("turbojpeg encode: {e}")))?
-        .to_vec()
-    };
-    if buf.len() > screen.max_payload {
-        return Err(MediaError::PayloadTooLarge { size: buf.len() });
+    if screen.png {
+        let buf = encode_png_bytes(&tj_image)?;
+        if buf.len() > screen.max_payload {
+            return Err(MediaError::PayloadTooLarge { size: buf.len() });
+        }
+        return Ok(buf);
     }
-    Ok(buf)
+    let mut size = 0;
+    for quality in jpeg_qualities(screen.jpeg_quality) {
+        let buf = turbojpeg::compress(tj_image, quality as i32, turbojpeg::Subsamp::Sub2x2)
+            .map_err(|e| MediaError::ImageError(format!("turbojpeg encode: {e}")))?;
+        if buf.len() <= screen.max_payload {
+            return Ok(buf.to_vec());
+        }
+        size = buf.len();
+    }
+    Err(MediaError::PayloadTooLarge { size })
+}
+
+fn jpeg_qualities(preferred: u8) -> impl Iterator<Item = u8> {
+    std::iter::once(preferred).chain(
+        [80, 65, 50, 35, 20]
+            .into_iter()
+            .filter(move |q| *q < preferred),
+    )
 }
 
 fn encode_png_bytes(img: &turbojpeg::Image<&[u8]>) -> Result<Vec<u8>, MediaError> {
