@@ -276,6 +276,8 @@ impl std::error::Error for LcdBusy {}
 /// How long a frame send waits for the LCD mutex before deferring.
 const LCD_BUSY_WAIT: Duration = Duration::from_millis(100);
 const BRIGHTNESS_WRITE_INTERVAL: Duration = Duration::from_millis(250);
+/// An H2 ring cycle cannot be abandoned midway and may run for 10 s.
+const LCD_SENDER_STOP_WAIT: Duration = Duration::from_secs(12);
 
 impl LcdBackend {
     pub(super) fn pause_for_wireless_image(&self) -> anyhow::Result<()> {
@@ -1050,7 +1052,7 @@ impl ThreadedWinUsbSender {
     fn shutdown(&mut self) -> anyhow::Result<()> {
         self.closing.store(true, Ordering::Release);
         self.stream_control.cancel();
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + LCD_SENDER_STOP_WAIT;
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let result = self
             .send_before(LcdThreadMsg::Shutdown(tx), deadline)
@@ -1071,7 +1073,7 @@ impl ThreadedWinUsbSender {
         }
         self.closing.store(true, Ordering::Release);
         self.stream_control.cancel();
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + LCD_SENDER_STOP_WAIT;
         if let Err(e) = self.send_before(LcdThreadMsg::Stop, deadline) {
             warn!("Failed to stop LCD sender: {e}");
         }

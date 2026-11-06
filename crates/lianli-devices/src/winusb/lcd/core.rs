@@ -1,5 +1,5 @@
 use super::playback::{LcdTransferInterrupted, PlaybackState};
-use super::ring::RingDelivery;
+use super::ring::{RingDelivery, RingKey};
 use crate::crypto::PacketBuilder;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
@@ -39,6 +39,30 @@ impl PendingCmd {
             .as_ref()
             .is_some_and(|stop| stop.load(Ordering::Acquire))
     }
+}
+
+fn ring_budget(software_cooling: bool) -> Duration {
+    if software_cooling {
+        RING_COOLING_BUDGET
+    } else {
+        RING_TRANSACTION_BUDGET
+    }
+}
+
+fn ring_key_tracked(pending: &[PendingCmd], in_flight: &[RingKey], key: &RingKey) -> bool {
+    in_flight.contains(key)
+        || pending
+            .iter()
+            .any(|cmd| !cmd.is_cancelled() && cmd.ring_key.as_ref() == Some(key))
+}
+
+fn take_unsafe_commands(queue: &mut Vec<PendingCmd>) -> Vec<PendingCmd> {
+    let (unsafe_cmds, rest): (Vec<_>, Vec<_>) = std::mem::take(queue)
+        .into_iter()
+        .filter(|c| !c.is_cancelled())
+        .partition(|c| !c.play_safe);
+    *queue = rest;
+    unsafe_cmds
 }
 
 fn remaining_timeout(deadline: Instant, maximum: Duration) -> Result<Duration> {
@@ -348,7 +372,7 @@ impl LcdLink {
             !lianli_transport::usb::shutting_down(),
             "H2 RGB operation cancelled"
         );
-        let deadline = Instant::now() + RING_TRANSACTION_BUDGET;
+        let deadline = Instant::now() + ring_budget(self.software_cooling_active());
         *self.last_hold.lock() = Some(Instant::now());
         let mut write_error = None;
         if !recovering {
@@ -421,12 +445,8 @@ impl LcdLink {
     }
 
     pub(crate) fn ring_is_queued(&self, key: &(Vec<u8>, u8)) -> bool {
-        self.ring.lock().in_flight.contains(key)
-            || self
-                .pending
-                .lock()
-                .iter()
-                .any(|cmd| !cmd.is_cancelled() && cmd.ring_key.as_ref() == Some(key))
+        let pending = self.pending.lock();
+        ring_key_tracked(&pending, &self.ring.lock().in_flight, key)
     }
 
     /// Queue a control command for the stream thread. Latest wins per label:
@@ -463,13 +483,16 @@ impl LcdLink {
 
     /// Take only the commands that need the panel reinitialised first.
     pub(crate) fn take_unsafe(&self) -> Vec<PendingCmd> {
-        let mut q = self.pending.lock();
-        let (unsafe_cmds, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut *q)
-            .into_iter()
-            .filter(|c| !c.is_cancelled())
-            .partition(|c| !c.play_safe);
-        *q = rest;
-        unsafe_cmds
+        take_unsafe_commands(&mut self.pending.lock())
+    }
+
+    /// Move the unsafe commands into a ring cycle. The pending lock spans the
+    /// move so `ring_is_queued` cannot miss a key between the two lists.
+    fn take_for_ring_cycle(&self) -> Vec<PendingCmd> {
+        let mut pending = self.pending.lock();
+        let cmds = take_unsafe_commands(&mut pending);
+        self.ring.lock().in_flight = cmds.iter().filter_map(|cmd| cmd.ring_key.clone()).collect();
+        cmds
     }
 
     pub(crate) fn oldest_play_safe_age(&self) -> Option<Duration> {
@@ -531,9 +554,13 @@ const REOPEN_DELAY: Duration = Duration::from_millis(100);
 const WAKE_STEP: Duration = Duration::from_millis(150);
 /// Reply wait for the wake commands inside a push and recover cycle.
 const WAKE_REPLY_WAIT: Duration = Duration::from_millis(100);
-/// After a PushRgbData and reopen: how long to poll GetVer for the panel
-/// to answer, the gap between polls, and each poll's reply wait.
+/// Whole push, reopen and GetVer cycle, which holds the bulk lock throughout.
+/// Measured 4.3 s to 8.3 s on a Circle.
 const RING_TRANSACTION_BUDGET: Duration = Duration::from_secs(10);
+/// Software fan and pump commands wait on the same lock, so a recovery must
+/// finish inside the 5 s temperature fallback window.
+const RING_COOLING_BUDGET: Duration = Duration::from_secs(3);
+/// The gap between GetVer polls, and each poll's reply wait.
 const PANEL_POLL_GAP: Duration = Duration::from_millis(250);
 const PANEL_POLL_READ: Duration = Duration::from_millis(500);
 /// Minimum spacing between push-and-recover cycles while streaming.
@@ -1260,9 +1287,7 @@ impl WinUsbLcdCore {
         if !self.transport.ring_recovery_pending() {
             self.stop_playback()?;
         }
-        let cmds = self.transport.take_unsafe();
-        self.transport.ring.lock().in_flight =
-            cmds.iter().filter_map(|cmd| cmd.ring_key.clone()).collect();
+        let cmds = self.transport.take_for_ring_cycle();
         info!(
             "H2 ring: stopping play for {} queued command(s)",
             cmds.len()
@@ -1665,6 +1690,39 @@ mod file_stream_tests {
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].packet, vec![2]);
     }
+    #[test]
+    fn ring_key_stays_tracked_while_its_cycle_runs() {
+        let key = (vec![1], 1);
+        let command = |cancelled| super::PendingCmd {
+            label: "PushRgbData",
+            packet: vec![1],
+            reply_wait: std::time::Duration::ZERO,
+            queued_at: std::time::Instant::now(),
+            play_safe: false,
+            ring_key: Some(key.clone()),
+            cancelled: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                cancelled,
+            ))),
+        };
+        let mut queue = vec![command(false)];
+        assert!(super::ring_key_tracked(&queue, &[], &key));
+        let taken = super::take_unsafe_commands(&mut queue);
+        assert_eq!(taken.len(), 1);
+        assert!(!super::ring_key_tracked(&queue, &[], &key));
+        assert!(super::ring_key_tracked(
+            &queue,
+            std::slice::from_ref(&key),
+            &key
+        ));
+        assert!(!super::ring_key_tracked(&[command(true)], &[], &key));
+    }
+
+    #[test]
+    fn software_cooling_recovery_ends_inside_the_temperature_fallback_window() {
+        assert!(super::ring_budget(true) < std::time::Duration::from_secs(5));
+        assert!(super::ring_budget(false) > std::time::Duration::from_millis(8_300));
+    }
+
     #[test]
     fn ring_recovery_requires_full_firmware_reply_and_a_live_deadline() {
         let mut response = [0; 512];
