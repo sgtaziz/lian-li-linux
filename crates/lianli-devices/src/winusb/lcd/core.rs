@@ -49,11 +49,16 @@ fn ring_budget(software_cooling: bool) -> Duration {
     }
 }
 
-fn ring_key_tracked(pending: &[PendingCmd], in_flight: &[RingKey], key: &RingKey) -> bool {
-    in_flight.contains(key)
-        || pending
-            .iter()
-            .any(|cmd| !cmd.is_cancelled() && cmd.ring_key.as_ref() == Some(key))
+/// A request matching the in-flight upload is the latest selection, so any
+/// other ring command still queued is stale and must not run after it.
+fn ring_key_tracked(pending: &mut Vec<PendingCmd>, in_flight: &[RingKey], key: &RingKey) -> bool {
+    if in_flight.contains(key) {
+        pending.retain(|cmd| cmd.ring_key.is_none());
+        return true;
+    }
+    pending
+        .iter()
+        .any(|cmd| !cmd.is_cancelled() && cmd.ring_key.as_ref() == Some(key))
 }
 
 fn take_unsafe_commands(queue: &mut Vec<PendingCmd>) -> Vec<PendingCmd> {
@@ -445,8 +450,8 @@ impl LcdLink {
     }
 
     pub(crate) fn ring_is_queued(&self, key: &(Vec<u8>, u8)) -> bool {
-        let pending = self.pending.lock();
-        ring_key_tracked(&pending, &self.ring.lock().in_flight, key)
+        let mut pending = self.pending.lock();
+        ring_key_tracked(&mut pending, &self.ring.lock().in_flight, key)
     }
 
     /// Queue a control command for the stream thread. Latest wins per label:
@@ -1705,16 +1710,26 @@ mod file_stream_tests {
             ))),
         };
         let mut queue = vec![command(false)];
-        assert!(super::ring_key_tracked(&queue, &[], &key));
+        assert!(super::ring_key_tracked(&mut queue, &[], &key));
         let taken = super::take_unsafe_commands(&mut queue);
         assert_eq!(taken.len(), 1);
-        assert!(!super::ring_key_tracked(&queue, &[], &key));
+        assert!(!super::ring_key_tracked(&mut queue, &[], &key));
+        assert!(!super::ring_key_tracked(
+            &mut vec![command(true)],
+            &[],
+            &key
+        ));
+
+        let older = (vec![2], 1);
+        let mut stale = command(false);
+        stale.ring_key = Some(older.clone());
+        let mut queue = vec![stale];
         assert!(super::ring_key_tracked(
-            &queue,
+            &mut queue,
             std::slice::from_ref(&key),
             &key
         ));
-        assert!(!super::ring_key_tracked(&[command(true)], &[], &key));
+        assert!(!super::ring_key_tracked(&mut queue, &[], &older));
     }
 
     #[test]
