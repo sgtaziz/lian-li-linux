@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use text::{draw_sensor_text_fallback, draw_sensor_text_ttf, TextRenderParams};
+use tracing::warn;
 
 pub struct FrameInfo {
     pub data: Vec<u8>,
@@ -50,6 +51,7 @@ pub struct SensorAsset {
     render_width: u32,
     render_height: u32,
     previous_value: Mutex<String>,
+    held_reading: Mutex<HeldReading>,
     frame_index: AtomicUsize,
     _retained_budget: crate::resource_budget::RetainedBudget,
 }
@@ -227,6 +229,7 @@ impl SensorAsset {
             render_width: rw,
             render_height: rh,
             previous_value: Mutex::new("N/A".into()),
+            held_reading: Mutex::default(),
             frame_index: 1.into(),
             _retained_budget: retained_budget,
         }))
@@ -240,7 +243,7 @@ impl SensorAsset {
     /// previous frame and `force` is false. Returns `Ok(None)` when skipped.
     pub fn render_frame(&self, force: bool) -> Result<Option<FrameInfo>, MediaError> {
         let text_work = crate::text_work::FrameTextWork::begin();
-        let reading = self.read_value()?;
+        let reading = self.read_value();
         let value_text = self.format_value(reading);
         let value = if reading.is_finite() {
             reading.clamp(0.0, 100.0)
@@ -310,7 +313,7 @@ impl SensorAsset {
 
     pub fn render_frame_rgba(&self, force: bool) -> Result<Option<RgbaImage>, MediaError> {
         let text_work = crate::text_work::FrameTextWork::begin();
-        let reading = self.read_value()?;
+        let reading = self.read_value();
         let value_text = self.format_value(reading);
         let value = if reading.is_finite() {
             reading.clamp(0.0, 100.0)
@@ -416,12 +419,39 @@ impl SensorAsset {
         self.ranges.last().map(|(_, c)| *c).unwrap_or([0, 200, 0])
     }
 
-    fn read_value(&self) -> Result<f32, MediaError> {
+    fn read_value(&self) -> f32 {
         match &self.source {
-            SensorSource::Constant(value) => Ok(*value),
-            SensorSource::Resolved(resolved) => lianli_shared::sensors::read_sensor_value(resolved)
-                .map_err(|e| MediaError::Sensor(e.to_string())),
+            SensorSource::Constant(value) => *value,
+            SensorSource::Resolved(resolved) => self.held_reading.lock().update(
+                lianli_shared::sensors::read_sensor_value(resolved),
+                &self.label,
+            ),
         }
+    }
+}
+
+/// A failed read keeps the gauge on its last value, since readings expire
+/// across a suspend and return on their own.
+#[derive(Debug, Default)]
+struct HeldReading {
+    value: f32,
+    failed: bool,
+}
+
+impl HeldReading {
+    fn update(&mut self, reading: anyhow::Result<f32>, label: &str) -> f32 {
+        match reading {
+            Ok(value) => {
+                self.value = value;
+                self.failed = false;
+            }
+            Err(error) => {
+                if !std::mem::replace(&mut self.failed, true) {
+                    warn!("sensor gauge '{label}' read failed: {error:#}");
+                }
+            }
+        }
+        self.value
     }
 }
 
@@ -455,6 +485,30 @@ mod tests {
         let asset = asset_reading(512.4);
         assert!(asset.render_frame(true).unwrap().is_some());
         assert_eq!(*asset.previous_value.lock(), "512");
+    }
+
+    #[test]
+    fn failed_read_holds_the_gauge_until_the_sensor_recovers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("sensor");
+        let mut asset = asset_reading(0.0);
+        asset.source = SensorSource::Resolved(lianli_shared::sensors::ResolvedSensor::SysfsFile {
+            path: path.clone(),
+            divider: 1,
+        });
+
+        assert!(asset.render_frame(true).unwrap().is_some());
+        assert_eq!(*asset.previous_value.lock(), "0");
+        std::fs::write(&path, "42").unwrap();
+        assert!(asset.render_frame(false).unwrap().is_some());
+        assert_eq!(*asset.previous_value.lock(), "42");
+        std::fs::remove_file(&path).unwrap();
+        assert!(asset.render_frame(false).unwrap().is_none());
+        assert!(asset.render_frame_rgba(true).unwrap().is_some());
+        assert_eq!(*asset.previous_value.lock(), "42");
+        std::fs::write(&path, "55").unwrap();
+        assert!(asset.render_frame(false).unwrap().is_some());
+        assert_eq!(*asset.previous_value.lock(), "55");
     }
 
     #[test]
