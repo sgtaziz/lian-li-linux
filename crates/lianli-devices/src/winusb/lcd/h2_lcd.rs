@@ -7,11 +7,9 @@ use std::time::Duration;
 use super::core::{SharedTransport, WinUsbLcdCore};
 use super::trait_::{BoxedWinUsbLcd, WinUsbLcd};
 
-const BLANK_CLIP: &[u8] = include_bytes!("../../../assets/blank_480.h264");
-
 pub struct H2WinUsbLcd {
     core: WinUsbLcdCore,
-    play_started: bool,
+    layers_cleared: bool,
 }
 
 impl H2WinUsbLcd {
@@ -24,7 +22,7 @@ impl H2WinUsbLcd {
             .without_stalled_chunk_resend();
         Ok(Self {
             core,
-            play_started: false,
+            layers_cleared: false,
         })
     }
 
@@ -34,7 +32,6 @@ impl H2WinUsbLcd {
         name: String,
     ) -> Self {
         Self {
-            play_started: false,
             core: WinUsbLcdCore::from_shared(
                 transport,
                 screen,
@@ -44,24 +41,26 @@ impl H2WinUsbLcd {
                 true,
             )
             .without_stalled_chunk_resend(),
+            layers_cleared: false,
         }
     }
 
-    /// The firmware keeps its coolant and pump overlay on top of JPEG frames
-    /// until an H.264 play session has run; the clip is 15 black 480x480
-    /// frames encoded with the daemon's libx264 live settings.
-    fn hide_firmware_overlay(&mut self) {
-        if self.play_started {
-            return;
+    /// JPEG frames leave the firmware's coolant and pump overlay running; only
+    /// a PNG push or StartPlay pauses it. This stays out of `do_init` so a
+    /// panel with no LCD media keeps its firmware display.
+    fn prepare_static_frame(&mut self) -> Result<()> {
+        if !self.core.initialized || self.core.needs_init() {
+            self.do_init()?;
         }
-        let stop = AtomicBool::new(false);
-        let mut clip: &[u8] = BLANK_CLIP;
-        if let Err(error) = WinUsbLcd::stream_h264_reader(self, &mut clip, &stop, 30.0) {
-            tracing::warn!("Hiding the firmware overlay failed: {error:#}");
+        if !self.layers_cleared {
+            self.core.clear_layers();
+            self.layers_cleared = true;
         }
+        Ok(())
     }
 
     fn do_init(&mut self) -> Result<()> {
+        self.layers_cleared = false;
         self.core.init_logging();
         self.core.reset_failure_state();
         if let Err(error) = self.core.stop_playback() {
@@ -108,17 +107,11 @@ impl WinUsbLcd for H2WinUsbLcd {
         Ok(())
     }
     fn send_frame(&mut self, frame: &[u8]) -> Result<()> {
-        self.hide_firmware_overlay();
-        if !self.core.initialized || self.core.needs_init() {
-            self.do_init()?;
-        }
+        self.prepare_static_frame()?;
         self.core.send_frame(frame)
     }
     fn send_frame_verified(&mut self, frame: &[u8]) -> Result<()> {
-        self.hide_firmware_overlay();
-        if !self.core.initialized || self.core.needs_init() {
-            self.do_init()?;
-        }
+        self.prepare_static_frame()?;
         self.core.send_frame_verified(frame)
     }
     fn set_brightness_val(&mut self, brightness: u8) -> Result<()> {
@@ -134,7 +127,6 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        self.play_started = true;
         if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
@@ -148,7 +140,6 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        self.play_started = true;
         if !self.core.initialized || self.core.needs_init() {
             self.do_init()?;
         }
