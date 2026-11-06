@@ -33,7 +33,7 @@ mod source_retirement;
 mod startup_image;
 mod streaming;
 mod subsystems;
-mod suspend;
+pub(crate) mod suspend;
 mod sync;
 mod usb_rescan;
 mod wired_identity;

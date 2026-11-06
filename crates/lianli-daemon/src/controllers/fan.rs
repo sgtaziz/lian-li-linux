@@ -1,6 +1,7 @@
 #[cfg(test)]
 use super::cooling::TEMPERATURE_GRACE;
 use super::cooling::{curve_sources, FirstSamples, TemperatureState};
+use crate::service::suspend::ResumeWatch;
 use crate::service::DaemonEvent;
 use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::{build_payload, SensorSnapshot, WirelessController};
@@ -153,13 +154,14 @@ fn fan_control_thread(inputs: FanControlInputs) {
     let mut fan_states: HashMap<usize, FanState> = HashMap::new();
     let mut unavailable_wireless = HashSet::new();
     let mut failures = super::failure_log::FailureLog::default();
-    let mut first_samples = FirstSamples::new(
+    let sampled_sources = || {
         curve_sources(
             config.speeds.iter().flat_map(|group| group.speeds.iter()),
             |name| curves.get(name),
-        ),
-        Instant::now(),
-    );
+        )
+    };
+    let mut first_samples = FirstSamples::new(sampled_sources(), Instant::now());
+    let mut resume_watch = ResumeWatch::new();
 
     // Auto-detect CPU/GPU temp sensors for the wireless LCD clock-sync payload.
     let cpu_temp_source = picker::find_default_cpu_temp(all_sensors);
@@ -273,6 +275,9 @@ fn fan_control_thread(inputs: FanControlInputs) {
             last_drift_check = now;
         }
 
+        if resume_watch.resumed() {
+            first_samples = FirstSamples::new(sampled_sources(), now);
+        }
         let samples_arrived = first_samples.waiting()
             && first_samples.refresh(now, |source| {
                 read_temperature(source, &mut sensor_cache, all_sensors, &wired)

@@ -4,6 +4,32 @@ const SAMPLE_TOLERANCE: Duration = Duration::from_millis(25);
 const RESUME_THRESHOLD: Duration = Duration::from_millis(500);
 const USB_SETTLE: Duration = Duration::from_secs(2);
 
+/// Reports a resume on the caller's own thread. The service's resume event
+/// waits for USB to settle, which is too late for the temperature fallback.
+pub(crate) struct ResumeWatch {
+    offset: Option<Duration>,
+}
+
+impl ResumeWatch {
+    pub(crate) fn new() -> Self {
+        Self {
+            offset: suspend_offset(),
+        }
+    }
+
+    pub(crate) fn resumed(&mut self) -> bool {
+        self.observe(suspend_offset())
+    }
+
+    fn observe(&mut self, offset: Option<Duration>) -> bool {
+        let Some(offset) = offset else {
+            return false;
+        };
+        let previous = self.offset.replace(offset);
+        previous.is_some_and(|previous| offset.saturating_sub(previous) >= RESUME_THRESHOLD)
+    }
+}
+
 pub(super) struct ResumeDetector {
     offset: Option<Duration>,
     ready_at: Option<Instant>,
@@ -72,6 +98,17 @@ fn sample_offset(before: Duration, boot: Duration, after: Duration) -> Option<Du
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_watch_reports_each_suspend_once_and_ignores_bad_samples() {
+        let mut watch = ResumeWatch {
+            offset: Some(Duration::ZERO),
+        };
+        assert!(!watch.observe(Some(Duration::from_millis(100))));
+        assert!(!watch.observe(None));
+        assert!(watch.observe(Some(Duration::from_secs(60))));
+        assert!(!watch.observe(Some(Duration::from_secs(60))));
+    }
 
     #[test]
     fn suspend_is_detected_when_monotonic_time_excludes_it() {

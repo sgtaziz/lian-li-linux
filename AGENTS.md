@@ -136,7 +136,7 @@ For every recurring task, worker, renderer, or polling loop:
 
 Prefer event-driven work over frequent polling. When polling is required by hardware, preserve established timing and explain any cadence change in the handoff.
 
-Software-controlled fans and pumps must fall back to 100% after five seconds without a valid temperature reading, immediately if no valid reading has ever arrived, and resume their curves when readings recover. Preserve hardware-managed and motherboard-sync control.
+Software-controlled fans and pumps must fall back to 100% after five seconds without a valid temperature reading, immediately if no valid reading has ever arrived, and resume their curves when readings recover. At daemon start and after a system resume, wait at most `FIRST_SAMPLE_WAIT` for fresh samples first. Preserve hardware-managed and motherboard-sync control.
 
 Do not add informational logs inside frame loops or high-frequency polling paths. Use `tracing` at a level appropriate to frequency. Repeated failures should be rate-limited, deduplicated, or logged on state transitions.
 
