@@ -350,16 +350,20 @@ impl H2AioController {
                     stream_began = true;
                     None
                 } else {
-                    Some(
-                        transport
-                            .write_full(&hdr, LCD_WRITE_TIMEOUT)
-                            .context("H2: GetH2Params write")
-                            .and_then(|_| {
-                                transport
-                                    .read(&mut buf, LCD_READ_TIMEOUT)
-                                    .context("H2: GetH2Params read")
-                            }),
-                    )
+                    let outcome = transport
+                        .write_full(&hdr, LCD_WRITE_TIMEOUT)
+                        .context("H2: GetH2Params write")
+                        .and_then(|_| {
+                            transport
+                                .read(&mut buf, LCD_READ_TIMEOUT)
+                                .context("H2: GetH2Params read")
+                        });
+                    if outcome.is_ok() {
+                        // Without this the panel stops accepting writes after
+                        // about 40 s of polling while the LCD shows a static image.
+                        transport.read_flush();
+                    }
+                    Some(outcome)
                 }
             };
             match res {
