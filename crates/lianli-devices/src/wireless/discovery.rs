@@ -45,7 +45,30 @@ pub struct DiscoveredDevice {
     pub bind_intent: bool,
 }
 
+/// The record fields that define a device's layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DeviceIdentity {
+    device_type: u8,
+    fan_count: u8,
+    right_attach: bool,
+    slots: [u8; 4],
+}
+
 impl DiscoveredDevice {
+    fn identity(&self) -> DeviceIdentity {
+        let mut slots = self.fan_types;
+        // An AIO reports coolant temperature in the last slot.
+        if self.fan_type.is_aio() {
+            slots[3] = 0;
+        }
+        DeviceIdentity {
+            device_type: self.device_type,
+            fan_count: self.fan_count,
+            right_attach: self.is_inf_right_attach,
+            slots,
+        }
+    }
+
     pub fn lcd_group_size(&self) -> Option<u8> {
         if self.device_type != 0 || !(1..=4).contains(&self.fan_count) {
             return None;
@@ -246,6 +269,7 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
 
 pub(super) const LIVENESS_TIMEOUT: Duration = Duration::from_secs(15);
 const DEBOUNCE_SIGHTINGS: u32 = 3;
+const IDENTITY_WARN_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Exclusive upper bound for RX slots. `get_rx_unused()` allocates from 1..14,
 /// so anything at or above this was never a slot this daemon handed out.
@@ -392,6 +416,8 @@ pub(super) struct DeviceHealth {
     rx_published_at: Instant,
     master_cand: Option<([u8; 6], u32)>,
     addr_cand: Option<((u8, u8), u32)>,
+    identity_cand: Option<(DeviceIdentity, u32)>,
+    identity_warned_at: Option<Instant>,
 }
 
 impl DeviceHealth {
@@ -465,6 +491,50 @@ impl DeviceHealth {
             foreign_since: None,
             master_cand: None,
             addr_cand: None,
+            identity_cand: None,
+            identity_warned_at: None,
+        }
+    }
+
+    /// A single record can carry bad type bytes between good ones. Unknown never
+    /// replaces a known layout, so RGB and fan control keep their last valid
+    /// target while the device stays alive.
+    fn merge_identity(&mut self, rec: &DiscoveredDevice, now: Instant) {
+        let reported = rec.identity();
+        let published = self.published.identity();
+        if reported == published {
+            self.identity_cand = None;
+            self.published.fan_types = rec.fan_types;
+            return;
+        }
+        if self
+            .identity_warned_at
+            .is_none_or(|at| now.saturating_duration_since(at) >= IDENTITY_WARN_INTERVAL)
+        {
+            self.identity_warned_at = Some(now);
+            warn!(
+                "{} reported {:?} {reported:?} while published as {:?} {published:?}",
+                rec.mac_str(),
+                rec.fan_type,
+                self.published.fan_type
+            );
+        }
+        let committed = commit_streak(&mut self.identity_cand, reported).is_some();
+        let keeps_layout =
+            rec.fan_type != WirelessFanType::Unknown || self.published.fan_type == rec.fan_type;
+        if committed && keeps_layout {
+            info!(
+                "{} changed from {:?} {published:?} to {:?} {reported:?}",
+                rec.mac_str(),
+                self.published.fan_type,
+                rec.fan_type
+            );
+            let p = &mut self.published;
+            p.device_type = rec.device_type;
+            p.fan_count = rec.fan_count;
+            p.is_inf_right_attach = rec.is_inf_right_attach;
+            p.fan_types = rec.fan_types;
+            p.fan_type = rec.fan_type;
         }
     }
 
@@ -613,11 +683,12 @@ pub(super) fn poll_and_discover(
                     parse_device_record(&response[offset..offset + 42], idx as u8)
                 {
                     debug!(
-                        "  [{}] {} type=0x{:02x} fans={} RPM=[{},{},{},{}] PWM=[{},{},{},{}]",
+                        "  [{}] {} type=0x{:02x} fans={} slots={:?} RPM=[{},{},{},{}] PWM=[{},{},{},{}]",
                         idx,
                         device,
                         device.device_type,
                         device.fan_count,
+                        device.fan_types,
                         device.fan_rpms[0],
                         device.fan_rpms[1],
                         device.fan_rpms[2],
@@ -724,15 +795,12 @@ fn merge_sightings(
         }
         h.raw_channel = rec.channel;
 
+        h.merge_identity(rec, now);
+
         let p = &mut h.published;
-        p.device_type = rec.device_type;
-        p.fan_count = rec.fan_count;
-        p.is_inf_right_attach = rec.is_inf_right_attach;
-        p.fan_types = rec.fan_types;
         p.fan_rpms = rec.fan_rpms;
         p.current_pwm = rec.current_pwm;
         p.cmd_seq = rec.cmd_seq;
-        p.fan_type = rec.fan_type;
         p.coolant_temp_c = rec.coolant_temp_c;
         p.effect_index = rec.effect_index;
         p.is_sync_mb_light = rec.is_sync_mb_light;
@@ -1088,6 +1156,77 @@ mod tests {
         health.raw_channel = 8;
         health.published.channel = 8;
         assert_eq!(health.channel_correction_action([9; 6], 4, now), Send);
+    }
+
+    #[test]
+    fn corrupt_type_records_do_not_replace_a_known_layout() {
+        let local = [9; 6];
+        let controller = controller_with_master(local);
+        let typed = |slots: [u8; 4]| {
+            let mut device = rec([1; 6], local);
+            device.fan_types = slots;
+            device.fan_type = WirelessFanType::from_fan_type_byte(slots[0]);
+            device
+        };
+        let tl = typed([28, 28, 28, 0]);
+        let sl = typed([20, 20, 20, 0]);
+        let unknown = typed([0xEE, 0, 0, 0]);
+        let published = || controller.device_by_mac(&[1; 6]).unwrap();
+
+        merge_into(&controller, std::slice::from_ref(&tl), 1);
+        for _ in 0..DEBOUNCE_SIGHTINGS {
+            merge_into(&controller, std::slice::from_ref(&sl), 1);
+            merge_into(&controller, std::slice::from_ref(&unknown), 1);
+            merge_into(&controller, std::slice::from_ref(&tl), 1);
+            assert_eq!(published().fan_type, WirelessFanType::Tlv2Led);
+        }
+
+        merge_into(
+            &controller,
+            std::slice::from_ref(&unknown),
+            DEBOUNCE_SIGHTINGS * 2,
+        );
+        assert_eq!(published().fan_type, WirelessFanType::Tlv2Led);
+        assert_eq!(published().fan_types, tl.fan_types);
+
+        merge_into(&controller, std::slice::from_ref(&sl), DEBOUNCE_SIGHTINGS);
+        assert_eq!(published().fan_type, WirelessFanType::Slv3Led);
+    }
+
+    #[test]
+    fn unknown_first_sighting_adopts_a_stable_type() {
+        let local = [9; 6];
+        let controller = controller_with_master(local);
+        let mut device = rec([1; 6], local);
+        merge_into(&controller, std::slice::from_ref(&device), 1);
+        device.fan_types = [28, 28, 28, 0];
+        device.fan_type = WirelessFanType::Tlv2Led;
+        merge_into(
+            &controller,
+            std::slice::from_ref(&device),
+            DEBOUNCE_SIGHTINGS,
+        );
+        assert_eq!(
+            controller.device_by_mac(&[1; 6]).unwrap().fan_type,
+            WirelessFanType::Tlv2Led
+        );
+    }
+
+    #[test]
+    fn aio_coolant_changes_do_not_count_as_identity_changes() {
+        let local = [9; 6];
+        let controller = controller_with_master(local);
+        let mut aio = rec([1; 6], local);
+        aio.device_type = 10;
+        aio.fan_type = WirelessFanType::WaterBlock;
+        aio.fan_types = [0, 0, 0, 30];
+        merge_into(&controller, std::slice::from_ref(&aio), 1);
+        aio.fan_types[3] = 31;
+        merge_into(&controller, std::slice::from_ref(&aio), 1);
+        let health = controller.device_health.lock();
+        let health = health.get(&[1; 6]).unwrap();
+        assert_eq!(health.published.fan_types[3], 31);
+        assert!(health.identity_warned_at.is_none());
     }
 
     #[test]
