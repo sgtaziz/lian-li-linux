@@ -10,7 +10,7 @@ Add the flake to your system flake and import the module:
 
 ```nix
 {
-  inputs.lian-li-linux.url = "github:sgtaziz/lian-li-linux";
+  inputs.lian-li-linux.url = "git+https://github.com/sgtaziz/lian-li-linux";
 
   outputs = { nixpkgs, lian-li-linux, ... }: {
     nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
@@ -72,8 +72,8 @@ sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
 ## Package only
 
 ```sh
-nix run github:sgtaziz/lian-li-linux
-nix profile add github:sgtaziz/lian-li-linux
+nix run git+https://github.com/sgtaziz/lian-li-linux
+nix profile add git+https://github.com/sgtaziz/lian-li-linux
 ```
 
 This gives you `lianli-gui`, `lianli-daemon`, `lianli-control` and `lianli-session`
@@ -82,10 +82,10 @@ install.
 
 ## Notes
 
-- Absolute paths to `systemctl`, `systemd-run`, `pkexec` and the project binaries are
+- Absolute paths to `systemctl`, `journalctl`, `systemd-run`, `pkexec` and the project binaries are
   patched to Nix store and `/run/wrappers` paths at build time.
 - The desktop capture helper starts from its XDG autostart entry, as on other
   distributions.
-- `ffmpeg` and `ffprobe` are added to the binaries' `PATH`.
+- `ffmpeg` and `ffprobe` are added to the daemon's `PATH`.
 - `libevdi` and the GL/GBM libraries are added to the runpath, along with the driver
   directory in `/run/opengl-driver`.

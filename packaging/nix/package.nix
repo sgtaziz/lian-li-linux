@@ -2,8 +2,7 @@
   lib,
   rustPlatform,
   src,
-  fetchNpmDeps,
-  npmHooks,
+  importNpmLock,
   nodejs,
   pkg-config,
   cmake,
@@ -35,6 +34,7 @@
   systemd,
   runtimeShell,
   coreutils,
+  kmod,
 }:
 
 let
@@ -50,10 +50,8 @@ rustPlatform.buildRustPackage {
   cargoLock.lockFile = "${src}/Cargo.lock";
 
   npmRoot = frontendRoot;
-  npmDeps = fetchNpmDeps {
-    name = "lianli-gui-npm-deps";
-    src = "${src}/${frontendRoot}";
-    hash = "sha256-fyxkk7BTX5/VAi9BAHgc3MIb3q+JDLBt0Q/lBNMlkMs=";
+  npmDeps = importNpmLock {
+    npmRoot = "${src}/${frontendRoot}";
   };
 
   nativeBuildInputs = [
@@ -61,7 +59,7 @@ rustPlatform.buildRustPackage {
     cmake
     nasm
     nodejs
-    npmHooks.npmConfigHook
+    importNpmLock.npmConfigHook
     rustPlatform.bindgenHook
     wrapGAppsHook3
     addDriverRunpath
@@ -92,16 +90,25 @@ rustPlatform.buildRustPackage {
   ];
 
   postPatch = ''
-    files=$(grep -rlE '/usr/bin/(systemctl|systemd-run|busctl|pkexec|lianli-(control|daemon|session|gui))' crates/*/src \
+    files=$(grep -rlE '/usr/(bin/(systemctl|systemd-run|busctl|journalctl|pkexec|uname|test|lianli-(control|daemon|session|gui))|sbin/modinfo)' crates/*/src \
       | grep -vE 'distrobox|container' || true)
     for file in $files; do
       substituteInPlace "$file" \
         --replace-quiet '/usr/bin/systemctl' '${systemd}/bin/systemctl' \
         --replace-quiet '/usr/bin/systemd-run' '${systemd}/bin/systemd-run' \
         --replace-quiet '/usr/bin/busctl' '${systemd}/bin/busctl' \
+        --replace-quiet '/usr/bin/journalctl' '${systemd}/bin/journalctl' \
         --replace-quiet '/usr/bin/pkexec' '/run/wrappers/bin/pkexec' \
+        --replace-quiet '/usr/bin/uname' '${coreutils}/bin/uname' \
+        --replace-quiet '/usr/bin/test' '${coreutils}/bin/test' \
+        --replace-quiet '/usr/sbin/modinfo' '${kmod}/bin/modinfo' \
         --replace-quiet '/usr/bin/lianli-' "$out/bin/lianli-"
     done
+
+    # The binaries embed these files and compare them with the installed copies.
+    substituteInPlace packaging/systemd/*.service --replace-quiet /usr/bin/ "$out/bin/"
+    substituteInPlace packaging/udev/60-lianli.rules \
+      --replace-fail "/bin/sh -c 'exec chmod" "${runtimeShell} -c 'exec ${coreutils}/bin/chmod"
   '';
 
   preBuild = ''
@@ -119,8 +126,6 @@ rustPlatform.buildRustPackage {
     rm -f $out/lib/liblianli_gui_lib.*
 
     install -Dm644 packaging/udev/60-lianli.rules -t $out/lib/udev/rules.d
-    substituteInPlace $out/lib/udev/rules.d/60-lianli.rules \
-      --replace-fail "/bin/sh -c 'exec chmod" "${runtimeShell} -c 'exec ${coreutils}/bin/chmod"
 
     for unit in packaging/systemd/*.service; do
       case "$unit" in
@@ -129,7 +134,6 @@ rustPlatform.buildRustPackage {
       esac
       install -Dm644 "$unit" -t "$dir"
     done
-    substituteInPlace $out/lib/systemd/*/*.service --replace-quiet /usr/bin/ $out/bin/
 
     install -Dm644 packaging/polkit/49-lianli-recovery.rules -t $out/share/polkit-1/rules.d
     install -Dm644 packaging/sysusers.d/lianli.conf $out/lib/sysusers.d/lianli.conf
@@ -161,9 +165,9 @@ rustPlatform.buildRustPackage {
       } "$bin"
       addDriverRunpath "$bin"
     done
+    # lianli-control stays unwrapped: it refuses to run under any other file name.
     wrapProgram $out/bin/lianli-daemon --prefix PATH : ${lib.makeBinPath [ ffmpeg ]}
-    wrapProgram $out/bin/lianli-control --prefix PATH : ${lib.makeBinPath [ ffmpeg ]}
-    wrapGApp $out/bin/lianli-gui --prefix PATH : ${lib.makeBinPath [ ffmpeg ]}
+    wrapGApp $out/bin/lianli-gui
   '';
 
   meta = {
