@@ -27,6 +27,7 @@ getent passwd lianli
 [ "$(stat -c %a /run/lianli-daemon.lock)" = 666 ]
 [ -f /run/lianli-control.lock ]
 [ "$(stat -c %a /run/lianli-control.lock)" = 666 ]
+[ "$(stat -c %U:%a /var/lib/lianli-control)" = root:700 ]
 for binary in /usr/bin/lianli-daemon /usr/bin/lianli-gui /usr/bin/lianli-session /usr/bin/lianli-control; do
     libraries=$(ldd "$binary")
     if grep -q 'not found' <<< "$libraries"; then

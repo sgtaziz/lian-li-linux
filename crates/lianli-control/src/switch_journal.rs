@@ -891,7 +891,8 @@ impl Store {
                 && held.mode() & 0o077 == 0
                 && current.is_dir()
                 && (held.dev(), held.ino()) == (current.dev(), current.ino()),
-            "Switch journal directory is not private, owned by its coordinator, or was replaced"
+            "Switch journal directory {} is not private, owned by its coordinator, or was replaced",
+            self.path.display()
         );
         Ok(())
     }

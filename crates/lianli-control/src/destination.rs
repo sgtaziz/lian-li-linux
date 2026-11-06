@@ -200,7 +200,13 @@ pub fn inspect(scope: ServiceScope, prepare_directory: bool) -> Result<Destinati
                 .context("Destination has no configuration directory")?,
         )?;
     }
-    inspect_files(scope, &account, config_path, working_directory)
+    inspect_files(
+        scope,
+        &account,
+        config_path,
+        working_directory,
+        prepare_directory,
+    )
 }
 
 pub fn inspect_container(
@@ -229,7 +235,7 @@ fn inspect_container_files(
             .mode(0o700)
             .create(config.parent().context("Configuration has no directory")?)?;
     }
-    inspect_files(scope, account, config.into(), working.into())
+    inspect_files(scope, account, config.into(), working.into(), prepare)
 }
 
 pub(crate) fn verify_service_recipe(scope: ServiceScope) -> Result<()> {
@@ -431,6 +437,7 @@ fn inspect_files(
     account: &Account,
     config_path: PathBuf,
     working_directory: PathBuf,
+    prepare: bool,
 ) -> Result<Destination> {
     let uid = account.uid;
     let base = config_path
@@ -439,9 +446,17 @@ fn inspect_files(
     let directory = OpenOptions::new().read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open(base)
         .context("Destination configuration directory is unavailable. Complete account setup before switching")?;
-    let metadata = directory.metadata()?;
-    ensure!(metadata.uid() == uid && metadata.mode() & 0o022 == 0,
-        "Destination state directory must belong to its daemon account and must not be writable by other accounts");
+    let mut metadata = directory.metadata()?;
+    // The daemon creates this directory under the session umask, which may allow group writes.
+    if prepare && metadata.uid() == uid && metadata.mode() & 0o022 != 0 {
+        directory.set_permissions(fs::Permissions::from_mode(metadata.mode() & 0o7755))?;
+        metadata = directory.metadata()?;
+    }
+    ensure!(
+        metadata.uid() == uid && metadata.mode() & 0o022 == 0,
+        "State directory {} must belong to its daemon account and must not be writable by other accounts",
+        base.display()
+    );
     ensure!(!entry_present(&base.join(".lianli-state-transaction.json"))?,
         "Destination has an interrupted state transaction. Recover it before preparing another switch");
     let writable =
@@ -907,6 +922,7 @@ mod tests {
                 &account,
                 config.clone(),
                 root.path().into(),
+                false,
             )
         };
         let report = check().unwrap();
@@ -918,6 +934,29 @@ mod tests {
         fs::remove_file(root.path().join("profiles")).unwrap();
         fs::write(root.path().join(".lianli-state-transaction.json"), b"{}").unwrap();
         assert!(check().is_err());
+    }
+
+    #[test]
+    fn preparation_removes_group_write_left_by_the_session_umask() {
+        let root = tempfile::tempdir().unwrap();
+        let account = account(root.path());
+        let config = root.path().join("config.json");
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o775)).unwrap();
+        let check = |prepare| {
+            inspect_files(
+                ServiceScope::User,
+                &account,
+                config.clone(),
+                root.path().into(),
+                prepare,
+            )
+        };
+        let error = check(false).unwrap_err().to_string();
+        assert!(error.contains(&root.path().display().to_string()));
+        assert_eq!(fs::metadata(root.path()).unwrap().mode() & 0o777, 0o775);
+        check(true).unwrap();
+        assert_eq!(fs::metadata(root.path()).unwrap().mode() & 0o777, 0o755);
+        check(false).unwrap();
     }
 
     #[test]
@@ -936,6 +975,7 @@ mod tests {
                 &account,
                 config.clone(),
                 root.path().into(),
+                false,
             )
         };
         let report = check().unwrap();
