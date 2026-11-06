@@ -3,6 +3,38 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.5 — 2026-11-06
+
+### Features
+- **packaging**: Add Nix flake and NixOS module  (`5f5f601`)
+
+### Fixes
+- **h2**: Drain the pipe after each GetH2Params poll  (`85e3685`)
+- **gui**: Add missing resolved and integrity fields to package-lock  (`472ce16`)
+- **packaging**: Declare only the system daemon in the NixOS module  (`974937f`)
+- **packaging**: Untrack Nix result link and document NixOS mode selection  (`a3089c2`)
+- **packaging**: Make the Nix package pass service and health checks  (`35b2822`)
+- **h2**: Stop duplicate ring uploads while an LCD stream is held  (`9247ed8`)
+- **h2**: Bound ring recovery by cooling and shutdown deadlines  (`a1d597a`)
+- **h2**: Drop queued ring uploads behind a matching in-flight request  (`593e426`)
+- **h2**: Hide the firmware overlay before the first static image  (`139d175`)
+- **h2**: Clear layers before the first static frame (fixes [#277](https://github.com/sgtaziz/lian-li-linux/issues/277))
+- **h2**: Retry the layer clear after a failed PNG write  (`1ee1c78`)
+- **packaging**: Restart the running daemon after deb and AUR upgrades (fixes [#273](https://github.com/sgtaziz/lian-li-linux/issues/273))
+- **packaging**: Keep the user daemon running across logout (fixes [#269](https://github.com/sgtaziz/lian-li-linux/issues/269))
+- **lcd**: Keep sensor gauges alive through expired readings (fixes [#264](https://github.com/sgtaziz/lian-li-linux/issues/264))
+- **fan**: Wait for fresh samples after resume before falling back (fixes [#264](https://github.com/sgtaziz/lian-li-linux/issues/264))
+- **control**: Repair state directory permissions before native switching (fixes [#275](https://github.com/sgtaziz/lian-li-linux/issues/275))
+- **wireless**: Debounce device identity across discovery polls (fixes [#271](https://github.com/sgtaziz/lian-li-linux/issues/271))
+
+### Other changes
+- [TEMPLATE] add Retro LCD Amber dashboard  ([#266](https://github.com/sgtaziz/lian-li-linux/pull/266))
+- [TEMPLATE] add Cyber Rain Blue dashboard  ([#265](https://github.com/sgtaziz/lian-li-linux/pull/265))
+- Merge pull request #278 from JustLutz/fix/h2-idle-poll-freeze  (`128f904`)
+- Merge pull request #274 from owainxyz/nix-flake  (`3ee05c1`)
+- Merge pull request #276 from JustLutz/fix/h2-duplicate-ring-uploads  (`5d8a36a`)
+- Merge pull request #279 from JustLutz/fix/h2-firmware-overlay  (`e0f8e25`)
+
 ## v1.2.4 — 2026-10-24
 
 ### Features
