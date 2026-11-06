@@ -1,7 +1,6 @@
 [Unit]
 Description=Lian Li Linux Device Daemon
 After=graphical-session.target
-PartOf=graphical-session.target
 
 [Service]
 Type=simple
