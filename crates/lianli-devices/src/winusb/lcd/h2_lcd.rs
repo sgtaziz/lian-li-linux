@@ -53,8 +53,7 @@ impl H2WinUsbLcd {
             self.do_init()?;
         }
         if !self.layers_cleared {
-            self.core.clear_layers();
-            self.layers_cleared = true;
+            self.layers_cleared = self.core.clear_layers();
         }
         Ok(())
     }
