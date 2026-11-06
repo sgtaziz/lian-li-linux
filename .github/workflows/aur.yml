@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - packaging/archlinux/git/PKGBUILD
+      - packaging/archlinux/lianli-linux.install
       - packaging/archlinux/LICENSE
   workflow_dispatch:
     inputs:
@@ -82,6 +83,7 @@ jobs:
               -e "s/^_tinyuz=.*/_tinyuz=$tinyuz/" \
               -e "s/^_hdiffpatch=.*/_hdiffpatch=$hdiffpatch/" \
               packaging/archlinux/release/PKGBUILD > /home/builder/pkg/PKGBUILD
+          install -m 644 -o builder packaging/archlinux/lianli-linux.install /home/builder/pkg/
           chown builder /home/builder/pkg/PKGBUILD
           cd /home/builder/pkg
           sudo -u builder updpkgsums
@@ -115,6 +117,7 @@ jobs:
           useradd -m builder
           install -d -o builder /home/builder/pkg
           install -m 644 -o builder packaging/archlinux/git/PKGBUILD /home/builder/pkg/PKGBUILD
+          install -m 644 -o builder packaging/archlinux/lianli-linux.install /home/builder/pkg/
 
       - name: Publish lianli-linux-git
         env:

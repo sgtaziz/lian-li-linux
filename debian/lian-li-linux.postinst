@@ -10,6 +10,18 @@ if [ "$1" = configure ]; then
         fi
         if [ -d /run/systemd/system ]; then
             systemctl --system daemon-reload
+            if [ -n "$2" ]; then
+                systemctl --system try-restart lianli-daemon-system.service >/dev/null 2>&1 || :
+                for d in /run/user/*; do
+                    [ -d "$d" ] && [ -S "$d/bus" ] || continue
+                    uid="${d##*/}"
+                    user="$(id -nu "$uid" 2>/dev/null)" || continue
+                    runuser -u "$user" -- env XDG_RUNTIME_DIR="$d" DBUS_SESSION_BUS_ADDRESS="unix:path=$d/bus" \
+                        systemctl --user daemon-reload >/dev/null 2>&1 || :
+                    runuser -u "$user" -- env XDG_RUNTIME_DIR="$d" DBUS_SESSION_BUS_ADDRESS="unix:path=$d/bus" \
+                        systemctl --user try-restart lianli-daemon.service >/dev/null 2>&1 || :
+                done
+            fi
         fi
     fi
 fi

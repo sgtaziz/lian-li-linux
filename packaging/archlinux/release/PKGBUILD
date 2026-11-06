@@ -21,6 +21,7 @@ sha256sums=('4308b61d329ee54c0ba05b162db41f724d29805d97ca4fb9b5aa58d9f42c47a2'
             '307558ad57549d8ad55ba77add19cfca2e384c0857dfd4b6c2ff82b95172a033'
             '62378965f548feaf5d5c3e1e2e65e985fae33ff4c87432cb42e60250d7e0d670')
 options=('!lto' '!debug')
+install=lianli-linux.install
 
 prepare() {
   cd lian-li-linux-$pkgver

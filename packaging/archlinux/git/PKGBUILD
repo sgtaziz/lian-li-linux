@@ -15,6 +15,7 @@ conflicts=('lianli-linux')
 source=("git+${url}.git")
 sha256sums=('SKIP')
 options=('!lto' '!debug')
+install=lianli-linux.install
 
 pkgver() {
   cd lian-li-linux

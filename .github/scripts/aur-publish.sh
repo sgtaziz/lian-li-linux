@@ -24,9 +24,9 @@ ssh-keygen -lf "$ssh_dir/known_hosts" | grep -q 'SHA256:RFzBCUItH9LZS0cKB5UE6ceA
 export GIT_SSH_COMMAND="ssh -i $ssh_dir/aur -o UserKnownHostsFile=$ssh_dir/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
 git clone "ssh://aur@aur.archlinux.org/$pkgbase.git" /tmp/aur
-cp PKGBUILD .SRCINFO "$license" /tmp/aur/
+cp PKGBUILD .SRCINFO lianli-linux.install "$license" /tmp/aur/
 cd /tmp/aur
-git add PKGBUILD .SRCINFO LICENSE
+git add PKGBUILD .SRCINFO lianli-linux.install LICENSE
 if git diff --cached --quiet; then
   echo "$pkgbase on the AUR is already up to date"
   exit 0
