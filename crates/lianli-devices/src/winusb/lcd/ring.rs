@@ -4,6 +4,7 @@ pub(super) type RingKey = (Vec<u8>, u8);
 pub(super) struct RingDelivery {
     pub applied: Option<RingKey>,
     pub attempted: Option<RingKey>,
+    pub in_flight: Vec<RingKey>,
     written: bool,
 }
 
