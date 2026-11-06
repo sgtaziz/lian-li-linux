@@ -1035,7 +1035,8 @@ impl WinUsbLcdCore {
         }
     }
 
-    pub(crate) fn clear_layers(&mut self) {
+    /// Returns whether the PNG layer reached the panel.
+    pub(crate) fn clear_layers(&mut self) -> bool {
         use image::{ImageBuffer, Rgb, Rgba};
         use std::io::Cursor;
 
@@ -1044,6 +1045,7 @@ impl WinUsbLcdCore {
 
         let png_img = ImageBuffer::from_pixel(w, h, Rgba([0u8, 0, 0, 0]));
         let mut png_buf = Vec::new();
+        let mut png_sent = false;
         if png_img
             .write_to(&mut Cursor::new(&mut png_buf), image::ImageFormat::Png)
             .is_ok()
@@ -1056,6 +1058,7 @@ impl WinUsbLcdCore {
                 warn!("ClearPngLayer failed: {e}");
             } else {
                 self.read_response("ClearPngLayer");
+                png_sent = true;
             }
         }
 
@@ -1068,7 +1071,7 @@ impl WinUsbLcdCore {
             );
             if let Err(e) = encoder.encode_image(&jpg_img) {
                 warn!("Failed to encode blank JPEG: {e}");
-                return;
+                return png_sent;
             }
         }
         let header = self.builder.jpeg_header_winusb(jpg_buf.len());
@@ -1080,6 +1083,7 @@ impl WinUsbLcdCore {
         } else {
             self.read_response("ClearJpgLayer");
         }
+        png_sent
     }
 
     pub(crate) fn send_frame(&mut self, frame: &[u8]) -> Result<()> {

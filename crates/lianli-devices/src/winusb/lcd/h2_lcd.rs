@@ -9,6 +9,7 @@ use super::trait_::{BoxedWinUsbLcd, WinUsbLcd};
 
 pub struct H2WinUsbLcd {
     core: WinUsbLcdCore,
+    layers_cleared: bool,
 }
 
 impl H2WinUsbLcd {
@@ -19,7 +20,10 @@ impl H2WinUsbLcd {
     ) -> Result<Self> {
         let core = WinUsbLcdCore::open(device, screen, name, WRITE_TIMEOUT, READ_TIMEOUT, true)?
             .without_stalled_chunk_resend();
-        Ok(Self { core })
+        Ok(Self {
+            core,
+            layers_cleared: false,
+        })
     }
 
     pub(crate) fn from_shared(
@@ -37,10 +41,25 @@ impl H2WinUsbLcd {
                 true,
             )
             .without_stalled_chunk_resend(),
+            layers_cleared: false,
         }
     }
 
+    /// JPEG frames leave the firmware's coolant and pump overlay running; only
+    /// a PNG push or StartPlay pauses it. This stays out of `do_init` so a
+    /// panel with no LCD media keeps its firmware display.
+    fn prepare_static_frame(&mut self) -> Result<()> {
+        if !self.core.initialized || self.core.needs_init() {
+            self.do_init()?;
+        }
+        if !self.layers_cleared {
+            self.layers_cleared = self.core.clear_layers();
+        }
+        Ok(())
+    }
+
     fn do_init(&mut self) -> Result<()> {
+        self.layers_cleared = false;
         self.core.init_logging();
         self.core.reset_failure_state();
         if let Err(error) = self.core.stop_playback() {
@@ -87,15 +106,11 @@ impl WinUsbLcd for H2WinUsbLcd {
         Ok(())
     }
     fn send_frame(&mut self, frame: &[u8]) -> Result<()> {
-        if !self.core.initialized || self.core.needs_init() {
-            self.do_init()?;
-        }
+        self.prepare_static_frame()?;
         self.core.send_frame(frame)
     }
     fn send_frame_verified(&mut self, frame: &[u8]) -> Result<()> {
-        if !self.core.initialized || self.core.needs_init() {
-            self.do_init()?;
-        }
+        self.prepare_static_frame()?;
         self.core.send_frame_verified(frame)
     }
     fn set_brightness_val(&mut self, brightness: u8) -> Result<()> {
