@@ -279,25 +279,14 @@ fn encode_frame(
     let mut encoding = *screen;
     // H.264 preparation uses temporary JPEG inputs, even on PNG-overlay panels.
     encoding.png = screen.png && !screen.h264;
-    let mut last_error = None;
-    for quality in [screen.jpeg_quality, 80, 65, 50, 35, 20] {
-        encoding.jpeg_quality = quality.min(screen.jpeg_quality);
-        let image = turbojpeg::Image {
-            pixels: frame.as_raw().as_slice(),
-            width: frame.width() as usize,
-            pitch: frame.width() as usize * 3,
-            height: frame.height() as usize,
-            format: turbojpeg::PixelFormat::RGB,
-        };
-        match crate::common::encode_compressed(image, &encoding) {
-            Ok(bytes) => return Ok(bytes),
-            Err(e @ crate::MediaError::PayloadTooLarge { .. }) if !encoding.png => {
-                last_error = Some(e)
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    Err(last_error.expect("all quality attempts exceeded the payload limit"))
+    let image = turbojpeg::Image {
+        pixels: frame.as_raw().as_slice(),
+        width: frame.width() as usize,
+        pitch: frame.width() as usize * 3,
+        height: frame.height() as usize,
+        format: turbojpeg::PixelFormat::RGB,
+    };
+    crate::common::encode_compressed(image, &encoding)
 }
 
 #[cfg(test)]
