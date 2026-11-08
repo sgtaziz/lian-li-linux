@@ -14,9 +14,13 @@
         "aarch64-linux"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      # github: flake refs come without submodules, so fetch the same commit again with them.
+      # github: flake refs come without submodules, so fetch the same upstream commit again with them.
+      # Forks with their own commits build with git+https://github.com/<fork>/lian-li-linux?submodules=1.
+      hasSubmodules =
+        builtins.pathExists "${self}/vendor/tinyuz/compress/tuz_enc.h"
+        && builtins.pathExists "${self}/vendor/HDiffPatch/libHDiffPatch/HDiff/private_diff/libdivsufsort/divsufsort.cpp";
       src =
-        if builtins.pathExists "${self}/vendor/tinyuz/compress/tuz_enc.h" then
+        if hasSubmodules then
           self
         else if self ? rev then
           builtins.fetchGit {
@@ -26,7 +30,7 @@
             allRefs = true;
           }
         else
-          throw "lian-li-linux needs its git submodules. Use git+https://github.com/sgtaziz/lian-li-linux or run `git submodule update --init`.";
+          throw "lian-li-linux needs its git submodules. Run `git submodule update --init`, or use git+https://github.com/sgtaziz/lian-li-linux?submodules=1.";
     in
     {
       packages = forAllSystems (pkgs: {
