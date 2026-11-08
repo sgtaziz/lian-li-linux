@@ -10,7 +10,7 @@ mod helpers;
 mod history;
 mod widgets;
 
-use crate::common::{encode_jpeg_rgba, render_dimensions, MediaError};
+use crate::common::{encode_jpeg_rgba, render_dimensions, JpegQualityMemo, MediaError};
 use crate::sensor::FrameInfo;
 use crate::PreparationControl;
 use ab_glyph::FontVec;
@@ -71,6 +71,7 @@ pub struct CustomAsset {
     default_font: FontVec,
     smooth_edges: bool,
     frame_index: AtomicUsize,
+    quality_memo: JpegQualityMemo,
     start_instant: Instant,
     _retained_budget: crate::resource_budget::RetainedBudget,
 }
@@ -302,6 +303,7 @@ impl CustomAsset {
             default_font,
             smooth_edges,
             frame_index: AtomicUsize::new(1),
+            quality_memo: JpegQualityMemo::default(),
             start_instant: Instant::now(),
         }))
     }
@@ -350,6 +352,7 @@ impl CustomAsset {
                 self.canonical_height,
                 self.orientation,
                 &self.screen,
+                &JpegQualityMemo::default(),
             )
             .unwrap_or_default(),
             frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
@@ -364,6 +367,7 @@ impl CustomAsset {
                 self.canonical_height,
                 self.orientation,
                 &self.screen,
+                &self.quality_memo,
             )
         })?;
         match outcome {
@@ -575,6 +579,7 @@ mod tests {
             default_font: font,
             smooth_edges: false,
             frame_index: AtomicUsize::new(0),
+            quality_memo: JpegQualityMemo::default(),
             start_instant: Instant::now(),
             _retained_budget: crate::resource_budget::RetainedBudget::default(),
         }

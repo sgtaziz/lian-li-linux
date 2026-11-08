@@ -4,7 +4,13 @@ use image::{RgbImage, RgbaImage};
 use lianli_shared::media::MediaFraming;
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::template::ImageFit;
+use std::sync::atomic::{AtomicU8, Ordering};
 use thiserror::Error;
+use tracing::debug;
+
+/// A frame must use under a third of the limit before quality rises, so the
+/// next quality step is unlikely to overflow and cost a wasted encode.
+const QUALITY_RAISE_HEADROOM: usize = 3;
 
 #[derive(Debug, Error)]
 pub enum MediaError {
@@ -32,7 +38,20 @@ pub enum MediaError {
     ImageError(String),
 }
 
+/// Starting JPEG quality carried between frames of one stream, so frames that
+/// only fit at a reduced quality do not repeat every higher encode.
+#[derive(Debug, Default)]
+pub struct JpegQualityMemo(AtomicU8);
+
 pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
+    encode_jpeg_with(image, screen, &JpegQualityMemo::default())
+}
+
+pub fn encode_jpeg_with(
+    image: RgbImage,
+    screen: &ScreenInfo,
+    memo: &JpegQualityMemo,
+) -> Result<Vec<u8>, MediaError> {
     let width = image.width() as usize;
     let height = image.height() as usize;
     let tj_image = turbojpeg::Image {
@@ -42,7 +61,7 @@ pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, Medi
         height,
         format: turbojpeg::PixelFormat::RGB,
     };
-    encode_compressed(tj_image, screen)
+    encode_compressed_with(tj_image, screen, memo)
 }
 
 pub fn encode_jpeg_rgba(
@@ -51,6 +70,7 @@ pub fn encode_jpeg_rgba(
     height: u32,
     orientation: f32,
     screen: &ScreenInfo,
+    memo: &JpegQualityMemo,
 ) -> Result<Vec<u8>, MediaError> {
     let orientation_q =
         (((((orientation % 360.0) + 360.0) % 360.0 + 45.0) / 90.0).floor() as i32 & 3) * 90;
@@ -64,7 +84,7 @@ pub fn encode_jpeg_rgba(
             height: height as usize,
             format: turbojpeg::PixelFormat::RGBA,
         };
-        return encode_compressed(tj_image, screen);
+        return encode_compressed_with(tj_image, screen, memo);
     }
 
     let img = RgbaImage::from_raw(width, height, rgba.to_vec())
@@ -82,12 +102,20 @@ pub fn encode_jpeg_rgba(
         height: rotated.height() as usize,
         format: turbojpeg::PixelFormat::RGBA,
     };
-    encode_compressed(tj_image, screen)
+    encode_compressed_with(tj_image, screen, memo)
 }
 
 pub(crate) fn encode_compressed(
     tj_image: turbojpeg::Image<&[u8]>,
     screen: &ScreenInfo,
+) -> Result<Vec<u8>, MediaError> {
+    encode_compressed_with(tj_image, screen, &JpegQualityMemo::default())
+}
+
+fn encode_compressed_with(
+    tj_image: turbojpeg::Image<&[u8]>,
+    screen: &ScreenInfo,
+    memo: &JpegQualityMemo,
 ) -> Result<Vec<u8>, MediaError> {
     if screen.png {
         let buf = encode_png_bytes(&tj_image)?;
@@ -96,16 +124,42 @@ pub(crate) fn encode_compressed(
         }
         return Ok(buf);
     }
+    let preferred = screen.jpeg_quality;
+    let start = match memo.0.load(Ordering::Relaxed) {
+        0 => preferred,
+        remembered => remembered,
+    };
     let mut size = 0;
-    for quality in jpeg_qualities(screen.jpeg_quality) {
+    for quality in jpeg_qualities(preferred).skip_while(|q| *q > start) {
         let buf = turbojpeg::compress(tj_image, quality as i32, turbojpeg::Subsamp::Sub2x2)
             .map_err(|e| MediaError::ImageError(format!("turbojpeg encode: {e}")))?;
         if buf.len() <= screen.max_payload {
+            if quality < start {
+                debug!(
+                    quality,
+                    preferred,
+                    size = buf.len(),
+                    limit = screen.max_payload,
+                    "lowered JPEG quality to fit the LCD payload limit"
+                );
+            }
+            let next = next_start_quality(preferred, quality, buf.len(), screen.max_payload);
+            memo.0.store(next, Ordering::Relaxed);
             return Ok(buf.to_vec());
         }
         size = buf.len();
     }
     Err(MediaError::PayloadTooLarge { size })
+}
+
+fn next_start_quality(preferred: u8, quality: u8, size: usize, limit: usize) -> u8 {
+    if size.saturating_mul(QUALITY_RAISE_HEADROOM) > limit {
+        return quality;
+    }
+    jpeg_qualities(preferred)
+        .take_while(|q| *q > quality)
+        .last()
+        .unwrap_or(quality)
 }
 
 fn jpeg_qualities(preferred: u8) -> impl Iterator<Item = u8> {
@@ -278,4 +332,74 @@ pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {
         ((g_temp + m) * 255.0).round() as u8,
         ((b_temp + m) * 255.0).round() as u8,
     ]
+}
+
+#[cfg(test)]
+mod jpeg_quality_memo_tests {
+    use super::*;
+
+    fn screen(max_payload: usize) -> ScreenInfo {
+        ScreenInfo {
+            width: 480,
+            height: 480,
+            max_fps: 30,
+            jpeg_quality: 95,
+            max_payload,
+            h264: false,
+            needs_keepalive: false,
+            png: false,
+            play_count: 0,
+        }
+    }
+
+    fn noise() -> RgbImage {
+        let mut state = 0x2545_f491_u32;
+        RgbImage::from_fn(480, 480, |_, _| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let [r, g, b, _] = state.to_le_bytes();
+            image::Rgb([r, g, b])
+        })
+    }
+
+    #[test]
+    fn next_frame_starts_at_the_quality_that_fit() {
+        let full = encode_jpeg(noise(), &screen(usize::MAX)).unwrap().len();
+        let limited = screen(full * 2 / 3);
+        let memo = JpegQualityMemo::default();
+
+        let first = encode_jpeg_with(noise(), &limited, &memo).unwrap();
+        let remembered = memo.0.load(Ordering::Relaxed);
+        assert!(remembered < limited.jpeg_quality);
+
+        let second = encode_jpeg_with(noise(), &limited, &memo).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(memo.0.load(Ordering::Relaxed), remembered);
+    }
+
+    #[test]
+    fn simple_frames_climb_back_one_step_at_a_time() {
+        let flat = RgbImage::from_pixel(480, 480, image::Rgb([20, 40, 60]));
+        let screen = screen(512_000);
+        let memo = JpegQualityMemo(AtomicU8::new(50));
+
+        let mut starts = Vec::new();
+        for _ in 0..4 {
+            encode_jpeg_with(flat.clone(), &screen, &memo).unwrap();
+            starts.push(memo.0.load(Ordering::Relaxed));
+        }
+        assert_eq!(starts, [65, 80, 95, 95]);
+    }
+
+    #[test]
+    fn harder_frame_steps_below_the_remembered_quality() {
+        let full = encode_jpeg(noise(), &screen(usize::MAX)).unwrap().len();
+        let limited = screen(full / 3);
+        let memo = JpegQualityMemo(AtomicU8::new(80));
+
+        let fitted = encode_jpeg_with(noise(), &limited, &memo).unwrap();
+        assert!(fitted.len() <= limited.max_payload);
+        assert!(memo.0.load(Ordering::Relaxed) < 80);
+    }
 }

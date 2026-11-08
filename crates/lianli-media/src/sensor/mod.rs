@@ -2,7 +2,10 @@ mod bitmap_glyphs;
 mod gauge;
 mod text;
 
-use crate::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
+use crate::common::{
+    apply_orientation, encode_jpeg, encode_jpeg_with, render_dimensions, JpegQualityMemo,
+    MediaError,
+};
 use ab_glyph::FontVec;
 use gauge::{draw_gauge, GaugeParams};
 use image::{ImageBuffer, Rgb, RgbImage, RgbaImage};
@@ -53,6 +56,7 @@ pub struct SensorAsset {
     previous_value: Mutex<String>,
     held_reading: Mutex<HeldReading>,
     frame_index: AtomicUsize,
+    quality_memo: JpegQualityMemo,
     _retained_budget: crate::resource_budget::RetainedBudget,
 }
 
@@ -231,6 +235,7 @@ impl SensorAsset {
             previous_value: Mutex::new("N/A".into()),
             held_reading: Mutex::default(),
             frame_index: 1.into(),
+            quality_memo: JpegQualityMemo::default(),
             _retained_budget: retained_budget,
         }))
     }
@@ -304,7 +309,7 @@ impl SensorAsset {
         *prev = value_text;
 
         let oriented = apply_orientation(image, self.orientation);
-        let data = encode_jpeg(oriented, &self.screen)?;
+        let data = encode_jpeg_with(oriented, &self.screen, &self.quality_memo)?;
         Ok(Some(FrameInfo {
             data,
             frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),

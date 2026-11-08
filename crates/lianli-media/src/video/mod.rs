@@ -14,7 +14,9 @@ pub use h264::encode_h264_with_status;
 pub use h264_inprocess::{ensure_ffmpeg_initialized, H264Encoder};
 pub use h264_live::LiveH264Encoder;
 
-use crate::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
+use crate::common::{
+    apply_orientation, encode_jpeg_with, render_dimensions, JpegQualityMemo, MediaError,
+};
 use crate::PreparationControl;
 use ffmpeg::stream_rgba;
 use image::codecs::gif::GifDecoder;
@@ -40,9 +42,11 @@ pub fn build_video_frames(
     let (rw, rh) = render_dimensions(screen, orientation);
     let mut frames = Vec::new();
     let mut budget = frame_budget::FrameBudget::default();
+    let quality_memo = JpegQualityMemo::default();
     stream_rgba(path, fps, rw, rh, framing, &control, |rgba| {
         control.check()?;
-        let frame = crate::common::encode_jpeg_rgba(rgba, rw, rh, orientation, screen)?;
+        let frame =
+            crate::common::encode_jpeg_rgba(rgba, rw, rh, orientation, screen, &quality_memo)?;
         budget.reserve(frame.len())?;
         frames.push(frame);
         Ok(())
@@ -87,6 +91,7 @@ pub(crate) fn build_gif_frames_cancellable(
     let (rw, rh) = render_dimensions(screen, orientation);
     frame_budget::rgba_bytes(rw, rh)?;
     let mut budget = frame_budget::FrameBudget::default();
+    let quality_memo = JpegQualityMemo::default();
     let mut encoded = Vec::new();
     let mut durations = Vec::new();
 
@@ -122,7 +127,7 @@ pub(crate) fn build_gif_frames_cancellable(
         let rgb = DynamicImage::ImageRgba8(rgba).to_rgb8();
         let resized = crate::common::frame_rgb(&rgb, framing, rw, rh);
         let oriented = apply_orientation(resized, orientation);
-        let jpeg = encode_jpeg(oriented, screen)?;
+        let jpeg = encode_jpeg_with(oriented, screen, &quality_memo)?;
         budget.reserve(jpeg.len())?;
         encoded.push(jpeg);
         durations.push(Duration::from_millis(accum_ms as u64));
