@@ -1,4 +1,5 @@
 mod classic;
+mod custom;
 mod geometry;
 mod paths;
 mod tables;
@@ -29,6 +30,12 @@ pub const MODES: &[RgbMode] = &[
     RgbMode::Hourglass,
     RgbMode::ElectricCurrent,
     RgbMode::RainbowWave,
+    RgbMode::Nebula,
+    RgbMode::NebulaRandom,
+    RgbMode::Cinder,
+    RgbMode::CinderRandom,
+    RgbMode::Pulsar,
+    RgbMode::PulsarRandom,
 ];
 
 pub fn render(effect: &RgbEffect, led_count: usize) -> Result<Animation> {
@@ -112,6 +119,18 @@ pub fn render(effect: &RgbEffect, led_count: usize) -> Result<Animation> {
                 1_100,
             ),
             RgbMode::RainbowWave => (paths::rainbow_wave(led_count, brightness, reverse), 1_650),
+            RgbMode::Nebula => (
+                custom::steady_nebula(effect, led_count, brightness, reverse),
+                1_600,
+            ),
+            RgbMode::Cinder => (custom::steady_cinder(effect, led_count, brightness), 1_600),
+            RgbMode::Pulsar => (custom::steady_pulsar(effect, led_count, brightness), 1_600),
+            RgbMode::NebulaRandom => (
+                custom::nebula(effect, led_count, brightness, reverse),
+                1_600,
+            ),
+            RgbMode::CinderRandom => (custom::cinder(effect, led_count, brightness), 1_600),
+            RgbMode::PulsarRandom => (custom::pulsar(effect, led_count, brightness), 1_600),
             _ => bail!("unsupported Universal Screen RGB mode: {:?}", effect.mode),
         }
     };

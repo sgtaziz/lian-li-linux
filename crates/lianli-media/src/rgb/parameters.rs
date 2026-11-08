@@ -224,6 +224,12 @@ pub fn for_scope(
             } else if screen {
                 max_colors = match mode {
                     RgbMode::Runway | RgbMode::Mixing | RgbMode::River => 2,
+                    RgbMode::Nebula
+                    | RgbMode::Cinder
+                    | RgbMode::Pulsar
+                    | RgbMode::NebulaRandom
+                    | RgbMode::CinderRandom
+                    | RgbMode::PulsarRandom => 2,
                     RgbMode::Hourglass | RgbMode::ElectricCurrent => 4,
                     _ => max_colors,
                 };
@@ -237,6 +243,8 @@ pub fn for_scope(
                         | RgbMode::BulletStack
                         | RgbMode::River
                         | RgbMode::RainbowWave
+                        | RgbMode::Nebula
+                        | RgbMode::NebulaRandom
                 ) || profile.family == RgbRenderFamily::HydroShiftIIOled && mode == RgbMode::Tide
             } else if profile.family == RgbRenderFamily::Sl {
                 matches!(
@@ -266,6 +274,12 @@ pub fn for_scope(
                             | RgbMode::PingPong
                             | RgbMode::Hourglass
                             | RgbMode::ElectricCurrent
+                            | RgbMode::Nebula
+                            | RgbMode::Cinder
+                            | RgbMode::Pulsar
+                            | RgbMode::NebulaRandom
+                            | RgbMode::CinderRandom
+                            | RgbMode::PulsarRandom
                     ) {
                     1
                 } else {
