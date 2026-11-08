@@ -14,15 +14,28 @@
         "aarch64-linux"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      # github: flake refs come without submodules, so fetch the same commit again with them.
+      src =
+        if builtins.pathExists "${self}/vendor/tinyuz/compress/tuz_enc.h" then
+          self
+        else if self ? rev then
+          builtins.fetchGit {
+            url = "https://github.com/sgtaziz/lian-li-linux";
+            inherit (self) rev;
+            submodules = true;
+            allRefs = true;
+          }
+        else
+          throw "lian-li-linux needs its git submodules. Use git+https://github.com/sgtaziz/lian-li-linux or run `git submodule update --init`.";
     in
     {
       packages = forAllSystems (pkgs: {
-        lian-li-linux = pkgs.callPackage ./packaging/nix/package.nix { src = self; };
+        lian-li-linux = pkgs.callPackage ./packaging/nix/package.nix { inherit src; };
         default = self.packages.${pkgs.stdenv.hostPlatform.system}.lian-li-linux;
       });
 
       overlays.default = final: _: {
-        lian-li-linux = final.callPackage ./packaging/nix/package.nix { src = self; };
+        lian-li-linux = final.callPackage ./packaging/nix/package.nix { inherit src; };
       };
 
       nixosModules.default = {
