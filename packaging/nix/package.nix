@@ -161,6 +161,7 @@ rustPlatform.buildRustPackage {
           wayland
           libxkbcommon
           linuxPackages.evdi
+          systemd
         ]
       } "$bin"
       addDriverRunpath "$bin"
