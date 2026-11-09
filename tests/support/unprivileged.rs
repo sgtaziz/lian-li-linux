@@ -60,7 +60,25 @@ fn spawn_test_process(command: &mut std::process::Command) -> std::io::Result<st
 fn copied_test_process_waits_for_writer_to_close() {
     let directory = tempfile::tempdir().unwrap();
     let binary = directory.path().join("true");
-    std::fs::copy("/bin/true", &binary).unwrap();
+    // NixOS has no /bin/true, so take the first one on PATH. Its read-only store mode is copied too.
+    let source = std::env::var_os("PATH")
+        .iter()
+        .flat_map(std::env::split_paths)
+        .map(|directory| directory.join("true"))
+        .find(|path| {
+            path.metadata().is_ok_and(|metadata| {
+                metadata.is_file()
+                    && std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111
+                        != 0
+            })
+        })
+        .unwrap_or_else(|| "/bin/true".into());
+    std::fs::copy(source, &binary).unwrap();
+    std::fs::set_permissions(
+        &binary,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
     let writer = std::fs::OpenOptions::new().write(true).open(&binary).unwrap();
     let mut command = std::process::Command::new(&binary);
     assert_eq!(command.spawn().unwrap_err().raw_os_error(), Some(libc::ETXTBSY));
