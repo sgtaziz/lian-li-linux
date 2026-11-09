@@ -65,7 +65,13 @@ fn copied_test_process_waits_for_writer_to_close() {
         .iter()
         .flat_map(std::env::split_paths)
         .map(|directory| directory.join("true"))
-        .find(|path| path.is_file())
+        .find(|path| {
+            path.metadata().is_ok_and(|metadata| {
+                metadata.is_file()
+                    && std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111
+                        != 0
+            })
+        })
         .unwrap_or_else(|| "/bin/true".into());
     std::fs::copy(source, &binary).unwrap();
     std::fs::set_permissions(
