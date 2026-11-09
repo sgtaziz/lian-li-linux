@@ -3,6 +3,26 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.6 — 2026-11-09
+
+### Features
+- **rgb**: Add Nebula, Cinder and Pulsar effects for the Universal Screen ring  ([#282](https://github.com/sgtaziz/lian-li-linux/pull/282))
+
+### Fixes
+- **lcd**: Lower JPEG quality until frames fit the payload limit  (`5389d0f`)
+- **lcd**: Let encode_compressed own the JPEG quality fallback  (`0f447e9`)
+- **lcd**: Remember the JPEG quality that fit between frames  (`9977deb`)
+- **packaging**: Fetch submodules for github: flake refs  (`a7dcc4e`)
+- **packaging**: Check both submodules and document fork builds  (`f1f1035`)
+- **lcd**: Open Flex panels with the vendor layer reset  (`4e249e6`)
+- **lcd**: Keep brightness changes when the sender queue is full  (`0ecdd3f`)
+- **wired**: Parse receiver firmware versions like the vendor  (`f368adc`)
+- **wired**: Reopen receivers that reset between hotplug polls  (`c88631c`)
+
+### Other changes
+- Merge pull request #280 from owainxyz/fix-jpeg-payload  (`56bfc02`)
+- Merge pull request #281 from owainxyz/nix-github-submodules  (`107116f`)
+
 ## v1.2.5 — 2026-11-06
 
 ### Features
