@@ -103,6 +103,12 @@ pub trait FanDevice: Send + Sync {
         true
     }
 
+    /// True once the open USB handle has reported that its device is gone. A
+    /// device that resets between enumeration polls needs this to be reopened.
+    fn transport_lost(&self) -> bool {
+        false
+    }
+
     /// Poll coolant temperature from wired AIO devices (HydroShift LCD, Galahad2).
     /// Returns `None` if the device doesn't have a coolant sensor.
     /// Ref: PR #103 — exposes wired coolant telemetry to fan curves.
@@ -215,6 +221,9 @@ impl<T: FanDevice + ?Sized> FanDevice for Arc<T> {
     }
     fn is_ready_for_control(&self) -> bool {
         (**self).is_ready_for_control()
+    }
+    fn transport_lost(&self) -> bool {
+        (**self).transport_lost()
     }
     fn poll_coolant_temp(&self) -> Option<f32> {
         (**self).poll_coolant_temp()

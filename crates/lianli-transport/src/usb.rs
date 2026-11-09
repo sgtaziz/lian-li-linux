@@ -10,6 +10,7 @@ use crate::error::TransportError;
 use crate::UsbContext;
 use rusb::{Device, DeviceHandle};
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
@@ -78,6 +79,7 @@ pub struct RusbBulk {
     /// All interfaces we hold for the lifetime of this transport.
     /// Held continuously so the kernel can't re-bind and reject our writes.
     claimed: Vec<u8>,
+    disconnected: AtomicBool,
 }
 
 impl RusbBulk {
@@ -99,6 +101,7 @@ impl RusbBulk {
             ep_in_interrupt,
             ep_out_interrupt,
             claimed: Vec::new(),
+            disconnected: AtomicBool::new(false),
         })
     }
 
@@ -112,6 +115,7 @@ impl RusbBulk {
             ep_in_interrupt,
             ep_out_interrupt,
             claimed: Vec::new(),
+            disconnected: AtomicBool::new(false),
         })
     }
 
@@ -223,13 +227,24 @@ impl RusbBulk {
         Ok(())
     }
 
+    fn observe<T>(&self, result: rusb::Result<T>) -> rusb::Result<T> {
+        if matches!(result, Err(rusb::Error::NoDevice)) {
+            self.disconnected.store(true, Ordering::Relaxed);
+        }
+        result
+    }
+
+    pub fn is_disconnected(&self) -> bool {
+        self.disconnected.load(Ordering::Relaxed)
+    }
+
     pub fn write(&self, data: &[u8], timeout: Duration) -> Result<usize, TransportError> {
         let timeout = transfer_timeout(timeout)?;
-        let n = if self.ep_out_interrupt {
-            self.handle.write_interrupt(self.ep_out, data, timeout)?
+        let n = self.observe(if self.ep_out_interrupt {
+            self.handle.write_interrupt(self.ep_out, data, timeout)
         } else {
-            self.handle.write_bulk(self.ep_out, data, timeout)?
-        };
+            self.handle.write_bulk(self.ep_out, data, timeout)
+        })?;
         if n != data.len() {
             warn!(
                 "USB short write: {n}/{} bytes on EP 0x{:02x} ({})",
@@ -253,13 +268,13 @@ impl RusbBulk {
         let mut offset = 0usize;
         while offset < data.len() {
             let timeout = transfer_timeout(timeout)?;
-            let n = if self.ep_out_interrupt {
+            let n = self.observe(if self.ep_out_interrupt {
                 self.handle
-                    .write_interrupt(self.ep_out, &data[offset..], timeout)?
+                    .write_interrupt(self.ep_out, &data[offset..], timeout)
             } else {
                 self.handle
-                    .write_bulk(self.ep_out, &data[offset..], timeout)?
-            };
+                    .write_bulk(self.ep_out, &data[offset..], timeout)
+            })?;
             if n == 0 {
                 return Err(TransportError::Write(format!(
                     "zero-length USB write at offset {offset}/{}",
@@ -274,9 +289,9 @@ impl RusbBulk {
     pub fn read(&self, buf: &mut [u8], timeout: Duration) -> Result<usize, TransportError> {
         let timeout = transfer_timeout(timeout)?;
         if self.ep_in_interrupt {
-            Ok(self.handle.read_interrupt(self.ep_in, buf, timeout)?)
+            Ok(self.observe(self.handle.read_interrupt(self.ep_in, buf, timeout))?)
         } else {
-            Ok(self.handle.read_bulk(self.ep_in, buf, timeout)?)
+            Ok(self.observe(self.handle.read_bulk(self.ep_in, buf, timeout))?)
         }
     }
 

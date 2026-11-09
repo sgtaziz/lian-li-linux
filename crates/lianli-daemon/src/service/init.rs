@@ -230,13 +230,10 @@ impl ServiceManager {
                 return;
             }
         };
-        // Compare identities too, not just topology. A device replaced at
-        // the same port keeps its topology entry but gets a new id from
-        // its serial, and without this check the daemon would keep the
-        // stale backends forever and never open the replacement.
         let topology_changed = current_topos != self.registry.last_wired_topos;
         let identities_changed = current_ids != self.registry.last_wired_ids;
-        if topology_changed || identities_changed {
+        let reset_device_returned = lost_device_returned(&self.registry.fan_devices, &current_ids);
+        if topology_changed || identities_changed || reset_device_returned {
             let added = current_topos
                 .difference(&self.registry.last_wired_topos)
                 .count();
@@ -266,7 +263,7 @@ impl ServiceManager {
             }
             self.registry.last_reinit = Some(now);
             info!(
-                "Wired device set changed (topology +{added} -{removed}, identity +{id_added} -{id_removed}): re-initializing"
+                "Wired device set changed (topology +{added} -{removed}, identity +{id_added} -{id_removed}, reset device returned: {reset_device_returned}): re-initializing"
             );
 
             // stop controllers first, they hold Arcs into fan_devices
@@ -1114,5 +1111,60 @@ impl ServiceManager {
                 false
             }
         }
+    }
+}
+
+fn lost_device_returned(
+    devices: &HashMap<String, Box<dyn FanDevice>>,
+    present_ids: &HashSet<String>,
+) -> bool {
+    devices
+        .iter()
+        .any(|(id, device)| present_ids.contains(id) && device.transport_lost())
+}
+
+#[cfg(test)]
+mod lost_device_tests {
+    use super::*;
+
+    struct Fan(bool);
+
+    impl FanDevice for Fan {
+        fn set_fan_speed(&self, _: u8, _: u8) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn set_fan_speeds(&self, _: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn read_fan_rpm(&self) -> anyhow::Result<Vec<u16>> {
+            Ok(Vec::new())
+        }
+        fn fan_slot_count(&self) -> u8 {
+            1
+        }
+        fn transport_lost(&self) -> bool {
+            self.0
+        }
+    }
+
+    #[test]
+    fn reinit_waits_until_a_lost_device_is_back_on_the_bus() {
+        let devices: HashMap<String, Box<dyn FanDevice>> =
+            HashMap::from([("receiver".to_string(), Box::new(Fan(true)) as _)]);
+        assert!(!lost_device_returned(&devices, &HashSet::new()));
+        assert!(lost_device_returned(
+            &devices,
+            &HashSet::from(["receiver".to_string()])
+        ));
+    }
+
+    #[test]
+    fn healthy_devices_do_not_force_a_reinit() {
+        let devices: HashMap<String, Box<dyn FanDevice>> =
+            HashMap::from([("receiver".to_string(), Box::new(Fan(false)) as _)]);
+        assert!(!lost_device_returned(
+            &devices,
+            &HashSet::from(["receiver".to_string()])
+        ));
     }
 }

@@ -171,6 +171,12 @@ impl WiredReceiverController {
 }
 
 impl FanDevice for WiredReceiverController {
+    fn transport_lost(&self) -> bool {
+        self.transport
+            .try_lock()
+            .is_some_and(|transport| transport.is_disconnected())
+    }
+
     fn lcd_group_size(&self) -> Option<u8> {
         self.lcd_count
     }
