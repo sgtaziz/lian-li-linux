@@ -769,6 +769,9 @@ pub(super) struct ThreadedWinUsbSender {
     tx: std::sync::mpsc::SyncSender<LcdThreadMsg>,
     stream_control: Arc<StreamControl>,
     frame_delivery: Arc<FrameDelivery>,
+    /// Latest brightness that found the queue full. A full queue guarantees the
+    /// worker dequeues again, and it applies this value before that message.
+    deferred_brightness: Arc<Mutex<Option<u8>>>,
     closing: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -803,12 +806,19 @@ impl ThreadedWinUsbSender {
         let worker_control = stream_control.clone();
         let closing = Arc::new(AtomicBool::new(false));
         let closing_clone = Arc::clone(&closing);
+        let deferred_brightness: Arc<Mutex<Option<u8>>> = Arc::default();
+        let worker_brightness = Arc::clone(&deferred_brightness);
         let thread = thread::spawn(move || {
             for msg in rx {
                 if closing_clone.load(Ordering::Acquire)
                     && !matches!(msg, LcdThreadMsg::Shutdown(_) | LcdThreadMsg::Stop)
                 {
                     continue;
+                }
+                if let Some(val) = worker_brightness.lock().take() {
+                    if let Err(e) = device.set_brightness_val(val) {
+                        warn!("LCD[{index}] set_brightness error: {e}");
+                    }
                 }
                 match msg {
                     LcdThreadMsg::StartupImage(jpeg, stop, transfer, reply) => {
@@ -919,6 +929,7 @@ impl ThreadedWinUsbSender {
             tx,
             stream_control,
             frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness,
             closing,
             thread: Some(thread),
         }
@@ -952,14 +963,18 @@ impl ThreadedWinUsbSender {
     }
 
     fn set_brightness(&self, brightness: u8) -> anyhow::Result<()> {
+        use std::sync::mpsc::TrySendError;
         match self.tx.try_send(LcdThreadMsg::SetBrightness(brightness)) {
-            Ok(()) => Ok(()),
-            Err(std::sync::mpsc::TrySendError::Full(_)) => {
-                anyhow::bail!("LCD busy. Brightness change was not accepted.")
-            }
-            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
-                anyhow::bail!("LCD sender thread exited")
-            }
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Disconnected(_)) => anyhow::bail!("LCD sender thread exited"),
+            Err(TrySendError::Full(_)) => {}
+        }
+        *self.deferred_brightness.lock() = Some(brightness);
+        // The queue may have drained before the value was stored. Sending again
+        // either wakes the worker or proves a queued message will still see it.
+        match self.tx.try_send(LcdThreadMsg::SetBrightness(brightness)) {
+            Err(TrySendError::Disconnected(_)) => anyhow::bail!("LCD sender thread exited"),
+            Ok(()) | Err(TrySendError::Full(_)) => Ok(()),
         }
     }
 
@@ -2788,6 +2803,7 @@ mod tests {
                 tx,
                 stream_control: Arc::new(StreamControl::default()),
                 frame_delivery: Arc::new(FrameDelivery::default()),
+                deferred_brightness: Arc::default(),
                 closing: Arc::new(AtomicBool::new(false)),
                 thread: None,
             }),
@@ -2843,6 +2859,7 @@ mod tests {
                 tx: std::sync::mpsc::sync_channel(1).0,
                 stream_control: Arc::new(StreamControl::default()),
                 frame_delivery: Arc::new(FrameDelivery::default()),
+                deferred_brightness: Arc::default(),
                 closing: Arc::new(AtomicBool::new(false)),
                 thread: None,
             }),
@@ -2925,6 +2942,7 @@ mod tests {
                     tx,
                     stream_control: Arc::new(StreamControl::default()),
                     frame_delivery: Arc::new(FrameDelivery::default()),
+                    deferred_brightness: Arc::default(),
                     closing: Arc::new(AtomicBool::new(false)),
                     thread: None,
                 }),
@@ -2964,6 +2982,7 @@ mod tests {
             tx,
             stream_control: Arc::new(StreamControl::default()),
             frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness: Arc::default(),
             closing: Arc::new(AtomicBool::new(false)),
             thread: None,
         };
@@ -3050,6 +3069,7 @@ mod tests {
             tx,
             stream_control: Arc::new(StreamControl::default()),
             frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness: Arc::default(),
             closing: Arc::new(AtomicBool::new(false)),
             thread: None,
         };
@@ -3105,6 +3125,7 @@ mod tests {
             tx,
             stream_control: Arc::new(StreamControl::default()),
             frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness: Arc::default(),
             closing: Arc::new(AtomicBool::new(false)),
             thread: None,
         };
@@ -3141,6 +3162,29 @@ mod tests {
     }
 
     #[test]
+    fn brightness_on_a_full_queue_is_accepted_and_keeps_the_latest_value() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let sender = ThreadedWinUsbSender {
+            shares_cooling: false,
+            transport: None,
+            tx,
+            stream_control: Arc::new(StreamControl::default()),
+            frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness: Arc::default(),
+            closing: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        };
+        sender.send_frame(&[1]).unwrap();
+        sender.set_brightness(30).unwrap();
+        sender.set_brightness(60).unwrap();
+        assert_eq!(*sender.deferred_brightness.lock(), Some(60));
+        assert!(matches!(rx.try_recv().unwrap(), LcdThreadMsg::Frame(..)));
+        assert!(rx.try_recv().is_err());
+        drop(rx);
+        assert!(sender.set_brightness(10).is_err());
+    }
+
+    #[test]
     fn replacing_queued_stream_keeps_old_cancellation_and_brightness_order() {
         let (tx, rx) = std::sync::mpsc::sync_channel(3);
         let sender = ThreadedWinUsbSender {
@@ -3149,6 +3193,7 @@ mod tests {
             tx,
             stream_control: Arc::new(StreamControl::default()),
             frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness: Arc::default(),
             closing: Arc::new(AtomicBool::new(false)),
             thread: None,
         };
@@ -3192,6 +3237,7 @@ mod tests {
             tx,
             stream_control: Arc::new(StreamControl::default()),
             frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness: Arc::default(),
             closing: Arc::new(AtomicBool::new(false)),
             thread: None,
         };
@@ -3614,6 +3660,7 @@ mod tests {
             tx,
             stream_control,
             frame_delivery: Arc::new(FrameDelivery::default()),
+            deferred_brightness: Arc::default(),
             closing,
             thread: Some(worker),
         };
