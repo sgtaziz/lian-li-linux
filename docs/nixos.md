@@ -69,6 +69,11 @@ selection and choose **User (at login)** in the GUI:
 sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
 ```
 
+Both `git+https://github.com/sgtaziz/lian-li-linux` and `github:sgtaziz/lian-li-linux` work. To build
+a fork with commits that aren't upstream, use
+`git+https://github.com/<you>/lian-li-linux?submodules=1` so Nix fetches the vendored submodules
+from the fork.
+
 ## Package only
 
 ```sh
