@@ -19,6 +19,34 @@ const PROFILES: &[(Family, u8, u16)] = &[
 ];
 
 #[test]
+fn every_effect_offered_on_the_led88_ring_fits_the_wireless_upload() {
+    let ring = |led_count| RgbRenderProfile {
+        family: Family::UniversalScreen,
+        fan_count: 0,
+        led_count,
+        right_attach: false,
+    };
+    assert!(lianli_media::rgb::parameters::modes(ring(60)).contains(&RgbMode::NebulaRandom));
+    for controls in lianli_media::rgb::parameters::for_profile(ring(88)) {
+        for colors in [
+            vec![[255, 0, 40], [0, 60, 255]],
+            vec![[123, 45, 201], [17, 233, 99]],
+            vec![[255, 255, 255]],
+        ] {
+            let effect = RgbEffect {
+                mode: controls.mode,
+                colors,
+                brightness: 4,
+                ..Default::default()
+            };
+            let animation = lianli_media::rgb::universal::render(&effect, 88).unwrap();
+            WirelessRgbUpload::with_timing(&animation.frames, animation.timing(), None)
+                .unwrap_or_else(|error| panic!("{:?}: {error:#}", controls.mode));
+        }
+    }
+}
+
+#[test]
 fn native_sync_runway_uses_first_color_for_the_moving_stripe() {
     for &(family, fan_count, led_count) in PROFILES {
         for colors in [

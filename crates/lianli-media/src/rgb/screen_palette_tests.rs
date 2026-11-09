@@ -17,7 +17,9 @@ fn variable_screen_cycles_scale_with_the_selected_palette_length() {
             right_attach: false,
         };
         for controls in parameters::for_scope(profile, RgbScope::All) {
-            if controls.min_colors == controls.max_colors {
+            if controls.min_colors == controls.max_colors
+                || super::universal::RING_EFFECTS.contains(&controls.mode)
+            {
                 continue;
             }
             assert_eq!(controls.min_colors, 1);

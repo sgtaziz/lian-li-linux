@@ -111,6 +111,12 @@ pub enum RgbMode {
     Boomerang,
     CandyBox,
     Transformation,
+    Nebula,
+    Cinder,
+    Pulsar,
+    NebulaRandom,
+    CinderRandom,
+    PulsarRandom,
 }
 
 impl RgbMode {
@@ -409,6 +415,12 @@ impl RgbMode {
             Self::ShuttleRun => "Shuttle Run",
             Self::GradientRibbon => "Gradient Ribbon",
             Self::RainbowWave => "Rainbow Wave",
+            Self::Nebula => "Nebula",
+            Self::Cinder => "Cinder",
+            Self::Pulsar => "Pulsar",
+            Self::NebulaRandom => "Nebula (Random)",
+            Self::CinderRandom => "Cinder (Random)",
+            Self::PulsarRandom => "Pulsar (Random)",
             Self::ColorfulMeteor => "Colorful Meteor",
             Self::Wing => "Wing",
             Self::Drumming => "Drumming",
@@ -517,6 +529,12 @@ impl RgbMode {
             "Shuttle Run" => Self::ShuttleRun,
             "Gradient Ribbon" => Self::GradientRibbon,
             "Rainbow Wave" => Self::RainbowWave,
+            "Nebula" => Self::Nebula,
+            "Cinder" => Self::Cinder,
+            "Pulsar" => Self::Pulsar,
+            "Nebula (Random)" => Self::NebulaRandom,
+            "Cinder (Random)" => Self::CinderRandom,
+            "Pulsar (Random)" => Self::PulsarRandom,
             "Colorful Meteor" => Self::ColorfulMeteor,
             "Wing" => Self::Wing,
             "Drumming" => Self::Drumming,
@@ -1259,6 +1277,12 @@ mod tests {
         RgbMode::Boomerang,
         RgbMode::CandyBox,
         RgbMode::Transformation,
+        RgbMode::Nebula,
+        RgbMode::Cinder,
+        RgbMode::Pulsar,
+        RgbMode::NebulaRandom,
+        RgbMode::CinderRandom,
+        RgbMode::PulsarRandom,
     ];
 
     #[test]
