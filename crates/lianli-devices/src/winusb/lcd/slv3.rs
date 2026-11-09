@@ -9,6 +9,7 @@ use super::trait_::{BoxedWinUsbLcd, WinUsbLcd};
 
 pub struct Slv3WinUsbLcd {
     core: WinUsbLcdCore,
+    flex: bool,
 }
 
 impl Slv3WinUsbLcd {
@@ -17,6 +18,7 @@ impl Slv3WinUsbLcd {
         screen: ScreenInfo,
         name: &str,
         stop_play_supported: bool,
+        flex: bool,
     ) -> Result<Self> {
         let core = WinUsbLcdCore::open(
             device,
@@ -26,7 +28,7 @@ impl Slv3WinUsbLcd {
             READ_TIMEOUT,
             stop_play_supported,
         )?;
-        Ok(Self { core })
+        Ok(Self { core, flex })
     }
 
     pub(crate) fn from_shared(
@@ -34,6 +36,7 @@ impl Slv3WinUsbLcd {
         screen: ScreenInfo,
         name: String,
         stop_play_supported: bool,
+        flex: bool,
     ) -> Self {
         Self {
             core: WinUsbLcdCore::from_shared(
@@ -44,6 +47,7 @@ impl Slv3WinUsbLcd {
                 READ_TIMEOUT,
                 stop_play_supported,
             ),
+            flex,
         }
     }
 
@@ -52,6 +56,11 @@ impl Slv3WinUsbLcd {
         self.core.reset_failure_state();
         self.core.stop_playback()?;
         self.core.read_firmware();
+        if self.flex {
+            self.core.open_flex_layers()?;
+            self.core.initialized = true;
+            return Ok(());
+        }
         self.core.set_frame_rate(SLV3_FRAME_RATE)?;
         self.core.query_h264_block();
         let sync = self.core.builder_mut().sync_clock_header_winusb(2);
@@ -61,6 +70,16 @@ impl Slv3WinUsbLcd {
         self.core.clear_layers();
         self.core.initialized = true;
         Ok(())
+    }
+
+    fn prepare_stream(&mut self, fps: f32) -> Result<()> {
+        if !self.core.initialized {
+            self.do_init()?;
+        }
+        if self.flex {
+            self.core.query_h264_block();
+        }
+        self.core.apply_stream_fps(fps)
     }
 }
 
@@ -118,10 +137,7 @@ impl WinUsbLcd for Slv3WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        if !self.core.initialized {
-            self.do_init()?;
-        }
-        self.core.apply_stream_fps(fps)?;
+        self.prepare_stream(fps)?;
         self.core
             .stream_h264(path, looping, stop, fps, self.core.screen().play_count, 0)
     }
@@ -131,10 +147,7 @@ impl WinUsbLcd for Slv3WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        if !self.core.initialized {
-            self.do_init()?;
-        }
-        self.core.apply_stream_fps(fps)?;
+        self.prepare_stream(fps)?;
         self.core
             .stream_h264_reader(reader, stop, self.core.screen().play_count, 0)
     }
@@ -145,11 +158,13 @@ pub(crate) fn boxed(
     screen: ScreenInfo,
     name: &str,
     stop_play_supported: bool,
+    flex: bool,
 ) -> Result<BoxedWinUsbLcd> {
     Ok(Box::new(Slv3WinUsbLcd::new(
         device,
         screen,
         name,
         stop_play_supported,
+        flex,
     )?))
 }

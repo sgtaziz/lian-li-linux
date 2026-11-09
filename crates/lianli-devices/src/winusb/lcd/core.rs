@@ -576,6 +576,7 @@ const SLOW_CHUNK_WRITE: Duration = Duration::from_millis(100);
 /// daemon's bounded recreation instead of looping on reopen and resend.
 const CHUNK_RESEND_COOLDOWN: Duration = Duration::from_secs(60);
 const WAIT_BUFFER_POLL: Duration = Duration::from_millis(50);
+const FLEX_L3_LAYER_SIZE: u32 = 360;
 const WAIT_BUFFER_NO_STOP_CAP: u32 = 600;
 
 pub(crate) struct LcdResponse {
@@ -1033,6 +1034,26 @@ impl WinUsbLcdCore {
         } else {
             self.read_response("ClearJpgLayer");
         }
+    }
+
+    /// Flex firmware 2026072401 stops answering USB after its first frame
+    /// unless all three layers are reset first. The writes go out before any
+    /// reply is read, and only the first two layers are acknowledged.
+    pub(crate) fn open_flex_layers(&mut self) -> Result<()> {
+        for packet in flex_opening_packets(&mut self.builder, &self.screen)? {
+            self.tx_write_full(&packet)
+                .context("writing Flex layer reset")?;
+            self.note_write_success();
+        }
+        let mut reply = [0u8; 512];
+        for _ in 0..2 {
+            if let Err(error) = self.tx_read(&mut reply) {
+                debug!("Flex layer reset reply unavailable: {error}");
+                break;
+            }
+        }
+        self.tx_read_flush();
+        Ok(())
     }
 
     /// Returns whether the PNG layer reached the panel.
@@ -1676,6 +1697,87 @@ fn read_stream_chunk(
     }
     let last = !looping && reader.stream_position()? >= length;
     Ok(Some((count, last)))
+}
+
+fn transparent_png(width: u32, height: u32) -> Result<Vec<u8>> {
+    let layer = image::RgbaImage::new(width, height);
+    let mut png = Vec::new();
+    layer
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .context("encoding transparent PNG layer")?;
+    Ok(png)
+}
+
+fn black_jpeg(screen: &ScreenInfo) -> Result<Vec<u8>> {
+    let (width, height) = (screen.width as usize, screen.height as usize);
+    let pixels = vec![0u8; width * height * 3];
+    let jpeg = turbojpeg::compress(
+        turbojpeg::Image {
+            pixels: pixels.as_slice(),
+            width,
+            pitch: width * 3,
+            height,
+            format: turbojpeg::PixelFormat::RGB,
+        },
+        i32::from(screen.jpeg_quality),
+        turbojpeg::Subsamp::Sub2x2,
+    )
+    .context("encoding black JPEG layer")?;
+    Ok(jpeg.to_vec())
+}
+
+fn flex_opening_packets(builder: &mut PacketBuilder, screen: &ScreenInfo) -> Result<[Vec<u8>; 3]> {
+    let framed = |mut header: Vec<u8>, payload: &[u8]| {
+        header.extend_from_slice(payload);
+        header
+    };
+    let png = transparent_png(screen.width, screen.height)?;
+    let jpeg = black_jpeg(screen)?;
+    let l3 = transparent_png(FLEX_L3_LAYER_SIZE, FLEX_L3_LAYER_SIZE)?;
+    Ok([
+        framed(builder.png_header_winusb(png.len()), &png),
+        framed(builder.jpeg_header_winusb(jpeg.len()), &jpeg),
+        framed(builder.flex_l3_layer_header_winusb(l3.len(), 0, 0), &l3),
+    ])
+}
+
+#[cfg(test)]
+mod flex_opening_tests {
+    use super::*;
+    use des::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+
+    fn header(packet: &[u8]) -> Vec<u8> {
+        let mut encrypted = packet[..504].to_vec();
+        cbc::Decryptor::<des::Des>::new_from_slices(b"slv3tuzx", b"slv3tuzx")
+            .unwrap()
+            .decrypt_padded_mut::<Pkcs7>(&mut encrypted)
+            .unwrap()
+            .to_vec()
+    }
+
+    fn png_size(payload: &[u8]) -> (u32, u32) {
+        let field = |at: usize| u32::from_be_bytes(payload[at..at + 4].try_into().unwrap());
+        (field(16), field(20))
+    }
+
+    #[test]
+    fn opening_resets_each_layer_in_vendor_order_with_exact_payload_sizes() {
+        let packets =
+            flex_opening_packets(&mut PacketBuilder::new(), &ScreenInfo::FLEX_LCD).unwrap();
+        let opcodes = packets.each_ref().map(|packet| header(packet)[0]);
+        assert_eq!(opcodes, [0x66, 0x65, 0x67]);
+
+        for packet in &packets {
+            let declared = u32::from_be_bytes(header(packet)[8..12].try_into().unwrap());
+            assert_eq!(declared as usize, packet.len() - 512);
+            assert_eq!(&packet[510..512], &[0xa1, 0x1a]);
+        }
+
+        assert_eq!(png_size(&packets[0][512..]), (400, 400));
+        assert_eq!(&packets[1][512..514], &[0xff, 0xd8]);
+        assert_eq!(png_size(&packets[2][512..]), (360, 360));
+        assert_eq!(&header(&packets[2])[12..16], &[0, 0, 0, 0]);
+    }
 }
 
 #[cfg(test)]

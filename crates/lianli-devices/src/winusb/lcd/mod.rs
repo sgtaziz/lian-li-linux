@@ -61,6 +61,7 @@ impl WinUsbLcdDevice {
                 screen,
                 name.to_string(),
                 supports_stop_play(pid),
+                is_flex_panel(pid),
             )),
         };
         Ok(Self(boxed, pid))
@@ -200,11 +201,19 @@ fn make_device(device: Device<UsbContext>, pid: u16) -> Result<BoxedWinUsbLcd> {
         0xA068 => hs2_oled::boxed(device, screen, name),
         0xA021 | 0xA034 => h2_lcd::boxed(device, screen, name),
         0xA065 => base::boxed(device, screen, name),
-        0xA088 | 0xA092 | 0xA018 | 0xA019 => {
-            slv3::boxed(device, screen, name, supports_stop_play(pid))
-        }
+        0xA088 | 0xA092 | 0xA018 | 0xA019 => slv3::boxed(
+            device,
+            screen,
+            name,
+            supports_stop_play(pid),
+            is_flex_panel(pid),
+        ),
         _ => bail!("no WinUSB LCD variant for PID {:#06x}", pid),
     }
+}
+
+fn is_flex_panel(pid: u16) -> bool {
+    matches!(pid, 0xA018 | 0xA019)
 }
 
 fn supports_stop_play(pid: u16) -> bool {

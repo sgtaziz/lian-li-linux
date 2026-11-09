@@ -240,6 +240,14 @@ impl PacketBuilder {
         self.build_winusb(CMD_CLEAR_PNG, &[])
     }
 
+    pub fn flex_l3_layer_header_winusb(&mut self, png_size: usize, x: u16, y: u16) -> Vec<u8> {
+        let mut params = [0u8; 8];
+        params[..4].copy_from_slice(&(png_size as u32).to_be_bytes());
+        params[4..6].copy_from_slice(&x.to_be_bytes());
+        params[6..].copy_from_slice(&y.to_be_bytes());
+        self.build_winusb(CMD_CLEAR_PNG, &params)
+    }
+
     pub fn hide_show_frames_none_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_HIDE_SHOW_FRAMES, &[0u8; 32])
     }
