@@ -1,21 +1,18 @@
-use super::geometry::{frame, Color};
+use super::geometry::{frame, scale, Color, DotNetRandom};
 use lianli_shared::rgb::RgbEffect;
 use std::f64::consts::TAU;
 
 const RING: usize = 60;
-const RED: Color = [255, 0, 40];
-const BLUE: Color = [0, 60, 255];
 
-struct Rng(u64);
+struct Rng(DotNetRandom);
 
 impl Rng {
+    fn new(seed: i32) -> Self {
+        Self(DotNetRandom::new(seed))
+    }
+
     fn next(&mut self) -> f64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^= z >> 31;
-        (z >> 11) as f64 / (1u64 << 53) as f64
+        f64::from(self.0.next(i32::MAX)) / f64::from(i32::MAX)
     }
 
     fn range(&mut self, low: f64, high: f64) -> f64 {
@@ -33,7 +30,7 @@ impl Rng {
 
 fn pair(effect: &RgbEffect) -> (Color, Color) {
     match effect.colors.as_slice() {
-        [] => (RED, BLUE),
+        [] => ([0; 3], [0; 3]),
         [one] => (*one, shade(*one, 0.35)),
         [first, second, ..] => (*first, *second),
     }
@@ -56,7 +53,7 @@ fn output(led_count: usize, ring: &[Color], brightness: u8, reverse: bool) -> Ve
         } else {
             index
         };
-        out[target] = shade(*color, f64::from(brightness) / 255.0);
+        out[target] = scale(*color, brightness);
     }
     out
 }
@@ -66,15 +63,44 @@ fn ring_distance(a: f64, b: f64) -> f64 {
     d.min(RING as f64 - d)
 }
 
-pub(super) fn nebula(
-    effect: &RgbEffect,
+fn pulse_glow(at: f64, a: f64, b: f64) -> f64 {
+    (-ring_distance(at, a).powi(2) / 5.0)
+        .exp()
+        .max((-ring_distance(at, b).powi(2) / 5.0).exp())
+}
+
+fn pulsar_frames(
+    length: usize,
+    (lead, echo): (Color, Color),
     led_count: usize,
     brightness: u8,
-    reverse: bool,
+    fronts: impl Fn(f64) -> (f64, f64),
 ) -> Vec<Vec<Color>> {
+    const LAG: f64 = 3.0;
+    (0..length)
+        .map(|f| {
+            let (a, b) = fronts(f as f64);
+            let (trail_a, trail_b) = fronts(f as f64 - LAG);
+            let ring: Vec<Color> = (0..RING)
+                .map(|i| {
+                    let main = pulse_glow(i as f64, a, b);
+                    let trail = 0.55 * pulse_glow(i as f64, trail_a, trail_b);
+                    if main >= trail {
+                        shade(lead, main)
+                    } else {
+                        shade(echo, trail)
+                    }
+                })
+                .collect();
+            output(led_count, &ring, brightness, false)
+        })
+        .collect()
+}
+
+pub(super) fn nebula(effect: &RgbEffect, led_count: usize, brightness: u8) -> Vec<Vec<Color>> {
     const LENGTH: usize = 480;
     let (first, second) = pair(effect);
-    let mut rng = Rng(0x6E65_6275_6C61);
+    let mut rng = Rng::new(0x6E65_6275);
     let waves: Vec<(f64, f64, f64)> = (0..3)
         .map(|_| {
             (
@@ -113,7 +139,7 @@ pub(super) fn nebula(
                     shade(mix(first, second, blend), 0.03 + 0.97 * glow)
                 })
                 .collect();
-            output(led_count, &ring, brightness, reverse)
+            output(led_count, &ring, brightness, false)
         })
         .collect()
 }
@@ -121,7 +147,7 @@ pub(super) fn nebula(
 pub(super) fn cinder(effect: &RgbEffect, led_count: usize, brightness: u8) -> Vec<Vec<Color>> {
     const LENGTH: usize = 600;
     let (hot, cool) = pair(effect);
-    let mut rng = Rng(0x6369_6E64_6572);
+    let mut rng = Rng::new(0x6369_6E64);
     let mut flares: Vec<Vec<(usize, f64)>> = vec![Vec::new(); LENGTH];
     for _ in 0..LENGTH * 9 / 10 {
         let at = rng.below(LENGTH);
@@ -157,13 +183,24 @@ struct Lap {
     length: f64,
 }
 
+/// The two final splits that return the pulse to LED 0. Origins near the far
+/// side of the ring cannot close with both splits in 0.3..=0.7, so those stretch to 0.2..=0.8.
+fn closing_splits(rng: &mut Rng, origin: f64) -> (f64, f64) {
+    let remaining = 1.0 - origin / RING as f64;
+    let total = if remaining < 0.5 {
+        remaining + 1.0
+    } else {
+        remaining
+    };
+    let first = rng.range((total - 0.7).max(0.3), (total - 0.3).min(0.7));
+    (first, total - first)
+}
+
 pub(super) fn pulsar(effect: &RgbEffect, led_count: usize, brightness: u8) -> Vec<Vec<Color>> {
     const LAPS: usize = 12;
     const STEP: f64 = 2.2;
-    const LAG: f64 = 3.0;
-    let (lead, echo) = pair(effect);
     let ring = RING as f64;
-    let mut rng = Rng(0x7075_6C73_6172);
+    let mut rng = Rng::new(0x7075_6C73);
     let mut laps = Vec::with_capacity(LAPS);
     let mut origin = 0.0;
     let mut push = |rng: &mut Rng, origin: &mut f64, split: f64| {
@@ -179,13 +216,7 @@ pub(super) fn pulsar(effect: &RgbEffect, led_count: usize, brightness: u8) -> Ve
         let split = rng.range(0.3, 0.7);
         push(&mut rng, &mut origin, split);
     }
-    let (closing, last) = loop {
-        let first = rng.range(0.3, 0.7);
-        let rest = (-(origin + first * ring)).rem_euclid(ring) / ring;
-        if (0.3..=0.7).contains(&rest) {
-            break (first, rest);
-        }
-    };
+    let (closing, last) = closing_splits(&mut rng, origin);
     push(&mut rng, &mut origin, closing);
     push(&mut rng, &mut origin, last);
 
@@ -208,29 +239,7 @@ pub(super) fn pulsar(effect: &RgbEffect, led_count: usize, brightness: u8) -> Ve
             (lap.origin - progress * (1.0 - lap.split) * ring).rem_euclid(ring),
         )
     };
-    let glow = |at: f64, a: f64, b: f64| {
-        (-ring_distance(at, a).powi(2) / 5.0)
-            .exp()
-            .max((-ring_distance(at, b).powi(2) / 5.0).exp())
-    };
-    (0..total as usize)
-        .map(|f| {
-            let (a, b) = fronts(f as f64);
-            let (trail_a, trail_b) = fronts(f as f64 - LAG);
-            let ring: Vec<Color> = (0..RING)
-                .map(|i| {
-                    let main = glow(i as f64, a, b);
-                    let trail = 0.55 * glow(i as f64, trail_a, trail_b);
-                    if main >= trail {
-                        shade(lead, main)
-                    } else {
-                        shade(echo, trail)
-                    }
-                })
-                .collect();
-            output(led_count, &ring, brightness, false)
-        })
-        .collect()
+    pulsar_frames(total as usize, pair(effect), led_count, brightness, fronts)
 }
 
 pub(super) fn steady_nebula(
@@ -247,7 +256,7 @@ pub(super) fn steady_nebula(
             let ring: Vec<Color> = (0..RING)
                 .map(|i| {
                     let x = i as f64 / RING as f64 * TAU;
-                    let blend = 0.5 + 0.5 * (2.0 * x + time).sin();
+                    let blend = 0.5 + 0.5 * (2.0 * x - time).sin();
                     let blend = blend.powi(3) / (blend.powi(3) + (1.0 - blend).powi(3));
                     let glow = (0.5 + 0.5 * (3.0 * x - 2.0 * time).sin()).powf(2.2);
                     shade(mix(first, second, blend), 0.03 + 0.97 * glow)
@@ -286,42 +295,20 @@ pub(super) fn steady_pulsar(
     brightness: u8,
 ) -> Vec<Vec<Color>> {
     const LENGTH: usize = 55;
-    const LAG: f64 = 3.0;
-    let (lead, echo) = pair(effect);
     let ring = RING as f64;
     let fronts = |time: f64| {
         let travel = time.rem_euclid(LENGTH as f64) / LENGTH as f64 * ring;
         (travel.rem_euclid(ring), (-travel).rem_euclid(ring))
     };
-    let glow = |at: f64, a: f64, b: f64| {
-        (-ring_distance(at, a).powi(2) / 5.0)
-            .exp()
-            .max((-ring_distance(at, b).powi(2) / 5.0).exp())
-    };
-    (0..LENGTH)
-        .map(|f| {
-            let (a, b) = fronts(f as f64);
-            let (trail_a, trail_b) = fronts(f as f64 - LAG);
-            let ring: Vec<Color> = (0..RING)
-                .map(|i| {
-                    let main = glow(i as f64, a, b);
-                    let trail = 0.55 * glow(i as f64, trail_a, trail_b);
-                    if main >= trail {
-                        shade(lead, main)
-                    } else {
-                        shade(echo, trail)
-                    }
-                })
-                .collect();
-            output(led_count, &ring, brightness, false)
-        })
-        .collect()
+    pulsar_frames(LENGTH, pair(effect), led_count, brightness, fronts)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use lianli_shared::rgb::RgbMode;
+
+    const PALETTE: [Color; 2] = [[255, 0, 40], [0, 60, 255]];
 
     fn effect(mode: RgbMode, colors: Vec<Color>) -> RgbEffect {
         RgbEffect {
@@ -342,12 +329,7 @@ mod tests {
 
     fn all(colors: Vec<Color>) -> Vec<Vec<Vec<Color>>> {
         vec![
-            nebula(
-                &effect(RgbMode::NebulaRandom, colors.clone()),
-                60,
-                255,
-                false,
-            ),
+            nebula(&effect(RgbMode::NebulaRandom, colors.clone()), 60, 255),
             cinder(&effect(RgbMode::CinderRandom, colors.clone()), 60, 255),
             pulsar(&effect(RgbMode::PulsarRandom, colors.clone()), 60, 255),
             steady_nebula(&effect(RgbMode::Nebula, colors.clone()), 60, 255, false),
@@ -358,7 +340,7 @@ mod tests {
 
     #[test]
     fn loops_join_up_without_a_visible_jump() {
-        for frames in all(vec![]) {
+        for frames in all(PALETTE.to_vec()) {
             let typical = frames
                 .windows(2)
                 .map(|w| jump(&w[0], &w[1]))
@@ -391,20 +373,62 @@ mod tests {
 
     #[test]
     fn brightness_scales_and_zero_is_dark() {
-        let bright = pulsar(&effect(RgbMode::Pulsar, vec![]), 60, 255);
-        let dim = pulsar(&effect(RgbMode::Pulsar, vec![]), 60, 64);
+        let bright = pulsar(&effect(RgbMode::Pulsar, PALETTE.to_vec()), 60, 255);
+        let dim = pulsar(&effect(RgbMode::Pulsar, PALETTE.to_vec()), 60, 64);
         let peak =
             |frames: &Vec<Vec<Color>>| frames.iter().flatten().flatten().copied().max().unwrap();
         assert!(peak(&dim) < peak(&bright));
-        assert!(pulsar(&effect(RgbMode::Pulsar, vec![]), 60, 0)
+        assert!(pulsar(&effect(RgbMode::Pulsar, PALETTE.to_vec()), 60, 0)
             .iter()
             .flatten()
             .all(|c| *c == [0; 3]));
     }
 
     #[test]
+    fn empty_palette_renders_black() {
+        for frames in all(vec![]) {
+            assert!(frames.iter().flatten().all(|c| *c == [0; 3]));
+        }
+    }
+
+    #[test]
+    fn closing_laps_return_the_pulse_to_the_start_from_any_origin() {
+        let mut rng = Rng::new(1);
+        for step in 0..240 {
+            let origin = step as f64 / 4.0;
+            let (first, last) = closing_splits(&mut rng, origin);
+            assert!(
+                (0.2..=0.8).contains(&first) && (0.2..=0.8).contains(&last),
+                "origin {origin}: splits {first} and {last}"
+            );
+            assert!(ring_distance(origin + (first + last) * RING as f64, 0.0) < 1e-6);
+        }
+    }
+
+    #[test]
+    fn nebula_colour_bands_follow_the_selected_direction() {
+        const FRAMES_PER_LED: usize = 8;
+        let render = |reverse| {
+            let palette = vec![[255, 0, 0], [0, 0, 255]];
+            steady_nebula(&effect(RgbMode::Nebula, palette), 60, 255, reverse)
+        };
+        let blend = |c: Color| f64::from(c[2]) / (f64::from(c[0]) + f64::from(c[2])).max(1.0);
+        let mismatch = |frames: &[Vec<Color>], shift: usize| {
+            (0..RING)
+                .map(|i| {
+                    (blend(frames[FRAMES_PER_LED][(i + shift) % RING]) - blend(frames[0][i])).abs()
+                })
+                .sum::<f64>()
+        };
+        let forward = render(false);
+        assert!(mismatch(&forward, 1) < mismatch(&forward, RING - 1));
+        let backward = render(true);
+        assert!(mismatch(&backward, RING - 1) < mismatch(&backward, 1));
+    }
+
+    #[test]
     fn pulsar_starts_somewhere_new_each_lap() {
-        let frames = pulsar(&effect(RgbMode::PulsarRandom, vec![]), 60, 255);
+        let frames = pulsar(&effect(RgbMode::PulsarRandom, PALETTE.to_vec()), 60, 255);
         let brightest: Vec<usize> = frames
             .iter()
             .map(|f| {
@@ -420,41 +444,42 @@ mod tests {
     }
 
     #[test]
-    fn every_speed_brightness_and_direction_renders() {
+    fn higher_speeds_play_faster_at_every_brightness_and_direction() {
         use lianli_shared::rgb::RgbDirection;
-        for mode in [
-            RgbMode::Nebula,
-            RgbMode::Cinder,
-            RgbMode::Pulsar,
-            RgbMode::NebulaRandom,
-            RgbMode::CinderRandom,
-            RgbMode::PulsarRandom,
-        ] {
-            for speed in 0..=4 {
-                for brightness in 0..=4 {
-                    for direction in [RgbDirection::Clockwise, RgbDirection::CounterClockwise] {
-                        let effect = RgbEffect {
-                            mode,
-                            speed,
-                            brightness,
-                            direction,
-                            ..RgbEffect::default()
-                        };
-                        let animation = super::super::render(&effect, 60).unwrap();
-                        assert!((100..=6_553_599).contains(&animation.interval_hundredths));
-                        assert_eq!(
-                            animation.interval_hundredths,
-                            1_600 * [7, 6, 5, 4, 3][speed as usize]
-                        );
-                    }
-                }
-            }
+        for mode in super::super::RING_EFFECTS {
+            let intervals: Vec<u32> = (0..=4)
+                .map(|speed| {
+                    let rendered: Vec<u32> = (0..=4)
+                        .flat_map(|brightness| {
+                            [RgbDirection::Clockwise, RgbDirection::CounterClockwise].map(
+                                |direction| {
+                                    let effect = RgbEffect {
+                                        mode,
+                                        speed,
+                                        brightness,
+                                        direction,
+                                        ..RgbEffect::default()
+                                    };
+                                    super::super::render(&effect, 60)
+                                        .unwrap()
+                                        .interval_hundredths
+                                },
+                            )
+                        })
+                        .collect();
+                    assert!(rendered
+                        .iter()
+                        .all(|i| *i == rendered[0] && (100..=6_553_599).contains(i)));
+                    rendered[0]
+                })
+                .collect();
+            assert!(intervals.windows(2).all(|pair| pair[1] < pair[0]));
         }
     }
 
     #[test]
     fn steady_pulsar_always_starts_from_the_same_spot() {
-        let frames = steady_pulsar(&effect(RgbMode::Pulsar, vec![]), 60, 255);
+        let frames = steady_pulsar(&effect(RgbMode::Pulsar, PALETTE.to_vec()), 60, 255);
         let peak = (0..60)
             .max_by_key(|&i| frames[0][i].iter().map(|&c| u32::from(c)).sum::<u32>())
             .unwrap();

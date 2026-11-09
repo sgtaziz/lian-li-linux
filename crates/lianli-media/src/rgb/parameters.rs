@@ -177,9 +177,12 @@ pub fn for_scope(
     }
     super::family::modes(profile.family)
         .iter()
-        .filter(|&&mode| {
-            profile.family != RgbRenderFamily::Sl
-                || super::sl_wireless::capabilities::supports(mode, scope)
+        .filter(|&&mode| match profile.family {
+            RgbRenderFamily::Sl => super::sl_wireless::capabilities::supports(mode, scope),
+            RgbRenderFamily::UniversalScreen => {
+                super::universal::available_on(mode, profile.led_count)
+            }
+            _ => true,
         })
         .map(|&mode| {
             let screen = matches!(
@@ -224,13 +227,8 @@ pub fn for_scope(
             } else if screen {
                 max_colors = match mode {
                     RgbMode::Runway | RgbMode::Mixing | RgbMode::River => 2,
-                    RgbMode::Nebula
-                    | RgbMode::Cinder
-                    | RgbMode::Pulsar
-                    | RgbMode::NebulaRandom
-                    | RgbMode::CinderRandom
-                    | RgbMode::PulsarRandom => 2,
                     RgbMode::Hourglass | RgbMode::ElectricCurrent => 4,
+                    _ if super::universal::RING_EFFECTS.contains(&mode) => 2,
                     _ => max_colors,
                 };
             }
@@ -244,7 +242,6 @@ pub fn for_scope(
                         | RgbMode::River
                         | RgbMode::RainbowWave
                         | RgbMode::Nebula
-                        | RgbMode::NebulaRandom
                 ) || profile.family == RgbRenderFamily::HydroShiftIIOled && mode == RgbMode::Tide
             } else if profile.family == RgbRenderFamily::Sl {
                 matches!(
@@ -263,7 +260,7 @@ pub fn for_scope(
             RgbEffectParameters {
                 mode,
                 min_colors: if screen
-                    && matches!(
+                    && (matches!(
                         mode,
                         RgbMode::Wave
                             | RgbMode::Paint
@@ -274,13 +271,8 @@ pub fn for_scope(
                             | RgbMode::PingPong
                             | RgbMode::Hourglass
                             | RgbMode::ElectricCurrent
-                            | RgbMode::Nebula
-                            | RgbMode::Cinder
-                            | RgbMode::Pulsar
-                            | RgbMode::NebulaRandom
-                            | RgbMode::CinderRandom
-                            | RgbMode::PulsarRandom
-                    ) {
+                    ) || super::universal::RING_EFFECTS.contains(&mode))
+                {
                     1
                 } else {
                     max_colors

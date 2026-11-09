@@ -38,6 +38,25 @@ pub const MODES: &[RgbMode] = &[
     RgbMode::PulsarRandom,
 ];
 
+pub(super) const RING_EFFECTS: [RgbMode; 6] = [
+    RgbMode::Nebula,
+    RgbMode::NebulaRandom,
+    RgbMode::Cinder,
+    RgbMode::CinderRandom,
+    RgbMode::Pulsar,
+    RgbMode::PulsarRandom,
+];
+
+/// Only the 60-LED wired ring streams its frames. These effects compress past
+/// the wireless RF upload limit, so other ring sizes do not offer them.
+pub(super) fn available_on(mode: RgbMode, led_count: u16) -> bool {
+    led_count == 60
+        || !matches!(
+            mode,
+            RgbMode::Nebula | RgbMode::NebulaRandom | RgbMode::CinderRandom | RgbMode::PulsarRandom
+        )
+}
+
 pub fn render(effect: &RgbEffect, led_count: usize) -> Result<Animation> {
     ensure!(
         (60..=u8::MAX as usize).contains(&led_count),
@@ -125,10 +144,7 @@ pub fn render(effect: &RgbEffect, led_count: usize) -> Result<Animation> {
             ),
             RgbMode::Cinder => (custom::steady_cinder(effect, led_count, brightness), 1_600),
             RgbMode::Pulsar => (custom::steady_pulsar(effect, led_count, brightness), 1_600),
-            RgbMode::NebulaRandom => (
-                custom::nebula(effect, led_count, brightness, reverse),
-                1_600,
-            ),
+            RgbMode::NebulaRandom => (custom::nebula(effect, led_count, brightness), 1_600),
             RgbMode::CinderRandom => (custom::cinder(effect, led_count, brightness), 1_600),
             RgbMode::PulsarRandom => (custom::pulsar(effect, led_count, brightness), 1_600),
             _ => bail!("unsupported Universal Screen RGB mode: {:?}", effect.mode),

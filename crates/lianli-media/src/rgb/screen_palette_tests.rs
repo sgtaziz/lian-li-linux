@@ -18,15 +18,7 @@ fn variable_screen_cycles_scale_with_the_selected_palette_length() {
         };
         for controls in parameters::for_scope(profile, RgbScope::All) {
             if controls.min_colors == controls.max_colors
-                || matches!(
-                    controls.mode,
-                    RgbMode::Nebula
-                        | RgbMode::Cinder
-                        | RgbMode::Pulsar
-                        | RgbMode::NebulaRandom
-                        | RgbMode::CinderRandom
-                        | RgbMode::PulsarRandom
-                )
+                || super::universal::RING_EFFECTS.contains(&controls.mode)
             {
                 continue;
             }
