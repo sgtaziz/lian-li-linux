@@ -171,14 +171,7 @@ impl Hs2OledLedController {
     /// GetLedVer (0x10) — firmware version.
     pub fn read_firmware(&self) -> Result<String> {
         let rx = self.send_and_read(&[CMD_GET_VER, 0, 0, 0, 0, 0, 0, 0])?;
-        let fw = if rx[1] < 5 {
-            format!("{}.{}", rx[1], rx[2])
-        } else {
-            // UTF-8 string starting at rx[2]
-            String::from_utf8_lossy(&rx[2..])
-                .trim_end_matches('\0')
-                .to_string()
-        };
+        let fw = firmware_text(&rx);
         *self.firmware.lock() = Some(fw.clone());
         Ok(fw)
     }
@@ -522,14 +515,35 @@ impl crate::registry::DeviceDriver for Hs2OledLedDriver {
     }
 }
 
+fn firmware_text(reply: &[u8; REPLY_SIZE]) -> String {
+    if reply[1] < 5 {
+        format!("{}.{}", reply[1], reply[2])
+    } else {
+        super::nul_terminated_text(&reply[2..34])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_rgb_packets, pump_source_packet, rpm_to_output, HaltRecovery, CMD_PUSH_RGB,
-        HALT_RECOVERY_INTERVAL,
+        build_rgb_packets, firmware_text, pump_source_packet, rpm_to_output, HaltRecovery,
+        CMD_PUSH_RGB, HALT_RECOVERY_INTERVAL, REPLY_SIZE,
     };
     use lianli_transport::TransportError;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn firmware_text_ignores_bytes_after_the_terminator() {
+        let mut reply = [0xc3u8; REPLY_SIZE];
+        reply[1..7].copy_from_slice(b"V1.2.3");
+        reply[7] = 0;
+        assert_eq!(firmware_text(&reply), "1.2.3");
+
+        let mut numeric = [0xc3u8; REPLY_SIZE];
+        numeric[1] = 2;
+        numeric[2] = 7;
+        assert_eq!(firmware_text(&numeric), "2.7");
+    }
 
     #[test]
     fn halt_recovery_ignores_nonstall_errors() {

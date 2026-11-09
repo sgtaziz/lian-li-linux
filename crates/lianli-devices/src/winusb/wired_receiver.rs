@@ -234,13 +234,18 @@ impl WiredReceiverController {
         tx[0] = CMD_GET_VER;
         let rx = self.send_and_read(&tx)?;
         anyhow::ensure!(rx[0] == CMD_GET_VER, "unexpected receiver firmware opcode");
-        let fw_bytes = &rx[3..19];
-        let end = fw_bytes
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(fw_bytes.len());
-        let fw = String::from_utf8_lossy(&fw_bytes[..end]).trim().to_string();
-        Ok(fw)
+        Ok(firmware_text(&rx))
+    }
+}
+
+/// Only date-stamped firmware reports text. Older replies carry a binary
+/// version in bytes 1 and 2, followed by unrelated data.
+fn firmware_text(reply: &[u8]) -> String {
+    let text = super::nul_terminated_text(&reply[3..19]);
+    if text.starts_with("202") {
+        text
+    } else {
+        u16::from_be_bytes([reply[1], reply[2]]).to_string()
     }
 }
 

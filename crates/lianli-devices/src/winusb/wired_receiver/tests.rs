@@ -3,6 +3,21 @@ use super::{checked_frame_count, rgb_flash_header, ReceiverParams};
 use lianli_shared::rgb::{RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile};
 
 #[test]
+fn firmware_reads_date_text_and_falls_back_to_the_binary_version() {
+    let mut reply = [0u8; 64];
+    reply[0] = 0x10;
+    reply[3..11].copy_from_slice(b"20260724");
+    reply[12] = 0xff;
+    assert_eq!(super::firmware_text(&reply), "20260724");
+
+    let mut binary = [0xc3u8; 64];
+    binary[0] = 0x10;
+    binary[1] = 0x01;
+    binary[2] = 0x02;
+    assert_eq!(super::firmware_text(&binary), "258");
+}
+
+#[test]
 fn receiver_responses_cannot_read_zero_filled_missing_fields() {
     for (command, minimum) in [(0x12, 42), (0x10, 19), (0x13, 2), (0x14, 1)] {
         assert!(super::validate_response_length(&vec![0; minimum - 1], command).is_err());

@@ -9,3 +9,8 @@ pub mod hs2_oled_led;
 pub mod lcd;
 pub mod led;
 pub mod wired_receiver;
+
+fn nul_terminated_text(bytes: &[u8]) -> String {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).trim().to_string()
+}
