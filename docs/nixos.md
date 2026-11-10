@@ -32,7 +32,7 @@ Add the flake to your system flake and import the module:
 | Option | Default | Description |
 | --- | --- | --- |
 | `enable` | `false` | Install the package, udev rules, units, Polkit rule and `lianli` account |
-| `userService.enable` | `false` | Start the user daemon at login, for every user |
+| `userService.enable` | `false` | Start the user daemon at login for every user, subject to the saved selection |
 | `systemService.enable` | `false` | Run the system daemon at boot as `lianli` instead of the user daemon |
 | `evdi.enable` | `false` | Load the EVDI kernel module for [desktop-mode LCDs](desktop-backends.md) |
 | `package` | flake package | Override the package |
@@ -64,19 +64,22 @@ daemon that is not the selected one exits at once. `select-mode` refuses to run 
 daemon owns the hardware, so stop the running daemon first. A fresh install has no
 selection and needs none of this.
 
-Settings do not follow the mode. The user daemon keeps its state in `~/.config/lianli`
-and the system daemon in `/var/lib/lianli`, and neither `select-mode` nor a rebuild
-copies it. Copy it yourself while both daemons are stopped, or the new mode starts from
-defaults or from whatever it last saved. Media that a template or LCD setting points at
-must also be readable by the new account. See [Configuration and template
-backups](state-backups.md) for what the directory holds.
+Settings do not follow the mode. The user daemon keeps its state in
+`${XDG_CONFIG_HOME:-$HOME/.config}/lianli` and the system daemon in `/var/lib/lianli`,
+and neither `select-mode` nor a rebuild copies it. Copy it yourself while both daemons
+are stopped, or the new mode starts from defaults or from whatever it last saved. The
+copy overwrites matching files in the destination, so the steps below back it up first.
+Media that a template or LCD setting points at must also be readable by the new account.
+See [Configuration and template backups](state-backups.md) for what the directory holds.
 
 From user to system mode:
 
 ```sh
 systemctl --user stop lianli-daemon
+src="${XDG_CONFIG_HOME:-$HOME/.config}/lianli"
 sudo install -d -o lianli -g lianli /var/lib/lianli
-sudo cp -a ~/.config/lianli/. /var/lib/lianli/
+sudo cp -a /var/lib/lianli "/var/lib/lianli.bak-$(date +%s)"
+sudo cp -a "$src/." /var/lib/lianli/
 sudo chown -R lianli:lianli /var/lib/lianli
 sudo lianli-control select-mode --scope system
 ```
@@ -92,9 +95,11 @@ From system to user mode:
 
 ```sh
 sudo systemctl stop lianli-daemon-system
-mkdir -p ~/.config/lianli
-sudo cp -a /var/lib/lianli/. ~/.config/lianli/
-sudo chown -R "$(id -un):$(id -gn)" ~/.config/lianli
+dst="${XDG_CONFIG_HOME:-$HOME/.config}/lianli"
+mkdir -p "$dst"
+cp -a "$dst" "$dst.bak-$(date +%s)"
+sudo cp -a /var/lib/lianli/. "$dst/"
+sudo chown -R "$(id -un):$(id -gn)" "$dst"
 sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
 ```
 
@@ -105,7 +110,17 @@ the user daemon or log in again:
 systemctl --user start lianli-daemon
 ```
 
-Leave out the copy lines to keep each mode's own settings.
+The user selection names one UID. Daemons for other users exit while it stands, even
+after that user logs out. To hand the hardware to another user, stop the running daemon,
+run `sudo lianli-control select-mode --scope user --user-uid UID` with their non-root
+UID, then start the daemon in their session.
+
+Rebuild straight after `select-mode`. If the machine reboots in between, the old unit
+is still the enabled one and the new selection makes it exit, so no daemon runs. Either
+finish the rebuild and start the new daemon as above, or put the old selection back
+with `select-mode` and start the old daemon.
+
+Leave out the copy and backup lines to keep each mode's own settings.
 
 Both `git+https://github.com/sgtaziz/lian-li-linux` and `github:sgtaziz/lian-li-linux` work. To build
 a fork with commits that aren't upstream, use
