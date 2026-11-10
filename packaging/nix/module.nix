@@ -7,8 +7,13 @@
 
 let
   cfg = config.services.lian-li-linux;
+  # The login PATH, which systemd expands per user.
   userPath = [
     "/run/wrappers"
+    "%h/.nix-profile"
+    "%h/.local/state/nix/profile"
+    "/etc/profiles/per-user/%u"
+    "/nix/var/nix/profiles/default"
     "/run/current-system/sw"
   ];
 in

@@ -44,32 +44,68 @@ user and system daemon.
 ## Service mode
 
 NixOS generates `/etc/systemd` read-only and systemd reports its units as `linked`, so
-the GUI cannot enable, disable or switch the daemon. Pick the mode in the configuration
-and rebuild: `userService.enable = true` starts the user daemon at login, and
-`systemService.enable = true` starts the system daemon at boot. Set one, not both. With
-neither set, start the user daemon from the GUI each session.
+the GUI cannot enable, disable, switch, start or restart the daemon. Pick the mode in the
+configuration and rebuild: `userService.enable = true` starts the user daemon at login,
+and `systemService.enable = true` starts the system daemon at boot. Set one, not both.
+
+With neither set, start the user daemon yourself each session:
+
+```sh
+systemctl --user start lianli-daemon
+```
 
 Do not run `systemctl --user enable lianli-daemon`. It links the unit to one store path,
 which goes stale on the next update.
 
-An existing install keeps its saved mode in `/etc/lianli/service-selection.json`, so
-update it when moving between modes. A fresh install has no selection and needs neither
-step.
+### Moving between modes
 
-From user to system mode, stop the user daemon, record the selection, then rebuild with
-`systemService.enable = true` and `userService.enable = false`:
+An existing install keeps its saved mode in `/etc/lianli/service-selection.json`, and a
+daemon that is not the selected one exits at once. `select-mode` refuses to run while a
+daemon owns the hardware, so stop the running daemon first. A fresh install has no
+selection and needs none of this.
+
+Settings do not follow the mode. The user daemon keeps its state in `~/.config/lianli`
+and the system daemon in `/var/lib/lianli`, and neither `select-mode` nor a rebuild
+copies it. Copy it yourself while both daemons are stopped, or the new mode starts from
+defaults or from whatever it last saved. Media that a template or LCD setting points at
+must also be readable by the new account. See [Configuration and template
+backups](state-backups.md) for what the directory holds.
+
+From user to system mode:
 
 ```sh
 systemctl --user stop lianli-daemon
+sudo install -d -o lianli -g lianli /var/lib/lianli
+sudo cp -a ~/.config/lianli/. /var/lib/lianli/
+sudo chown -R lianli:lianli /var/lib/lianli
 sudo lianli-control select-mode --scope system
 ```
 
-From system to user mode, rebuild with `systemService.enable = false` and
-`userService.enable = true`, then record the selection:
+Rebuild with `systemService.enable = true` and `userService.enable = false`. The
+rebuild does not always start the system daemon, so start it or reboot:
 
 ```sh
+sudo systemctl start lianli-daemon-system
+```
+
+From system to user mode:
+
+```sh
+sudo systemctl stop lianli-daemon-system
+mkdir -p ~/.config/lianli
+sudo cp -a /var/lib/lianli/. ~/.config/lianli/
+sudo chown -R "$(id -un):$(id -gn)" ~/.config/lianli
 sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
 ```
+
+Rebuild with `systemService.enable = false` and `userService.enable = true`, then start
+the user daemon or log in again:
+
+```sh
+systemctl --user start lianli-daemon
+```
+
+Leave out the copy lines to keep each mode's own settings.
 
 Both `git+https://github.com/sgtaziz/lian-li-linux` and `github:sgtaziz/lian-li-linux` work. To build
 a fork with commits that aren't upstream, use
@@ -96,7 +132,8 @@ install.
 - With `userService.enable`, Installation Health reports "Hardware service enabled for
   every user". That is the declared mode, and the daemon lock still allows one owner.
 - `ffmpeg` and `ffprobe` are added to the daemon's `PATH`.
-- A declared daemon also gets `/run/current-system/sw/bin` on its `PATH`, for `fc-match`,
-  `sh`, `nvidia-smi` and `lspci`.
+- The system daemon also gets `/run/current-system/sw/bin` on its `PATH`, for `fc-match`,
+  `sh`, `nvidia-smi` and `lspci`. A declared user unit gets the login `PATH`, including
+  the per-user profiles, so command sensors find the same programs as a shell.
 - `libevdi` and the GL/GBM libraries are added to the runpath, along with the driver
   directory in `/run/opengl-driver`.
