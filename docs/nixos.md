@@ -32,6 +32,7 @@ Add the flake to your system flake and import the module:
 | Option | Default | Description |
 | --- | --- | --- |
 | `enable` | `false` | Install the package, udev rules, units, Polkit rule and `lianli` account |
+| `userService.enable` | `false` | Start the user daemon at login, for every user |
 | `systemService.enable` | `false` | Run the system daemon at boot as `lianli` instead of the user daemon |
 | `evdi.enable` | `false` | Load the EVDI kernel module for [desktop-mode LCDs](desktop-backends.md) |
 | `package` | flake package | Override the package |
@@ -42,28 +43,29 @@ user and system daemon.
 
 ## Service mode
 
-Without `systemService.enable`, choose **User (at login)** in the GUI on first launch.
-That enables the user daemon in `~/.config/systemd/user`, which works as on other
-distributions.
+NixOS generates `/etc/systemd` read-only and systemd reports its units as `linked`, so
+the GUI cannot enable, disable or switch the daemon. Pick the mode in the configuration
+and rebuild: `userService.enable = true` starts the user daemon at login, and
+`systemService.enable = true` starts the system daemon at boot. Set one, not both. With
+neither set, start the user daemon from the GUI each session.
 
-NixOS generates `/etc/systemd` read-only, so the GUI cannot enable or disable the
-system daemon. Set `systemService.enable = true` for system mode and rebuild. The GUI's
-mode switch is not available while the system daemon is declared.
+Do not run `systemctl --user enable lianli-daemon`. It links the unit to one store path,
+which goes stale on the next update.
 
 An existing install keeps its saved mode in `/etc/lianli/service-selection.json`, so
 update it when moving between modes. A fresh install has no selection and needs neither
 step.
 
 From user to system mode, stop the user daemon, record the selection, then rebuild with
-`systemService.enable = true`:
+`systemService.enable = true` and `userService.enable = false`:
 
 ```sh
-systemctl --user disable --now lianli-daemon
+systemctl --user stop lianli-daemon
 sudo lianli-control select-mode --scope system
 ```
 
-From system to user mode, rebuild with `systemService.enable = false`, then record the
-selection and choose **User (at login)** in the GUI:
+From system to user mode, rebuild with `systemService.enable = false` and
+`userService.enable = true`, then record the selection:
 
 ```sh
 sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
@@ -89,8 +91,12 @@ install.
 
 - Absolute paths to `systemctl`, `journalctl`, `systemd-run`, `pkexec` and the project binaries are
   patched to Nix store and `/run/wrappers` paths at build time.
-- The desktop capture helper starts from its XDG autostart entry, as on other
-  distributions.
+- The module enables the desktop capture helper for every login, as the packages for
+  other distributions do.
+- With `userService.enable`, Installation Health reports "Hardware service enabled for
+  every user". That is the declared mode, and the daemon lock still allows one owner.
 - `ffmpeg` and `ffprobe` are added to the daemon's `PATH`.
+- A declared daemon also gets `/run/current-system/sw/bin` on its `PATH`, for `fc-match`,
+  `sh`, `nvidia-smi` and `lspci`.
 - `libevdi` and the GL/GBM libraries are added to the runpath, along with the driver
   directory in `/run/opengl-driver`.
