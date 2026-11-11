@@ -7,6 +7,15 @@
 
 let
   cfg = config.services.lian-li-linux;
+  # The login PATH, which systemd expands per user.
+  userPath = [
+    "/run/wrappers"
+    "%h/.nix-profile"
+    "%h/.local/state/nix/profile"
+    "/etc/profiles/per-user/%u"
+    "/nix/var/nix/profiles/default"
+    "/run/current-system/sw"
+  ];
 in
 {
   options.services.lian-li-linux = {
@@ -16,14 +25,25 @@ in
 
     systemService.enable = lib.mkEnableOption ''
       the system daemon, which runs at boot as the `lianli` account. NixOS keeps
-      system units read-only, so this mode cannot be selected from the GUI. Leave
-      it disabled to choose the user daemon from the GUI instead
+      units read-only, so the mode cannot be selected from the GUI
+    '';
+
+    userService.enable = lib.mkEnableOption ''
+      the user daemon, which starts at login for every user. NixOS keeps units
+      read-only, so the mode cannot be selected from the GUI
     '';
 
     evdi.enable = lib.mkEnableOption "the EVDI kernel module for desktop-mode LCD panels";
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = !(cfg.systemService.enable && cfg.userService.enable);
+        message = "services.lian-li-linux: enable systemService or userService, not both.";
+      }
+    ];
+
     environment.systemPackages = [ cfg.package ];
 
     services.udev.packages = [ cfg.package ];
@@ -46,6 +66,22 @@ in
     systemd.services.lianli-daemon-system.wantedBy = lib.mkIf cfg.systemService.enable [
       "multi-user.target"
     ];
+    # System units get a bare PATH. Fonts (fc-match), command sensors (sh) and GPU
+    # sensors (nvidia-smi, lspci) need the same tools the user daemon finds.
+    systemd.services.lianli-daemon-system.path = [ "/run/current-system/sw" ];
+
+    # Declaring a user unit replaces its login PATH with a bare one, so put it back.
+    systemd.user.services = {
+      # Other distributions ship this link in the package. NixOS ignores packaged .wants.
+      lianli-session = {
+        wantedBy = [ "default.target" ];
+        path = userPath;
+      };
+      lianli-daemon = lib.mkIf cfg.userService.enable {
+        wantedBy = [ "default.target" ];
+        path = userPath;
+      };
+    };
 
     boot.extraModulePackages = lib.mkIf cfg.evdi.enable [ config.boot.kernelPackages.evdi ];
     boot.kernelModules = lib.mkIf cfg.evdi.enable [ "evdi" ];

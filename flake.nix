@@ -42,10 +42,15 @@
         lian-li-linux = final.callPackage ./packaging/nix/package.nix { inherit src; };
       };
 
-      nixosModules.default = {
-        imports = [ ./packaging/nix/module.nix ];
-        nixpkgs.overlays = [ self.overlays.default ];
-      };
+      # No overlay here: nixpkgs.overlays cannot be set when pkgs is passed in read-only.
+      nixosModules.default =
+        { lib, pkgs, ... }:
+        {
+          imports = [ ./packaging/nix/module.nix ];
+          services.lian-li-linux.package = lib.mkDefault (
+            pkgs.callPackage ./packaging/nix/package.nix { inherit src; }
+          );
+        };
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt);
     };

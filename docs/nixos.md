@@ -32,6 +32,7 @@ Add the flake to your system flake and import the module:
 | Option | Default | Description |
 | --- | --- | --- |
 | `enable` | `false` | Install the package, udev rules, units, Polkit rule and `lianli` account |
+| `userService.enable` | `false` | Start the user daemon at login for every user, subject to the saved selection |
 | `systemService.enable` | `false` | Run the system daemon at boot as `lianli` instead of the user daemon |
 | `evdi.enable` | `false` | Load the EVDI kernel module for [desktop-mode LCDs](desktop-backends.md) |
 | `package` | flake package | Override the package |
@@ -42,32 +43,95 @@ user and system daemon.
 
 ## Service mode
 
-Without `systemService.enable`, choose **User (at login)** in the GUI on first launch.
-That enables the user daemon in `~/.config/systemd/user`, which works as on other
-distributions.
+NixOS generates `/etc/systemd` read-only and systemd reports its units as `linked`, so
+the GUI cannot enable, disable, switch, start or restart the daemon. Pick the mode in the
+configuration and rebuild: `userService.enable = true` starts the user daemon at login,
+and `systemService.enable = true` starts the system daemon at boot. Set one, not both.
 
-NixOS generates `/etc/systemd` read-only, so the GUI cannot enable or disable the
-system daemon. Set `systemService.enable = true` for system mode and rebuild. The GUI's
-mode switch is not available while the system daemon is declared.
-
-An existing install keeps its saved mode in `/etc/lianli/service-selection.json`, so
-update it when moving between modes. A fresh install has no selection and needs neither
-step.
-
-From user to system mode, stop the user daemon, record the selection, then rebuild with
-`systemService.enable = true`:
+`userService.enable` starts a daemon for every account that logs in, and only one can own
+the hardware. On a machine where more than one account logs in, record the owner once,
+while no other account is logged in. Otherwise the other accounts' daemons retry every
+5 seconds for as long as they are logged in:
 
 ```sh
-systemctl --user disable --now lianli-daemon
+systemctl --user stop lianli-daemon
+sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
+systemctl --user start lianli-daemon
+```
+
+With neither set, start the user daemon yourself each session:
+
+```sh
+systemctl --user start lianli-daemon
+```
+
+Do not run `systemctl --user enable lianli-daemon`. It links the unit to one store path,
+which goes stale on the next update.
+
+### Moving between modes
+
+An existing install keeps its saved mode in `/etc/lianli/service-selection.json`, and a
+daemon that is not the selected one exits at once. `select-mode` refuses to run while a
+daemon owns the hardware, so stop the running daemon first. A fresh install has no
+selection and needs none of this.
+
+Settings do not follow the mode. The user daemon keeps its state in
+`${XDG_CONFIG_HOME:-$HOME/.config}/lianli` and the system daemon in `/var/lib/lianli`,
+and neither `select-mode` nor a rebuild copies it. Copy it yourself while both daemons
+are stopped, or the new mode starts from defaults or from whatever it last saved. The
+copy overwrites matching files in the destination, so the steps below back it up first.
+Media that a template or LCD setting points at must also be readable by the new account.
+See [Configuration and template backups](state-backups.md) for what the directory holds.
+
+From user to system mode:
+
+```sh
+systemctl --user stop lianli-daemon
+src="${XDG_CONFIG_HOME:-$HOME/.config}/lianli"
+sudo install -d -o lianli -g lianli /var/lib/lianli
+sudo cp -a /var/lib/lianli "/var/lib/lianli.bak-$(date +%s)"
+sudo cp -a "$src/." /var/lib/lianli/
+sudo chown -R lianli:lianli /var/lib/lianli
 sudo lianli-control select-mode --scope system
 ```
 
-From system to user mode, rebuild with `systemService.enable = false`, then record the
-selection and choose **User (at login)** in the GUI:
+Rebuild with `systemService.enable = true` and `userService.enable = false`. The
+rebuild does not always start the system daemon, so start it or reboot:
 
 ```sh
+sudo systemctl start lianli-daemon-system
+```
+
+From system to user mode:
+
+```sh
+sudo systemctl stop lianli-daemon-system
+dst="${XDG_CONFIG_HOME:-$HOME/.config}/lianli"
+mkdir -p "$dst"
+cp -a "$dst" "$dst.bak-$(date +%s)"
+sudo cp -a /var/lib/lianli/. "$dst/"
+sudo chown -R "$(id -un):$(id -gn)" "$dst"
 sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
 ```
+
+Rebuild with `systemService.enable = false` and `userService.enable = true`, then start
+the user daemon or log in again:
+
+```sh
+systemctl --user start lianli-daemon
+```
+
+The user selection names one UID. Daemons for other users exit while it stands, even
+after that user logs out. To hand the hardware to another user, stop the running daemon,
+run `sudo lianli-control select-mode --scope user --user-uid UID` with their non-root
+UID, then start the daemon in their session.
+
+Rebuild straight after `select-mode`. If the machine reboots in between, the old unit
+is still the enabled one and the new selection makes it exit, so no daemon runs. Either
+finish the rebuild and start the new daemon as above, or put the old selection back
+with `select-mode` and start the old daemon.
+
+Leave out the copy and backup lines to keep each mode's own settings.
 
 Both `git+https://github.com/sgtaziz/lian-li-linux` and `github:sgtaziz/lian-li-linux` work. To build
 a fork with commits that aren't upstream, use
@@ -89,8 +153,14 @@ install.
 
 - Absolute paths to `systemctl`, `journalctl`, `systemd-run`, `pkexec` and the project binaries are
   patched to Nix store and `/run/wrappers` paths at build time.
-- The desktop capture helper starts from its XDG autostart entry, as on other
-  distributions.
+- The module enables the desktop capture helper for every login, as the packages for
+  other distributions do.
+- With `userService.enable`, Installation Health reports "Hardware service enabled for
+  every user". That is the declared mode. On a shared machine, record the owner as in
+  [Service mode](#service-mode).
 - `ffmpeg` and `ffprobe` are added to the daemon's `PATH`.
+- The system daemon also gets `/run/current-system/sw/bin` on its `PATH`, for `fc-match`,
+  `sh`, `nvidia-smi` and `lspci`. A declared user unit gets the login `PATH`, including
+  the per-user profiles, so command sensors find the same programs as a shell.
 - `libevdi` and the GL/GBM libraries are added to the runpath, along with the driver
   directory in `/run/opengl-driver`.
