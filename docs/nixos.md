@@ -149,6 +149,15 @@ This gives you `lianli-gui`, `lianli-daemon`, `lianli-control` and `lianli-sessi
 without udev rules, so devices are only accessible as root. Use the module for a working
 install.
 
+## Development
+
+`nix develop` opens a shell with the build inputs, `rustfmt`, `clippy`, `ffmpeg` and
+`libsystemd`, which the test suite needs:
+
+```sh
+nix develop -c cargo test --workspace
+```
+
 ## Notes
 
 - Absolute paths to `systemctl`, `journalctl`, `systemd-run`, `pkexec` and the project binaries are
