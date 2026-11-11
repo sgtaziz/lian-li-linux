@@ -48,6 +48,17 @@ the GUI cannot enable, disable, switch, start or restart the daemon. Pick the mo
 configuration and rebuild: `userService.enable = true` starts the user daemon at login,
 and `systemService.enable = true` starts the system daemon at boot. Set one, not both.
 
+`userService.enable` starts a daemon for every account that logs in, and only one can own
+the hardware. On a machine where more than one account logs in, record the owner once,
+while no other account is logged in. Otherwise the other accounts' daemons retry every
+5 seconds for as long as they are logged in:
+
+```sh
+systemctl --user stop lianli-daemon
+sudo lianli-control select-mode --scope user --user-uid "$(id -u)"
+systemctl --user start lianli-daemon
+```
+
 With neither set, start the user daemon yourself each session:
 
 ```sh
@@ -145,7 +156,8 @@ install.
 - The module enables the desktop capture helper for every login, as the packages for
   other distributions do.
 - With `userService.enable`, Installation Health reports "Hardware service enabled for
-  every user". That is the declared mode, and the daemon lock still allows one owner.
+  every user". That is the declared mode. On a shared machine, record the owner as in
+  [Service mode](#service-mode).
 - `ffmpeg` and `ffprobe` are added to the daemon's `PATH`.
 - The system daemon also gets `/run/current-system/sw/bin` on its `PATH`, for `fc-match`,
   `sh`, `nvidia-smi` and `lspci`. A declared user unit gets the login `PATH`, including
