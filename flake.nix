@@ -60,8 +60,11 @@
             pkgs.rustfmt
             pkgs.clippy
           ];
-          # The login monitor loads libsystemd at run time.
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.systemd ];
+          # The login monitor and EVDI mode load libsystemd and libevdi at run time.
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.systemd
+            pkgs.linuxPackages.evdi
+          ];
         };
       });
 

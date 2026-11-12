@@ -42,7 +42,9 @@ impl WinUsbLedDevice {
         let vid = desc.vendor_id();
         let pid = desc.product_id();
         let bus = device.bus_number();
-        let port_numbers = device.port_numbers().unwrap_or_default();
+        let port_numbers = device
+            .port_numbers()
+            .with_context(|| format!("reading the USB port path of {name}"))?;
         let mut transport = RusbBulk::open_device(device).map_err(transport_to_anyhow)?;
         transport
             .detach_and_configure(name)
