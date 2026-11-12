@@ -363,6 +363,75 @@
       ]
     },
     {
+      "id": "rx78-flight-enhanced",
+      "name": "RX-78 / Flight Enhanced",
+      "description": "Animated RX-78 dashboard with large color-coded CPU/GPU load, temperatures, RX/TX network rates and pulsing jet engines.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.2.6",
+      "folder": "rx78-flight-enhanced",
+      "template_file": "template.json",
+      "template_sha256": "7fb32703d808425b01f900c48267282773f3a81d5e9436ec75a6d39787a3ee44",
+      "preview": "preview.png",
+      "preview_sha256": "4975c05537e82701a3f74e92ec4bd28d9def57915833dfdd3f826175021d3d2f",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "Amuro-OFL.txt",
+          "sha256": "b33764c95f1fb36567af758f20cf217d9993faa3c8cb47d5bf19b3ab098d1a99"
+        },
+        {
+          "path": "Amuro-Readme.txt",
+          "sha256": "7db3f0ebbc952d448f08416038d552b90d51547ab3fff8caec3086bac5370768"
+        },
+        {
+          "path": "Amuro.otf",
+          "sha256": "6097d5cd8c054f2fa82147e1632819e3497059b13c3f7a6cc9292c319e95935d"
+        },
+        {
+          "path": "CC-BY-NC-3.0.txt",
+          "sha256": "45526cb7a15234d8d686a3ba5f11b607516f90662d125d5423eb2b57f474e5e4"
+        },
+        {
+          "path": "CREDITS.md",
+          "sha256": "ce4285c5005068cd3b095b064000e7adf6449803a01ee3d78b59697a0e8e1eea"
+        },
+        {
+          "path": "README.md",
+          "sha256": "aa3c8c067d1b849e3890fb4bb7e98eabcb53c7c74c62f607748a4f2bed36483f"
+        },
+        {
+          "path": "gundam-head.png",
+          "sha256": "bed7a9b44078b609b540179cf3665dff1fc22c8527b730dfa3d5ba3b89c0bcce"
+        },
+        {
+          "path": "jet-trail.png",
+          "sha256": "1c446be8065e653d0480104b11844ee285b7dd932339f61f33d32228d36c3e5d"
+        },
+        {
+          "path": "panels.png",
+          "sha256": "07d871bc5e9f3afc92c4f297c73f0811aa9ad45b3f7010132fbe11923c1ddbce"
+        },
+        {
+          "path": "rx-arrow.png",
+          "sha256": "9db8c3df025d70f6d3316b1be514b4d2c73d1f0a23c876a0710847fd837536af"
+        },
+        {
+          "path": "starfield.png",
+          "sha256": "442d0dea852ddd9ffe742d7c4c327242b99835e665acc995042424f2adbb6a8e"
+        },
+        {
+          "path": "stars-twinkle.mp4",
+          "sha256": "08fedeac4f322300006c5b31ea977b02d10d01e34081c2f67850b6b0fc9b3cdf"
+        },
+        {
+          "path": "tx-arrow.png",
+          "sha256": "c8bcbe689a728efdbdd9b65e2b0a7515465f5baee0f27ac3bf13bc96861ec096"
+        }
+      ]
+    },
+    {
       "id": "maneki-neko-horizontal",
       "name": "Maneki Neko / Ivory",
       "description": "Light ivory lucky-cat dashboard with CPU/GPU temperature and load bars, RAM usage and a seconds clock.",
