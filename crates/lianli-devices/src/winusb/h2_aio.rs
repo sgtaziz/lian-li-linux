@@ -5,7 +5,7 @@
 //! thread (see `LcdLink`) instead of going straight on the wire.
 
 use super::lcd::{PendingCmd, SharedTransport};
-use crate::crypto::PacketBuilder;
+use crate::crypto::{PacketBuilder, CMD_GET_H2_PARAMS};
 use crate::traits::{AioDevice, FanDevice, RgbDevice, RgbFrameDelivery};
 use anyhow::{Context, Result};
 use lianli_shared::rgb::{
@@ -61,6 +61,29 @@ pub struct H2Params {
     pub mac: Option<[u8; 6]>,
 }
 
+/// Byte 0 echoes 0xFA; any other reply belongs to another command.
+pub(crate) fn parse_h2_params(reply: &[u8], observed_at: std::time::Instant) -> Option<H2Params> {
+    if reply.len() < 32 || reply[0] != CMD_GET_H2_PARAMS {
+        return None;
+    }
+    let mac: [u8; 6] = reply[22..28].try_into().ok()?;
+    Some(H2Params {
+        observed_at,
+        cpu_temp: 0,
+        cpu_load: 0,
+        gpu_temp: 0,
+        gpu_load: 0,
+        pump_rpm: u16::from_be_bytes([reply[20], reply[21]]),
+        fan_rpm: [
+            u16::from_be_bytes([reply[14], reply[15]]),
+            u16::from_be_bytes([reply[16], reply[17]]),
+            u16::from_be_bytes([reply[18], reply[19]]),
+        ],
+        coolant_temp: reply[13],
+        mac: (mac != [0; 6]).then_some(mac),
+    })
+}
+
 fn pwm_refresh_due(
     elapsed: Duration,
     previous_pump: u8,
@@ -85,6 +108,42 @@ fn selected_duties(mut previous: [u8; 3], duties: &[Option<u8>]) -> [u8; 3] {
         }
     }
     previous
+}
+
+#[cfg(test)]
+mod params_reply_tests {
+    use super::parse_h2_params;
+    use std::time::Instant;
+
+    fn reply(prefix: &[u8]) -> [u8; 512] {
+        let mut reply = [0u8; 512];
+        reply[..prefix.len()].copy_from_slice(prefix);
+        reply
+    }
+
+    #[test]
+    fn reads_coolant_pump_and_mac_from_a_params_reply() {
+        // Captured from a HydroShift II Square, firmware lianlih2s_0001_0027.
+        let captured = reply(&[
+            0xfa, 0xc8, 0x97, 0x02, 0, 0, 0, 0, 0x0b, 0, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 0, 0x0a,
+            0x53, 0xe3, 0x03, 0xe4, 0xe5, 0x66, 0xe1, 0, 0, 0x01,
+        ]);
+        let params = parse_h2_params(&captured, Instant::now()).unwrap();
+        assert_eq!(params.coolant_temp, 32);
+        assert_eq!(params.pump_rpm, 2643);
+        assert_eq!(params.mac, Some([0xe3, 0x03, 0xe4, 0xe5, 0x66, 0xe1]));
+    }
+
+    #[test]
+    fn rejects_replies_that_belong_to_other_commands() {
+        let mut sync_pump_fan = reply(&[0xfb]);
+        sync_pump_fan[13] = 105;
+        let frame_ack = reply(&[0x65, 0, 0, 0, 0, 0, 0, 0, 3]);
+        for other in [sync_pump_fan, frame_ack] {
+            assert!(parse_h2_params(&other, Instant::now()).is_none());
+        }
+        assert!(parse_h2_params(&reply(&[0xfa])[..31], Instant::now()).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -250,6 +309,8 @@ impl H2AioController {
             .with_context(|| format!("H2: {label} write"))?;
         let mut buf = [0u8; 512];
         let _ = transport.read(&mut buf, reply_wait);
+        // A reply later than reply_wait would reach the next exchange.
+        transport.read_flush();
         Ok(true)
     }
 
@@ -321,18 +382,11 @@ impl H2AioController {
         }
         let header = self.builder.lock().get_h2_params_header_winusb();
 
-        // The transport stays locked across both halves of each exchange; it
-        // used to be released between them, letting another command's reply be
-        // consumed here.
-        // Two attempts. sync_pump_fan() fires once a second on this shared
-        // transport and only waits before discarding its own reply, so a late
-        // answer can still be sitting in the pipe. The first exchange then
-        // consumes that stale frame and the second gets the real one — which is
-        // why coolant read a constant 105 C (a field of the fixed SyncPumpFan
-        // reply) instead of the true ~26 C.
+        // A late reply to another command can still be in the pipe, so a
+        // rejected first reply gets a second attempt.
         let mut buf = [0u8; 512];
         let mut last_err: Option<anyhow::Error> = None;
-        let mut got = false;
+        let mut parsed = None;
         let mut stream_began = false;
         for attempt in 0..2 {
             let hdr = if attempt == 0 {
@@ -368,11 +422,22 @@ impl H2AioController {
             };
             match res {
                 None => break,
-                Some(Ok(k)) if k >= 32 => {
-                    got = true;
-                    break;
-                }
-                Some(Ok(k)) => last_err = Some(anyhow::anyhow!("response too short ({k} bytes)")),
+                Some(Ok(k)) => match parse_h2_params(&buf[..k], std::time::Instant::now()) {
+                    Some(params) => {
+                        parsed = Some(params);
+                        break;
+                    }
+                    None => {
+                        debug!(
+                            "H2: GetH2Params read another reply ({k} bytes, command {:#04x})",
+                            buf[0]
+                        );
+                        last_err = Some(anyhow::anyhow!(
+                            "unexpected GetH2Params reply ({k} bytes, command {:#04x})",
+                            buf[0]
+                        ));
+                    }
+                },
                 Some(Err(e)) => last_err = Some(e),
             }
         }
@@ -385,37 +450,11 @@ impl H2AioController {
             }
             anyhow::bail!("H2: GetH2Params withheld — LCD streaming began mid exchange");
         }
-        if !got {
-            return Err(last_err.unwrap_or_else(|| anyhow::anyhow!("H2: GetH2Params failed")));
+        let parsed = parsed
+            .ok_or_else(|| last_err.unwrap_or_else(|| anyhow::anyhow!("H2: GetH2Params failed")))?;
+        if parsed.mac.is_some() {
+            *self.mac.lock() = parsed.mac;
         }
-
-        let mac = {
-            let m = [buf[22], buf[23], buf[24], buf[25], buf[26], buf[27]];
-            if m.iter().all(|&b| b == 0) {
-                None
-            } else {
-                Some(m)
-            }
-        };
-        if mac.is_some() {
-            *self.mac.lock() = mac;
-        }
-
-        let parsed = H2Params {
-            observed_at: std::time::Instant::now(),
-            cpu_temp: 0,
-            cpu_load: 0,
-            gpu_temp: 0,
-            gpu_load: 0,
-            pump_rpm: u16::from_be_bytes([buf[20], buf[21]]),
-            fan_rpm: [
-                u16::from_be_bytes([buf[14], buf[15]]),
-                u16::from_be_bytes([buf[16], buf[17]]),
-                u16::from_be_bytes([buf[18], buf[19]]),
-            ],
-            coolant_temp: buf[13],
-            mac,
-        };
         *self.params_cache.lock() = Some((parsed.observed_at, parsed.clone()));
         Ok(parsed)
     }
