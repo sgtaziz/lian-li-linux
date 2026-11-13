@@ -1,0 +1,586 @@
+{
+  "id": "rx78-flight-enhanced",
+  "name": "RX-78 / Flight Enhanced",
+  "base_width": 1920,
+  "base_height": 480,
+  "background": {
+    "type": "image",
+    "path": "starfield.png"
+  },
+  "widgets": [
+    {
+      "id": "Twinkling stars",
+      "x": 960,
+      "y": 240,
+      "width": 1920,
+      "height": 480,
+      "fps": 8,
+      "kind": {
+        "type": "video",
+        "path": "stars-twinkle.mp4",
+        "loop_playback": true,
+        "opacity": 1,
+        "fit": "contain"
+      }
+    },
+    {
+      "id": "Translucent instrument panels",
+      "x": 960,
+      "y": 240,
+      "width": 1920,
+      "height": 480,
+      "kind": {
+        "type": "image",
+        "path": "panels.png",
+        "opacity": 1,
+        "fit": "contain"
+      }
+    },
+    {
+      "id": "Core-inspired jet and flight trail",
+      "x": 960,
+      "y": 49,
+      "width": 1920,
+      "height": 98,
+      "kind": {
+        "type": "image",
+        "path": "jet-trail.png",
+        "opacity": 1,
+        "fit": "contain"
+      }
+    },
+    {
+      "id": "title",
+      "kind": {
+        "type": "label",
+        "text": "RX-78",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 58,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      },
+      "x": 165,
+      "y": 50,
+      "width": 260,
+      "height": 80,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "CPU label",
+      "kind": {
+        "type": "label",
+        "text": "CPU / LOAD",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 48,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 0
+      },
+      "x": 660,
+      "y": 151,
+      "width": 420,
+      "height": 74,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "CPU temperature",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 64,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [],
+        "letter_spacing": 0
+      },
+      "x": 763,
+      "y": 381,
+      "width": 254,
+      "height": 84,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "CPU temperature label",
+      "kind": {
+        "type": "label",
+        "text": "TEMP",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 39,
+        "color": [
+          152,
+          175,
+          202,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      },
+      "x": 532,
+      "y": 384,
+      "width": 170,
+      "height": 65,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "CPU load",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 164,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              239,
+              244,
+              250
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              194,
+              65
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              77,
+              82
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 660,
+      "y": 263,
+      "width": 440,
+      "height": 190,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "GPU label",
+      "kind": {
+        "type": "label",
+        "text": "GPU / LOAD",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 48,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 0
+      },
+      "x": 1160,
+      "y": 151,
+      "width": 420,
+      "height": 74,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "GPU temperature",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "°C",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 64,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [],
+        "letter_spacing": 0
+      },
+      "x": 1263,
+      "y": 381,
+      "width": 254,
+      "height": 84,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "GPU temperature label",
+      "kind": {
+        "type": "label",
+        "text": "TEMP",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 39,
+        "color": [
+          152,
+          175,
+          202,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 0
+      },
+      "x": 1032,
+      "y": 384,
+      "width": 170,
+      "height": 65,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "GPU load",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 164,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              239,
+              244,
+              250
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              194,
+              65
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              77,
+              82
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 1160,
+      "y": 263,
+      "width": 440,
+      "height": 190,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "clock",
+      "kind": {
+        "type": "clock_digital",
+        "format": "%H:%M:%S",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 80,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "right",
+        "letter_spacing": 0
+      },
+      "x": 1675,
+      "y": 50,
+      "width": 470,
+      "height": 100,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null
+    },
+    {
+      "id": "gundam head",
+      "kind": {
+        "type": "image",
+        "path": "gundam-head.png",
+        "opacity": 1,
+        "fit": "contain"
+      },
+      "x": 206,
+      "y": 269,
+      "width": 350,
+      "height": 338,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "network title",
+      "x": 1660,
+      "y": 151,
+      "width": 420,
+      "height": 68,
+      "kind": {
+        "type": "label",
+        "text": "NETWORK",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 48,
+        "color": [
+          245,
+          204,
+          70,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "DOWNLOAD label",
+      "x": 1680,
+      "y": 194,
+      "width": 360,
+      "height": 50,
+      "kind": {
+        "type": "label",
+        "text": "RX / DOWNLOAD",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 27,
+        "color": [
+          150,
+          212,
+          240,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "DOWNLOAD speed",
+      "x": 1660,
+      "y": 249,
+      "width": 420,
+      "height": 90,
+      "sensor_category": "network_rx",
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "network_rx",
+          "iface": "eth0"
+        },
+        "format": "{:.1}",
+        "unit": " MB/s",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 64,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 125,
+        "ranges": []
+      }
+    },
+    {
+      "id": "UPLOAD label",
+      "x": 1680,
+      "y": 324,
+      "width": 360,
+      "height": 50,
+      "kind": {
+        "type": "label",
+        "text": "TX / UPLOAD",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 27,
+        "color": [
+          245,
+          204,
+          115,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "UPLOAD speed",
+      "x": 1660,
+      "y": 379,
+      "width": 420,
+      "height": 90,
+      "sensor_category": "network_tx",
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "network_tx",
+          "iface": "eth0"
+        },
+        "format": "{:.1}",
+        "unit": " MB/s",
+        "font": {
+          "path": "Amuro.otf"
+        },
+        "font_size": 64,
+        "color": [
+          239,
+          244,
+          250,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 125,
+        "ranges": []
+      }
+    },
+    {
+      "id": "rx-arrow",
+      "x": 1470,
+      "y": 194,
+      "width": 24,
+      "height": 24,
+      "kind": {
+        "type": "image",
+        "path": "rx-arrow.png",
+        "opacity": 1,
+        "fit": "contain"
+      }
+    },
+    {
+      "id": "tx-arrow",
+      "x": 1470,
+      "y": 324,
+      "width": 24,
+      "height": 24,
+      "kind": {
+        "type": "image",
+        "path": "tx-arrow.png",
+        "opacity": 1,
+        "fit": "contain"
+      }
+    }
+  ],
+  "rotated": true,
+  "target_device": "Universal Screen 8.8\" (480×1920)"
+}
