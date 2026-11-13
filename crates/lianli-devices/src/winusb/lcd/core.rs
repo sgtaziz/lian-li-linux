@@ -133,6 +133,8 @@ pub struct LcdLink {
     software_cooling: AtomicBool,
     storage_interrupted: AtomicBool,
     pending: Mutex<Vec<PendingCmd>>,
+    telemetry_requested: Mutex<Option<Instant>>,
+    stream_telemetry: Mutex<Option<crate::winusb::h2_aio::H2Params>>,
 }
 
 impl LcdLink {
@@ -148,7 +150,23 @@ impl LcdLink {
             software_cooling: AtomicBool::new(true),
             storage_interrupted: AtomicBool::new(false),
             pending: Mutex::new(Vec::new()),
+            telemetry_requested: Mutex::new(None),
+            stream_telemetry: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn request_stream_telemetry(&self) {
+        *self.telemetry_requested.lock() = Some(Instant::now());
+    }
+
+    fn stream_telemetry_requested(&self) -> bool {
+        self.telemetry_requested
+            .lock()
+            .is_some_and(|at| at.elapsed() < TELEMETRY_REQUEST_WINDOW)
+    }
+
+    pub(crate) fn stream_telemetry(&self) -> Option<crate::winusb::h2_aio::H2Params> {
+        self.stream_telemetry.lock().clone()
     }
 
     pub fn lock(&self) -> MutexGuard<'_, RusbBulk> {
@@ -553,6 +571,17 @@ const CONTROL_SAFE_LEVEL: u8 = 1;
 /// waited `CONTROL_RELAX_AFTER`.
 const CONTROL_RELAXED_LEVEL: u8 = 2;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
+/// L-Connect's GetH2Params cadence: every 7th tick of its 330 ms message loop.
+const STREAM_TELEMETRY_INTERVAL: Duration = Duration::from_millis(2_310);
+const TELEMETRY_REQUEST_WINDOW: Duration = Duration::from_secs(5);
+
+fn stream_telemetry_due(level: u8, since_last: Duration) -> bool {
+    match level {
+        level if level <= CONTROL_SAFE_LEVEL => since_last >= STREAM_TELEMETRY_INTERVAL,
+        level if level <= CONTROL_RELAXED_LEVEL => since_last >= CONTROL_RELAX_AFTER,
+        _ => false,
+    }
+}
 
 const REOPEN_DELAY: Duration = Duration::from_millis(100);
 /// Gap between the wake-preamble commands (StopPlay, StopClock, GetVer).
@@ -642,6 +671,7 @@ pub(crate) struct WinUsbLcdCore {
     stop_play_supported: bool,
     resend_stalled_chunk: bool,
     last_chunk_resend: Option<Instant>,
+    last_telemetry_query: Option<Instant>,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -729,6 +759,7 @@ impl WinUsbLcdCore {
             stop_play_supported,
             resend_stalled_chunk: true,
             last_chunk_resend: None,
+            last_telemetry_query: None,
         })
     }
 
@@ -757,6 +788,7 @@ impl WinUsbLcdCore {
             stop_play_supported,
             resend_stalled_chunk: true,
             last_chunk_resend: None,
+            last_telemetry_query: None,
         }
     }
 
@@ -1462,7 +1494,33 @@ impl WinUsbLcdCore {
                 .context("LCD buffer did not drain; stopping H.264 playback")?;
         }
         self.flush_pending_control(Some(level));
+        self.query_stream_telemetry(level);
         Ok(())
+    }
+
+    /// L-Connect polls GetH2Params throughout H.264 playback.
+    fn query_stream_telemetry(&mut self, level: u8) {
+        let now = Instant::now();
+        let since_last = self
+            .last_telemetry_query
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+        if !self.transport.stream_telemetry_requested() || !stream_telemetry_due(level, since_last)
+        {
+            return;
+        }
+        self.last_telemetry_query = Some(now);
+        let header = self.builder.get_h2_params_header_winusb();
+        let mut reply = [0u8; 512];
+        match self.tx_exchange(&header, &mut reply) {
+            Ok(Ok(n)) => {
+                match crate::winusb::h2_aio::parse_h2_params(&reply[..n], Instant::now()) {
+                    Some(params) => *self.transport.stream_telemetry.lock() = Some(params),
+                    None => debug!("GetH2Params between chunks read another reply ({n} bytes)"),
+                }
+            }
+            Ok(Err(e)) => debug!("GetH2Params read between chunks failed: {e}"),
+            Err(e) => warn!("GetH2Params write between chunks failed: {e}"),
+        }
     }
 
     /// Mark the start of an H.264 stream: control writers defer to us.
@@ -1471,7 +1529,8 @@ impl WinUsbLcdCore {
     /// not streaming either finishes its write before any stream chunk or
     /// sees the flag flip and queues instead. It can never land a control
     /// packet mid stream.
-    fn stream_begin(&self) {
+    fn stream_begin(&mut self) {
+        self.last_telemetry_query = Some(Instant::now());
         let _bulk = self.transport.lock();
         self.transport.set_streaming(true);
     }
@@ -1761,6 +1820,28 @@ fn flex_opening_packets(builder: &mut PacketBuilder, screen: &ScreenInfo) -> Res
         framed(builder.jpeg_header_winusb(jpeg.len()), &jpeg),
         framed(builder.flex_l3_layer_header_winusb(l3.len(), 0, 0), &l3),
     ])
+}
+
+#[cfg(test)]
+mod stream_telemetry_tests {
+    use super::{stream_telemetry_due, CONTROL_RELAX_AFTER, STREAM_TELEMETRY_INTERVAL};
+    use std::time::Duration;
+
+    #[test]
+    fn queries_only_when_the_panel_buffer_has_headroom() {
+        let long = Duration::from_secs(60);
+        assert!(stream_telemetry_due(0, STREAM_TELEMETRY_INTERVAL));
+        assert!(stream_telemetry_due(1, STREAM_TELEMETRY_INTERVAL));
+        assert!(!stream_telemetry_due(
+            1,
+            STREAM_TELEMETRY_INTERVAL - Duration::from_millis(1)
+        ));
+        assert!(!stream_telemetry_due(2, STREAM_TELEMETRY_INTERVAL));
+        assert!(stream_telemetry_due(2, CONTROL_RELAX_AFTER));
+        for level in 3..=5 {
+            assert!(!stream_telemetry_due(level, long));
+        }
+    }
 }
 
 #[cfg(test)]

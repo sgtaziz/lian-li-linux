@@ -351,6 +351,26 @@ impl H2AioController {
         }
     }
 
+    fn streaming_params(&self) -> Result<H2Params> {
+        self.transport.request_stream_telemetry();
+        let mut cache = self.params_cache.lock();
+        if let Some(fresh) = self.transport.stream_telemetry() {
+            if cache.as_ref().is_none_or(|(at, _)| fresh.observed_at > *at) {
+                if fresh.mac.is_some() {
+                    *self.mac.lock() = fresh.mac;
+                }
+                *cache = Some((fresh.observed_at, fresh));
+            }
+        }
+        let (at, cached) = cache
+            .as_ref()
+            .context("H2: GetH2Params withheld — LCD streaming, no reading yet")?;
+        if at.elapsed() >= Duration::from_secs(5) {
+            self.note_stale_params(at.elapsed());
+        }
+        Ok(cached.clone())
+    }
+
     /// How long a GetH2Params reply is reused before going back to the wire.
     /// Long enough to cover a poll cycle's coolant+RPM pair, far shorter than
     /// the 1s telemetry tick, so readings stay live.
@@ -367,18 +387,10 @@ impl H2AioController {
                 return Ok(cached.clone());
             }
         }
-        // A control write landing on a full ingest buffer hangs the MCU, which
-        // is why every command in send_control defers while the LCD streams.
-        // This one is a read, so there is nothing to queue — but it is the same
-        // 512-byte header on the same pipe, and on a cache miss it goes out
-        // twice. Hold the last reading instead: telemetry goes stale for the
-        // length of the stream, which is recoverable, and a wedged pump is not.
+        // A write landing on a full ingest buffer hangs the MCU, so while the
+        // LCD streams only the stream thread queries, between chunks.
         if self.transport.is_streaming() {
-            if let Some((at, cached)) = self.params_cache.lock().as_ref() {
-                self.note_stale_params(at.elapsed());
-                return Ok(cached.clone());
-            }
-            anyhow::bail!("H2: GetH2Params withheld — LCD streaming, no cached reading yet");
+            return self.streaming_params();
         }
         let header = self.builder.lock().get_h2_params_header_winusb();
 
@@ -442,13 +454,7 @@ impl H2AioController {
             }
         }
         if stream_began {
-            // Serve the last reading rather than failing the poll, the
-            // stream will end and refresh it.
-            if let Some((at, cached)) = self.params_cache.lock().as_ref() {
-                self.note_stale_params(at.elapsed());
-                return Ok(cached.clone());
-            }
-            anyhow::bail!("H2: GetH2Params withheld — LCD streaming began mid exchange");
+            return self.streaming_params();
         }
         let parsed = parsed
             .ok_or_else(|| last_err.unwrap_or_else(|| anyhow::anyhow!("H2: GetH2Params failed")))?;
