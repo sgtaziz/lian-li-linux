@@ -1,6 +1,6 @@
 # Maintainer: sgtaziz <sgtaziz013 at gmail dot com>
 pkgname=lianli-linux
-pkgver=1.2.6
+pkgver=1.2.7
 pkgrel=1
 pkgdesc="Open-source Linux replacement for L-Connect 3 for Lian Li devices"
 arch=('x86_64')
