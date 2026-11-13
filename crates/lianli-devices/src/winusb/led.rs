@@ -30,6 +30,8 @@ pub struct WinUsbLedDevice {
     led_count: u16,
     vid: u16,
     pid: u16,
+    bus: u8,
+    port_numbers: Vec<u8>,
 }
 
 impl WinUsbLedDevice {
@@ -39,6 +41,10 @@ impl WinUsbLedDevice {
             .context("reading device descriptor")?;
         let vid = desc.vendor_id();
         let pid = desc.product_id();
+        let bus = device.bus_number();
+        let port_numbers = device
+            .port_numbers()
+            .with_context(|| format!("reading the USB port path of {name}"))?;
         let mut transport = RusbBulk::open_device(device).map_err(transport_to_anyhow)?;
         transport
             .detach_and_configure(name)
@@ -53,6 +59,8 @@ impl WinUsbLedDevice {
             led_count,
             vid,
             pid,
+            bus,
+            port_numbers,
         })
     }
 
@@ -62,7 +70,23 @@ impl WinUsbLedDevice {
     }
 
     fn reopen(&self) -> Result<()> {
-        let mut new_transport = RusbBulk::open(self.vid, self.pid)
+        let device = lianli_transport::usb_context::devices()
+            .context("listing USB devices")?
+            .iter()
+            .find(|device| {
+                device.bus_number() == self.bus
+                    && device.port_numbers().ok().as_deref() == Some(&self.port_numbers[..])
+                    && device.device_descriptor().is_ok_and(|desc| {
+                        desc.vendor_id() == self.vid && desc.product_id() == self.pid
+                    })
+            })
+            .with_context(|| {
+                format!(
+                    "{} is no longer at USB {}-{:?}",
+                    self.name, self.bus, self.port_numbers
+                )
+            })?;
+        let mut new_transport = RusbBulk::open_device(device)
             .map_err(transport_to_anyhow)
             .with_context(|| format!("reopening {}", self.name))?;
         new_transport

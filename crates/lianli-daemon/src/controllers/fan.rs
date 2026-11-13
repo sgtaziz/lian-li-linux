@@ -140,7 +140,11 @@ fn fan_control_thread(inputs: FanControlInputs) {
     }
 
     if wireless.is_none() && wired.is_empty() {
-        warn!("No fan devices available — fan control disabled");
+        if curves.is_empty() && config.speeds.is_empty() {
+            debug!("No fan devices or fan settings; fan control idle");
+        } else {
+            warn!("No fan devices available — fan control disabled");
+        }
         return;
     }
 
