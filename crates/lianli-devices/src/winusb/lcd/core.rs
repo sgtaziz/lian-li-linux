@@ -605,6 +605,8 @@ const SLOW_CHUNK_WRITE: Duration = Duration::from_millis(100);
 /// daemon's bounded recreation instead of looping on reopen and resend.
 const CHUNK_RESEND_COOLDOWN: Duration = Duration::from_secs(60);
 const WAIT_BUFFER_POLL: Duration = Duration::from_millis(50);
+/// Nothing reads the live encoder's output yet, and its frame writes time out after 2 s.
+const RING_DRAIN_BUDGET: Duration = Duration::from_millis(1_000);
 const FLEX_L3_LAYER_SIZE: u32 = 360;
 const WAIT_BUFFER_NO_STOP_CAP: u32 = 600;
 
@@ -1267,6 +1269,20 @@ impl WinUsbLcdCore {
             Ok(n) if n > 0 => buffer_level(&reply[..n]),
             _ => None,
         }
+    }
+
+    pub(crate) fn drain_h264_ring(&mut self, stop: &AtomicBool) -> Option<u8> {
+        let deadline = Instant::now() + RING_DRAIN_BUDGET;
+        let mut level = self.query_buffer_level();
+        while level.is_some_and(|level| level > 0)
+            && Instant::now() < deadline
+            && !stop.load(Ordering::Acquire)
+            && !lianli_transport::usb::shutting_down()
+        {
+            std::thread::sleep(WAIT_BUFFER_POLL);
+            level = self.query_buffer_level();
+        }
+        level
     }
 
     /// Poll QueryBlock at the vendor cadence, with a total wait bound.

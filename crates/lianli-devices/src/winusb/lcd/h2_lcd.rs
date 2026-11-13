@@ -58,6 +58,20 @@ impl H2WinUsbLcd {
         Ok(())
     }
 
+    /// L-Connect clears both layers before playing a theme. The PNG also stops
+    /// the firmware's background video, whose chunks share the H.264 ring.
+    fn prepare_stream(&mut self, stop: &AtomicBool, fps: f32) -> Result<()> {
+        if !self.core.initialized || self.core.needs_init() {
+            self.do_init()?;
+        }
+        self.core.clear_layers();
+        match self.core.drain_h264_ring(stop) {
+            Some(0) => {}
+            level => tracing::debug!("H2 H.264 ring not empty before StartPlay: {level:?}"),
+        }
+        self.core.apply_stream_fps(fps)
+    }
+
     fn do_init(&mut self) -> Result<()> {
         self.layers_cleared = false;
         self.core.init_logging();
@@ -126,10 +140,7 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        if !self.core.initialized || self.core.needs_init() {
-            self.do_init()?;
-        }
-        self.core.apply_stream_fps(fps)?;
+        self.prepare_stream(stop, fps)?;
         self.core
             .stream_h264(path, looping, stop, fps, self.core.screen().play_count, 0)
     }
@@ -139,10 +150,7 @@ impl WinUsbLcd for H2WinUsbLcd {
         stop: &AtomicBool,
         fps: f32,
     ) -> Result<()> {
-        if !self.core.initialized || self.core.needs_init() {
-            self.do_init()?;
-        }
-        self.core.apply_stream_fps(fps)?;
+        self.prepare_stream(stop, fps)?;
         self.core
             .stream_h264_reader(reader, stop, self.core.screen().play_count, 0)
     }
