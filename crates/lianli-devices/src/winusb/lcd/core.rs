@@ -689,6 +689,8 @@ pub(crate) struct WinUsbLcdCore {
     last_telemetry_query: Option<Instant>,
     /// Earliest retry after a GetH2Params exchange that produced no reading.
     telemetry_retry_at: Option<Instant>,
+    /// Reading the drain-held debug line was last logged for.
+    drain_stale_logged: Option<Instant>,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -778,6 +780,7 @@ impl WinUsbLcdCore {
             last_chunk_resend: None,
             last_telemetry_query: None,
             telemetry_retry_at: None,
+            drain_stale_logged: None,
         })
     }
 
@@ -808,6 +811,7 @@ impl WinUsbLcdCore {
             last_chunk_resend: None,
             last_telemetry_query: None,
             telemetry_retry_at: None,
+            drain_stale_logged: None,
         }
     }
 
@@ -1323,10 +1327,14 @@ impl WinUsbLcdCore {
                 Some(level) if level <= threshold => return Some(level),
                 Some(level) => {
                     last = Some(level);
-                    // A drain from level 4 takes several seconds once the
-                    // feed backs up; keep telemetry live through it.
+                    // Poll as soon as the drain is back at level 3 rather than
+                    // after it reaches the threshold. Level 4 and up still
+                    // sends nothing (`stream_telemetry_due`): if the panel
+                    // holds level 4 past the 5 s consumer grace, readings
+                    // expire. Seen only when the encoder outruns the panel.
                     if self.transport.is_streaming() {
                         self.query_stream_telemetry(level);
+                        self.note_drain_holding_telemetry(level);
                     }
                     std::thread::sleep(WAIT_BUFFER_POLL)
                 }
@@ -1578,6 +1586,25 @@ impl WinUsbLcdCore {
                 warn!("GetH2Params write between chunks failed: {e}");
                 self.telemetry_retry_at = Some(Instant::now() + STREAM_TELEMETRY_RETRY);
             }
+        }
+    }
+
+    /// Debug aid: log once per stale period when a drain at level 4+ keeps
+    /// the last reading from refreshing.
+    fn note_drain_holding_telemetry(&mut self, level: u8) {
+        const NEAR_EXPIRY: Duration = Duration::from_secs(4);
+        if level <= STREAM_TELEMETRY_MAX_LEVEL || !self.transport.stream_telemetry_requested() {
+            return;
+        }
+        let Some(age) = self.last_telemetry_query.map(|at| at.elapsed()) else {
+            return;
+        };
+        if age >= NEAR_EXPIRY && self.drain_stale_logged != self.last_telemetry_query {
+            self.drain_stale_logged = self.last_telemetry_query;
+            debug!(
+                "GetH2Params held by drain at level {level}: last reading {} ms ago",
+                age.as_millis()
+            );
         }
     }
 
