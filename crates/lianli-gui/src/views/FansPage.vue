@@ -8,7 +8,7 @@ import { useDeviceNamesStore } from "@/stores/deviceNames";
 import FanCurveEditor from "@/components/fans/FanCurveEditor.vue";
 import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
-import type { SensorSource, DeviceInfo, FanCurve, FanGroup } from "@/types";
+import type { SensorSource, DeviceInfo, FanGroup } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate, type MessageKey } from "@/i18n";
@@ -124,19 +124,6 @@ function fanGroupUsers(name: string): string[] {
 
 const curveUsers = computed(() => (current.value?.name && config.fanCurveRuns(current.value) ? fanGroupUsers(current.value.name) : []));
 
-function aioUsesCurve(name: string): boolean {
-  return Object.entries(config.config.aio).some(([deviceId, aio]) => {
-    const device = devices.byId(deviceId);
-    if (!device) return aio.pump_target_rpm === name || aio.fan_speeds.includes(name);
-    return (device.has_pump && aio.pump_target_rpm === name) || aio.fan_speeds.slice(0, device.fan_count ?? 0).includes(name);
-  });
-}
-
-function curveInUse(curve: FanCurve): boolean {
-  if (isSpeedModeKey(curve.name) || config.fanCurveNameShared(curve)) return false;
-  return fanCfg.value.speeds.some((group) => curveSlotCount(group, curve.name) > 0) || aioUsesCurve(curve.name);
-}
-
 const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, true, true));
 
 function onCurveChange(value: [number, number][]) {
@@ -166,7 +153,7 @@ function removeCurve(idx: number) {
   const name = curve.name || t("fans.page.curveFallbackName");
   dialog.error({
     title: t("fans.page.deleteCurveTitle"),
-    content: t(curveInUse(curve) ? "fans.page.deleteCurveInUseContent" : "fans.page.deleteCurveContent", { name }),
+    content: t(config.fanCurveReferenced(curve) ? "fans.page.deleteCurveInUseContent" : "fans.page.deleteCurveContent", { name }),
     positiveText: t("common.delete"),
     negativeText: t("common.cancel"),
     onPositiveClick: () => {

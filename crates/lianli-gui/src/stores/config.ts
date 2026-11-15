@@ -207,6 +207,14 @@ export const useConfigStore = defineStore("config", () => {
     return sameName[sameName.length - 1] === curve;
   }
 
+  // Every fan and AIO slot naming the curve, active or not. A shared name falls back to the other copy.
+  function fanCurveReferenced(curve: FanCurve): boolean {
+    if (isSpeedModeKey(curve.name) || fanCurveNameShared(curve)) return false;
+    const named = (speed: FanSpeed) => speed === curve.name;
+    return (config.fans?.speeds ?? []).some((group) => group.speeds.some(named))
+      || Object.values(config.aio).some((aio) => named(aio.pump_target_rpm) || aio.fan_speeds.some(named));
+  }
+
   function renameFanCurve(curve: FanCurve, name: string) {
     const previous = curve.name;
     if (previous === name) return;
@@ -265,6 +273,7 @@ export const useConfigStore = defineStore("config", () => {
     curveNames,
     fanCurveNameShared,
     fanCurveRuns,
+    fanCurveReferenced,
     renameFanCurve,
     addLcd,
     addFanCurve,
