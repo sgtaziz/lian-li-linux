@@ -207,8 +207,8 @@ export const useConfigStore = defineStore("config", () => {
   function renameFanCurve(curve: FanCurve, name: string) {
     const previous = curve.name;
     if (previous === name) return;
-    const modeKey = isSpeedModeKey(previous);
-    const follow = (speed: FanSpeed) => (!modeKey && speed === previous ? name : speed);
+    const ambiguous = isSpeedModeKey(previous) || config.fan_curves.some((c) => c !== curve && c.name === previous);
+    const follow = (speed: FanSpeed) => (!ambiguous && speed === previous ? name : speed);
     for (const group of config.fans?.speeds ?? []) {
       group.speeds = group.speeds.map(follow);
     }

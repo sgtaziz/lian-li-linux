@@ -143,7 +143,7 @@ function addCurve() {
 
 function removeCurve(idx: number) {
   const name = curves.value[idx]?.name ?? t("fans.page.curveFallbackName");
-  const inUse = config.fanCurveInUse(name);
+  const inUse = config.fanCurveInUse(name) && curves.value.filter((c) => c.name === name).length === 1;
   dialog.error({
     title: t("fans.page.deleteCurveTitle"),
     content: t(inUse ? "fans.page.deleteCurveInUseContent" : "fans.page.deleteCurveContent", { name }),
