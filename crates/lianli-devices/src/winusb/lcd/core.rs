@@ -1,6 +1,6 @@
 use super::playback::{LcdTransferInterrupted, PlaybackState};
 use super::ring::{RingDelivery, RingKey};
-use crate::crypto::PacketBuilder;
+use crate::crypto::{PacketBuilder, CMD_GET_H2_PARAMS, CMD_PUSH_RGB_DATA, CMD_SYNC_PUMP_FAN};
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
 use lianli_transport::usb::{RusbBulk, EP_IN, EP_OUT};
@@ -571,17 +571,12 @@ const CONTROL_SAFE_LEVEL: u8 = 1;
 /// waited `CONTROL_RELAX_AFTER`.
 const CONTROL_RELAXED_LEVEL: u8 = 2;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
-/// L-Connect's GetH2Params cadence: every 7th tick of its 330 ms message loop.
+/// L-Connect polls every 7th tick of its 330 ms loop, at any buffer level.
 const STREAM_TELEMETRY_INTERVAL: Duration = Duration::from_millis(2_310);
 const TELEMETRY_REQUEST_WINDOW: Duration = Duration::from_secs(5);
-
-fn stream_telemetry_due(level: u8, since_last: Duration) -> bool {
-    match level {
-        level if level <= CONTROL_SAFE_LEVEL => since_last >= STREAM_TELEMETRY_INTERVAL,
-        level if level <= CONTROL_RELAXED_LEVEL => since_last >= CONTROL_RELAX_AFTER,
-        _ => false,
-    }
-}
+/// One tick of L-Connect's 330 ms message loop.
+const STREAM_TELEMETRY_RETRY: Duration = Duration::from_millis(330);
+const STREAM_TELEMETRY_SECOND_READ: Duration = Duration::from_millis(200);
 
 const REOPEN_DELAY: Duration = Duration::from_millis(100);
 /// Gap between the wake-preamble commands (StopPlay, StopClock, GetVer).
@@ -650,8 +645,12 @@ fn logged_response(
     }
 }
 
+/// The H2 control channel shares this pipe, and its late replies carry no buffer level.
 fn buffer_level(response: &[u8]) -> Option<u8> {
-    response.get(8).copied()
+    match response.first()? {
+        &CMD_GET_H2_PARAMS | &CMD_SYNC_PUMP_FAN | &CMD_PUSH_RGB_DATA => None,
+        _ => response.get(8).copied(),
+    }
 }
 
 pub(crate) struct WinUsbLcdCore {
@@ -674,6 +673,7 @@ pub(crate) struct WinUsbLcdCore {
     resend_stalled_chunk: bool,
     last_chunk_resend: Option<Instant>,
     last_telemetry_query: Option<Instant>,
+    telemetry_retry_at: Option<Instant>,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -762,6 +762,7 @@ impl WinUsbLcdCore {
             resend_stalled_chunk: true,
             last_chunk_resend: None,
             last_telemetry_query: None,
+            telemetry_retry_at: None,
         })
     }
 
@@ -791,6 +792,7 @@ impl WinUsbLcdCore {
             resend_stalled_chunk: true,
             last_chunk_resend: None,
             last_telemetry_query: None,
+            telemetry_retry_at: None,
         }
     }
 
@@ -1322,6 +1324,9 @@ impl WinUsbLcdCore {
                 Some(level) if level <= threshold => return Some(level),
                 Some(level) => {
                     last = Some(level);
+                    if self.transport.is_streaming() {
+                        self.query_stream_telemetry(level);
+                    }
                     std::thread::sleep(WAIT_BUFFER_POLL)
                 }
                 None => {
@@ -1385,6 +1390,8 @@ impl WinUsbLcdCore {
             Ok(_) => debug!("No reply to deferred {} (timeout)", cmd.label),
             Err(e) => debug!("Reply read after deferred {} failed: {e}", cmd.label),
         }
+        // A reply later than reply_wait would reach the next exchange.
+        transport.read_flush();
         Ok(())
     }
 
@@ -1532,27 +1539,88 @@ impl WinUsbLcdCore {
 
     /// L-Connect polls GetH2Params throughout H.264 playback.
     fn query_stream_telemetry(&mut self, level: u8) {
+        if !self.transport.stream_telemetry_requested() {
+            return;
+        }
         let now = Instant::now();
+        if self.telemetry_retry_at.is_some_and(|at| now < at) {
+            return;
+        }
+        // Counted from the last parsed reading, since consumers drop one after 5 s.
         let since_last = self
             .last_telemetry_query
             .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
-        if !self.transport.stream_telemetry_requested() || !stream_telemetry_due(level, since_last)
-        {
+        if since_last < STREAM_TELEMETRY_INTERVAL {
             return;
         }
-        self.last_telemetry_query = Some(now);
         let header = self.builder.get_h2_params_header_winusb();
+        match self.h2_params_exchange(&header) {
+            Ok(Some(params)) => {
+                debug!(
+                    "GetH2Params between chunks: reading (level {level}, previous {} ms ago)",
+                    since_last.as_millis()
+                );
+                *self.transport.stream_telemetry.lock() = Some(params);
+                self.last_telemetry_query = Some(Instant::now());
+                self.telemetry_retry_at = None;
+            }
+            Ok(None) => self.note_telemetry_miss(),
+            Err(e) => {
+                warn!("GetH2Params write between chunks failed: {e}");
+                self.note_telemetry_miss();
+            }
+        }
+    }
+
+    /// An exchange can block the stream for a full read timeout, so only one quick retry.
+    fn note_telemetry_miss(&mut self) {
+        let now = Instant::now();
+        if self.telemetry_retry_at.take().is_some() {
+            self.last_telemetry_query = Some(now);
+        } else {
+            self.telemetry_retry_at = Some(now + STREAM_TELEMETRY_RETRY);
+        }
+    }
+
+    /// The reply often queues behind a late reply to an earlier command.
+    fn h2_params_exchange(
+        &self,
+        header: &[u8],
+    ) -> std::result::Result<
+        Option<crate::winusb::h2_aio::H2Params>,
+        lianli_transport::TransportError,
+    > {
+        let bulk = self.transport.lock();
+        bulk.write_full(header, self.write_timeout)?;
         let mut reply = [0u8; 512];
-        match self.tx_exchange(&header, &mut reply) {
-            Ok(Ok(n)) => {
-                match crate::winusb::h2_aio::parse_h2_params(&reply[..n], Instant::now()) {
-                    Some(params) => *self.transport.stream_telemetry.lock() = Some(params),
-                    None => debug!("GetH2Params between chunks read another reply ({n} bytes)"),
+        let mut parsed = None;
+        for (attempt, wait) in [self.read_timeout, STREAM_TELEMETRY_SECOND_READ]
+            .into_iter()
+            .enumerate()
+        {
+            match bulk.read(&mut reply, wait) {
+                Ok(n) => {
+                    parsed = crate::winusb::h2_aio::parse_h2_params(&reply[..n], Instant::now());
+                    if parsed.is_some() {
+                        break;
+                    }
+                    debug!(
+                        "GetH2Params between chunks read another reply ({n} bytes, cmd {:#04x}, read {})",
+                        reply.first().copied().unwrap_or(0),
+                        attempt + 1
+                    );
+                }
+                Err(e) => {
+                    debug!(
+                        "GetH2Params read between chunks failed (read {}): {e}",
+                        attempt + 1
+                    );
+                    break;
                 }
             }
-            Ok(Err(e)) => debug!("GetH2Params read between chunks failed: {e}"),
-            Err(e) => warn!("GetH2Params write between chunks failed: {e}"),
         }
+        bulk.read_flush();
+        Ok(parsed)
     }
 
     /// Mark the start of an H.264 stream: control writers defer to us.
@@ -1563,6 +1631,7 @@ impl WinUsbLcdCore {
     /// packet mid stream.
     fn stream_begin(&mut self) {
         self.last_telemetry_query = Some(Instant::now());
+        self.telemetry_retry_at = None;
         let _bulk = self.transport.lock();
         self.transport.set_streaming(true);
     }
@@ -1864,28 +1933,6 @@ fn flex_opening_packets(builder: &mut PacketBuilder, screen: &ScreenInfo) -> Res
 }
 
 #[cfg(test)]
-mod stream_telemetry_tests {
-    use super::{stream_telemetry_due, CONTROL_RELAX_AFTER, STREAM_TELEMETRY_INTERVAL};
-    use std::time::Duration;
-
-    #[test]
-    fn queries_only_when_the_panel_buffer_has_headroom() {
-        let long = Duration::from_secs(60);
-        assert!(stream_telemetry_due(0, STREAM_TELEMETRY_INTERVAL));
-        assert!(stream_telemetry_due(1, STREAM_TELEMETRY_INTERVAL));
-        assert!(!stream_telemetry_due(
-            1,
-            STREAM_TELEMETRY_INTERVAL - Duration::from_millis(1)
-        ));
-        assert!(!stream_telemetry_due(2, STREAM_TELEMETRY_INTERVAL));
-        assert!(stream_telemetry_due(2, CONTROL_RELAX_AFTER));
-        for level in 3..=5 {
-            assert!(!stream_telemetry_due(level, long));
-        }
-    }
-}
-
-#[cfg(test)]
 mod flex_opening_tests {
     use super::*;
     use des::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
@@ -2139,6 +2186,24 @@ mod h264_negotiation_tests {
             super::buffer_level(&super::LcdResponse { bytes, length: 9 }),
             Some(0)
         );
+    }
+
+    #[test]
+    fn h2_control_replies_give_no_buffer_credit() {
+        for opcode in [
+            crate::crypto::CMD_GET_H2_PARAMS,
+            crate::crypto::CMD_SYNC_PUMP_FAN,
+            crate::crypto::CMD_PUSH_RGB_DATA,
+        ] {
+            let mut reply = [0u8; 32];
+            reply[0] = opcode;
+            reply[8] = 1;
+            assert_eq!(super::buffer_level(&reply), None);
+        }
+        let mut chunk_ack = [0u8; 32];
+        chunk_ack[0] = crate::crypto::CMD_START_PLAY;
+        chunk_ack[8] = 1;
+        assert_eq!(super::buffer_level(&chunk_ack), Some(1));
     }
     use super::*;
 
