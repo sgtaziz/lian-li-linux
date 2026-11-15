@@ -204,14 +204,15 @@ export const useConfigStore = defineStore("config", () => {
   function renameFanCurve(curve: FanCurve, name: string) {
     const previous = curve.name;
     if (previous === name) return;
-    const ambiguous = isSpeedModeKey(previous) || fanCurveNameShared(curve);
-    const follow = (speed: FanSpeed) => (!ambiguous && speed === previous ? name : speed);
-    for (const group of config.fans?.speeds ?? []) {
-      group.speeds = group.speeds.map(follow);
-    }
-    for (const aio of Object.values(config.aio)) {
-      aio.pump_target_rpm = follow(aio.pump_target_rpm);
-      aio.fan_speeds = aio.fan_speeds.map(follow);
+    if (!isSpeedModeKey(previous) && !fanCurveNameShared(curve)) {
+      const follow = (speed: FanSpeed) => (speed === previous ? name : speed);
+      for (const group of config.fans?.speeds ?? []) {
+        if (group.speeds.includes(previous)) group.speeds = group.speeds.map(follow);
+      }
+      for (const aio of Object.values(config.aio)) {
+        if (aio.pump_target_rpm === previous) aio.pump_target_rpm = name;
+        if (aio.fan_speeds.includes(previous)) aio.fan_speeds = aio.fan_speeds.map(follow);
+      }
     }
     curve.name = name;
     markDirty();
