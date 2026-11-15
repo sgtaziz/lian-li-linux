@@ -264,6 +264,7 @@ export const useConfigStore = defineStore("config", () => {
     aioConfigFor,
     curveNames,
     fanCurveNameShared,
+    fanCurveRuns,
     renameFanCurve,
     addLcd,
     addFanCurve,

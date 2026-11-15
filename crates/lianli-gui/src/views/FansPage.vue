@@ -8,11 +8,11 @@ import { useDeviceNamesStore } from "@/stores/deviceNames";
 import FanCurveEditor from "@/components/fans/FanCurveEditor.vue";
 import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
-import type { SensorSource, DeviceInfo, FanCurve } from "@/types";
+import type { SensorSource, DeviceInfo, FanCurve, FanGroup } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate, type MessageKey } from "@/i18n";
-import { decodeSpeedMode, fillSlots, isMbSyncGroup, isReservedCurveName, isSpeedModeKey, speedModeOf } from "@/components/fans/speedMode";
+import { decodeSpeedMode, fillSlots, groupRunsCurves, isReservedCurveName, isSpeedModeKey, speedModeOf } from "@/components/fans/speedMode";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
@@ -104,20 +104,25 @@ function applyToAllFans(value: string) {
 }
 
 const fanLabels = computed(() => devices.labels);
+function curveSlotCount(group: FanGroup, name: string): number {
+  if (isSpeedModeKey(name) || !groupRunsCurves(group)) return 0;
+  const device = group.device_id ? devices.byId(group.device_id) : undefined;
+  const slots = device ? group.speeds.slice(0, device.fan_count ?? 1) : group.speeds;
+  return slots.filter((speed) => speed === name).length;
+}
+
 function fanGroupUsers(name: string): string[] {
   return fanCfg.value.speeds.flatMap((group) => {
-    if (isMbSyncGroup(group.speeds)) return [];
-    const device = group.device_id ? devices.byId(group.device_id) : undefined;
-    const slots = device ? group.speeds.slice(0, device.fan_count ?? 1) : group.speeds;
-    const count = slots.filter((speed) => speed === name).length;
+    const count = curveSlotCount(group, name);
     if (!count) return [];
+    const device = group.device_id ? devices.byId(group.device_id) : undefined;
     if (!device) return [t("fans.page.curveUserOffline", { device: group.device_id ?? t("fans.page.unknownDevice") })];
     const label = names.label(device.device_id, fanLabels.value.get(device.device_id) ?? device.name);
     return [t(count === 1 ? "fans.page.curveUserOneFan" : "fans.page.curveUserFans", { label, count })];
   });
 }
 
-const curveUsers = computed(() => (current.value?.name ? fanGroupUsers(current.value.name) : []));
+const curveUsers = computed(() => (current.value?.name && config.fanCurveRuns(current.value) ? fanGroupUsers(current.value.name) : []));
 
 function aioUsesCurve(name: string): boolean {
   return Object.entries(config.config.aio).some(([deviceId, aio]) => {
@@ -129,7 +134,7 @@ function aioUsesCurve(name: string): boolean {
 
 function curveInUse(curve: FanCurve): boolean {
   if (isSpeedModeKey(curve.name) || config.fanCurveNameShared(curve)) return false;
-  return fanGroupUsers(curve.name).length > 0 || aioUsesCurve(curve.name);
+  return fanCfg.value.speeds.some((group) => curveSlotCount(group, curve.name) > 0) || aioUsesCurve(curve.name);
 }
 
 const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, true, true));
