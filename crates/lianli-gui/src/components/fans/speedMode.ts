@@ -44,5 +44,5 @@ export function groupRunsCurves(group: FanGroup): boolean {
 
 // Stricter than the daemon so new names never look like MB Sync in the GUI.
 export function isReservedCurveName(name: string): boolean {
-  return isSpeedModeKey(name) || name.startsWith(MB_SYNC_KEY);
+  return name === "off" || name.startsWith(MB_SYNC_KEY);
 }
