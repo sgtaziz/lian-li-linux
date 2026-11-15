@@ -570,8 +570,17 @@ const CONTROL_SAFE_LEVEL: u8 = 1;
 /// Panels can hold level 3 for minutes, which would starve SyncPumpFan.
 const CONTROL_RELAXED_LEVEL: u8 = 3;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
+/// L-Connect's SyncPumpFan cadence; the firmware wedges under faster writes.
+const CONTROL_MIN_GAP: Duration = Duration::from_millis(3_600);
 
-fn control_send_allowed(level: Option<u8>, oldest_wait: Option<Duration>) -> bool {
+fn control_send_allowed(
+    level: Option<u8>,
+    oldest_wait: Option<Duration>,
+    since_last_send: Option<Duration>,
+) -> bool {
+    if since_last_send.is_some_and(|gap| gap < CONTROL_MIN_GAP) {
+        return false;
+    }
     match level {
         Some(l) if l <= CONTROL_SAFE_LEVEL => true,
         Some(l) if l <= CONTROL_RELAXED_LEVEL => {
@@ -683,6 +692,7 @@ pub(crate) struct WinUsbLcdCore {
     last_chunk_resend: Option<Instant>,
     last_telemetry_query: Option<Instant>,
     telemetry_retry_at: Option<Instant>,
+    last_control_send: Option<Instant>,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -772,6 +782,7 @@ impl WinUsbLcdCore {
             last_chunk_resend: None,
             last_telemetry_query: None,
             telemetry_retry_at: None,
+            last_control_send: None,
         })
     }
 
@@ -802,6 +813,7 @@ impl WinUsbLcdCore {
             last_chunk_resend: None,
             last_telemetry_query: None,
             telemetry_retry_at: None,
+            last_control_send: None,
         }
     }
 
@@ -1354,9 +1366,15 @@ impl WinUsbLcdCore {
         if !self.transport.has_play_safe_pending() {
             return;
         }
-        if !control_send_allowed(level, self.transport.oldest_play_safe_age()) {
+        let since_last_send = self.last_control_send.map(|at| at.elapsed());
+        if !control_send_allowed(
+            level,
+            self.transport.oldest_play_safe_age(),
+            since_last_send,
+        ) {
             return;
         }
+        self.last_control_send = Some(Instant::now());
         for cmd in self.transport.take_play_safe() {
             debug!(
                 "Sending deferred {} ({} bytes, waited {} ms, level {:?})",
@@ -2082,11 +2100,20 @@ mod file_stream_tests {
         use std::time::Duration;
         let fresh = Some(Duration::from_millis(500));
         let overdue = Some(CONTROL_RELAX_AFTER);
-        assert!(control_send_allowed(Some(1), fresh));
-        assert!(!control_send_allowed(Some(3), fresh));
-        assert!(control_send_allowed(Some(3), overdue));
-        assert!(!control_send_allowed(Some(4), overdue));
-        assert!(!control_send_allowed(None, overdue));
+        assert!(control_send_allowed(Some(1), fresh, None));
+        assert!(!control_send_allowed(Some(3), fresh, None));
+        assert!(control_send_allowed(Some(3), overdue, None));
+        assert!(!control_send_allowed(Some(4), overdue, None));
+        assert!(!control_send_allowed(None, overdue, None));
+    }
+    #[test]
+    fn cooling_commands_keep_l_connect_spacing_while_streaming() {
+        use super::{control_send_allowed, CONTROL_MIN_GAP};
+        use std::time::Duration;
+        let queued = Some(Duration::from_millis(100));
+        let just_sent = Some(CONTROL_MIN_GAP - Duration::from_millis(1));
+        assert!(!control_send_allowed(Some(0), queued, just_sent));
+        assert!(control_send_allowed(Some(0), queued, Some(CONTROL_MIN_GAP)));
     }
     use super::*;
     use std::io::Cursor;

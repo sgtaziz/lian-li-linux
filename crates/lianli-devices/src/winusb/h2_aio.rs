@@ -472,9 +472,12 @@ impl H2AioController {
         }
         // Firmware wedges under frequent writes; retain its 3.6s refresh cadence.
         // A rising full-speed target must bypass the jitter deadband for safety.
-        if self.last_sync.lock().is_some_and(|(at, pump, fans)| {
-            !pwm_refresh_due(at.elapsed(), pump, fans, pump_duty, fan_duties)
-        }) {
+        // While streaming, the stream thread paces sends from the last one it wrote.
+        if !self.transport.is_streaming()
+            && self.last_sync.lock().is_some_and(|(at, pump, fans)| {
+                !pwm_refresh_due(at.elapsed(), pump, fans, pump_duty, fan_duties)
+            })
+        {
             return Ok(());
         }
         let pump_pwm = self.duty_to_pwm(pump_duty);
