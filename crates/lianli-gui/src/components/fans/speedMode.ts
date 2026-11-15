@@ -25,3 +25,7 @@ export function decodeSpeedMode(value: string): FanSpeed {
 export function fillSlots(group: FanGroup, value: FanSpeed) {
   group.speeds = [value, value, value, value] as FanSlots;
 }
+
+export function isReservedCurveName(name: string): boolean {
+  return name === "" || name === "off" || name.startsWith(MB_SYNC_KEY);
+}

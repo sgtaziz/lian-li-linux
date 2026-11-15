@@ -12,7 +12,7 @@ import type { SensorSource, DeviceInfo } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate, type MessageKey } from "@/i18n";
-import { decodeSpeedMode, fillSlots, speedModeOf } from "@/components/fans/speedMode";
+import { decodeSpeedMode, fillSlots, isReservedCurveName, speedModeOf } from "@/components/fans/speedMode";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
@@ -162,7 +162,7 @@ function removeCurve(idx: number) {
 
 function curveNameError(name: string): MessageKey | null {
   if (!name) return "fans.page.curveNameEmpty";
-  if (name === "off" || name.startsWith(MB_SYNC_KEY)) return "fans.page.curveNameReserved";
+  if (isReservedCurveName(name)) return "fans.page.curveNameReserved";
   if (curves.value.some((c) => c !== current.value && c.name === name)) return "fans.page.curveNameTaken";
   return null;
 }

@@ -4,6 +4,7 @@ import { LCD_TEMPLATES_CHANGED_EVENT } from "@/stores/lcd";
 import { computed, reactive, ref } from "vue";
 import { useIpc } from "@/composables/useIpc";
 import { tr } from "@/i18n";
+import { isReservedCurveName } from "@/components/fans/speedMode";
 import type {
   AppConfig,
   LcdTemplate,
@@ -197,6 +198,7 @@ export const useConfigStore = defineStore("config", () => {
   }
 
   function fanCurveInUse(name: string): boolean {
+    if (isReservedCurveName(name)) return false;
     const fanSpeeds = (config.fans?.speeds ?? []).flatMap((group) => group.speeds);
     const aioSpeeds = Object.values(config.aio).flatMap((aio) => [aio.pump_target_rpm, ...aio.fan_speeds]);
     return [...fanSpeeds, ...aioSpeeds].includes(name);
@@ -205,7 +207,8 @@ export const useConfigStore = defineStore("config", () => {
   function renameFanCurve(curve: FanCurve, name: string) {
     const previous = curve.name;
     if (previous === name) return;
-    const follow = (speed: FanSpeed) => (speed === previous ? name : speed);
+    const reserved = isReservedCurveName(previous);
+    const follow = (speed: FanSpeed) => (!reserved && speed === previous ? name : speed);
     for (const group of config.fans?.speeds ?? []) {
       group.speeds = group.speeds.map(follow);
     }
