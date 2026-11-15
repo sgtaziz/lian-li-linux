@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useDialog } from "naive-ui";
+import { useDialog, useMessage } from "naive-ui";
 import { Plus, X } from "lucide-vue-next";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
@@ -11,13 +11,14 @@ import SensorSelect from "@/components/common/SensorSelect.vue";
 import type { SensorSource, DeviceInfo } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
-import { useTranslate } from "@/i18n";
+import { useTranslate, type MessageKey } from "@/i18n";
 import { decodeSpeedMode, fillSlots, speedModeOf } from "@/components/fans/speedMode";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
 const names = useDeviceNamesStore();
 const dialog = useDialog();
+const message = useMessage();
 const t = useTranslate();
 
 const selectedCurve = ref(0);
@@ -157,8 +158,32 @@ function removeCurve(idx: number) {
   });
 }
 
-function renameCurve(name: string) {
+function curveNameError(name: string): MessageKey | null {
+  if (!name) return "fans.page.curveNameEmpty";
+  if (name === "off" || name.startsWith(MB_SYNC_KEY)) return "fans.page.curveNameReserved";
+  if (curves.value.some((c) => c !== current.value && c.name === name)) return "fans.page.curveNameTaken";
+  return null;
+}
+
+const nameError = computed(() => {
+  const name = nameBuffer.value.trim();
+  return name === current.value?.name ? null : curveNameError(name);
+});
+
+function renameCurve(input: string) {
   if (!current.value) return;
+  const name = input.trim();
+  if (name === current.value.name) {
+    nameBuffer.value = name;
+    return;
+  }
+  const error = curveNameError(name);
+  if (error) {
+    message.warning(t(error, { name }));
+    nameBuffer.value = current.value.name;
+    return;
+  }
+  nameBuffer.value = name;
   config.renameFanCurve(current.value, name);
 }
 
@@ -269,6 +294,7 @@ function onHysteresisPwm(percent: number | null) {
             <n-input
               size="small"
               v-model:value="nameBuffer"
+              :status="nameError ? 'error' : undefined"
               @blur="renameCurve(nameBuffer)"
               :placeholder="t('fans.page.curveNamePlaceholder')"
             />
