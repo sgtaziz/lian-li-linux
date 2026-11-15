@@ -567,10 +567,19 @@ pub type SharedTransport = Arc<LcdLink>;
 
 /// Buffer level at or below which queued control commands go out right away.
 const CONTROL_SAFE_LEVEL: u8 = 1;
-/// If the panel never drains that far, accept this level once a command has
-/// waited `CONTROL_RELAX_AFTER`.
-const CONTROL_RELAXED_LEVEL: u8 = 2;
+/// Panels can hold level 3 for minutes, which would starve SyncPumpFan.
+const CONTROL_RELAXED_LEVEL: u8 = 3;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
+
+fn control_send_allowed(level: Option<u8>, oldest_wait: Option<Duration>) -> bool {
+    match level {
+        Some(l) if l <= CONTROL_SAFE_LEVEL => true,
+        Some(l) if l <= CONTROL_RELAXED_LEVEL => {
+            oldest_wait.is_some_and(|wait| wait >= CONTROL_RELAX_AFTER)
+        }
+        _ => false,
+    }
+}
 /// L-Connect polls every 7th tick of its 330 ms loop, at any buffer level.
 const STREAM_TELEMETRY_INTERVAL: Duration = Duration::from_millis(2_310);
 const TELEMETRY_REQUEST_WINDOW: Duration = Duration::from_secs(5);
@@ -1345,15 +1354,7 @@ impl WinUsbLcdCore {
         if !self.transport.has_play_safe_pending() {
             return;
         }
-        let safe = match level {
-            Some(l) if l <= CONTROL_SAFE_LEVEL => true,
-            Some(l) if l <= CONTROL_RELAXED_LEVEL => self
-                .transport
-                .oldest_play_safe_age()
-                .is_some_and(|age| age >= CONTROL_RELAX_AFTER),
-            _ => false,
-        };
-        if !safe {
+        if !control_send_allowed(level, self.transport.oldest_play_safe_age()) {
             return;
         }
         for cmd in self.transport.take_play_safe() {
@@ -2074,6 +2075,18 @@ mod file_stream_tests {
             assert_eq!(queue[0].queued_at, now);
         }
         assert!(now + Duration::from_secs(4) - queue[0].queued_at >= CONTROL_RELAX_AFTER);
+    }
+    #[test]
+    fn cooling_commands_reach_a_panel_holding_level_three() {
+        use super::{control_send_allowed, CONTROL_RELAX_AFTER};
+        use std::time::Duration;
+        let fresh = Some(Duration::from_millis(500));
+        let overdue = Some(CONTROL_RELAX_AFTER);
+        assert!(control_send_allowed(Some(1), fresh));
+        assert!(!control_send_allowed(Some(3), fresh));
+        assert!(control_send_allowed(Some(3), overdue));
+        assert!(!control_send_allowed(Some(4), overdue));
+        assert!(!control_send_allowed(None, overdue));
     }
     use super::*;
     use std::io::Cursor;
