@@ -201,10 +201,16 @@ export const useConfigStore = defineStore("config", () => {
     return config.fan_curves.some((c) => c !== curve && c.name === curve.name);
   }
 
+  // The daemon keys curves by name, so the last curve with a given name is the one that runs.
+  function fanCurveRuns(curve: FanCurve): boolean {
+    const sameName = config.fan_curves.filter((c) => c.name === curve.name);
+    return sameName[sameName.length - 1] === curve;
+  }
+
   function renameFanCurve(curve: FanCurve, name: string) {
     const previous = curve.name;
     if (previous === name) return;
-    if (!isSpeedModeKey(previous) && !fanCurveNameShared(curve)) {
+    if (!isSpeedModeKey(previous) && fanCurveRuns(curve)) {
       const follow = (speed: FanSpeed) => (speed === previous ? name : speed);
       for (const group of config.fans?.speeds ?? []) {
         if (group.speeds.includes(previous)) group.speeds = group.speeds.map(follow);
