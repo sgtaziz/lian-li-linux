@@ -197,17 +197,14 @@ export const useConfigStore = defineStore("config", () => {
     return config.fan_curves.map((c) => c.name);
   }
 
-  function fanCurveInUse(name: string): boolean {
-    if (isSpeedModeKey(name)) return false;
-    const fanSpeeds = (config.fans?.speeds ?? []).flatMap((group) => group.speeds);
-    const aioSpeeds = Object.values(config.aio).flatMap((aio) => [aio.pump_target_rpm, ...aio.fan_speeds]);
-    return [...fanSpeeds, ...aioSpeeds].includes(name);
+  function fanCurveNameShared(curve: FanCurve): boolean {
+    return config.fan_curves.some((c) => c !== curve && c.name === curve.name);
   }
 
   function renameFanCurve(curve: FanCurve, name: string) {
     const previous = curve.name;
     if (previous === name) return;
-    const ambiguous = isSpeedModeKey(previous) || config.fan_curves.some((c) => c !== curve && c.name === previous);
+    const ambiguous = isSpeedModeKey(previous) || fanCurveNameShared(curve);
     const follow = (speed: FanSpeed) => (!ambiguous && speed === previous ? name : speed);
     for (const group of config.fans?.speeds ?? []) {
       group.speeds = group.speeds.map(follow);
@@ -259,7 +256,7 @@ export const useConfigStore = defineStore("config", () => {
     presetsFor,
     aioConfigFor,
     curveNames,
-    fanCurveInUse,
+    fanCurveNameShared,
     renameFanCurve,
     addLcd,
     addFanCurve,
