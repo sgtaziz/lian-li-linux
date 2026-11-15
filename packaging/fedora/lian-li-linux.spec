@@ -1,5 +1,5 @@
 Name:           lian-li-linux
-Version:        1.2.6
+Version:        1.2.8
 Release:        1%{?dist}
 Summary:        Open-source Linux replacement for L-Connect 3
 

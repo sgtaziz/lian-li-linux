@@ -12,7 +12,7 @@ pub use ffmpeg::{cap_fps_to_source, probe_source_fps};
 pub use h264::encode_h264;
 pub use h264::encode_h264_with_status;
 pub use h264_inprocess::{ensure_ffmpeg_initialized, H264Encoder};
-pub use h264_live::LiveH264Encoder;
+pub use h264_live::{LiveH264Encoder, LiveH264Output};
 
 use crate::common::{
     apply_orientation, encode_jpeg_with, render_dimensions, JpegQualityMemo, MediaError,

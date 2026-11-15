@@ -19,6 +19,7 @@ pub const CMD_PUSH_JPG: u8 = 0x65;
 pub const CMD_PUSH_PNG: u8 = 0x66;
 pub const CMD_CLEAR_PNG: u8 = 0x67;
 pub const CMD_HIDE_SHOW_FRAMES: u8 = 0x68;
+pub const CMD_LOCAL_PLAYER_STATE: u8 = 0x70;
 pub const CMD_START_PLAY: u8 = 0x79;
 pub const CMD_QUERY_BLOCK: u8 = 0x7A;
 pub const CMD_STOP_PLAY: u8 = 0x7B;
@@ -258,6 +259,10 @@ impl PacketBuilder {
 
     pub fn query_buffer_level_header_winusb(&mut self) -> Vec<u8> {
         self.build_winusb(CMD_QUERY_BLOCK, &[])
+    }
+
+    pub fn local_player_state_header_winusb(&mut self) -> Vec<u8> {
+        self.build_winusb(CMD_LOCAL_PLAYER_STATE, &[])
     }
 
     pub fn stop_play_header_winusb(&mut self) -> Vec<u8> {
