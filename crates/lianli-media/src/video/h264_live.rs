@@ -4,10 +4,10 @@ use super::h264::{
 use crate::common::MediaError;
 use lianli_shared::screen::ScreenInfo;
 use parking_lot::Mutex;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -140,6 +140,96 @@ fn grow_pipe(fd: i32, frame_bytes: usize) {
     }
 }
 
+/// A frame starts at a slice NAL (type 1 or 5) whose first_mb_in_slice ue(v) is 0, a leading 1 bit.
+#[derive(Default)]
+struct FrameStarts {
+    zeros: u8,
+    state: NalState,
+}
+
+#[derive(Default, Clone, Copy)]
+enum NalState {
+    #[default]
+    Scan,
+    Header,
+    SliceStart,
+}
+
+impl FrameStarts {
+    fn count(&mut self, bytes: &[u8]) -> u64 {
+        let mut frames = 0;
+        for &byte in bytes {
+            match self.state {
+                NalState::Header => {
+                    self.state = if matches!(byte & 0x1f, 1 | 5) {
+                        NalState::SliceStart
+                    } else {
+                        NalState::Scan
+                    };
+                    self.zeros = 0;
+                    continue;
+                }
+                NalState::SliceStart => {
+                    frames += u64::from(byte & 0x80 != 0);
+                    self.state = NalState::Scan;
+                }
+                NalState::Scan => {}
+            }
+            if byte == 0 {
+                self.zeros = self.zeros.saturating_add(1);
+            } else {
+                if byte == 1 && self.zeros >= 2 {
+                    self.state = NalState::Header;
+                }
+                self.zeros = 0;
+            }
+        }
+        frames
+    }
+}
+
+struct EncoderBacklog {
+    written: AtomicU64,
+    read: AtomicU64,
+}
+
+impl EncoderBacklog {
+    fn new() -> Self {
+        Self {
+            // The startup probe frame.
+            written: AtomicU64::new(1),
+            read: AtomicU64::new(0),
+        }
+    }
+
+    /// None until a frame start is seen, so unparsed output never throttles the renderer.
+    fn queued(&self) -> Option<u64> {
+        let read = self.read.load(Ordering::Acquire);
+        (read > 0).then(|| self.written.load(Ordering::Relaxed).saturating_sub(read))
+    }
+}
+
+fn backlog_limit(fps: u32) -> u64 {
+    u64::from(fps / 2).max(3)
+}
+
+pub struct LiveH264Output {
+    stdout: ChildStdout,
+    backlog: Arc<EncoderBacklog>,
+    frames: FrameStarts,
+}
+
+impl Read for LiveH264Output {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.stdout.read(buf)?;
+        let frames = self.frames.count(&buf[..n]);
+        if frames > 0 {
+            self.backlog.read.fetch_add(frames, Ordering::Release);
+        }
+        Ok(n)
+    }
+}
+
 /// Long-running ffmpeg subprocess that consumes raw RGBA frames on stdin and
 /// emits a continuous H.264 NAL stream on stdout. Used by Custom mode for live
 /// h264 streaming on devices that accept it.
@@ -149,6 +239,9 @@ pub struct LiveH264Encoder {
     stdout: Option<ChildStdout>,
     frame_bytes: usize,
     kind: EncoderKind,
+    backlog: Arc<EncoderBacklog>,
+    backlog_limit: u64,
+    dropped_log: DiagnosticRate,
 }
 
 impl LiveH264Encoder {
@@ -186,12 +279,13 @@ impl LiveH264Encoder {
                 transpose,
                 frame_bytes,
             ) {
-                Ok(child) => {
+                Ok(mut encoder) => {
                     info!(
                         "live H.264 encoder: {width}x{height}@{fps_int}fps via {}",
                         kind.name()
                     );
-                    return Ok(child);
+                    encoder.backlog_limit = backlog_limit(fps_int);
+                    return Ok(encoder);
                 }
                 Err(e) => {
                     warn!("h264 encoder {} unavailable, trying next: {e}", kind.name());
@@ -206,8 +300,8 @@ impl LiveH264Encoder {
         )))
     }
 
-    /// Push one raw RGBA frame into the encoder. Returns Err on broken pipe
-    /// (encoder died) so the caller can tear down.
+    /// Push one raw RGBA frame into the encoder, or drop it while the consumer
+    /// lags. Returns Err on broken pipe (encoder died) so the caller can tear down.
     pub fn write_frame(&mut self, rgba: &[u8]) -> Result<(), MediaError> {
         if rgba.len() != self.frame_bytes {
             return Err(MediaError::Ffmpeg(format!(
@@ -216,18 +310,36 @@ impl LiveH264Encoder {
                 self.frame_bytes
             )));
         }
+        if let Some(queued) = self
+            .backlog
+            .queued()
+            .filter(|queued| *queued >= self.backlog_limit)
+        {
+            if let Some(earlier) = self.dropped_log.observe(Instant::now()) {
+                debug!(
+                    "live H.264 consumer is {queued} frames behind; dropped {} frames",
+                    earlier + 1
+                );
+            }
+            return Ok(());
+        }
         let stdin = self
             .stdin
             .as_mut()
             .ok_or_else(|| MediaError::Ffmpeg("encoder stdin already closed".into()))?;
         write_pipe(stdin, rgba, Duration::from_secs(2))
             .map_err(|e| MediaError::Ffmpeg(format!("write_frame: {e}")))?;
+        self.backlog.written.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
     /// Hand the encoder's stdout to the streaming consumer. Callable once.
-    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
-        self.stdout.take()
+    pub fn take_stdout(&mut self) -> Option<LiveH264Output> {
+        self.stdout.take().map(|stdout| LiveH264Output {
+            stdout,
+            backlog: Arc::clone(&self.backlog),
+            frames: FrameStarts::default(),
+        })
     }
 }
 
@@ -455,6 +567,9 @@ fn try_spawn(
         stdout: Some(stdout),
         frame_bytes,
         kind,
+        backlog: Arc::new(EncoderBacklog::new()),
+        backlog_limit: u64::MAX,
+        dropped_log: DiagnosticRate::default(),
     })
 }
 
@@ -610,5 +725,45 @@ mod pipe_tests {
         write_pipe(&mut writer, &payload, Duration::from_secs(2)).unwrap();
         drop(writer);
         assert_eq!(consumer.join().unwrap(), payload);
+    }
+}
+
+#[cfg(test)]
+mod backlog_tests {
+    use super::*;
+
+    fn annex_b_stream() -> Vec<u8> {
+        [
+            &[0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1f][..],
+            &[0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80],
+            &[0, 0, 1, 0x06, 0x05, 0x10],
+            &[0, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x21],
+            &[0, 0, 1, 0x65, 0x40, 0x11],
+            &[0, 0, 0, 1, 0x41, 0x9a, 0x02],
+            &[0, 0, 1, 0x01, 0x80, 0x00, 0x00, 0x03, 0x01],
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn counts_one_start_per_frame_across_any_read_split() {
+        let stream = annex_b_stream();
+        for chunk in 1..=stream.len() {
+            let mut starts = FrameStarts::default();
+            let frames: u64 = stream.chunks(chunk).map(|part| starts.count(part)).sum();
+            assert_eq!(frames, 3, "chunk size {chunk}");
+        }
+    }
+
+    #[test]
+    fn backlog_throttles_only_after_the_consumer_reads_a_frame() {
+        let backlog = EncoderBacklog::new();
+        backlog.written.store(40, Ordering::Relaxed);
+        assert_eq!(backlog.queued(), None);
+        backlog.read.store(25, Ordering::Release);
+        assert_eq!(backlog.queued(), Some(15));
+        assert!(backlog.queued().unwrap() >= backlog_limit(30));
+        assert!(backlog.queued().unwrap() < backlog_limit(60));
+        assert_eq!(backlog_limit(1), 3);
     }
 }

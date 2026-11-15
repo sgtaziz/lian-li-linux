@@ -9,13 +9,13 @@ use lianli_devices::slv3_lcd::Slv3LcdDevice;
 use lianli_devices::traits::LcdDevice;
 use lianli_devices::winusb::lcd::WinUsbLcdDevice;
 use lianli_devices::wireless::WirelessController;
+use lianli_media::video::LiveH264Output;
 use lianli_media::{MediaAsset, MediaAssetKind};
 use lianli_shared::config::ConfigKey;
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::ui_message::{UiMessage, UiText};
 use parking_lot::Mutex;
 use std::path::PathBuf;
-use std::process::ChildStdout;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -385,7 +385,7 @@ impl LcdBackend {
 
     pub(super) fn start_h264_stream(
         &self,
-        stdout: ChildStdout,
+        stdout: LiveH264Output,
         stop: Arc<AtomicBool>,
         fps: f32,
     ) -> anyhow::Result<Option<HidStreamWorker>> {
@@ -560,7 +560,7 @@ impl StreamRestarter {
     /// stream is halted and joined (bounded) first.
     pub(super) fn start_stream(
         &self,
-        stdout: ChildStdout,
+        stdout: LiveH264Output,
         stop: Arc<AtomicBool>,
         fps: f32,
     ) -> anyhow::Result<()> {
@@ -607,7 +607,7 @@ pub(super) enum LcdThreadMsg {
         fps: f32,
         stop: Arc<AtomicBool>,
     },
-    StreamH264Reader(std::process::ChildStdout, f32, Arc<AtomicBool>),
+    StreamH264Reader(LiveH264Output, f32, Arc<AtomicBool>),
     SwitchDesktop(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
     SetBrightness(u8),
     Shutdown(std::sync::mpsc::SyncSender<anyhow::Result<()>>),
@@ -949,11 +949,7 @@ impl ThreadedWinUsbSender {
         Ok(())
     }
 
-    fn stream_h264_reader(
-        &self,
-        stdout: std::process::ChildStdout,
-        fps: f32,
-    ) -> anyhow::Result<()> {
+    fn stream_h264_reader(&self, stdout: LiveH264Output, fps: f32) -> anyhow::Result<()> {
         self.stream_control.submit(None, |stop| {
             self.tx
                 .try_send(LcdThreadMsg::StreamH264Reader(stdout, fps, stop))
