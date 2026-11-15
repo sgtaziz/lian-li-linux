@@ -1271,14 +1271,30 @@ impl WinUsbLcdCore {
         }
     }
 
+    fn local_player_running(&mut self) -> Option<bool> {
+        let header = self.builder.local_player_state_header_winusb();
+        let mut reply = [0u8; 512];
+        match self.tx_exchange(&header, &mut reply).ok()? {
+            Ok(n) => parse_local_player_state(&reply[..n]),
+            Err(_) => None,
+        }
+    }
+
+    /// A StartPlay while the firmware's local player is still exiting can make
+    /// the decoder reset the ring after our first block, and the exiting player
+    /// can push one last chunk, so the ring drains after the player stops.
     pub(crate) fn drain_h264_ring(&mut self, stop: &AtomicBool) -> Option<u8> {
         let deadline = Instant::now() + RING_DRAIN_BUDGET;
+        let waiting = |stop: &AtomicBool| {
+            Instant::now() < deadline
+                && !stop.load(Ordering::Acquire)
+                && !lianli_transport::usb::shutting_down()
+        };
+        while self.local_player_running() == Some(true) && waiting(stop) {
+            std::thread::sleep(WAIT_BUFFER_POLL);
+        }
         let mut level = self.query_buffer_level();
-        while level.is_some_and(|level| level > 0)
-            && Instant::now() < deadline
-            && !stop.load(Ordering::Acquire)
-            && !lianli_transport::usb::shutting_down()
-        {
+        while level.is_some_and(|level| level > 0) && waiting(stop) {
             std::thread::sleep(WAIT_BUFFER_POLL);
             level = self.query_buffer_level();
         }
@@ -1742,6 +1758,15 @@ fn tag_interrupted(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
+fn parse_local_player_state(reply: &[u8]) -> Option<bool> {
+    match reply {
+        [crate::crypto::CMD_LOCAL_PLAYER_STATE, _, _, _, _, _, _, _, playing, ..] => {
+            Some(*playing != 0)
+        }
+        _ => None,
+    }
+}
+
 fn chunk_resend_allowed(last_resend: Option<Instant>, now: Instant) -> bool {
     last_resend.is_none_or(|at| now.saturating_duration_since(at) >= CHUNK_RESEND_COOLDOWN)
 }
@@ -2172,5 +2197,26 @@ mod h264_negotiation_tests {
         assert_eq!(state.get().unwrap_or(DEFAULT_H264_CHUNK_SIZE), 202_752);
         assert_eq!(state.update(&response(32_768)), Some(32_768));
         assert_eq!(state.get(), Some(32_768));
+    }
+}
+
+#[cfg(test)]
+mod local_player_tests {
+    use super::parse_local_player_state;
+    use crate::crypto::{CMD_LOCAL_PLAYER_STATE, CMD_QUERY_BLOCK};
+
+    #[test]
+    fn local_player_state_comes_only_from_its_own_reply() {
+        let mut reply = [0u8; 16];
+        reply[0] = CMD_LOCAL_PLAYER_STATE;
+        reply[1] = 0xc8;
+        reply[8] = 1;
+        assert_eq!(parse_local_player_state(&reply), Some(true));
+        reply[8] = 0;
+        assert_eq!(parse_local_player_state(&reply), Some(false));
+        assert_eq!(parse_local_player_state(&reply[..8]), None);
+        reply[0] = CMD_QUERY_BLOCK;
+        reply[8] = 1;
+        assert_eq!(parse_local_player_state(&reply), None);
     }
 }
