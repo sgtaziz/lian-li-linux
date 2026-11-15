@@ -3,6 +3,14 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.8 — 2026-11-15
+
+### Fixes
+- **h2**: Wait for the firmware's local player to exit before streaming  (`41e874f`)
+- **h2**: Keep wired coolant/pump telemetry live through H.264 drains  ([#292](https://github.com/sgtaziz/lian-li-linux/pull/292))
+- **h2**: Keep SyncPumpFan flowing while the panel holds ring level 3  (`88aa231`)
+- **h2**: Pace streamed SyncPumpFan from the last send  (`33f9ed1`)
+
 ## v1.2.7 — 2026-11-13
 
 ### Fixes
