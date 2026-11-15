@@ -29,3 +29,8 @@ export function fillSlots(group: FanGroup, value: FanSpeed) {
 export function isReservedCurveName(name: string): boolean {
   return name === "" || name === "off" || name.startsWith(MB_SYNC_KEY);
 }
+
+// Mirrors FanSpeed::is_off and FanSpeed::is_mb_sync in lianli-shared.
+export function isSpeedModeKey(name: string): boolean {
+  return name === "off" || name === MB_SYNC_KEY || name.startsWith(`${MB_SYNC_KEY}:`);
+}
