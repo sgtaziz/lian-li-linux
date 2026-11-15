@@ -1,6 +1,6 @@
 use super::playback::{LcdTransferInterrupted, PlaybackState};
 use super::ring::{RingDelivery, RingKey};
-use crate::crypto::PacketBuilder;
+use crate::crypto::{PacketBuilder, CMD_GET_H2_PARAMS, CMD_PUSH_RGB_DATA, CMD_SYNC_PUMP_FAN};
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
 use lianli_transport::usb::{RusbBulk, EP_IN, EP_OUT};
@@ -571,19 +571,13 @@ const CONTROL_SAFE_LEVEL: u8 = 1;
 /// waited `CONTROL_RELAX_AFTER`.
 const CONTROL_RELAXED_LEVEL: u8 = 2;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
-/// L-Connect's GetH2Params cadence: every 7th tick of its 330 ms message loop.
+/// L-Connect's GetH2Params cadence: every 7th tick of its 330 ms message loop,
+/// at any buffer level, including during its QueryBlock drain wait.
 const STREAM_TELEMETRY_INTERVAL: Duration = Duration::from_millis(2_310);
 const TELEMETRY_REQUEST_WINDOW: Duration = Duration::from_secs(5);
-/// The stream still writes H.264 chunks at level 3 and only waits for a drain above it.
-const STREAM_TELEMETRY_MAX_LEVEL: u8 = 3;
 /// One tick of L-Connect's 330 ms message loop.
 const STREAM_TELEMETRY_RETRY: Duration = Duration::from_millis(330);
 const STREAM_TELEMETRY_SECOND_READ: Duration = Duration::from_millis(200);
-
-/// Consumers drop a reading after 5 s, so the interval counts from the last parsed reading.
-fn stream_telemetry_due(level: u8, since_last: Duration) -> bool {
-    level <= STREAM_TELEMETRY_MAX_LEVEL && since_last >= STREAM_TELEMETRY_INTERVAL
-}
 
 const REOPEN_DELAY: Duration = Duration::from_millis(100);
 /// Gap between the wake-preamble commands (StopPlay, StopClock, GetVer).
@@ -652,8 +646,12 @@ fn logged_response(
     }
 }
 
+/// The H2 control channel shares this pipe, and its late replies carry no buffer level.
 fn buffer_level(response: &[u8]) -> Option<u8> {
-    response.get(8).copied()
+    match response.first()? {
+        &CMD_GET_H2_PARAMS | &CMD_SYNC_PUMP_FAN | &CMD_PUSH_RGB_DATA => None,
+        _ => response.get(8).copied(),
+    }
 }
 
 pub(crate) struct WinUsbLcdCore {
@@ -1533,10 +1531,11 @@ impl WinUsbLcdCore {
         if self.telemetry_retry_at.is_some_and(|at| now < at) {
             return;
         }
+        // Counted from the last parsed reading, since consumers drop one after 5 s.
         let since_last = self
             .last_telemetry_query
             .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
-        if !stream_telemetry_due(level, since_last) {
+        if since_last < STREAM_TELEMETRY_INTERVAL {
             return;
         }
         let header = self.builder.get_h2_params_header_winusb();
@@ -1912,33 +1911,6 @@ fn flex_opening_packets(builder: &mut PacketBuilder, screen: &ScreenInfo) -> Res
 }
 
 #[cfg(test)]
-mod stream_telemetry_tests {
-    use super::{stream_telemetry_due, STREAM_TELEMETRY_INTERVAL};
-    use std::time::Duration;
-
-    #[test]
-    fn queries_only_below_the_drain_level() {
-        let long = Duration::from_secs(60);
-        assert!(stream_telemetry_due(0, STREAM_TELEMETRY_INTERVAL));
-        assert!(stream_telemetry_due(1, STREAM_TELEMETRY_INTERVAL));
-        assert!(!stream_telemetry_due(
-            1,
-            STREAM_TELEMETRY_INTERVAL - Duration::from_millis(1)
-        ));
-        for level in 2..=3 {
-            assert!(stream_telemetry_due(level, STREAM_TELEMETRY_INTERVAL));
-            assert!(!stream_telemetry_due(
-                level,
-                STREAM_TELEMETRY_INTERVAL - Duration::from_millis(1)
-            ));
-        }
-        for level in 4..=6 {
-            assert!(!stream_telemetry_due(level, long));
-        }
-    }
-}
-
-#[cfg(test)]
 mod flex_opening_tests {
     use super::*;
     use des::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
@@ -2192,6 +2164,24 @@ mod h264_negotiation_tests {
             super::buffer_level(&super::LcdResponse { bytes, length: 9 }),
             Some(0)
         );
+    }
+
+    #[test]
+    fn h2_control_replies_give_no_buffer_credit() {
+        for opcode in [
+            crate::crypto::CMD_GET_H2_PARAMS,
+            crate::crypto::CMD_SYNC_PUMP_FAN,
+            crate::crypto::CMD_PUSH_RGB_DATA,
+        ] {
+            let mut reply = [0u8; 32];
+            reply[0] = opcode;
+            reply[8] = 1;
+            assert_eq!(super::buffer_level(&reply), None);
+        }
+        let mut chunk_ack = [0u8; 32];
+        chunk_ack[0] = crate::crypto::CMD_START_PLAY;
+        chunk_ack[8] = 1;
+        assert_eq!(super::buffer_level(&chunk_ack), Some(1));
     }
     use super::*;
 
