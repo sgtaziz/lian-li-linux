@@ -574,24 +574,13 @@ const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
 /// L-Connect's GetH2Params cadence: every 7th tick of its 330 ms message loop.
 const STREAM_TELEMETRY_INTERVAL: Duration = Duration::from_millis(2_310);
 const TELEMETRY_REQUEST_WINDOW: Duration = Duration::from_secs(5);
-/// Highest buffer level at which GetH2Params goes out mid stream. The stream
-/// itself keeps writing H.264 chunks (512-byte header plus data) at level 3
-/// and only waits for a drain above it; GetH2Params is a lone 512-byte
-/// header. Level 4 and up, where the drain wait starts, stays off limits.
+/// The stream still writes H.264 chunks at level 3 and only waits for a drain above it.
 const STREAM_TELEMETRY_MAX_LEVEL: u8 = 3;
-/// Retry delay after a GetH2Params exchange that produced no reading: one
-/// tick of L-Connect's 330 ms message loop.
+/// One tick of L-Connect's 330 ms message loop.
 const STREAM_TELEMETRY_RETRY: Duration = Duration::from_millis(330);
-/// Read wait for the GetH2Params reply queued behind a stale one.
 const STREAM_TELEMETRY_SECOND_READ: Duration = Duration::from_millis(200);
 
-/// `since_last` counts from the last reading actually parsed.
-///
-/// Why the cadence must stay near `STREAM_TELEMETRY_INTERVAL` at every level
-/// up to 3: L-Connect polls every 2.31 s throughout playback, and consumers
-/// here (fan/AIO curves, coolant publishing) drop a reading older than 5 s.
-/// Gating level 2 to 3 s and level 3 to never left gaps past 5 s whenever the
-/// panel sat at 2-3, which it does for most of a backed-up stream.
+/// Consumers drop a reading after 5 s, so the interval counts from the last parsed reading.
 fn stream_telemetry_due(level: u8, since_last: Duration) -> bool {
     level <= STREAM_TELEMETRY_MAX_LEVEL && since_last >= STREAM_TELEMETRY_INTERVAL
 }
@@ -687,10 +676,7 @@ pub(crate) struct WinUsbLcdCore {
     resend_stalled_chunk: bool,
     last_chunk_resend: Option<Instant>,
     last_telemetry_query: Option<Instant>,
-    /// Earliest retry after a GetH2Params exchange that produced no reading.
     telemetry_retry_at: Option<Instant>,
-    /// Reading the drain-held debug line was last logged for.
-    drain_stale_logged: Option<Instant>,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -780,7 +766,6 @@ impl WinUsbLcdCore {
             last_chunk_resend: None,
             last_telemetry_query: None,
             telemetry_retry_at: None,
-            drain_stale_logged: None,
         })
     }
 
@@ -811,7 +796,6 @@ impl WinUsbLcdCore {
             last_chunk_resend: None,
             last_telemetry_query: None,
             telemetry_retry_at: None,
-            drain_stale_logged: None,
         }
     }
 
@@ -1327,14 +1311,8 @@ impl WinUsbLcdCore {
                 Some(level) if level <= threshold => return Some(level),
                 Some(level) => {
                     last = Some(level);
-                    // Poll as soon as the drain is back at level 3 rather than
-                    // after it reaches the threshold. Level 4 and up still
-                    // sends nothing (`stream_telemetry_due`): if the panel
-                    // holds level 4 past the 5 s consumer grace, readings
-                    // expire. Seen only when the encoder outruns the panel.
                     if self.transport.is_streaming() {
                         self.query_stream_telemetry(level);
-                        self.note_drain_holding_telemetry(level);
                     }
                     std::thread::sleep(WAIT_BUFFER_POLL)
                 }
@@ -1399,9 +1377,7 @@ impl WinUsbLcdCore {
             Ok(_) => debug!("No reply to deferred {} (timeout)", cmd.label),
             Err(e) => debug!("Reply read after deferred {} failed: {e}", cmd.label),
         }
-        // A reply slower than `reply_wait` would otherwise be consumed by the
-        // next exchange, typically the GetH2Params poll that follows, and be
-        // rejected there. `write_control` flushes the same way outside playback.
+        // A reply later than reply_wait would reach the next exchange.
         transport.read_flush();
         Ok(())
     }
@@ -1549,11 +1525,6 @@ impl WinUsbLcdCore {
     }
 
     /// L-Connect polls GetH2Params throughout H.264 playback.
-    ///
-    /// The interval counts from the last reading parsed; a failed or rejected
-    /// exchange is retried after `STREAM_TELEMETRY_RETRY` rather than a full
-    /// interval later. Consumers drop a reading after 5 s, so one miss used to
-    /// cost the fan and pump curves their reading.
     fn query_stream_telemetry(&mut self, level: u8) {
         if !self.transport.stream_telemetry_requested() {
             return;
@@ -1579,39 +1550,27 @@ impl WinUsbLcdCore {
                 self.last_telemetry_query = Some(Instant::now());
                 self.telemetry_retry_at = None;
             }
-            Ok(None) => {
-                self.telemetry_retry_at = Some(Instant::now() + STREAM_TELEMETRY_RETRY);
-            }
+            Ok(None) => self.note_telemetry_miss(),
             Err(e) => {
                 warn!("GetH2Params write between chunks failed: {e}");
-                self.telemetry_retry_at = Some(Instant::now() + STREAM_TELEMETRY_RETRY);
+                self.note_telemetry_miss();
             }
         }
     }
 
-    /// Debug aid: log once per stale period when a drain at level 4+ keeps
-    /// the last reading from refreshing.
-    fn note_drain_holding_telemetry(&mut self, level: u8) {
-        const NEAR_EXPIRY: Duration = Duration::from_secs(4);
-        if level <= STREAM_TELEMETRY_MAX_LEVEL || !self.transport.stream_telemetry_requested() {
-            return;
-        }
-        let Some(age) = self.last_telemetry_query.map(|at| at.elapsed()) else {
-            return;
-        };
-        if age >= NEAR_EXPIRY && self.drain_stale_logged != self.last_telemetry_query {
-            self.drain_stale_logged = self.last_telemetry_query;
-            debug!(
-                "GetH2Params held by drain at level {level}: last reading {} ms ago",
-                age.as_millis()
-            );
+    /// Each exchange can block the stream thread for a full read timeout, so a
+    /// miss gets one quick retry and a second miss waits a full interval.
+    fn note_telemetry_miss(&mut self) {
+        let now = Instant::now();
+        if self.telemetry_retry_at.take().is_some() {
+            self.last_telemetry_query = Some(now);
+        } else {
+            self.telemetry_retry_at = Some(now + STREAM_TELEMETRY_RETRY);
         }
     }
 
-    /// One GetH2Params write and up to two reads under a single lock. When the
-    /// first reply belongs to an earlier command (a late chunk or deferred
-    /// control ack), the GetH2Params answer is usually queued right behind it,
-    /// so read once more before flushing. Never writes a second packet.
+    /// The GetH2Params reply often queues behind a late reply to an earlier
+    /// command, so a rejected first reply gets one more read.
     fn h2_params_exchange(
         &self,
         header: &[u8],
