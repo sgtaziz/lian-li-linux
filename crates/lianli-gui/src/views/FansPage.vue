@@ -142,9 +142,11 @@ function addCurve() {
 }
 
 function removeCurve(idx: number) {
+  const name = curves.value[idx]?.name ?? t("fans.page.curveFallbackName");
+  const inUse = config.fanCurveInUse(name);
   dialog.error({
     title: t("fans.page.deleteCurveTitle"),
-    content: t("fans.page.deleteCurveContent", { name: curves.value[idx]?.name ?? t("fans.page.curveFallbackName") }),
+    content: t(inUse ? "fans.page.deleteCurveInUseContent" : "fans.page.deleteCurveContent", { name }),
     positiveText: t("common.delete"),
     negativeText: t("common.cancel"),
     onPositiveClick: () => {

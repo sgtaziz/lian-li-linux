@@ -6,6 +6,7 @@ const messages: typeof en = {
     deleteCurve: "删除曲线",
     deleteCurveTitle: "删除曲线？",
     deleteCurveContent: "“{name}”将被永久删除。",
+    deleteCurveInUseContent: "仍有风扇或水泵使用“{name}”。删除后，它们将以 100% 转速运行，直到你为它们选择其他转速。",
     curveFallbackName: "曲线",
     newCurveName: "新曲线",
     name: "名称",

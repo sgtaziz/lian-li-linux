@@ -4,6 +4,7 @@ export default {
     deleteCurve: "Delete curve",
     deleteCurveTitle: "Delete curve?",
     deleteCurveContent: "\"{name}\" will be permanently deleted.",
+    deleteCurveInUseContent: "Fans or pumps still use \"{name}\". After deleting it they run at 100% until you choose another speed for them.",
     curveFallbackName: "Curve",
     newCurveName: "New Curve",
     name: "Name",
