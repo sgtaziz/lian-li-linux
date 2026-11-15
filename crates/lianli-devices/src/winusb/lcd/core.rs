@@ -571,8 +571,7 @@ const CONTROL_SAFE_LEVEL: u8 = 1;
 /// waited `CONTROL_RELAX_AFTER`.
 const CONTROL_RELAXED_LEVEL: u8 = 2;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
-/// L-Connect's GetH2Params cadence: every 7th tick of its 330 ms message loop,
-/// at any buffer level, including during its QueryBlock drain wait.
+/// L-Connect polls every 7th tick of its 330 ms loop, at any buffer level.
 const STREAM_TELEMETRY_INTERVAL: Duration = Duration::from_millis(2_310);
 const TELEMETRY_REQUEST_WINDOW: Duration = Duration::from_secs(5);
 /// One tick of L-Connect's 330 ms message loop.
@@ -1557,8 +1556,7 @@ impl WinUsbLcdCore {
         }
     }
 
-    /// Each exchange can block the stream thread for a full read timeout, so a
-    /// miss gets one quick retry and a second miss waits a full interval.
+    /// An exchange can block the stream for a full read timeout, so only one quick retry.
     fn note_telemetry_miss(&mut self) {
         let now = Instant::now();
         if self.telemetry_retry_at.take().is_some() {
@@ -1568,8 +1566,7 @@ impl WinUsbLcdCore {
         }
     }
 
-    /// The GetH2Params reply often queues behind a late reply to an earlier
-    /// command, so a rejected first reply gets one more read.
+    /// The reply often queues behind a late reply to an earlier command.
     fn h2_params_exchange(
         &self,
         header: &[u8],
