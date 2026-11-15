@@ -137,7 +137,7 @@ impl WiredRenderer {
                             Instant::now()
                                 + Duration::from_millis(500 * u64::from(p.failures.min(20))),
                         );
-                        if p.failures == 1 {
+                        if p.failures == 1 && !lianli_transport::usb::shutting_down() {
                             warn!("Software RGB failed for {id}; will retry: {error}");
                         }
                     }

@@ -3,6 +3,28 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.8 — 2026-11-15
+
+### Fixes
+- **h2**: Wait for the firmware's local player to exit before streaming  (`41e874f`)
+- **h2**: Keep wired coolant/pump telemetry live through H.264 drains  ([#292](https://github.com/sgtaziz/lian-li-linux/pull/292))
+- **h2**: Keep SyncPumpFan flowing while the panel holds ring level 3  (`88aa231`)
+- **h2**: Pace streamed SyncPumpFan from the last send  (`33f9ed1`)
+
+## v1.2.7 — 2026-11-13
+
+### Fixes
+- **nix**: Let lianli-session load libsystemd, and stop a test assuming /bin/true  ([#284](https://github.com/sgtaziz/lian-li-linux/pull/284))
+- **nix**: Make the NixOS module's daemon modes work  ([#286](https://github.com/sgtaziz/lian-li-linux/pull/286))
+- **daemon**: Drop two false warnings, reopen the right LED ring, add a Nix dev shell  ([#288](https://github.com/sgtaziz/lian-li-linux/pull/288))
+- **h2**: Hold one transport lock per LCD exchange  (`9751bcd`)
+- **h2**: Reject GetH2Params replies that belong to other commands  (`b0646b0`)
+- **h2**: Keep coolant and pump telemetry live during H.264 playback  (`b714bd3`)
+- **h2**: Clear the panel's layers before streaming H.264  (`001bb00`)
+
+### Other changes
+- [TEMPLATE] add RX-78 Flight Enhanced dashboard  ([#289](https://github.com/sgtaziz/lian-li-linux/pull/289))
+
 ## v1.2.6 — 2026-11-09
 
 ### Features

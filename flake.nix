@@ -42,10 +42,31 @@
         lian-li-linux = final.callPackage ./packaging/nix/package.nix { inherit src; };
       };
 
-      nixosModules.default = {
-        imports = [ ./packaging/nix/module.nix ];
-        nixpkgs.overlays = [ self.overlays.default ];
-      };
+      # No overlay here: nixpkgs.overlays cannot be set when pkgs is passed in read-only.
+      nixosModules.default =
+        { lib, pkgs, ... }:
+        {
+          imports = [ ./packaging/nix/module.nix ];
+          services.lian-li-linux.package = lib.mkDefault (
+            pkgs.callPackage ./packaging/nix/package.nix { inherit src; }
+          );
+        };
+
+      devShells = forAllSystems (pkgs: {
+        default = pkgs.mkShell {
+          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.lian-li-linux ];
+          packages = [
+            pkgs.ffmpeg
+            pkgs.rustfmt
+            pkgs.clippy
+          ];
+          # The login monitor and EVDI mode load libsystemd and libevdi at run time.
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.systemd
+            pkgs.linuxPackages.evdi
+          ];
+        };
+      });
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt);
     };

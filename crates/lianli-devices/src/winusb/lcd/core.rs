@@ -1,6 +1,6 @@
 use super::playback::{LcdTransferInterrupted, PlaybackState};
 use super::ring::{RingDelivery, RingKey};
-use crate::crypto::PacketBuilder;
+use crate::crypto::{PacketBuilder, CMD_GET_H2_PARAMS, CMD_PUSH_RGB_DATA, CMD_SYNC_PUMP_FAN};
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
 use lianli_transport::usb::{RusbBulk, EP_IN, EP_OUT};
@@ -133,6 +133,8 @@ pub struct LcdLink {
     software_cooling: AtomicBool,
     storage_interrupted: AtomicBool,
     pending: Mutex<Vec<PendingCmd>>,
+    telemetry_requested: Mutex<Option<Instant>>,
+    stream_telemetry: Mutex<Option<crate::winusb::h2_aio::H2Params>>,
 }
 
 impl LcdLink {
@@ -148,7 +150,23 @@ impl LcdLink {
             software_cooling: AtomicBool::new(true),
             storage_interrupted: AtomicBool::new(false),
             pending: Mutex::new(Vec::new()),
+            telemetry_requested: Mutex::new(None),
+            stream_telemetry: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn request_stream_telemetry(&self) {
+        *self.telemetry_requested.lock() = Some(Instant::now());
+    }
+
+    fn stream_telemetry_requested(&self) -> bool {
+        self.telemetry_requested
+            .lock()
+            .is_some_and(|at| at.elapsed() < TELEMETRY_REQUEST_WINDOW)
+    }
+
+    pub(crate) fn stream_telemetry(&self) -> Option<crate::winusb::h2_aio::H2Params> {
+        self.stream_telemetry.lock().clone()
     }
 
     pub fn lock(&self) -> MutexGuard<'_, RusbBulk> {
@@ -549,10 +567,34 @@ pub type SharedTransport = Arc<LcdLink>;
 
 /// Buffer level at or below which queued control commands go out right away.
 const CONTROL_SAFE_LEVEL: u8 = 1;
-/// If the panel never drains that far, accept this level once a command has
-/// waited `CONTROL_RELAX_AFTER`.
-const CONTROL_RELAXED_LEVEL: u8 = 2;
+/// Panels can hold level 3 for minutes, which would starve SyncPumpFan.
+const CONTROL_RELAXED_LEVEL: u8 = 3;
 const CONTROL_RELAX_AFTER: Duration = Duration::from_secs(3);
+/// L-Connect's SyncPumpFan cadence; the firmware wedges under faster writes.
+const CONTROL_MIN_GAP: Duration = Duration::from_millis(3_600);
+
+fn control_send_allowed(
+    level: Option<u8>,
+    oldest_wait: Option<Duration>,
+    since_last_send: Option<Duration>,
+) -> bool {
+    if since_last_send.is_some_and(|gap| gap < CONTROL_MIN_GAP) {
+        return false;
+    }
+    match level {
+        Some(l) if l <= CONTROL_SAFE_LEVEL => true,
+        Some(l) if l <= CONTROL_RELAXED_LEVEL => {
+            oldest_wait.is_some_and(|wait| wait >= CONTROL_RELAX_AFTER)
+        }
+        _ => false,
+    }
+}
+/// L-Connect polls every 7th tick of its 330 ms loop, at any buffer level.
+const STREAM_TELEMETRY_INTERVAL: Duration = Duration::from_millis(2_310);
+const TELEMETRY_REQUEST_WINDOW: Duration = Duration::from_secs(5);
+/// One tick of L-Connect's 330 ms message loop.
+const STREAM_TELEMETRY_RETRY: Duration = Duration::from_millis(330);
+const STREAM_TELEMETRY_SECOND_READ: Duration = Duration::from_millis(200);
 
 const REOPEN_DELAY: Duration = Duration::from_millis(100);
 /// Gap between the wake-preamble commands (StopPlay, StopClock, GetVer).
@@ -576,6 +618,8 @@ const SLOW_CHUNK_WRITE: Duration = Duration::from_millis(100);
 /// daemon's bounded recreation instead of looping on reopen and resend.
 const CHUNK_RESEND_COOLDOWN: Duration = Duration::from_secs(60);
 const WAIT_BUFFER_POLL: Duration = Duration::from_millis(50);
+/// Nothing reads the live encoder's output yet, and its frame writes time out after 2 s.
+const RING_DRAIN_BUDGET: Duration = Duration::from_millis(1_000);
 const FLEX_L3_LAYER_SIZE: u32 = 360;
 const WAIT_BUFFER_NO_STOP_CAP: u32 = 600;
 
@@ -592,8 +636,39 @@ impl std::ops::Deref for LcdResponse {
     }
 }
 
+fn logged_response(
+    context: &str,
+    read: std::result::Result<usize, lianli_transport::TransportError>,
+    reply: [u8; 512],
+) -> Option<LcdResponse> {
+    match read {
+        Ok(n) if n > 0 => {
+            debug!(
+                "Response for {context} ({n} bytes): {:02x?}",
+                &reply[..n.min(32)]
+            );
+            Some(LcdResponse {
+                bytes: reply,
+                length: n,
+            })
+        }
+        Ok(_) => {
+            debug!("No response for {context} (timeout)");
+            None
+        }
+        Err(e) => {
+            warn!("Read after {context} failed: {e}");
+            None
+        }
+    }
+}
+
+/// The H2 control channel shares this pipe, and its late replies carry no buffer level.
 fn buffer_level(response: &[u8]) -> Option<u8> {
-    response.get(8).copied()
+    match response.first()? {
+        &CMD_GET_H2_PARAMS | &CMD_SYNC_PUMP_FAN | &CMD_PUSH_RGB_DATA => None,
+        _ => response.get(8).copied(),
+    }
 }
 
 pub(crate) struct WinUsbLcdCore {
@@ -615,6 +690,9 @@ pub(crate) struct WinUsbLcdCore {
     stop_play_supported: bool,
     resend_stalled_chunk: bool,
     last_chunk_resend: Option<Instant>,
+    last_telemetry_query: Option<Instant>,
+    telemetry_retry_at: Option<Instant>,
+    last_control_send: Option<Instant>,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -702,6 +780,9 @@ impl WinUsbLcdCore {
             stop_play_supported,
             resend_stalled_chunk: true,
             last_chunk_resend: None,
+            last_telemetry_query: None,
+            telemetry_retry_at: None,
+            last_control_send: None,
         })
     }
 
@@ -730,6 +811,9 @@ impl WinUsbLcdCore {
             stop_play_supported,
             resend_stalled_chunk: true,
             last_chunk_resend: None,
+            last_telemetry_query: None,
+            telemetry_retry_at: None,
+            last_control_send: None,
         }
     }
 
@@ -793,20 +877,31 @@ impl WinUsbLcdCore {
         })
     }
 
-    #[inline]
-    fn tx_write_full(
+    /// One guard across write, read and flush, so the H2 control channel
+    /// sharing this handle cannot take the reply. Err is a write failure.
+    fn tx_exchange(
         &self,
-        data: &[u8],
-    ) -> std::result::Result<(), lianli_transport::TransportError> {
-        self.transport.lock().write_full(data, self.write_timeout)
+        packet: &[u8],
+        reply: &mut [u8; 512],
+    ) -> std::result::Result<
+        std::result::Result<usize, lianli_transport::TransportError>,
+        lianli_transport::TransportError,
+    > {
+        let bulk = self.transport.lock();
+        bulk.write_full(packet, self.write_timeout)?;
+        let read = bulk.read(reply, self.read_timeout);
+        bulk.read_flush();
+        Ok(read)
     }
 
-    #[inline]
-    fn tx_read(
+    fn exchange(
         &self,
-        buf: &mut [u8],
-    ) -> std::result::Result<usize, lianli_transport::TransportError> {
-        self.transport.lock().read(buf, self.read_timeout)
+        packet: &[u8],
+        context: &str,
+    ) -> std::result::Result<Option<LcdResponse>, lianli_transport::TransportError> {
+        let mut reply = [0u8; 512];
+        let read = self.tx_exchange(packet, &mut reply)?;
+        Ok(logged_response(context, read, reply))
     }
 
     #[inline]
@@ -876,44 +971,31 @@ impl WinUsbLcdCore {
         bail!("device unresponsive after recovery attempts; re-discovery required")
     }
 
+    /// Only for the stream thread, the sole writer while streaming.
     fn read_response(&mut self, context: &str) -> Option<LcdResponse> {
-        let mut buf = [0u8; 512];
-        match self.tx_read(&mut buf) {
-            Ok(n) if n > 0 => {
-                debug!(
-                    "Response for {context} ({n} bytes): {:02x?}",
-                    &buf[..n.min(32)]
-                );
-                self.tx_read_flush();
-                return Some(LcdResponse {
-                    bytes: buf,
-                    length: n,
-                });
-            }
-            Ok(_) => debug!("No response for {context} (timeout)"),
-            Err(e) => warn!("Read after {context} failed: {e}"),
-        }
-        self.tx_read_flush();
-        None
+        let mut reply = [0u8; 512];
+        let read = {
+            let bulk = self.transport.lock();
+            let read = bulk.read(&mut reply, self.read_timeout);
+            bulk.read_flush();
+            read
+        };
+        logged_response(context, read, reply)
     }
 
     pub(crate) fn send_command(&mut self, header: Vec<u8>, label: &str) {
-        match self.tx_write_full(&header) {
-            Ok(_) => self.note_write_success(),
-            Err(e) => {
-                warn!("{label} write failed: {e}");
-                if let Err(rec_err) = self.try_recover(None) {
-                    warn!("{label} recovery skipped: {rec_err}");
-                    return;
-                }
-                if let Err(e2) = self.tx_write_full(&header) {
-                    warn!("{label} write retry failed: {e2}");
-                    return;
-                }
-                self.note_write_success();
+        if let Err(e) = self.exchange(&header, label) {
+            warn!("{label} write failed: {e}");
+            if let Err(rec_err) = self.try_recover(None) {
+                warn!("{label} recovery skipped: {rec_err}");
+                return;
+            }
+            if let Err(e2) = self.exchange(&header, label) {
+                warn!("{label} write retry failed: {e2}");
+                return;
             }
         }
-        self.read_response(label);
+        self.note_write_success();
     }
 
     /// HydroShift II control-channel init: GetVer, frame rate, SyncClock,
@@ -946,11 +1028,17 @@ impl WinUsbLcdCore {
 
     pub(crate) fn read_firmware(&mut self) {
         let ver = self.builder.get_ver_header_winusb();
-        match self.tx_write_full(&ver) {
-            Ok(_) => self.note_write_success(),
-            Err(e) => warn!("GetVer write failed: {e}"),
-        }
-        if let Some(resp) = self.read_response("GetVer") {
+        let response = match self.exchange(&ver, "GetVer") {
+            Ok(response) => {
+                self.note_write_success();
+                response
+            }
+            Err(e) => {
+                warn!("GetVer write failed: {e}");
+                None
+            }
+        };
+        if let Some(resp) = response {
             let fw_bytes = resp.get(8..40.min(resp.len())).unwrap_or_default();
             let end = fw_bytes
                 .iter()
@@ -1000,14 +1088,16 @@ impl WinUsbLcdCore {
 
     pub(crate) fn stop_clock_resp(&mut self) -> Option<LcdResponse> {
         let h = self.builder.stop_clock_header_winusb();
-        match self.tx_write_full(&h) {
-            Ok(_) => self.note_write_success(),
+        match self.exchange(&h, "StopClock") {
+            Ok(response) => {
+                self.note_write_success();
+                response
+            }
             Err(e) => {
                 warn!("StopClock write failed: {e}");
-                return None;
+                None
             }
         }
-        self.read_response("StopClock")
     }
 
     pub(crate) fn clear_jpg_layer(&mut self) {
@@ -1029,10 +1119,8 @@ impl WinUsbLcdCore {
         let mut packet = vec![0u8; 512 + jpg_buf.len()];
         packet[..512].copy_from_slice(&header);
         packet[512..].copy_from_slice(&jpg_buf);
-        if let Err(e) = self.tx_write_full(&packet) {
+        if let Err(e) = self.exchange(&packet, "ClearJpgLayer") {
             warn!("ClearJpgLayer failed: {e}");
-        } else {
-            self.read_response("ClearJpgLayer");
         }
     }
 
@@ -1040,19 +1128,23 @@ impl WinUsbLcdCore {
     /// unless all three layers are reset first. The writes go out before any
     /// reply is read, and only the first two layers are acknowledged.
     pub(crate) fn open_flex_layers(&mut self) -> Result<()> {
-        for packet in flex_opening_packets(&mut self.builder, &self.screen)? {
-            self.tx_write_full(&packet)
-                .context("writing Flex layer reset")?;
-            self.note_write_success();
-        }
-        let mut reply = [0u8; 512];
-        for _ in 0..2 {
-            if let Err(error) = self.tx_read(&mut reply) {
-                debug!("Flex layer reset reply unavailable: {error}");
-                break;
+        let packets = flex_opening_packets(&mut self.builder, &self.screen)?;
+        {
+            let bulk = self.transport.lock();
+            for packet in &packets {
+                bulk.write_full(packet, self.write_timeout)
+                    .context("writing Flex layer reset")?;
             }
+            let mut reply = [0u8; 512];
+            for _ in 0..2 {
+                if let Err(error) = bulk.read(&mut reply, self.read_timeout) {
+                    debug!("Flex layer reset reply unavailable: {error}");
+                    break;
+                }
+            }
+            bulk.read_flush();
         }
-        self.tx_read_flush();
+        self.note_write_success();
         Ok(())
     }
 
@@ -1075,11 +1167,9 @@ impl WinUsbLcdCore {
             let mut packet = vec![0u8; 512 + png_buf.len()];
             packet[..512].copy_from_slice(&header);
             packet[512..].copy_from_slice(&png_buf);
-            if let Err(e) = self.tx_write_full(&packet) {
-                warn!("ClearPngLayer failed: {e}");
-            } else {
-                self.read_response("ClearPngLayer");
-                png_sent = true;
+            match self.exchange(&packet, "ClearPngLayer") {
+                Ok(_) => png_sent = true,
+                Err(e) => warn!("ClearPngLayer failed: {e}"),
             }
         }
 
@@ -1099,10 +1189,8 @@ impl WinUsbLcdCore {
         let mut packet = vec![0u8; 512 + jpg_buf.len()];
         packet[..512].copy_from_slice(&header);
         packet[512..].copy_from_slice(&jpg_buf);
-        if let Err(e) = self.tx_write_full(&packet) {
+        if let Err(e) = self.exchange(&packet, "ClearJpgLayer") {
             warn!("ClearJpgLayer failed: {e}");
-        } else {
-            self.read_response("ClearJpgLayer");
         }
         png_sent
     }
@@ -1127,19 +1215,17 @@ impl WinUsbLcdCore {
         packet[..512].copy_from_slice(&header);
         packet[512..total].copy_from_slice(frame);
 
-        match self.tx_write_full(&packet) {
-            Ok(_) => self.note_write_success(),
+        let resp = match self.exchange(&packet, "frame ack") {
+            Ok(resp) => resp,
             Err(e) => {
                 warn!("Frame write failed: {e}");
                 self.try_recover(None)
                     .with_context(|| format!("recovering from frame write error: {e}"))?;
-                self.tx_write_full(&packet)
-                    .context("writing LCD frame after recovery")?;
-                self.note_write_success();
+                self.exchange(&packet, "frame ack")
+                    .context("writing LCD frame after recovery")?
             }
-        }
-
-        let resp = self.read_response("frame ack");
+        };
+        self.note_write_success();
         if let Some(level) = resp.as_deref().and_then(buffer_level) {
             if level > 3 {
                 self.wait_buffer(2, None);
@@ -1167,16 +1253,16 @@ impl WinUsbLcdCore {
 
     pub(crate) fn set_brightness_val(&mut self, brightness: u8) -> Result<()> {
         let header = self.builder.brightness_header_winusb(brightness);
-        self.tx_write_full(&header).context("setting brightness")?;
-        self.read_response("brightness");
+        self.exchange(&header, "brightness")
+            .context("setting brightness")?;
         debug!("Set brightness to {}", brightness.min(100));
         Ok(())
     }
 
     pub(crate) fn set_frame_rate(&mut self, fps: u8) -> Result<()> {
         let header = self.builder.frame_rate_header_winusb(fps);
-        self.tx_write_full(&header).context("setting frame rate")?;
-        self.read_response("frame rate");
+        self.exchange(&header, "frame rate")
+            .context("setting frame rate")?;
         debug!("Set frame rate to {fps}");
         Ok(())
     }
@@ -1201,18 +1287,41 @@ impl WinUsbLcdCore {
 
     fn query_buffer_level(&mut self) -> Option<u8> {
         let header = self.builder.query_buffer_level_header_winusb();
-        self.tx_write_full(&header).ok()?;
-        let mut buf = [0u8; 512];
-        match self.tx_read(&mut buf) {
-            Ok(n) if n > 0 => {
-                self.tx_read_flush();
-                buffer_level(&buf[..n])
-            }
-            _ => {
-                self.tx_read_flush();
-                None
-            }
+        let mut reply = [0u8; 512];
+        match self.tx_exchange(&header, &mut reply).ok()? {
+            Ok(n) if n > 0 => buffer_level(&reply[..n]),
+            _ => None,
         }
+    }
+
+    fn local_player_running(&mut self) -> Option<bool> {
+        let header = self.builder.local_player_state_header_winusb();
+        let mut reply = [0u8; 512];
+        match self.tx_exchange(&header, &mut reply).ok()? {
+            Ok(n) => parse_local_player_state(&reply[..n]),
+            Err(_) => None,
+        }
+    }
+
+    /// A StartPlay while the firmware's local player is still exiting can make
+    /// the decoder reset the ring after our first block, and the exiting player
+    /// can push one last chunk, so the ring drains after the player stops.
+    pub(crate) fn drain_h264_ring(&mut self, stop: &AtomicBool) -> Option<u8> {
+        let deadline = Instant::now() + RING_DRAIN_BUDGET;
+        let waiting = |stop: &AtomicBool| {
+            Instant::now() < deadline
+                && !stop.load(Ordering::Acquire)
+                && !lianli_transport::usb::shutting_down()
+        };
+        while self.local_player_running() == Some(true) && waiting(stop) {
+            std::thread::sleep(WAIT_BUFFER_POLL);
+        }
+        let mut level = self.query_buffer_level();
+        while level.is_some_and(|level| level > 0) && waiting(stop) {
+            std::thread::sleep(WAIT_BUFFER_POLL);
+            level = self.query_buffer_level();
+        }
+        level
     }
 
     /// Poll QueryBlock at the vendor cadence, with a total wait bound.
@@ -1236,6 +1345,9 @@ impl WinUsbLcdCore {
                 Some(level) if level <= threshold => return Some(level),
                 Some(level) => {
                     last = Some(level);
+                    if self.transport.is_streaming() {
+                        self.query_stream_telemetry(level);
+                    }
                     std::thread::sleep(WAIT_BUFFER_POLL)
                 }
                 None => {
@@ -1254,17 +1366,15 @@ impl WinUsbLcdCore {
         if !self.transport.has_play_safe_pending() {
             return;
         }
-        let safe = match level {
-            Some(l) if l <= CONTROL_SAFE_LEVEL => true,
-            Some(l) if l <= CONTROL_RELAXED_LEVEL => self
-                .transport
-                .oldest_play_safe_age()
-                .is_some_and(|age| age >= CONTROL_RELAX_AFTER),
-            _ => false,
-        };
-        if !safe {
+        let since_last_send = self.last_control_send.map(|at| at.elapsed());
+        if !control_send_allowed(
+            level,
+            self.transport.oldest_play_safe_age(),
+            since_last_send,
+        ) {
             return;
         }
+        self.last_control_send = Some(Instant::now());
         for cmd in self.transport.take_play_safe() {
             debug!(
                 "Sending deferred {} ({} bytes, waited {} ms, level {:?})",
@@ -1299,6 +1409,8 @@ impl WinUsbLcdCore {
             Ok(_) => debug!("No reply to deferred {} (timeout)", cmd.label),
             Err(e) => debug!("Reply read after deferred {} failed: {e}", cmd.label),
         }
+        // A reply later than reply_wait would reach the next exchange.
+        transport.read_flush();
         Ok(())
     }
 
@@ -1440,7 +1552,94 @@ impl WinUsbLcdCore {
                 .context("LCD buffer did not drain; stopping H.264 playback")?;
         }
         self.flush_pending_control(Some(level));
+        self.query_stream_telemetry(level);
         Ok(())
+    }
+
+    /// L-Connect polls GetH2Params throughout H.264 playback.
+    fn query_stream_telemetry(&mut self, level: u8) {
+        if !self.transport.stream_telemetry_requested() {
+            return;
+        }
+        let now = Instant::now();
+        if self.telemetry_retry_at.is_some_and(|at| now < at) {
+            return;
+        }
+        // Counted from the last parsed reading, since consumers drop one after 5 s.
+        let since_last = self
+            .last_telemetry_query
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+        if since_last < STREAM_TELEMETRY_INTERVAL {
+            return;
+        }
+        let header = self.builder.get_h2_params_header_winusb();
+        match self.h2_params_exchange(&header) {
+            Ok(Some(params)) => {
+                debug!(
+                    "GetH2Params between chunks: reading (level {level}, previous {} ms ago)",
+                    since_last.as_millis()
+                );
+                *self.transport.stream_telemetry.lock() = Some(params);
+                self.last_telemetry_query = Some(Instant::now());
+                self.telemetry_retry_at = None;
+            }
+            Ok(None) => self.note_telemetry_miss(),
+            Err(e) => {
+                warn!("GetH2Params write between chunks failed: {e}");
+                self.note_telemetry_miss();
+            }
+        }
+    }
+
+    /// An exchange can block the stream for a full read timeout, so only one quick retry.
+    fn note_telemetry_miss(&mut self) {
+        let now = Instant::now();
+        if self.telemetry_retry_at.take().is_some() {
+            self.last_telemetry_query = Some(now);
+        } else {
+            self.telemetry_retry_at = Some(now + STREAM_TELEMETRY_RETRY);
+        }
+    }
+
+    /// The reply often queues behind a late reply to an earlier command.
+    fn h2_params_exchange(
+        &self,
+        header: &[u8],
+    ) -> std::result::Result<
+        Option<crate::winusb::h2_aio::H2Params>,
+        lianli_transport::TransportError,
+    > {
+        let bulk = self.transport.lock();
+        bulk.write_full(header, self.write_timeout)?;
+        let mut reply = [0u8; 512];
+        let mut parsed = None;
+        for (attempt, wait) in [self.read_timeout, STREAM_TELEMETRY_SECOND_READ]
+            .into_iter()
+            .enumerate()
+        {
+            match bulk.read(&mut reply, wait) {
+                Ok(n) => {
+                    parsed = crate::winusb::h2_aio::parse_h2_params(&reply[..n], Instant::now());
+                    if parsed.is_some() {
+                        break;
+                    }
+                    debug!(
+                        "GetH2Params between chunks read another reply ({n} bytes, cmd {:#04x}, read {})",
+                        reply.first().copied().unwrap_or(0),
+                        attempt + 1
+                    );
+                }
+                Err(e) => {
+                    debug!(
+                        "GetH2Params read between chunks failed (read {}): {e}",
+                        attempt + 1
+                    );
+                    break;
+                }
+            }
+        }
+        bulk.read_flush();
+        Ok(parsed)
     }
 
     /// Mark the start of an H.264 stream: control writers defer to us.
@@ -1449,7 +1648,9 @@ impl WinUsbLcdCore {
     /// not streaming either finishes its write before any stream chunk or
     /// sees the flag flip and queues instead. It can never land a control
     /// packet mid stream.
-    fn stream_begin(&self) {
+    fn stream_begin(&mut self) {
+        self.last_telemetry_query = Some(Instant::now());
+        self.telemetry_retry_at = None;
         let _bulk = self.transport.lock();
         self.transport.set_streaming(true);
     }
@@ -1642,6 +1843,15 @@ fn tag_interrupted(error: anyhow::Error) -> anyhow::Error {
         error.context(LcdTransferInterrupted)
     } else {
         error
+    }
+}
+
+fn parse_local_player_state(reply: &[u8]) -> Option<bool> {
+    match reply {
+        [crate::crypto::CMD_LOCAL_PLAYER_STATE, _, _, _, _, _, _, _, playing, ..] => {
+            Some(*playing != 0)
+        }
+        _ => None,
     }
 }
 
@@ -1884,6 +2094,27 @@ mod file_stream_tests {
         }
         assert!(now + Duration::from_secs(4) - queue[0].queued_at >= CONTROL_RELAX_AFTER);
     }
+    #[test]
+    fn cooling_commands_reach_a_panel_holding_level_three() {
+        use super::{control_send_allowed, CONTROL_RELAX_AFTER};
+        use std::time::Duration;
+        let fresh = Some(Duration::from_millis(500));
+        let overdue = Some(CONTROL_RELAX_AFTER);
+        assert!(control_send_allowed(Some(1), fresh, None));
+        assert!(!control_send_allowed(Some(3), fresh, None));
+        assert!(control_send_allowed(Some(3), overdue, None));
+        assert!(!control_send_allowed(Some(4), overdue, None));
+        assert!(!control_send_allowed(None, overdue, None));
+    }
+    #[test]
+    fn cooling_commands_keep_l_connect_spacing_while_streaming() {
+        use super::{control_send_allowed, CONTROL_MIN_GAP};
+        use std::time::Duration;
+        let queued = Some(Duration::from_millis(100));
+        let just_sent = Some(CONTROL_MIN_GAP - Duration::from_millis(1));
+        assert!(!control_send_allowed(Some(0), queued, just_sent));
+        assert!(control_send_allowed(Some(0), queued, Some(CONTROL_MIN_GAP)));
+    }
     use super::*;
     use std::io::Cursor;
 
@@ -1996,6 +2227,24 @@ mod h264_negotiation_tests {
             Some(0)
         );
     }
+
+    #[test]
+    fn h2_control_replies_give_no_buffer_credit() {
+        for opcode in [
+            crate::crypto::CMD_GET_H2_PARAMS,
+            crate::crypto::CMD_SYNC_PUMP_FAN,
+            crate::crypto::CMD_PUSH_RGB_DATA,
+        ] {
+            let mut reply = [0u8; 32];
+            reply[0] = opcode;
+            reply[8] = 1;
+            assert_eq!(super::buffer_level(&reply), None);
+        }
+        let mut chunk_ack = [0u8; 32];
+        chunk_ack[0] = crate::crypto::CMD_START_PLAY;
+        chunk_ack[8] = 1;
+        assert_eq!(super::buffer_level(&chunk_ack), Some(1));
+    }
     use super::*;
 
     fn response(size: u32) -> [u8; 12] {
@@ -2053,5 +2302,26 @@ mod h264_negotiation_tests {
         assert_eq!(state.get().unwrap_or(DEFAULT_H264_CHUNK_SIZE), 202_752);
         assert_eq!(state.update(&response(32_768)), Some(32_768));
         assert_eq!(state.get(), Some(32_768));
+    }
+}
+
+#[cfg(test)]
+mod local_player_tests {
+    use super::parse_local_player_state;
+    use crate::crypto::{CMD_LOCAL_PLAYER_STATE, CMD_QUERY_BLOCK};
+
+    #[test]
+    fn local_player_state_comes_only_from_its_own_reply() {
+        let mut reply = [0u8; 16];
+        reply[0] = CMD_LOCAL_PLAYER_STATE;
+        reply[1] = 0xc8;
+        reply[8] = 1;
+        assert_eq!(parse_local_player_state(&reply), Some(true));
+        reply[8] = 0;
+        assert_eq!(parse_local_player_state(&reply), Some(false));
+        assert_eq!(parse_local_player_state(&reply[..8]), None);
+        reply[0] = CMD_QUERY_BLOCK;
+        reply[8] = 1;
+        assert_eq!(parse_local_player_state(&reply), None);
     }
 }
