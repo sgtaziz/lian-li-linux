@@ -6,7 +6,7 @@ use lianli_shared::config::AppConfig;
 use lianli_shared::systeminfo::SysSensor;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -638,27 +638,7 @@ impl ServiceManager {
         info!("LIAN LI LINUX DAEMON");
         info!("=====================================================================");
 
-        {
-            let config_path = &self.config_path;
-            if !config_path.exists() {
-                info!(
-                    "No config found at {}, creating default",
-                    config_path.display()
-                );
-                if let Some(parent) = config_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let default_config = AppConfig::default();
-                match serde_json::to_string_pretty(&default_config) {
-                    Ok(json) => {
-                        if let Err(e) = std::fs::write(config_path, json) {
-                            warn!("Failed to write default config: {e}");
-                        }
-                    }
-                    Err(e) => warn!("Failed to serialize default config: {e}"),
-                }
-            }
-        }
+        write_initial_config(&self.config_path);
 
         let (tx, rx) = std::sync::mpsc::channel::<DaemonEvent>();
         signals.attach(tx.clone());
@@ -1202,6 +1182,55 @@ impl ServiceManager {
         stream_worker.stop();
         self.shutdown();
         Ok(self.restart_requested && !signals.requested())
+    }
+}
+
+fn write_initial_config(config_path: &Path) {
+    if config_path.exists() {
+        return;
+    }
+    info!(
+        "No config found at {}, creating default",
+        config_path.display()
+    );
+    if let Some(parent) = config_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(&AppConfig::initial()) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(config_path, json) {
+                warn!("Failed to write default config: {e}");
+            }
+        }
+        Err(e) => warn!("Failed to serialize default config: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod initial_config_tests {
+    use super::write_initial_config;
+    use lianli_shared::config::AppConfig;
+
+    #[test]
+    fn new_config_includes_starter_curves() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lianli/config.json");
+        write_initial_config(&path);
+        let config: AppConfig =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let names: Vec<&str> = config.fan_curves.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Quiet", "Standard", "High speed", "Full speed"]);
+        assert!(config.fans.is_none());
+    }
+
+    #[test]
+    fn existing_config_is_left_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.json");
+        let existing = br#"{"fan_curves":[]}"#;
+        std::fs::write(&path, existing).unwrap();
+        write_initial_config(&path);
+        assert_eq!(std::fs::read(&path).unwrap(), existing);
     }
 }
 
