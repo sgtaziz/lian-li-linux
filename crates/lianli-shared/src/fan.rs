@@ -33,6 +33,49 @@ impl FanCurve {
     }
 }
 
+/// Curves written into a newly created config so Curve mode is usable right after install.
+pub fn starter_fan_curves() -> Vec<FanCurve> {
+    let curve = |name: &str, points: &[(f32, f32)]| FanCurve {
+        name: name.into(),
+        temp_source: None,
+        temp_command: String::new(),
+        curve: points.to_vec(),
+    };
+    vec![
+        curve(
+            "Quiet",
+            &[
+                (30.0, 20.0),
+                (50.0, 25.0),
+                (65.0, 40.0),
+                (75.0, 65.0),
+                (85.0, 100.0),
+            ],
+        ),
+        curve(
+            "Standard",
+            &[
+                (30.0, 30.0),
+                (50.0, 40.0),
+                (65.0, 60.0),
+                (75.0, 80.0),
+                (85.0, 100.0),
+            ],
+        ),
+        curve(
+            "High speed",
+            &[
+                (30.0, 45.0),
+                (50.0, 60.0),
+                (60.0, 75.0),
+                (70.0, 90.0),
+                (80.0, 100.0),
+            ],
+        ),
+        curve("Full speed", &[(20.0, 100.0), (100.0, 100.0)]),
+    ]
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum FanSpeed {
@@ -257,6 +300,35 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starter_curves_are_ordered_bounded_and_reach_full_speed() {
+        let curves = starter_fan_curves();
+        let names: Vec<&str> = curves.iter().map(|curve| curve.name.as_str()).collect();
+        assert_eq!(names, ["Quiet", "Standard", "High speed", "Full speed"]);
+        for curve in &curves {
+            assert!(
+                curve.curve.windows(2).all(|pair| pair[0].0 < pair[1].0),
+                "{}",
+                curve.name
+            );
+            assert!(
+                curve
+                    .curve
+                    .iter()
+                    .all(|&(_, speed)| (20.0..=100.0).contains(&speed)),
+                "{}",
+                curve.name
+            );
+            assert_eq!(
+                interpolate_curve(&curve.curve, 85.0),
+                100.0,
+                "{}",
+                curve.name
+            );
+            assert!(curve.temp_source.is_none() && curve.temp_command.is_empty());
+        }
+    }
 
     #[test]
     fn is_off_matches_reserved_key_only() {
