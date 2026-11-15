@@ -167,18 +167,20 @@ function curveNameError(name: string): MessageKey | null {
   return null;
 }
 
-const nameError = computed(() => {
-  const name = nameBuffer.value.trim();
-  return name === current.value?.name ? null : curveNameError(name);
-});
+function isUnchangedName(input: string): boolean {
+  const saved = current.value?.name;
+  return input === saved || input.trim() === saved;
+}
+
+const nameError = computed(() => (isUnchangedName(nameBuffer.value) ? null : curveNameError(nameBuffer.value.trim())));
 
 function renameCurve(input: string) {
   if (!current.value) return;
-  const name = input.trim();
-  if (name === current.value.name) {
-    nameBuffer.value = name;
+  if (isUnchangedName(input)) {
+    nameBuffer.value = current.value.name;
     return;
   }
+  const name = input.trim();
   const error = curveNameError(name);
   if (error) {
     message.warning(t(error, { name }));
