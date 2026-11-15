@@ -159,8 +159,7 @@ function removeCurve(idx: number) {
 
 function renameCurve(name: string) {
   if (!current.value) return;
-  current.value.name = name;
-  config.markDirty();
+  config.renameFanCurve(current.value, name);
 }
 
 function onTempSource(value: string) {

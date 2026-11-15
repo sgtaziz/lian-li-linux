@@ -12,6 +12,7 @@ import type {
   SensorInfo,
   LcdConfig,
   FanCurve,
+  FanSpeed,
   PwmHeader,
 } from "@/types";
 
@@ -195,6 +196,21 @@ export const useConfigStore = defineStore("config", () => {
     return config.fan_curves.map((c) => c.name);
   }
 
+  function renameFanCurve(curve: FanCurve, name: string) {
+    const previous = curve.name;
+    if (previous === name) return;
+    const follow = (speed: FanSpeed) => (speed === previous ? name : speed);
+    for (const group of config.fans?.speeds ?? []) {
+      group.speeds = group.speeds.map(follow);
+    }
+    for (const aio of Object.values(config.aio)) {
+      aio.pump_target_rpm = follow(aio.pump_target_rpm);
+      aio.fan_speeds = aio.fan_speeds.map(follow);
+    }
+    curve.name = name;
+    markDirty();
+  }
+
   function addLcd(entry: LcdConfig) {
     config.lcds.push(entry);
     markDirty();
@@ -234,6 +250,7 @@ export const useConfigStore = defineStore("config", () => {
     presetsFor,
     aioConfigFor,
     curveNames,
+    renameFanCurve,
     addLcd,
     addFanCurve,
   };
