@@ -157,11 +157,11 @@ function addCurve() {
 
 function removeCurve(idx: number) {
   const curve = curves.value[idx];
-  const name = curve?.name ?? t("fans.page.curveFallbackName");
-  const inUse = curve ? curveInUse(curve) : false;
+  if (!curve) return;
+  const name = curve.name || t("fans.page.curveFallbackName");
   dialog.error({
     title: t("fans.page.deleteCurveTitle"),
-    content: t(inUse ? "fans.page.deleteCurveInUseContent" : "fans.page.deleteCurveContent", { name }),
+    content: t(curveInUse(curve) ? "fans.page.deleteCurveInUseContent" : "fans.page.deleteCurveContent", { name }),
     positiveText: t("common.delete"),
     negativeText: t("common.cancel"),
     onPositiveClick: () => {
