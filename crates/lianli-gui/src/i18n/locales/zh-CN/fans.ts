@@ -20,7 +20,7 @@ const messages: typeof en = {
     curveUserOffline: "{device}（离线）",
     unknownDevice: "未知设备",
     noFansUseCurve: "没有风扇使用此曲线",
-    noCurves: "暂无风扇曲线。点击“添加”创建。",
+    noCurves: "暂无风扇曲线。点击“添加”，从模板或空白曲线开始。",
     fanSpeedAssignments: "风扇转速分配",
     allFans: "所有风扇",
     useForAllFans: "应用到所有风扇",
@@ -37,6 +37,13 @@ const messages: typeof en = {
     temperatureAxis: "温度（°C）",
     speedAxis: "转速（%）",
     hint: "单击添加点，拖动移动点，双击删除点。",
+  },
+  templates: {
+    quiet: "静音",
+    standard: "标准",
+    highSpeed: "高速",
+    fullSpeed: "全速",
+    blank: "空白曲线",
   },
   groupCard: {
     fanCount: "{count} 个风扇",

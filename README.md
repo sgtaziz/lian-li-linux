@@ -205,8 +205,7 @@ session helper, including the frontend.
 Open **Lian Li Linux** after installation. **Installation Health** checks setup
 and links to repair instructions. Fresh native installs leave both daemon services
 stopped: choose **User (at login)** or **System (at boot)** and select **Enable and
-start**. Only one mode can own the hardware. A new configuration includes Quiet,
-Standard, High speed and Full speed fan curves, ready to assign on the **Fans** page.
+start**. Only one mode can own the hardware.
 
 Everything else lives in **Settings**:
 
