@@ -35,6 +35,13 @@ const messages: typeof en = {
     cacheUnavailable: "安装检查缓存不可用",
     alreadyRunning: "安装检查正在进行。请稍后重试。",
   },
+  curveFiles: {
+    unreadable: "无法读取风扇曲线文件：{error}",
+    tooLarge: "风扇曲线文件超过 64 KB",
+    invalid: "这不是有效的风扇曲线文件：{detail}",
+    writeFailed: "无法保存风扇曲线文件：{error}",
+    mainWindow: "请在主窗口中导出和导入风扇曲线",
+  },
   diagnostics: {
     previewMainWindow: "请从主窗口打开诊断导出",
     saveMainWindow: "请从主窗口保存诊断导出",
