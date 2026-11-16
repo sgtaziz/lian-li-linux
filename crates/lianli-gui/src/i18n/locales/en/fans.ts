@@ -6,6 +6,8 @@ export default {
     deleteCurveContent: "\"{name}\" will be permanently deleted.",
     curveFallbackName: "Curve",
     newCurveName: "New Curve",
+    emptyCurveName: "A fan curve needs a name.",
+    reservedCurveName: "\"{name}\" is reserved for fan modes. Choose another name.",
     name: "Name",
     curveNamePlaceholder: "Curve name",
     temperatureSource: "Temperature source",

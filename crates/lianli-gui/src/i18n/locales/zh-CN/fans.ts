@@ -8,6 +8,8 @@ const messages: typeof en = {
     deleteCurveContent: "“{name}”将被永久删除。",
     curveFallbackName: "曲线",
     newCurveName: "新曲线",
+    emptyCurveName: "风扇曲线需要名称。",
+    reservedCurveName: "“{name}”是风扇模式的保留名称。请选择其他名称。",
     name: "名称",
     curveNamePlaceholder: "曲线名称",
     temperatureSource: "温度来源",

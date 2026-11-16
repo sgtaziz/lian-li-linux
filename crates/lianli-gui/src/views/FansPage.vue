@@ -17,7 +17,7 @@ import type { SensorSource, DeviceInfo } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate } from "@/i18n";
-import { decodeSpeedMode, fillSlots, speedModeOf } from "@/components/fans/speedMode";
+import { decodeSpeedMode, fillSlots, isReservedCurveName, speedModeOf } from "@/components/fans/speedMode";
 import { speedAt } from "@/components/fans/curvePoints";
 import { CURVE_TEMPLATES } from "@/components/fans/curveTemplates";
 import { useCurveHistory } from "@/components/fans/useCurveHistory";
@@ -333,7 +333,15 @@ function removeCurve(idx: number) {
 
 function renameCurve(name: string) {
   if (!current.value) return;
-  current.value.name = name;
+  const trimmed = name.trim();
+  if (trimmed === current.value.name) return;
+  if (!trimmed || isReservedCurveName(trimmed)) {
+    message.error(t(trimmed ? "fans.page.reservedCurveName" : "fans.page.emptyCurveName", { name: trimmed }));
+    nameBuffer.value = current.value.name;
+    return;
+  }
+  current.value.name = trimmed;
+  nameBuffer.value = trimmed;
   config.markDirty();
 }
 

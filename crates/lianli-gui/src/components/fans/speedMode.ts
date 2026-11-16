@@ -25,3 +25,8 @@ export function decodeSpeedMode(value: string): FanSpeed {
 export function fillSlots(group: FanGroup, value: FanSpeed) {
   group.speeds = [value, value, value, value] as FanSlots;
 }
+
+/** Slot values that mean firmware control or motherboard sync, so a curve must not use them as its name. */
+export function isReservedCurveName(name: string): boolean {
+  return name === "off" || name.startsWith(MB_SYNC_KEY);
+}

@@ -83,7 +83,19 @@ export const useTrayStore = defineStore("tray", () => {
       available.value = false;
     }
     if (!available.value) return;
-    watch(status, (next) => void invoke("set_tray_status", { status: next }).catch(() => undefined), { immediate: true, deep: true });
+    let sent = "";
+    watch(
+      status,
+      (next) => {
+        const key = JSON.stringify(next);
+        if (key === sent) return;
+        sent = key;
+        void invoke("set_tray_status", { status: next }).catch(() => {
+          sent = "";
+        });
+      },
+      { immediate: true },
+    );
     await listen("tray://shown", () => setHidden(false));
     await listen("tray://quit", () => {
       quitRequested.value += 1;
