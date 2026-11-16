@@ -87,7 +87,7 @@ function removeColor(index: number) {
 <style scoped>
 .effect-settings, .field { display: flex; flex-direction: column; gap: var(--space-3); }
 .field > .segmented { align-self: flex-start; }
-.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: var(--space-4); }
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: var(--space-4); }
 .color-list, .color-item { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .effect-color { min-width: 130px; }
 @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }

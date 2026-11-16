@@ -518,7 +518,7 @@ const zoneLabel = computed(() => {
 }
 .two-col {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
   gap: var(--space-4);
 }
 .field > .segmented {
