@@ -201,12 +201,15 @@ export const useDevicesStore = defineStore("devices", () => {
     return telemetry.value.curve_temperatures?.[curveName] ?? null;
   }
 
-  const failingCurves = computed(() =>
-    Object.entries(telemetry.value.curve_temperatures ?? {})
+  // Returning the previous array when nothing changed keeps every poll from re-rendering
+  // the warning banner, sidebar icon and tray status.
+  const failingCurves = computed<string[]>((previous) => {
+    const next = Object.entries(telemetry.value.curve_temperatures ?? {})
       .filter(([, reading]) => reading.full_speed_fallback)
       .map(([name]) => name)
-      .sort(),
-  );
+      .sort();
+    return previous && previous.length === next.length && previous.every((name, i) => name === next[i]) ? previous : next;
+  });
 
   const history = shallowRef<Record<string, DeviceHistory>>({});
 
