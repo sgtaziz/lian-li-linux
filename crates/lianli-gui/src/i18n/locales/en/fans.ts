@@ -18,7 +18,7 @@ export default {
     curveUserOffline: "{device} (offline)",
     unknownDevice: "Unknown device",
     noFansUseCurve: "No fans use this curve",
-    noCurves: "No fan curves. Click \"Add\" to create one.",
+    noCurves: "No fan curves. Click \"Add\" to start from a template or a blank curve.",
     fanSpeedAssignments: "Fan Speed Assignments",
     allFans: "All fans",
     useForAllFans: "Use for all fans",
@@ -35,6 +35,13 @@ export default {
     temperatureAxis: "Temperature (°C)",
     speedAxis: "Speed (%)",
     hint: "Click to add points. Drag to move. Double-click to remove.",
+  },
+  templates: {
+    quiet: "Quiet",
+    standard: "Standard",
+    highSpeed: "High speed",
+    fullSpeed: "Full speed",
+    blank: "Blank curve",
   },
   groupCard: {
     fanCount: "{count} fans",

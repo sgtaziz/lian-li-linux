@@ -18,6 +18,7 @@ import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate } from "@/i18n";
 import { decodeSpeedMode, fillSlots, speedModeOf } from "@/components/fans/speedMode";
 import { speedAt } from "@/components/fans/curvePoints";
+import { CURVE_TEMPLATES } from "@/components/fans/curveTemplates";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
@@ -186,17 +187,29 @@ function onCurveChange(value: [number, number][]) {
   config.markDirty();
 }
 
-function addCurve() {
-  const name = uniqueName(t("fans.page.newCurveName"), curves.value.map((c) => c.name));
+const BLANK_CURVE = "blank";
+
+const addCurveOptions = computed(() => [
+  ...CURVE_TEMPLATES.map((template) => ({ key: template.id, label: t(template.nameKey) })),
+  { type: "divider", key: "divider" },
+  { key: BLANK_CURVE, label: t("fans.templates.blank") },
+]);
+
+function onAddCurve(key: string | number) {
+  const template = CURVE_TEMPLATES.find((candidate) => candidate.id === key);
+  if (template) {
+    addCurveFrom(t(template.nameKey), template.points);
+  } else if (key === BLANK_CURVE) {
+    addCurveFrom(t("fans.page.newCurveName"), [[30, 30], [60, 70], [85, 100]]);
+  }
+}
+
+function addCurveFrom(baseName: string, points: [number, number][]) {
   config.addFanCurve({
-    name,
+    name: uniqueName(baseName, curves.value.map((c) => c.name)),
     temp_source: null,
     temp_command: "",
-    curve: [
-      [30, 30],
-      [60, 70],
-      [85, 100],
-    ],
+    curve: points.map(([temp, speed]) => [temp, speed]),
   });
   selectedCurve.value = curves.value.length - 1;
 }
@@ -329,9 +342,11 @@ function onHysteresisPwm(percent: number | null) {
             <X :size="11" />
           </button>
         </div>
-        <button class="curve-tab add" @click="addCurve">
-          <Plus :size="13" /> {{ t("common.add") }}
-        </button>
+        <n-dropdown trigger="click" :options="addCurveOptions" @select="onAddCurve">
+          <button class="curve-tab add" type="button" aria-haspopup="menu">
+            <Plus :size="13" /> {{ t("common.add") }}
+          </button>
+        </n-dropdown>
       </div>
 
       <div v-if="current" class="curve-body">
