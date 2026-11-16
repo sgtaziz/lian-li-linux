@@ -1,6 +1,6 @@
 use crate::aio::AioConfig;
 use crate::device_id::DeviceFamily;
-use crate::fan::{starter_fan_curves, FanConfig, FanCurve};
+use crate::fan::{FanConfig, FanCurve};
 use crate::media::{
     DoublegaugeDescriptor, MediaFraming, MediaType, SensorDescriptor, SensorSourceConfig,
 };
@@ -304,16 +304,6 @@ fn default_true() -> bool {
 
 fn default_drift_interval_ms() -> u64 {
     1000
-}
-
-impl AppConfig {
-    /// The config written when no config file exists yet.
-    pub fn initial() -> Self {
-        Self {
-            fan_curves: starter_fan_curves(),
-            ..Self::default()
-        }
-    }
 }
 
 impl Default for AppConfig {
