@@ -1,6 +1,16 @@
 import type en from "../en/settings";
 
 const messages: typeof en = {
+  tray: {
+    closeToTray: "关闭窗口后在托盘中继续运行",
+    closeToTrayHint: "关闭窗口会将其隐藏到托盘。在托盘菜单中选择“退出”可退出程序。在 GNOME 中，托盘图标需要 AppIndicator 扩展。",
+    unavailable: "系统托盘不可用。请安装 libayatana-appindicator，然后重新启动 Lian Li Linux。",
+    icon: "托盘图标",
+    iconHint: "“自动”跟随桌面的浅色或深色样式。深色面板请选择“浅色”，浅色面板请选择“深色”。",
+    iconAuto: "自动",
+    iconLight: "浅色",
+    iconDark: "深色",
+  },
   appearance: {
     title: "外观",
     style: "样式",

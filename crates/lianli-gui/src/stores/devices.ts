@@ -1,11 +1,12 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 import type { CurveTemperature, DeviceInfo, TelemetrySnapshot } from "@/types";
 import { DONGLE_FAMILIES } from "@/constants";
 import { usePendingAction } from "@/composables/usePendingAction";
 import { DISPLAY_SWITCH_TIMEOUT_MS, displaySwitchComplete } from "@/utils/displaySwitch";
 import { deviceLabels } from "@/utils/deviceNames";
 import { tr } from "@/i18n";
+import { recordHistory, type DeviceHistory } from "@/utils/telemetryHistory";
 
 export type DisplaySwitchError = { message: string } | { timedOutDevice: string };
 
@@ -207,12 +208,21 @@ export const useDevicesStore = defineStore("devices", () => {
       .sort(),
   );
 
+  const history = shallowRef<Record<string, DeviceHistory>>({});
+
   function applyPoll(devices: DeviceInfo[], snap: TelemetrySnapshot) {
     for (const [id, source] of Object.entries(displaySwitches.value)) {
       if (displaySwitchComplete(source, devices)) finishDisplaySwitch(id);
     }
     list.value = devices;
     telemetry.value = snap;
+    history.value = recordHistory(
+      history.value,
+      devices.filter((d) => d.has_fan || d.has_pump).map((d) => d.device_id),
+      snap.fan_rpms,
+      snap.coolant_temps,
+      Date.now(),
+    );
     pending.expire(devices.map((d) => d.device_id));
   }
 
@@ -235,6 +245,7 @@ export const useDevicesStore = defineStore("devices", () => {
     coolantTemp,
     curveTemperature,
     failingCurves,
+    history,
     applyPoll,
   };
 });

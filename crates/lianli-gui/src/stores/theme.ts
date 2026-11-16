@@ -135,6 +135,7 @@ export const useThemeStore = defineStore("theme", () => {
     preference,
     mode,
     isDark,
+    desktopScheme,
     accentMode,
     customAccent,
     desktopAccent,

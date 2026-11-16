@@ -38,6 +38,7 @@ Requires:       hicolor-icon-theme
 # libavcodec-freeworld replaces its libavcodec.
 Requires:       (ffmpeg or (ffmpeg-free and libavcodec-freeworld))
 Requires:       systemd-libs
+Recommends:     libayatana-appindicator-gtk3
 Recommends:     polkit
 Suggests:       %{name}-evdi = %{version}-%{release}
 Suggests:       displaylink

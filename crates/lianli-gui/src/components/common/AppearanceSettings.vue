@@ -2,10 +2,12 @@
 import { computed } from "vue";
 import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import { useThemeStore, type ThemePreference } from "@/stores/theme";
+import { useTrayStore, type TrayIconStyle } from "@/stores/tray";
 import { DEFAULT_ACCENT, isHexColor } from "@/theme/palette";
 import { useTranslate } from "@/i18n";
 
 const theme = useThemeStore();
+const tray = useTrayStore();
 const t = useTranslate();
 
 const ACCENT_SWATCHES = [
@@ -24,6 +26,12 @@ const styleOptions = computed(() => [
   { value: "system" as const, label: t("settings.appearance.system") },
   { value: "light" as const, label: t("settings.appearance.light") },
   { value: "dark" as const, label: t("settings.appearance.dark") },
+]);
+
+const trayIconOptions = computed(() => [
+  { value: "auto" as const, label: t("settings.tray.iconAuto") },
+  { value: "light" as const, label: t("settings.tray.iconLight") },
+  { value: "dark" as const, label: t("settings.tray.iconDark") },
 ]);
 
 const followsDesktop = computed(() => theme.accentMode === "system");
@@ -57,6 +65,35 @@ function onCustomPicked(value: string) {
         :options="styleOptions"
         :label="t('settings.appearance.style')"
         @update:model-value="(v: ThemePreference) => theme.setPreference(v)"
+      />
+    </div>
+
+    <div class="divider" />
+
+    <div class="row">
+      <div class="row-text">
+        <span class="row-title">{{ t("settings.tray.closeToTray") }}</span>
+        <span class="row-hint">{{ tray.available ? t("settings.tray.closeToTrayHint") : t("settings.tray.unavailable") }}</span>
+      </div>
+      <n-switch
+        :value="tray.closeToTray"
+        :disabled="!tray.available"
+        :aria-label="t('settings.tray.closeToTray')"
+        @update:value="(v: boolean) => tray.setCloseToTray(v)"
+      />
+    </div>
+
+    <div class="row">
+      <div class="row-text">
+        <span class="row-title">{{ t("settings.tray.icon") }}</span>
+        <span class="row-hint">{{ t("settings.tray.iconHint") }}</span>
+      </div>
+      <SegmentedControl
+        :model-value="tray.iconStyle"
+        :options="trayIconOptions"
+        :label="t('settings.tray.icon')"
+        :disabled="!tray.available"
+        @update:model-value="(v: TrayIconStyle) => tray.setIconStyle(v)"
       />
     </div>
 
@@ -151,6 +188,9 @@ function onCustomPicked(value: string) {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+.row-text {
+  flex: 1 1 320px;
 }
 .row-title {
   font-size: 15px;

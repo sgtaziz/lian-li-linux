@@ -47,6 +47,15 @@ const messages: typeof en = {
     aioTitle: "没有一体式水冷",
     aioBody: "未连接一体式水冷。其他控制器上的风扇位于风扇页面。",
   },
+  tray: {
+    connected: "守护进程已连接 · {summary}",
+    offline: "守护进程未运行",
+    sensorLost: "没有温度读数：{name}",
+    tooltipConnected: "Lian Li Linux：已连接",
+    tooltipOffline: "Lian Li Linux：守护进程未运行",
+    open: "打开 Lian Li Linux",
+    quit: "退出",
+  },
   sidebar: {
     connected: "已连接",
     lastSeen: "上次检测到：{summary}",

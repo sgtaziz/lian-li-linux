@@ -8,7 +8,8 @@ url="https://github.com/sgtaziz/lian-li-linux"
 license=('MIT' 'GPL-2.0-only WITH Linux-syscall-note')
 depends=('cairo' 'dbus' 'ffmpeg' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'libgcc' 'libsoup3'
          'libstdc++' 'libusb' 'systemd-libs' 'webkit2gtk-4.1')
-optdepends=('evdi-dkms: EVDI desktop mode (userspace library and kernel module)' 'polkit: administrator authorization for service mode switching')
+optdepends=('evdi-dkms: EVDI desktop mode (userspace library and kernel module)' 'polkit: administrator authorization for service mode switching'
+            'libayatana-appindicator: system tray icon')
 makedepends=('git' 'cargo' 'clang' 'cmake' 'nasm' 'npm')
 provides=('lianli-linux')
 conflicts=('lianli-linux')

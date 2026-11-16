@@ -240,6 +240,10 @@ function iconFor(name: string) {
     top: 10px;
     right: 14px;
   }
+  .warn-icon {
+    top: 2px;
+    right: 4px;
+  }
   .status {
     display: flex;
     justify-content: center;

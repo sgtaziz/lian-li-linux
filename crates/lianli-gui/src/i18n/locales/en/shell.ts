@@ -45,6 +45,15 @@ export default {
     aioTitle: "No AIO coolers",
     aioBody: "No AIO cooler is connected. Fans on other controllers are on the Fans page.",
   },
+  tray: {
+    connected: "Daemon connected · {summary}",
+    offline: "Daemon isn't running",
+    sensorLost: "No temperature reading: {name}",
+    tooltipConnected: "Lian Li Linux: connected",
+    tooltipOffline: "Lian Li Linux: daemon not running",
+    open: "Open Lian Li Linux",
+    quit: "Quit",
+  },
   sidebar: {
     connected: "Connected",
     lastSeen: "Last seen: {summary}",

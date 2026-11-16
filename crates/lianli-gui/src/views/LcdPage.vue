@@ -409,7 +409,7 @@ function addLcd(deviceId: string) {
   padding: var(--space-6);
   text-align: center;
 }
-@media (max-width: 760px) {
+@media (max-width: 1000px) {
   .layout {
     grid-template-columns: 1fr;
   }

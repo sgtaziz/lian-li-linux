@@ -21,9 +21,10 @@ sha2 = { workspace = true }
 [dependencies]
 lianli-control = { path = "../../lianli-control" }
 lianli-shared = { path = "../../lianli-shared" }
-tauri = { workspace = true }
+tauri = { workspace = true, features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = { workspace = true }
 tauri-plugin-clipboard-manager = { workspace = true }
+tauri-plugin-single-instance = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

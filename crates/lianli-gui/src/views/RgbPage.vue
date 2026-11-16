@@ -367,7 +367,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
   margin: var(--space-2) 0 0;
   font-size: var(--font-size-sm);
 }
-@media (max-width: 760px) {
+@media (max-width: 1000px) {
   .layout {
     grid-template-columns: 1fr;
   }

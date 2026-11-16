@@ -23,6 +23,9 @@ function findTemp(sensors: SensorInfo[], kind: "cpu" | "gpu"): number | null {
   return match?.current_value ?? null;
 }
 
+const FOREGROUND_POLL_MS = 2000;
+const BACKGROUND_POLL_MS = 10000;
+
 export const useDaemonStore = defineStore("daemon", () => {
   const ipc = useIpc();
   const devices = useDevicesStore();
@@ -110,7 +113,7 @@ export const useDaemonStore = defineStore("daemon", () => {
     }
   }
 
-  const polling = usePolling(tick, 2000);
+  const polling = usePolling(tick, FOREGROUND_POLL_MS);
 
   async function refresh() {
     await polling.tick();
@@ -122,6 +125,10 @@ export const useDaemonStore = defineStore("daemon", () => {
 
   function stop() {
     polling.stop();
+  }
+
+  function setBackground(background: boolean) {
+    polling.setIntervalMs(background ? BACKGROUND_POLL_MS : FOREGROUND_POLL_MS);
   }
 
   return {
@@ -145,5 +152,6 @@ export const useDaemonStore = defineStore("daemon", () => {
     refresh,
     start,
     stop,
+    setBackground,
   };
 });

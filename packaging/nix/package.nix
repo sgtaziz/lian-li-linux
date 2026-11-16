@@ -162,6 +162,7 @@ rustPlatform.buildRustPackage {
           libxkbcommon
           linuxPackages.evdi
           systemd
+          libayatana-appindicator
         ]
       } "$bin"
       addDriverRunpath "$bin"
