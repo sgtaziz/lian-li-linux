@@ -1,4 +1,5 @@
 use crate::command_error::CommandError;
+use lianli_shared::fan::{MB_SYNC_KEY, OFF_KEY};
 use lianli_shared::ui_message::UiMessage;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -59,10 +60,19 @@ fn parse_curve_file(bytes: &[u8]) -> Result<Vec<PortableCurve>, CurveFileError> 
     file.curves.into_iter().map(validate_curve).collect()
 }
 
+/// Fan slots store a curve by name, and these names mean "firmware controlled" or
+/// motherboard sync instead, so a curve called this would silently change fan modes.
+fn is_reserved_name(name: &str) -> bool {
+    name == OFF_KEY || name.starts_with(MB_SYNC_KEY)
+}
+
 fn validate_curve(curve: PortableCurve) -> Result<PortableCurve, CurveFileError> {
     let name: String = curve.name.trim().chars().take(MAX_NAME_CHARS).collect();
     if name.is_empty() {
         return Err(invalid("a curve has no name"));
+    }
+    if is_reserved_name(&name) {
+        return Err(invalid(format!("{name} is a reserved name")));
     }
     if curve.curve.is_empty() || curve.curve.len() > MAX_POINTS {
         return Err(invalid(format!("{name} needs 1 to {MAX_POINTS} points")));
@@ -261,6 +271,12 @@ mod tests {
         }
         let blank = file(serde_json::json!([{ "name": "   ", "curve": [[30, 30]] }]));
         assert!(parse_curve_file(&blank).is_err());
+        for reserved in ["off", "__mb_sync__", "__mb_sync__:hwmon"] {
+            let bytes = file(serde_json::json!([{ "name": reserved, "curve": [[30, 30]] }]));
+            assert!(parse_curve_file(&bytes).is_err(), "{reserved}");
+        }
+        let allowed = file(serde_json::json!([{ "name": "Off peak", "curve": [[30, 30]] }]));
+        assert!(parse_curve_file(&allowed).is_ok());
         let oversized = vec![b' '; MAX_BYTES as usize + 1];
         assert_eq!(parse_curve_file(&oversized), Err(CurveFileError::TooLarge));
     }
