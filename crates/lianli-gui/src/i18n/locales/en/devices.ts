@@ -61,6 +61,14 @@ export default {
       desktopMode: "Desktop mode",
     },
   },
+  history: {
+    fanSpeed: "Fan speed",
+    coolant: "Coolant",
+    window: "Last 5 minutes",
+    range: "{min} – {max}",
+    summary: "{label} over the last 5 minutes, from {min} to {max}",
+    collecting: "Collecting readings…",
+  },
   aio: {
     fan: "Fan {index}",
     controlUnavailable: "Control channel unavailable",

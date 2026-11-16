@@ -12,6 +12,7 @@ import { useDaemonStore } from "@/stores/daemon";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { useIpc } from "@/composables/useIpc";
 import EditableName from "@/components/common/EditableName.vue";
+import HistorySparkline from "./HistorySparkline.vue";
 import { fanQuantityKey, fanQuantityPort, stageFanQuantity } from "@/utils/fanQuantity";
 import {
   FAMILY_DISPLAY,
@@ -55,6 +56,8 @@ const coolant = computed(() => devices.coolantTemp(d.value.device_id));
 const fanRpmText = computed(() =>
   fanRpms.value.length ? fanRpms.value.join(", ") : "",
 );
+const rpmHistory = computed(() => devices.history[d.value.device_id]?.rpm ?? []);
+const coolantHistory = computed(() => devices.history[d.value.device_id]?.coolant ?? []);
 const coolantText = computed(() =>
   coolant.value !== null ? `${coolant.value.toFixed(1)}\u00B0C` : "",
 );
@@ -275,6 +278,12 @@ async function ping() {
       </span>
     </div>
 
+    <div v-if="rpmHistory.length || coolantHistory.length" class="histories">
+      <span class="histories-title">{{ t("devices.history.window") }}</span>
+      <HistorySparkline v-if="rpmHistory.length" :samples="rpmHistory" :label="t('devices.history.fanSpeed')" unit=" rpm" :digits="0" tone="rpm" />
+      <HistorySparkline v-if="coolantHistory.length" :samples="coolantHistory" :label="t('devices.history.coolant')" unit=" °C" :digits="1" tone="coolant" />
+    </div>
+
     <div class="actions">
       <label v-if="supportsFanQuantity" class="qty">
         <span class="muted">{{ t("devices.card.fanQuantity") }}</span>
@@ -330,7 +339,8 @@ async function ping() {
   grid-template-columns: 56px minmax(0, 1fr) auto;
   grid-template-areas:
     "icon identity status"
-    "icon readings actions";
+    "icon readings actions"
+    "history history history";
   align-items: start;
   gap: var(--space-2) var(--space-4);
   padding: 20px;
@@ -366,6 +376,21 @@ async function ping() {
 }
 .actions {
   grid-area: actions;
+}
+.histories {
+  grid-area: history;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.histories-title {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--md-on-surface-variant);
 }
 .actions:empty {
   display: none;

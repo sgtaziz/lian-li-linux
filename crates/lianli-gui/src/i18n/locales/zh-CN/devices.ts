@@ -63,6 +63,14 @@ const messages: typeof en = {
       desktopMode: "桌面模式",
     },
   },
+  history: {
+    fanSpeed: "风扇转速",
+    coolant: "冷却液",
+    window: "最近 5 分钟",
+    range: "{min} – {max}",
+    summary: "{label}最近 5 分钟的范围为 {min} 至 {max}",
+    collecting: "正在收集读数…",
+  },
   aio: {
     fan: "风扇 {index}",
     controlUnavailable: "控制通道不可用",
