@@ -4,6 +4,8 @@ import { useRoute } from "vue-router";
 import { darkTheme, dateZhCN, zhCN, type GlobalTheme } from "naive-ui";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDaemonStore } from "@/stores/daemon";
+import { useTrayStore } from "@/stores/tray";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "@/stores/config";
 import { useThemeStore } from "@/stores/theme";
 import { useLanguageStore } from "@/stores/language";
@@ -18,6 +20,7 @@ import UnsavedChanges from "@/components/layout/UnsavedChanges.vue";
 import PageLoading from "@/components/layout/PageLoading.vue";
 
 const daemon = useDaemonStore();
+const tray = useTrayStore();
 const config = useConfigStore();
 const theme = useThemeStore();
 const language = useLanguageStore();
@@ -37,11 +40,20 @@ const themeOverrides = computed(() => theme.overrides);
 
 let unlistenTemplatesChanged: UnlistenFn | undefined;
 
+function isMainWindow(): boolean {
+  try {
+    return getCurrentWindow().label === "main";
+  } catch {
+    return false;
+  }
+}
+
 onMounted(async () => {
   theme.start();
   // Kick off the initial config load + polling loop.
   await config.load().catch(() => undefined);
   daemon.start();
+  if (isMainWindow()) void tray.start();
 
   unlistenTemplatesChanged = await listen(LCD_TEMPLATES_CHANGED_EVENT, () => {
     config.refreshTemplates().catch(() => undefined);

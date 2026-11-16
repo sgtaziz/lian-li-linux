@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { AlertTriangle } from "lucide-vue-next";
 import { useConfigStore } from "@/stores/config";
 import { useDaemonStore } from "@/stores/daemon";
+import { useTrayStore } from "@/stores/tray";
 import { useSaveConfig } from "@/composables/useSaveConfig";
 import { useTranslate } from "@/i18n";
 
 const config = useConfigStore();
 const daemon = useDaemonStore();
+const tray = useTrayStore();
 const t = useTranslate();
 const { saving, save } = useSaveConfig();
 
 const closeAsked = ref(false);
 let closeConfirmed = false;
+let quitAfterClose = false;
 let unlistenClose: UnlistenFn | undefined;
 
 function onKeydown(event: KeyboardEvent) {
@@ -28,21 +31,58 @@ async function closeWindow() {
   closeConfirmed = true;
   closeAsked.value = false;
   try {
-    await getCurrentWindow().destroy();
+    if (quitAfterClose) await tray.quit();
+    else await getCurrentWindow().destroy();
   } catch {
     closeConfirmed = false;
   }
+}
+
+async function hideToTray() {
+  try {
+    await getCurrentWindow().hide();
+    tray.setHidden(true);
+  } catch {
+    // The window stays open if it cannot be hidden.
+  }
+}
+
+async function quitFromTray() {
+  if (!config.dirty) {
+    await tray.quit();
+    return;
+  }
+  quitAfterClose = true;
+  tray.setHidden(false);
+  const window = getCurrentWindow();
+  await window.unminimize().catch(() => undefined);
+  await window.show().catch(() => undefined);
+  await window.setFocus().catch(() => undefined);
+  closeAsked.value = true;
+}
+
+function cancelClose() {
+  closeAsked.value = false;
+  quitAfterClose = false;
 }
 
 async function saveAndClose() {
   if (await save()) await closeWindow();
 }
 
+watch(() => tray.quitRequested, () => void quitFromTray());
+
 onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
   try {
     unlistenClose = await getCurrentWindow().onCloseRequested((event) => {
-      if (closeConfirmed || !config.dirty) return;
+      if (closeConfirmed) return;
+      if (tray.hideOnClose) {
+        event.preventDefault();
+        void hideToTray();
+        return;
+      }
+      if (!config.dirty) return;
       event.preventDefault();
       closeAsked.value = true;
     });
@@ -71,14 +111,14 @@ onUnmounted(() => {
     :show="closeAsked"
     :mask-closable="false"
     :close-on-esc="true"
-    @update:show="(show: boolean) => { if (!show) closeAsked = false; }"
+    @update:show="(show: boolean) => { if (!show) cancelClose(); }"
   >
     <div class="close-dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-close-title">
       <span class="warn-icon"><AlertTriangle :size="22" /></span>
       <h2 id="unsaved-close-title" class="close-title">{{ t("shell.unsaved.closeTitle") }}</h2>
       <p class="close-body">{{ t("shell.unsaved.closeBody") }}</p>
       <div class="close-actions">
-        <n-button quaternary type="primary" @click="closeAsked = false">{{ t("common.cancel") }}</n-button>
+        <n-button quaternary type="primary" @click="cancelClose">{{ t("common.cancel") }}</n-button>
         <n-button secondary @click="closeWindow">{{ t("shell.unsaved.closeDiscard") }}</n-button>
         <n-button type="primary" :loading="saving" :disabled="saving || !daemon.canWrite" @click="saveAndClose">
           {{ t("shell.unsaved.closeSave") }}

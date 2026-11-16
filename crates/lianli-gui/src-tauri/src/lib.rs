@@ -11,6 +11,7 @@ mod media_preview;
 mod service_operations;
 mod session_worker;
 mod startup_image_input;
+mod tray;
 
 use command_error::CommandError;
 use ipc::PollResult;
@@ -385,6 +386,9 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
@@ -411,6 +415,9 @@ pub fn run() {
             container_setup_proposal,
             container_setup,
             desktop_appearance::desktop_appearance,
+            tray::tray_available,
+            tray::set_tray_status,
+            tray::quit_app,
         ])
         .setup(|app| {
             tauri::async_runtime::spawn_blocking(|| {
@@ -420,6 +427,7 @@ pub fn run() {
             });
             session_worker::start();
             desktop_appearance::watch(app.handle().clone());
+            tray::init(app.handle());
             if let Some(win) = app.get_webview_window("main") {
                 apply_platform_decorations(&win);
                 #[cfg(debug_assertions)]
