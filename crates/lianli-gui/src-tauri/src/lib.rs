@@ -1,6 +1,7 @@
 //! Tauri command handlers + multi-window setup for the Lian Li Linux GUI.
 
 mod command_error;
+mod curve_files;
 mod desktop_appearance;
 mod diagnostic_export;
 mod external_link;
@@ -418,6 +419,8 @@ pub fn run() {
             tray::tray_available,
             tray::set_tray_status,
             tray::quit_app,
+            curve_files::export_fan_curves,
+            curve_files::import_fan_curves,
         ])
         .setup(|app| {
             tauri::async_runtime::spawn_blocking(|| {

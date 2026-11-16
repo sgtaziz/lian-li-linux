@@ -36,6 +36,13 @@ export default {
     cacheUnavailable: "Installation cache is unavailable",
     alreadyRunning: "An installation check is already running. Try again shortly.",
   },
+  curveFiles: {
+    unreadable: "Cannot read the fan curve file: {error}",
+    tooLarge: "The fan curve file is larger than 64 KB",
+    invalid: "This is not a valid fan curve file: {detail}",
+    writeFailed: "Cannot save the fan curve file: {error}",
+    mainWindow: "Export and import fan curves from the main window",
+  },
   diagnostics: {
     previewMainWindow: "Open diagnostic export from the main window",
     saveMainWindow: "Save diagnostic exports from the main window",

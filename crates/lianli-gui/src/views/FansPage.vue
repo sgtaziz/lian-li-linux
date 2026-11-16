@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useDialog } from "naive-ui";
-import { Plus, TriangleAlert, X } from "lucide-vue-next";
+import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
+import { useDialog, useMessage } from "naive-ui";
+import { Download, Plus, Redo2, TriangleAlert, Undo2, Upload, X } from "lucide-vue-next";
+import { invoke } from "@/utils/backendText";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useDaemonStore } from "@/stores/daemon";
@@ -19,12 +20,14 @@ import { useTranslate } from "@/i18n";
 import { decodeSpeedMode, fillSlots, speedModeOf } from "@/components/fans/speedMode";
 import { speedAt } from "@/components/fans/curvePoints";
 import { CURVE_TEMPLATES } from "@/components/fans/curveTemplates";
+import { useCurveHistory } from "@/components/fans/useCurveHistory";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
 const daemon = useDaemonStore();
 const names = useDeviceNamesStore();
 const dialog = useDialog();
+const message = useMessage();
 const t = useTranslate();
 
 const selectedCurve = ref(0);
@@ -181,10 +184,107 @@ const curveUsers = computed(() => {
 
 const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, true, true));
 
+const history = useCurveHistory(() => curves.value, () => config.markDirty());
+
 function onCurveChange(value: [number, number][]) {
   if (!current.value) return;
+  history.record(current.value, current.value.curve, value);
   current.value.curve = value;
   config.markDirty();
+}
+
+function isTextEntry(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+function onHistoryKey(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || isTextEntry(event.target)) return;
+  const key = event.key.toLowerCase();
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    history.undo();
+  } else if ((key === "z" && event.shiftKey) || key === "y") {
+    event.preventDefault();
+    history.redo();
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onHistoryKey));
+onUnmounted(() => window.removeEventListener("keydown", onHistoryKey));
+
+interface PortableCurve {
+  name: string;
+  curve: [number, number][];
+}
+
+const fileBusy = ref(false);
+
+async function exportCurves() {
+  if (fileBusy.value || !curves.value.length) return;
+  fileBusy.value = true;
+  try {
+    const saved = await invoke<boolean>("export_fan_curves", {
+      curves: curves.value.map((c) => ({ name: c.name, curve: c.curve })),
+      title: t("fans.curveFiles.exportTitle"),
+      filter: t("fans.curveFiles.filter"),
+    });
+    if (saved) message.success(t("fans.curveFiles.exported"));
+  } catch (error) {
+    message.error(String(error));
+  } finally {
+    fileBusy.value = false;
+  }
+}
+
+async function importCurves() {
+  if (fileBusy.value) return;
+  fileBusy.value = true;
+  let found: PortableCurve[] = [];
+  try {
+    found = await invoke<PortableCurve[]>("import_fan_curves", {
+      title: t("fans.curveFiles.importTitle"),
+      filter: t("fans.curveFiles.filter"),
+    });
+  } catch (error) {
+    message.error(String(error));
+  } finally {
+    fileBusy.value = false;
+  }
+  if (!found.length) return;
+  const taken = curves.value.map((c) => c.name);
+  const planned = found.map((curve) => {
+    const name = uniqueName(curve.name, taken);
+    taken.push(name);
+    return { name, original: curve.name, curve: curve.curve };
+  });
+  dialog.info({
+    title: t("fans.curveFiles.confirmTitle"),
+    content: () =>
+      h("div", { class: "import-preview" }, [
+        h(
+          "ul",
+          planned.map((item) =>
+            h("li", [
+              h("strong", item.name),
+              h("span", item.name === item.original
+                ? t("fans.curveFiles.points", { count: item.curve.length })
+                : t("fans.curveFiles.renamed", { name: item.original, count: item.curve.length })),
+            ]),
+          ),
+        ),
+        h("p", t("fans.curveFiles.sensorNote")),
+      ]),
+    positiveText: t("fans.curveFiles.importConfirm"),
+    negativeText: t("common.cancel"),
+    onPositiveClick: () => {
+      const first = curves.value.length;
+      for (const item of planned) {
+        config.addFanCurve({ name: item.name, temp_source: null, temp_command: "", curve: item.curve });
+      }
+      selectedCurve.value = first;
+      message.success(t("fans.curveFiles.imported"));
+    },
+  });
 }
 
 const BLANK_CURVE = "blank";
@@ -318,6 +418,23 @@ function onHysteresisPwm(percent: number | null) {
     <section class="card section">
       <div class="section-head">
         <h2 class="section-title">{{ t("fans.page.fanCurves") }}</h2>
+        <div class="curve-actions">
+          <n-button quaternary circle :disabled="!history.canUndo.value" :title="t('fans.history.undo')" :aria-label="t('fans.history.undo')" @click="history.undo()">
+            <template #icon><Undo2 :size="18" /></template>
+          </n-button>
+          <n-button quaternary circle :disabled="!history.canRedo.value" :title="t('fans.history.redo')" :aria-label="t('fans.history.redo')" @click="history.redo()">
+            <template #icon><Redo2 :size="18" /></template>
+          </n-button>
+          <span class="actions-divider" />
+          <n-button round size="small" :disabled="fileBusy || !curves.length" @click="exportCurves">
+            <template #icon><Download :size="15" /></template>
+            {{ t("fans.curveFiles.export") }}
+          </n-button>
+          <n-button round size="small" :disabled="fileBusy" @click="importCurves">
+            <template #icon><Upload :size="15" /></template>
+            {{ t("fans.curveFiles.import") }}
+          </n-button>
+        </div>
       </div>
 
       <!-- Curve selector as tabs (clearer than a dropdown + separate label).
@@ -501,6 +618,43 @@ function onHysteresisPwm(percent: number | null) {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+.curve-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+.actions-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--md-outline-variant);
+}
+:global(.import-preview ul) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+:global(.import-preview li) {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--md-surface-container-highest);
+}
+:global(.import-preview li span) {
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+}
+:global(.import-preview p) {
+  margin: var(--space-3) 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--md-on-surface-variant);
 }
 .curve-tabs {
   display: flex;
