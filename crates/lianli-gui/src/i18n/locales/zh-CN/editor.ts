@@ -11,6 +11,7 @@ const messages: typeof en = {
     backgroundType: "背景类型",
     backgroundColor: "颜色",
     backgroundImage: "图片",
+    backgroundVideo: "视频",
     copyJson: "复制 JSON",
     jsonCopied: "模板 JSON 已复制到剪贴板",
     copyFailed: "复制失败：{error}",

@@ -168,6 +168,7 @@ const bgType = computed(() => template.value?.background.type ?? "color");
 const backgroundOptions = computed(() => [
   { value: "color" as const, label: t("editor.window.backgroundColor") },
   { value: "image" as const, label: t("editor.window.backgroundImage") },
+  { value: "video" as const, label: t("editor.window.backgroundVideo") },
 ]);
 
 function onBgColor(v: RGB | RGBA) {
@@ -189,6 +190,18 @@ async function pickBgImage() {
     const selected = await pickMediaFile("image");
     if (selected && target && template.value === target) {
       target.background = { type: "image", path: selected };
+    }
+  } catch (error) {
+    setStatus(String(error), true);
+  }
+}
+
+async function pickBgVideo() {
+  const target = template.value;
+  try {
+    const selected = await pickMediaFile("video");
+    if (selected && target && template.value === target) {
+      target.background = { type: "video", path: selected, fps: null };
     }
   } catch (error) {
     setStatus(String(error), true);
@@ -551,7 +564,7 @@ function commitName() {
           :model-value="bgType"
           :options="backgroundOptions"
           :label="t('editor.window.backgroundType')"
-          @update:model-value="(kind) => (kind === 'color' ? setBgColorMode() : pickBgImage())"
+          @update:model-value="(kind) => (kind === 'color' ? setBgColorMode() : kind === 'video' ? pickBgVideo() : pickBgImage())"
         />
         <ColorPicker
           v-if="bgType === 'color'"
@@ -560,7 +573,7 @@ function commitName() {
           :alpha="true"
           @update:model-value="onBgColor"
         />
-        <span v-else-if="template?.background.type === 'image'" class="bg-path mono" :title="template.background.path">
+        <span v-else-if="template?.background.type === 'image' || template?.background.type === 'video'" class="bg-path mono" :title="template.background.path">
           {{ template.background.path.split("/").pop() }}
         </span>
       </div>

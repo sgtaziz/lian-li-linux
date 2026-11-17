@@ -27,7 +27,7 @@ pub use sensor::SensorAsset;
 use lianli_shared::config::{ConfigKey, LcdConfig};
 use lianli_shared::media::MediaType;
 use lianli_shared::screen::ScreenInfo;
-use lianli_shared::template::LcdTemplate;
+use lianli_shared::template::{LcdTemplate, TemplateBackground};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -208,10 +208,16 @@ pub fn prepare_media_asset(
                 .ok_or_else(|| {
                     MediaError::InvalidConfig(format!("unknown template id '{template_id}'"))
                 })?;
+            let background_fps = match &template.background {
+                TemplateBackground::Video { fps, .. } => *fps,
+                _ => None,
+            };
             let widget_fps = template
                 .widgets
                 .iter()
-                .filter_map(|w| w.fps.filter(|&f| f >= 1.0))
+                .filter_map(|w| w.fps)
+                .chain(background_fps)
+                .filter(|&f| f >= 1.0)
                 .fold(0.0f32, f32::max);
             let custom_fps = if widget_fps >= 1.0 {
                 widget_fps

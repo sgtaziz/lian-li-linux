@@ -22,17 +22,18 @@ impl Drop for Running {
 
 fn needs_media_tools(state: &super::DaemonState) -> bool {
     use lianli_shared::media::MediaType;
-    use lianli_shared::template::WidgetKind;
+    use lianli_shared::template::{TemplateBackground, WidgetKind};
     state.config.as_ref().is_some_and(|config| {
         config.lcds.iter().any(|lcd| {
             matches!(lcd.media_type, MediaType::Video | MediaType::Gif)
                 || (lcd.media_type == MediaType::Custom
                     && state.user_templates.iter().any(|template| {
                         Some(template.id.as_str()) == lcd.template_id.as_deref()
-                            && template
-                                .widgets
-                                .iter()
-                                .any(|widget| matches!(widget.kind, WidgetKind::Video { .. }))
+                            && (matches!(template.background, TemplateBackground::Video { .. })
+                                || template
+                                    .widgets
+                                    .iter()
+                                    .any(|widget| matches!(widget.kind, WidgetKind::Video { .. })))
                     }))
         })
     }) || state
