@@ -64,7 +64,18 @@ const sorted = computed(() => {
   return copy;
 });
 
-const visibleLine = computed<[number, number][]>(() => sorted.value.map((pt) => pt.p));
+// The axis stops at 0-120 °C, but a hand-edited config can hold points past it, so the line is cut there.
+const visibleLine = computed<[number, number][]>(() => {
+  const pts = sorted.value.map((pt) => pt.p);
+  if (pts.length === 0) return [];
+  const [lo, hi] = [X_MIN.value, X_MAX.value];
+  const line: [number, number][] = [];
+  if (pts[0][0] < lo) line.push([lo, speedAt(pts, lo)]);
+  line.push(...pts.filter(([temp]) => temp >= lo && temp <= hi));
+  if (pts[pts.length - 1][0] > hi) line.push([hi, speedAt(pts, hi)]);
+  return line;
+});
+const visiblePoints = computed(() => sorted.value.filter(({ p: [temp] }) => temp >= X_MIN.value && temp <= X_MAX.value));
 
 function pathOf(points: [number, number][]): string {
   return points.map(([temp, speed]) => `L ${xToPx(temp)} ${yToPx(speed)}`).join(" ");
@@ -258,7 +269,7 @@ function pointPx(pt: [number, number]) {
         <rect :x="liveMarker.labelX - 52" :y="liveMarker.labelY" width="104" height="22" rx="11" class="live-label-bg" />
         <text :x="liveMarker.labelX" :y="liveMarker.labelY + 15" text-anchor="middle" class="live-label">{{ liveMarker.label }}</text>
       </g>
-      <g v-for="(pt, idx) in sorted" :key="pt.i">
+      <g v-for="pt in visiblePoints" :key="pt.i">
         <circle
           :cx="pointPx(pt.p).cx"
           :cy="pointPx(pt.p).cy"
