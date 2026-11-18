@@ -4,4 +4,4 @@ For the Universal Screen 8.8" (vertical): CPU and GPU temperature and load, memo
 
 - Background art: generated procedurally for this template, no third-party imagery.
 - Fonts: Righteous, Audiowide, SIL Open Font License 1.1 (see the OFL-*.txt files).
-- NVMe widgets bind to the hwmon `nvme` / `Composite` sensor directly (no sensor_category), so they read 0 on systems without an NVMe drive.
+- NVMe widgets bind to the hwmon `nvme` / `Composite` sensor directly (no sensor_category), so on systems without an NVMe drive the NVMe readout stays blank and its gauge empty.
