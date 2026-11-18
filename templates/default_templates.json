@@ -455,6 +455,8 @@
     },
     {
       "id": "graphite-vertical",
+      "group": "graphite-vertical",
+      "variant": "Amber",
       "name": "Graphite (Vertical)",
       "description": "Amber graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -488,6 +490,8 @@
     },
     {
       "id": "graphite-cyan-vertical",
+      "group": "graphite-vertical",
+      "variant": "Cyan",
       "name": "Graphite Cyan (Vertical)",
       "description": "Cyan graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -521,6 +525,8 @@
     },
     {
       "id": "graphite-violet-vertical",
+      "group": "graphite-vertical",
+      "variant": "Violet",
       "name": "Graphite Violet (Vertical)",
       "description": "Violet graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -554,6 +560,8 @@
     },
     {
       "id": "graphite-yellow-vertical",
+      "group": "graphite-vertical",
+      "variant": "Yellow",
       "name": "Graphite Yellow (Vertical)",
       "description": "Yellow graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -587,6 +595,8 @@
     },
     {
       "id": "graphite-green-vertical",
+      "group": "graphite-vertical",
+      "variant": "Neon Green",
       "name": "Graphite Neon Green (Vertical)",
       "description": "Neon Green graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -620,6 +630,8 @@
     },
     {
       "id": "graphite-red-vertical",
+      "group": "graphite-vertical",
+      "variant": "Red",
       "name": "Graphite Red (Vertical)",
       "description": "Red graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -653,6 +665,8 @@
     },
     {
       "id": "graphite-blue-vertical",
+      "group": "graphite-vertical",
+      "variant": "Blue",
       "name": "Graphite Blue (Vertical)",
       "description": "Blue graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -686,6 +700,8 @@
     },
     {
       "id": "graphite-orange-vertical",
+      "group": "graphite-vertical",
+      "variant": "Orange",
       "name": "Graphite Orange (Vertical)",
       "description": "Orange graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -719,6 +735,8 @@
     },
     {
       "id": "graphite-stealth-vertical",
+      "group": "graphite-vertical",
+      "variant": "Stealth",
       "name": "Graphite Stealth (Vertical)",
       "description": "Stealth graphite dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -752,6 +770,8 @@
     },
     {
       "id": "neon-vertical",
+      "group": "graphite-vertical",
+      "variant": "Neon",
       "name": "Neon (Vertical)",
       "description": "Neon synthwave dashboard for the Universal Screen 8.8\" (vertical): large clock and date, CPU/GPU load gauges with temperatures and temperature history, memory, network throughput graphs and disk I/O.",
       "author": "superfatman",
@@ -789,6 +809,8 @@
     },
     {
       "id": "graphite-perfmon-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Amber",
       "name": "Graphite Perfmon (Vertical)",
       "description": "Amber graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -822,6 +844,8 @@
     },
     {
       "id": "graphite-perfmon-cyan-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Cyan",
       "name": "Graphite Perfmon Cyan (Vertical)",
       "description": "Cyan graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -855,6 +879,8 @@
     },
     {
       "id": "graphite-perfmon-violet-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Violet",
       "name": "Graphite Perfmon Violet (Vertical)",
       "description": "Violet graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -888,6 +914,8 @@
     },
     {
       "id": "graphite-perfmon-yellow-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Yellow",
       "name": "Graphite Perfmon Yellow (Vertical)",
       "description": "Yellow graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -921,6 +949,8 @@
     },
     {
       "id": "graphite-perfmon-green-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Neon Green",
       "name": "Graphite Perfmon Neon Green (Vertical)",
       "description": "Neon Green graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -954,6 +984,8 @@
     },
     {
       "id": "graphite-perfmon-red-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Red",
       "name": "Graphite Perfmon Red (Vertical)",
       "description": "Red graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -987,6 +1019,8 @@
     },
     {
       "id": "graphite-perfmon-blue-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Blue",
       "name": "Graphite Perfmon Blue (Vertical)",
       "description": "Blue graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -1020,6 +1054,8 @@
     },
     {
       "id": "graphite-perfmon-orange-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Orange",
       "name": "Graphite Perfmon Orange (Vertical)",
       "description": "Orange graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -1053,6 +1089,8 @@
     },
     {
       "id": "graphite-perfmon-stealth-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Stealth",
       "name": "Graphite Perfmon Stealth (Vertical)",
       "description": "Stealth graphite dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -1086,6 +1124,8 @@
     },
     {
       "id": "neon-perfmon-vertical",
+      "group": "graphite-perfmon-vertical",
+      "variant": "Neon",
       "name": "Neon Perfmon (Vertical)",
       "description": "Neon synthwave dashboard for the Universal Screen 8.8\" (vertical): CPU and GPU temperature and load, memory and NVMe temperature, each with a gauge and a 60-second history graph.",
       "author": "superfatman",
@@ -1123,6 +1163,8 @@
     },
     {
       "id": "graphite-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Amber",
       "name": "Graphite (Horizontal)",
       "description": "Amber graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1156,6 +1198,8 @@
     },
     {
       "id": "graphite-cyan-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Cyan",
       "name": "Graphite Cyan (Horizontal)",
       "description": "Cyan graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1189,6 +1233,8 @@
     },
     {
       "id": "graphite-violet-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Violet",
       "name": "Graphite Violet (Horizontal)",
       "description": "Violet graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1222,6 +1268,8 @@
     },
     {
       "id": "graphite-yellow-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Yellow",
       "name": "Graphite Yellow (Horizontal)",
       "description": "Yellow graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1255,6 +1303,8 @@
     },
     {
       "id": "graphite-green-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Neon Green",
       "name": "Graphite Neon Green (Horizontal)",
       "description": "Neon Green graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1288,6 +1338,8 @@
     },
     {
       "id": "graphite-red-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Red",
       "name": "Graphite Red (Horizontal)",
       "description": "Red graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1321,6 +1373,8 @@
     },
     {
       "id": "graphite-blue-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Blue",
       "name": "Graphite Blue (Horizontal)",
       "description": "Blue graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1354,6 +1408,8 @@
     },
     {
       "id": "graphite-orange-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Orange",
       "name": "Graphite Orange (Horizontal)",
       "description": "Orange graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1387,6 +1443,8 @@
     },
     {
       "id": "graphite-stealth-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Stealth",
       "name": "Graphite Stealth (Horizontal)",
       "description": "Stealth graphite dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
@@ -1420,6 +1478,8 @@
     },
     {
       "id": "neon-horizontal",
+      "group": "graphite-horizontal",
+      "variant": "Neon",
       "name": "Neon (Horizontal)",
       "description": "Neon synthwave dashboard for the Universal Screen 8.8\" (horizontal): clock and date, CPU/GPU load gauges with temperature readouts and history graphs, memory, network graphs and disk I/O.",
       "author": "superfatman",
