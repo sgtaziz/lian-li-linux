@@ -227,6 +227,11 @@ export type SensorCategory =
   | "gpu_temp"
   | "cpu_usage"
   | "gpu_usage"
+  | "gpu_mem_usage"
+  | "gpu_mem_free"
+  | "gpu_mem_total"
+  | "gpu_clock_core"
+  | "gpu_clock_memory"
   | "mem_usage"
   | "mem_used"
   | "mem_free"
@@ -242,7 +247,7 @@ export type SensorSourceConfig =
   | { type: "constant"; value: number }
   | { type: "command"; cmd: string }
   | { type: "hwmon"; name: string; label: string; device_path?: string }
-  | { type: "nvidia_gpu"; gpu_index?: number; metric?: "temp" | "usage" }
+  | { type: "nvidia_gpu"; gpu_index?: number; metric?: "temp" | "usage" | "mem_usage" | "mem_free" | "mem_total" | "clock_core" | "clock_memory" }
   | { type: "amd_gpu_usage"; card_index?: number }
   | { type: "wireless_coolant"; device_id: string }
   | { type: "cpu_usage" }
@@ -341,7 +346,7 @@ export interface MediaFraming {
 // ─── Fans ────────────────────────────────────────────────────────────────────
 export type SensorSource =
   | { type: "hwmon"; name: string; label: string; device_path?: string }
-  | { type: "nvidia_gpu"; gpu_index?: number; metric?: "temp" | "usage" }
+  | { type: "nvidia_gpu"; gpu_index?: number; metric?: "temp" | "usage" | "mem_usage" | "mem_free" | "mem_total" | "clock_core" | "clock_memory" }
   | { type: "amd_gpu_usage"; card_index?: number }
   | { type: "command"; cmd: string }
   | { type: "wireless_coolant"; device_id: string }
@@ -609,7 +614,7 @@ export interface LcdTemplate {
 }
 
 // ─── Sensors ─────────────────────────────────────────────────────────────────
-export type Unit = "C" | "RPM" | "V" | "FREQ" | "PERCENT" | "SIZE" | "MBps" | "WO";
+export type Unit = "C" | "RPM" | "V" | "FREQ" | "PERCENT" | "SIZE" | "MiB" | "MBps" | "WO";
 
 export interface SensorInfo {
   source: SensorSource;

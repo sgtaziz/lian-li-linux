@@ -35,6 +35,11 @@ pub enum NvidiaMetric {
     #[default]
     Temp,
     Usage,
+    MemUsage,
+    MemFree,
+    MemTotal,
+    ClockCore,
+    ClockMemory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -114,6 +119,7 @@ pub enum Unit {
     FREQ,
     PERCENT,
     SIZE,
+    MiB,
     MBps,
     WO,
 }
@@ -126,6 +132,7 @@ impl std::fmt::Display for Unit {
             Unit::V => "mV",
             Unit::FREQ => "Mhz",
             Unit::SIZE => "GB",
+            Unit::MiB => "MiB",
             Unit::MBps => "MB/s",
             Unit::PERCENT => "%",
             Unit::WO => "",
@@ -202,6 +209,11 @@ pub enum SensorCategory {
     GpuTemp,
     CpuUsage,
     GpuUsage,
+    GpuMemUsage,
+    GpuMemFree,
+    GpuMemTotal,
+    GpuClockCore,
+    GpuClockMemory,
     MemUsage,
     MemUsed,
     MemFree,

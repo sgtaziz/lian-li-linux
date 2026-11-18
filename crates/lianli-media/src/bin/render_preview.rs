@@ -119,6 +119,11 @@ fn mock_value_for_widget(widget: &Widget) -> f32 {
             }
             SensorCategory::MemUsed => 16.0,
             SensorCategory::MemFree => 16.0,
+            SensorCategory::GpuMemUsage => 50.0,
+            SensorCategory::GpuMemFree => 2048.0,
+            SensorCategory::GpuMemTotal => 8192.0,
+            SensorCategory::GpuClockCore => 2400.0,
+            SensorCategory::GpuClockMemory => 7000.0,
             SensorCategory::NetworkRx
             | SensorCategory::NetworkTx
             | SensorCategory::DiskRead

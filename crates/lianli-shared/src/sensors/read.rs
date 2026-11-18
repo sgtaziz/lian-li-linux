@@ -155,7 +155,7 @@ fn nvidia_cache_get(index: u32, metric: NvidiaMetric) -> anyhow::Result<SensorRe
 fn query_nvidia_smi_all() -> anyhow::Result<HashMap<(u32, NvidiaMetric), f32>> {
     let mut command = Command::new("nvidia-smi");
     command.args([
-        "--query-gpu=index,temperature.gpu,utilization.gpu",
+        "--query-gpu=index,temperature.gpu,utilization.gpu,memory.used,memory.free,memory.total,clocks.current.graphics,clocks.current.memory",
         "--format=csv,noheader,nounits",
     ]);
     let output = super::command::output(command)?;
@@ -163,7 +163,7 @@ fn query_nvidia_smi_all() -> anyhow::Result<HashMap<(u32, NvidiaMetric), f32>> {
     let mut map = HashMap::new();
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-        if parts.len() < 3 {
+        if parts.len() < 8 {
             continue;
         }
         let Ok(idx) = parts[0].parse::<u32>() else {
@@ -174,6 +174,26 @@ fn query_nvidia_smi_all() -> anyhow::Result<HashMap<(u32, NvidiaMetric), f32>> {
         }
         if let Ok(usage) = parts[2].parse::<f32>() {
             map.insert((idx, NvidiaMetric::Usage), usage);
+        }
+        let used = parts[3].parse::<f32>().ok();
+        let free = parts[4].parse::<f32>().ok();
+        let total = parts[5].parse::<f32>().ok();
+        if let (Some(used), Some(total)) = (used, total) {
+            if total > 0.0 {
+                map.insert((idx, NvidiaMetric::MemUsage), used / total * 100.0);
+            }
+        }
+        if let Some(free) = free {
+            map.insert((idx, NvidiaMetric::MemFree), free);
+        }
+        if let Some(total) = total {
+            map.insert((idx, NvidiaMetric::MemTotal), total);
+        }
+        if let Ok(core) = parts[6].parse::<f32>() {
+            map.insert((idx, NvidiaMetric::ClockCore), core);
+        }
+        if let Ok(memory) = parts[7].parse::<f32>() {
+            map.insert((idx, NvidiaMetric::ClockMemory), memory);
         }
     }
     Ok(map)
