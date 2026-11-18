@@ -304,6 +304,7 @@ mod tests {
             modes: vec![mode],
             max_width: 480,
             max_height: 480,
+            max_frame_bytes: None,
         };
         let mut caps = uapi::Caps {
             min_width: 640,
@@ -348,6 +349,7 @@ mod tests {
                 modes: vec![mode],
                 max_width: width,
                 max_height: height,
+                max_frame_bytes: None,
             };
             validate_mode(&caps, &request).unwrap();
             assert!(validate_mode(

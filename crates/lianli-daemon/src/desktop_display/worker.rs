@@ -5,7 +5,7 @@ use anyhow::{ensure, Context, Result};
 use lianli_devices::turzx::{self, Mode as TurzxMode, TurzxDisplay, FMT_H264, FMT_MJPEG};
 use lianli_display::buffer::EncodedBuffer;
 use lianli_shared::display::{
-    CaptureCommand, CaptureReply, DisplayCodec, DisplayMode, OutputRequest,
+    CaptureCommand, CaptureReply, DisplayCodec, DisplayMode, OutputRequest, MAX_ENCODED_BYTES,
 };
 use lianli_shared::ui_message::{UiError, UiMessage, UiText};
 use std::os::fd::{AsFd, AsRawFd};
@@ -17,6 +17,8 @@ use tracing::{debug, error, info, warn};
 
 // These firmware revisions acknowledge H.264 but cannot reliably display it.
 const JPEG_FORCE_PIDS: &[u16] = &[0xACD1, 0xAD11, 0xAD26];
+// H.264 keyframes visibly pulse on this panel every 0.5 s, and it has the bandwidth for JPEG.
+const JPEG_PREFERRED_PIDS: &[u16] = &[0xAD22];
 
 pub(super) fn spawn_worker(
     target: TurzxDeviceMatch,
@@ -76,14 +78,20 @@ fn run_worker(
         height: u32::from(mode.height),
         refresh_hz: u32::from(mode.refresh_hz),
     };
+    let jpeg_preferred = JPEG_PREFERRED_PIDS.contains(&pid) && caps.supports_mjpeg;
     let output = OutputRequest {
         edid: display.edid().to_vec(),
         preferred: convert(turzx::pick_mode(caps).context("Device advertises no modes")?),
         modes: caps.modes.iter().copied().map(convert).collect(),
         max_width: u32::from(caps.max_w),
         max_height: u32::from(caps.max_h),
+        max_frame_bytes: jpeg_preferred
+            .then(|| caps.max_transfer.checked_sub(turzx::FRAME_OVERHEAD as u32))
+            .flatten()
+            .filter(|bytes| *bytes > 0)
+            .map(|bytes| bytes.min(MAX_ENCODED_BYTES as u32)),
     };
-    let codec = if JPEG_FORCE_PIDS.contains(&pid) {
+    let codec = if JPEG_FORCE_PIDS.contains(&pid) || jpeg_preferred {
         DisplayCodec::Jpeg
     } else {
         DisplayCodec::H264

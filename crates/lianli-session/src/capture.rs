@@ -68,6 +68,7 @@ fn capture(
     watch: &Watchdog,
 ) -> Result<()> {
     output.validate()?;
+    let max_frame_bytes = output.max_frame_bytes;
     ensure_ffmpeg_initialized();
     let backend = LocalBackend::discover()?;
     let opened = backend.open(output, stop)?;
@@ -83,13 +84,22 @@ fn capture(
         Duration::from_secs(1),
         stop,
     )?;
-    stream(channel, capture.as_mut(), codec, &buffer, stop, watch)
+    stream(
+        channel,
+        capture.as_mut(),
+        codec,
+        max_frame_bytes,
+        &buffer,
+        stop,
+        watch,
+    )
 }
 
 fn stream(
     channel: &mut PacketChannel,
     capture: &mut dyn lianli_display::Capture,
     codec: DisplayCodec,
+    max_frame_bytes: Option<u32>,
     buffer: &EncodedBuffer,
     stop: &AtomicBool,
     watch: &Watchdog,
@@ -198,6 +208,7 @@ fn stream(
                     format,
                     fps,
                     hardware_video: policy.context("Missing encoder policy")?.hardware_video,
+                    max_frame_bytes,
                 },
                 stop,
             )?;
@@ -412,6 +423,7 @@ mod tests {
                     polls: 0,
                 },
                 DisplayCodec::Jpeg,
+                None,
                 &EncodedBuffer::create().unwrap(),
                 &AtomicBool::new(false),
                 &Watchdog::new(),
@@ -461,6 +473,7 @@ mod tests {
                     update_pending: false,
                 },
                 DisplayCodec::Jpeg,
+                None,
                 &storage,
                 &AtomicBool::new(false),
                 &Watchdog::new(),
@@ -564,6 +577,7 @@ mod tests {
                     update_pending: false,
                 },
                 DisplayCodec::Jpeg,
+                None,
                 &EncodedBuffer::create().unwrap(),
                 &AtomicBool::new(false),
                 &Watchdog::new(),

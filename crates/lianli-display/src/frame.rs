@@ -243,6 +243,7 @@ mod tests {
             modes: vec![mode],
             max_width: 480,
             max_height: 480,
+            max_frame_bytes: None,
         };
         assert!(request.validate_mode(mode).is_ok());
         assert!(request

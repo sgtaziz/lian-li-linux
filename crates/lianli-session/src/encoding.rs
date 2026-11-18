@@ -1,6 +1,7 @@
 use anyhow::{ensure, Context, Result};
 use lianli_display::frame::{Mode, PixelFormat};
 use lianli_display::Capture;
+use lianli_media::common::{encode_jpeg_to_fit, JpegQualityMemo};
 use lianli_media::video::vaapi::{DmaFrame, DmaPlane, VaapiEncoder};
 use lianli_media::video::H264Encoder;
 use lianli_shared::display::{
@@ -17,6 +18,7 @@ pub struct Encoder {
     cpu_readback_reason: Option<CpuReadbackReason>,
     software_reason: Option<SoftwareEncodingReason>,
     status: Option<DesktopEncodingStatus>,
+    jpeg_quality: JpegQualityMemo,
 }
 
 #[derive(Clone, Copy)]
@@ -26,6 +28,7 @@ pub struct FrameRequest {
     pub format: PixelFormat,
     pub fps: u32,
     pub hardware_video: bool,
+    pub max_frame_bytes: Option<u32>,
 }
 
 impl Encoder {
@@ -40,6 +43,7 @@ impl Encoder {
         self.cpu_readback_reason = None;
         self.software_reason = None;
         self.status = None;
+        self.jpeg_quality = JpegQualityMemo::default();
         capture.discard_gpu()
     }
 
@@ -86,7 +90,7 @@ impl Encoder {
             "Desktop frame layout changed unexpectedly"
         );
         let result = match request.codec {
-            DisplayCodec::Jpeg => Ok(turbojpeg::compress(
+            DisplayCodec::Jpeg => Ok(encode_jpeg_to_fit(
                 turbojpeg::Image {
                     pixels: frame.pixels,
                     width: frame.mode.width as usize,
@@ -99,9 +103,11 @@ impl Encoder {
                     },
                 },
                 90,
-                turbojpeg::Subsamp::Sub2x2,
-            )?
-            .to_vec()),
+                request
+                    .max_frame_bytes
+                    .map_or(usize::MAX, |bytes| bytes as usize),
+                &self.jpeg_quality,
+            )?),
             DisplayCodec::H264 => {
                 if self.cpu_input.is_none() {
                     self.cpu_input = Some(H264Encoder::new(
@@ -297,6 +303,7 @@ mod tests {
                         format: PixelFormat::Argb8888,
                         fps: 30,
                         hardware_video,
+                        max_frame_bytes: None,
                     },
                     &AtomicBool::new(false),
                 )
@@ -317,5 +324,48 @@ mod tests {
             encoder.reset(&mut capture).unwrap();
             assert!(encoder.status().is_none());
         }
+    }
+
+    #[test]
+    fn jpeg_frames_step_down_to_the_frame_limit_until_reset() {
+        let mut state = 0x2545_f491_u32;
+        let mut capture = SoftwareCapture {
+            pixels: (0..16 * 16 * 4)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    state as u8
+                })
+                .collect(),
+            frames: 0,
+        };
+        let request = |max_frame_bytes| FrameRequest {
+            codec: DisplayCodec::Jpeg,
+            mode: mode(),
+            format: PixelFormat::Argb8888,
+            fps: 30,
+            hardware_video: false,
+            max_frame_bytes,
+        };
+        let stop = AtomicBool::new(false);
+        let mut encoder = Encoder::default();
+        let full = encoder.encode(&mut capture, request(None), &stop).unwrap();
+        let limit = full.len() - 1;
+        let fitted = encoder
+            .encode(&mut capture, request(Some(limit as u32)), &stop)
+            .unwrap();
+        assert!(fitted.len() <= limit);
+        assert_eq!(
+            encoder
+                .encode(&mut capture, request(Some(full.len() as u32)), &stop)
+                .unwrap(),
+            fitted
+        );
+        encoder.reset(&mut capture).unwrap();
+        assert_eq!(
+            encoder.encode(&mut capture, request(None), &stop).unwrap(),
+            full
+        );
     }
 }

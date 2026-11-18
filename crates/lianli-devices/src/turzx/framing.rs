@@ -31,8 +31,10 @@ fn write_header(buf: &mut Vec<u8>, opcode: u8, offset: u32, size: u32) {
     buf.push((size & 0xFF) as u8);
 }
 
+pub const FRAME_OVERHEAD: usize = 10;
+
 pub fn pack_frame(opcode: u8, offset: u32, payload: &[u8]) -> Vec<u8> {
-    let mut pkt = Vec::with_capacity(payload.len() + 10);
+    let mut pkt = Vec::with_capacity(payload.len() + FRAME_OVERHEAD);
     write_header(&mut pkt, opcode, offset, payload.len() as u32);
     pkt.extend_from_slice(payload);
     pkt.push(MAGIC);
@@ -53,7 +55,7 @@ pub fn pack_fragment(opcode: u8, offset: u32, payload: &[u8]) -> Vec<u8> {
 /// `0xAF 0x66` commit marker.
 pub fn fragment_stream_a(packet: &[u8], urb_max: usize) -> Vec<Vec<u8>> {
     let urb_max = urb_max.max(16);
-    let budget_final = urb_max.saturating_sub(10);
+    let budget_final = urb_max.saturating_sub(FRAME_OVERHEAD);
     let budget_frag = urb_max.saturating_sub(8);
 
     if packet.len() <= budget_final {
