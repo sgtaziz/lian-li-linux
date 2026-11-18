@@ -869,6 +869,39 @@ mod tests {
     }
 
     #[test]
+    fn split_compositor_event_is_handled_once_the_rest_arrives() {
+        use std::io::Write;
+        let (client, mut compositor) = std::os::unix::net::UnixStream::pair().unwrap();
+        let connection = Connection::from_socket(client).unwrap();
+        let mut queue = connection.new_event_queue::<State>();
+        let registry = connection.display().get_registry(&queue.handle(), ());
+        let mut state = State::new(Mode {
+            width: 480,
+            height: 480,
+            refresh_hz: 30,
+        });
+        let (global_opcode, global_name, version, wl_shm_with_nul) = (0u32, 7u32, 1u32, 7u32);
+        let interface = b"wl_shm\0\0";
+        let event_bytes = 8 + 4 + 4 + interface.len() as u32 + 4;
+        let mut event = Vec::new();
+        event.extend_from_slice(&registry.id().protocol_id().to_ne_bytes());
+        event.extend_from_slice(&((event_bytes << 16) | global_opcode).to_ne_bytes());
+        event.extend_from_slice(&global_name.to_ne_bytes());
+        event.extend_from_slice(&wl_shm_with_nul.to_ne_bytes());
+        event.extend_from_slice(interface);
+        event.extend_from_slice(&version.to_ne_bytes());
+        let deadline = Instant::now() + Duration::from_secs(1);
+
+        compositor.write_all(&event[..12]).unwrap();
+        dispatch(&connection, &mut queue, &mut state, deadline).unwrap();
+        assert!(state.shm.is_none());
+
+        compositor.write_all(&event[12..]).unwrap();
+        dispatch(&connection, &mut queue, &mut state, deadline).unwrap();
+        assert!(state.shm.is_some());
+    }
+
+    #[test]
     fn capture_buffer_limits_include_padding_and_reject_overflow() {
         assert_eq!(buffer_size(480, 480, 2048).unwrap(), 983040);
         assert!(buffer_size(480, 480, 1919).is_err());
