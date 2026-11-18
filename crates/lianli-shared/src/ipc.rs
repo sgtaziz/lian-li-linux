@@ -567,6 +567,14 @@ pub struct DeviceInfo {
     pub wireless_group_mac: Option<String>,
     #[serde(default)]
     pub topology_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub h264: Option<H264Setting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct H264Setting {
+    pub key: String,
+    pub jpeg_available: bool,
 }
 
 /// Status of the OpenRGB SDK server.
@@ -679,6 +687,8 @@ pub struct DesktopStreamStatus {
     pub applied_policy: Option<crate::display::DisplayVideoPolicy>,
     #[serde(default)]
     pub encoding: Option<crate::display::DesktopEncodingStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codecs: Option<crate::display::DesktopCodecSupport>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

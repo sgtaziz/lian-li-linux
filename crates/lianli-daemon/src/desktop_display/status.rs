@@ -20,11 +20,20 @@ impl StreamStatus {
             applied_generation: None,
             applied_policy: None,
             encoding: None,
+            codecs: None,
         }))
+    }
+
+    pub fn codecs(&self, support: lianli_shared::display::DesktopCodecSupport) {
+        self.0.lock().codecs = Some(support);
     }
 
     pub fn snapshot(&self) -> DesktopStreamStatus {
         self.0.lock().clone()
+    }
+
+    pub fn codec_support(&self) -> Option<lianli_shared::display::DesktopCodecSupport> {
+        self.0.lock().codecs
     }
 
     pub fn waiting(&self) {

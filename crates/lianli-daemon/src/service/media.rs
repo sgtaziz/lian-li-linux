@@ -63,13 +63,24 @@ impl ServiceManager {
             })
             .map(|(index, target)| (*index, target.clone()))
             .collect();
+        let h264: Vec<_> = (0..cfg.lcds.len())
+            .map(|index| {
+                targets
+                    .get(&index)
+                    .is_some_and(|target| target.screen.h264 && cfg.h264_allowed(&target.device_id))
+            })
+            .collect();
         let keys: Vec<_> = cfg
             .lcds
             .iter()
             .enumerate()
             .map(|(index, device)| {
                 let base = asset_cache_key(device, &templates, cfg.default_fps, cfg.hardware_video);
-                format!("{base}|target:{:?}", targets.get(&index))
+                format!(
+                    "{base}|target:{:?}|h264:{}",
+                    targets.get(&index),
+                    h264[index]
+                )
             })
             .collect();
         if self.media_preparation.is_busy() && self.media_requested_keys == keys {
@@ -94,6 +105,8 @@ impl ServiceManager {
             .retain(|index, _| self.media_assets.contains_key(index));
         self.media_asset_targets
             .retain(|index, _| self.media_assets.contains_key(index));
+        self.media_asset_h264
+            .retain(|index, _| self.media_assets.contains_key(index));
         let jobs: Vec<_> = cfg
             .lcds
             .iter()
@@ -113,6 +126,7 @@ impl ServiceManager {
                     config: device.clone(),
                     key,
                     target,
+                    h264: h264[index],
                 })
             })
             .collect();
@@ -227,6 +241,7 @@ impl ServiceManager {
                     self.media_assets.insert(result.index, asset);
                     self.media_settings.insert(result.index, result.config);
                     self.media_asset_targets.insert(result.index, result.target);
+                    self.media_asset_h264.insert(result.index, result.h264);
                     (MediaPreparationState::Ready, None)
                 }
                 Err(error) => {
@@ -418,6 +433,14 @@ impl ServiceManager {
                     }
                 };
                 let applied_cfg = self.media_settings.get(&cfg_idx).unwrap_or(device_cfg);
+                let playback_screen = ScreenInfo {
+                    h264: self
+                        .media_asset_h264
+                        .get(&cfg_idx)
+                        .copied()
+                        .unwrap_or_else(|| screen.h264 && cfg.h264_allowed(&candidate.device_id)),
+                    ..screen
+                };
 
                 // Form rewrites only: the alias fallback may have matched a
                 // different physical device, which must not be persisted.
@@ -435,13 +458,23 @@ impl ServiceManager {
                         // Media is unchanged, but the custom_h264 toggle may have
                         // flipped — rebuild the frame source so the H.264 pipeline
                         // engages/disengages without a daemon restart.
-                        existing.update_custom_h264(applied_cfg.custom_h264(), self.tx.clone());
+                        if existing.screen == playback_screen {
+                            existing.update_custom_h264(applied_cfg.custom_h264(), self.tx.clone());
+                        } else {
+                            existing.screen = playback_screen;
+                            existing.swap_media(
+                                Arc::clone(&asset),
+                                applied_cfg.custom_h264(),
+                                self.tx.clone(),
+                            );
+                        }
                         new_targets.insert(cfg_idx, existing);
                         continue;
                     } else if existing.device_identity == candidate.device_id {
                         // Same device, different config — reuse the USB transport,
                         // just swap the media asset. Reopening the device can leave
                         // some firmware in a bad state.
+                        existing.screen = playback_screen;
                         existing.swap_media(
                             Arc::clone(&asset),
                             applied_cfg.custom_h264(),
@@ -647,14 +680,12 @@ impl ServiceManager {
                                 }
                             }
                         }
-                        let screen =
-                            screen_info_for(candidate.family).unwrap_or(ScreenInfo::WIRELESS_LCD);
                         let mut target = ActiveTarget::new(
                             cfg_idx,
                             candidate.device_id.clone(),
                             lcd,
                             Arc::clone(&asset),
-                            screen,
+                            playback_screen,
                             applied_cfg.custom_h264(),
                             self.tx.clone(),
                         );
@@ -890,6 +921,7 @@ mod tests {
             config: new_config.clone(),
             result: Ok(asset("stale")),
             target: target(),
+            h264: true,
         }]);
         assert!(Arc::ptr_eq(&service.media_assets[&0], &old));
         service.apply_prepared_results(vec![super::super::media_preparation::PreparedMedia {
@@ -898,6 +930,7 @@ mod tests {
             config: new_config.clone(),
             result: Err("unreadable child video".into()),
             target: target(),
+            h264: true,
         }]);
         assert!(Arc::ptr_eq(&service.media_assets[&0], &old));
         assert_eq!(
@@ -911,6 +944,7 @@ mod tests {
             config: new_config,
             result: Ok(new.clone()),
             target: target(),
+            h264: true,
         }]);
         assert!(Arc::ptr_eq(&service.media_assets[&0], &new));
         assert_eq!(service.media_settings[&0].rgb, Some([255, 0, 0]));
@@ -1063,6 +1097,57 @@ mod tests {
         let hardware = super::asset_cache_key(&device, &[], 30.0, true);
         assert_ne!(software, hardware);
         assert_eq!(software, super::asset_cache_key(&device, &[], 30.0, false));
+    }
+
+    #[test]
+    fn disabling_h264_reprepares_the_panel_media_without_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut service = ServiceManager::new(
+            root.path().join("config.json"),
+            root.path().join("daemon.sock"),
+            lianli_shared::daemon::DaemonMode::User,
+        )
+        .unwrap();
+        let lcd = config("hid:1cbe:a021:1-3.2", [255, 0, 0]);
+        service.config = Some(lianli_shared::config::AppConfig {
+            lcds: vec![lcd],
+            ..Default::default()
+        });
+        service.media_targets.insert(
+            0,
+            MediaTarget {
+                selection: "serial:1cbe:a021:1-3.2".into(),
+                device_id: "hid:1cbe:a021:1-3.2".into(),
+                screen: ScreenInfo::HYDROSHIFT2,
+            },
+        );
+        let (tx, _rx) = std::sync::mpsc::channel();
+        service.tx = Some(tx.clone());
+        let prepare = |service: &mut ServiceManager| {
+            service.prepare_media_assets(tx.clone());
+            let deadline = Instant::now() + std::time::Duration::from_secs(3);
+            while service.media_preparation.is_busy() && Instant::now() < deadline {
+                service.poll_prepared_media();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(!service.media_preparation.is_busy());
+            (
+                service.media_assets[&0].config_key.clone(),
+                service.media_asset_h264[&0],
+            )
+        };
+        let (h264_key, h264) = prepare(&mut service);
+        assert!(h264);
+        service
+            .config
+            .as_mut()
+            .unwrap()
+            .h264_disabled
+            .insert("usb:1-3.2".into());
+        let (jpeg_key, h264) = prepare(&mut service);
+        assert!(!h264);
+        assert_ne!(h264_key, jpeg_key);
+        assert_eq!(service.media_targets[&0].screen, ScreenInfo::HYDROSHIFT2);
     }
 
     #[test]

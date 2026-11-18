@@ -36,6 +36,7 @@ function defaultConfig(): AppConfig {
     },
     rgb_drift_detection_enabled: true,
     rgb_drift_detection_interval_ms: 1000,
+    h264_disabled: [],
   };
 }
 

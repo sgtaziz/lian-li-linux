@@ -49,6 +49,10 @@ const messages: typeof en = {
     takeOverTitle: "接管此设备？",
     takeOverContent: "该设备当前属于另一个控制器。接管后，它将与那台电脑断开连接。",
     pingFailed: "识别设备失败",
+    useH264: "使用 H.264",
+    useH264Hint: "关闭后改为发送 JPEG 帧。JPEG 在部分面板上可能更清晰，但会占用更多 USB 带宽。",
+    h264OffHint: "H.264 已关闭。此屏幕将接收 JPEG 帧，画面可能更清晰，但会占用更多 USB 带宽。",
+    h264Required: "此面板在桌面模式下不支持 JPEG 帧，因此始终使用 H.264。",
     status: {
       switching: "切换中…",
       binding: "绑定中…",

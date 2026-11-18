@@ -5,7 +5,8 @@ use anyhow::{ensure, Context, Result};
 use lianli_devices::turzx::{self, Mode as TurzxMode, TurzxDisplay, FMT_H264, FMT_MJPEG};
 use lianli_display::buffer::EncodedBuffer;
 use lianli_shared::display::{
-    CaptureCommand, CaptureReply, DisplayCodec, DisplayMode, OutputRequest,
+    CaptureCommand, CaptureReply, DesktopCodecSupport, DisplayCodec, DisplayMode, OutputRequest,
+    MAX_ENCODED_BYTES,
 };
 use lianli_shared::ui_message::{UiError, UiMessage, UiText};
 use std::os::fd::{AsFd, AsRawFd};
@@ -18,8 +19,38 @@ use tracing::{debug, error, info, warn};
 // These firmware revisions acknowledge H.264 but cannot reliably display it.
 const JPEG_FORCE_PIDS: &[u16] = &[0xACD1, 0xAD11, 0xAD26];
 
+pub(super) fn streams_h264_by_default(pid: u16) -> bool {
+    !JPEG_FORCE_PIDS.contains(&pid)
+}
+
+// Formats are unknown until a worker opens the panel, so assume JPEG works until then.
+pub(super) fn jpeg_available(support: Option<DesktopCodecSupport>) -> bool {
+    support.is_none_or(|support| support.mjpeg)
+}
+
+fn select_codec(
+    pid: u16,
+    caps: &turzx::VendorCaps,
+    h264_allowed: bool,
+) -> (DisplayCodec, Option<u32>) {
+    if JPEG_FORCE_PIDS.contains(&pid) {
+        return (DisplayCodec::Jpeg, None);
+    }
+    if h264_allowed || !caps.supports_mjpeg {
+        return (DisplayCodec::H264, None);
+    }
+    // A JPEG frame is sent as one bulk transfer, so it must fit the advertised transfer size.
+    let limit = caps
+        .max_transfer
+        .checked_sub(turzx::FRAME_OVERHEAD as u32)
+        .filter(|bytes| *bytes > 0)
+        .map(|bytes| bytes.min(MAX_ENCODED_BYTES as u32));
+    (DisplayCodec::Jpeg, limit)
+}
+
 pub(super) fn spawn_worker(
     target: TurzxDeviceMatch,
+    h264_allowed: bool,
     video_policy: Arc<SharedVideoPolicy>,
     session: SessionClient,
     status: Arc<super::status::StreamStatus>,
@@ -36,6 +67,7 @@ pub(super) fn spawn_worker(
             status.starting();
             if let Err(error) = run_worker(
                 target,
+                h264_allowed,
                 &stop_clone,
                 &healthy_clone,
                 &video_policy,
@@ -56,11 +88,13 @@ pub(super) fn spawn_worker(
         healthy,
         join: Some(join),
         pid,
+        h264_allowed,
     })
 }
 
 fn run_worker(
     target: TurzxDeviceMatch,
+    h264_allowed: bool,
     stop: &AtomicBool,
     healthy: &AtomicBool,
     video_policy: &SharedVideoPolicy,
@@ -71,6 +105,11 @@ fn run_worker(
     ensure!(session.ready(), "Waiting for the active desktop worker");
     let mut display = TurzxDisplay::open_device(target.device, || stop.load(Ordering::Relaxed))?;
     let caps = display.caps();
+    status.codecs(DesktopCodecSupport {
+        h264: caps.supports_h264,
+        mjpeg: caps.supports_mjpeg,
+    });
+    let (codec, max_frame_bytes) = select_codec(pid, caps, h264_allowed);
     let convert = |mode: TurzxMode| DisplayMode {
         width: u32::from(mode.width),
         height: u32::from(mode.height),
@@ -82,12 +121,11 @@ fn run_worker(
         modes: caps.modes.iter().copied().map(convert).collect(),
         max_width: u32::from(caps.max_w),
         max_height: u32::from(caps.max_h),
+        max_frame_bytes,
     };
-    let codec = if JPEG_FORCE_PIDS.contains(&pid) {
-        DisplayCodec::Jpeg
-    } else {
-        DisplayCodec::H264
-    };
+    if !h264_allowed && codec == DisplayCodec::H264 {
+        info!("TURZX {pid:04x} keeps H.264 because it does not advertise MJPEG");
+    }
     let format = if codec == DisplayCodec::Jpeg {
         FMT_MJPEG
     } else {
@@ -452,6 +490,48 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn disabling_h264_selects_capped_jpeg_only_on_panels_that_advertise_mjpeg() {
+        let mut caps = turzx::VendorCaps {
+            max_transfer: 131_040,
+            supports_mjpeg: true,
+            supports_h264: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            select_codec(0xAD22, &caps, true),
+            (DisplayCodec::H264, None)
+        );
+        assert_eq!(
+            select_codec(0xAD22, &caps, false),
+            (DisplayCodec::Jpeg, Some(131_030))
+        );
+        for forced in [true, false] {
+            assert_eq!(
+                select_codec(0xAD26, &caps, forced),
+                (DisplayCodec::Jpeg, None)
+            );
+        }
+        caps.max_transfer = 0;
+        assert_eq!(
+            select_codec(0xAD21, &caps, false),
+            (DisplayCodec::Jpeg, None)
+        );
+        caps.supports_mjpeg = false;
+        assert_eq!(
+            select_codec(0xAD21, &caps, false),
+            (DisplayCodec::H264, None)
+        );
+        let h264_only = DesktopCodecSupport {
+            h264: true,
+            mjpeg: false,
+        };
+        assert!(jpeg_available(None));
+        assert!(!jpeg_available(Some(h264_only)));
+        assert!(streams_h264_by_default(0xAD21));
+        assert!(!streams_h264_by_default(0xAD26));
     }
 
     #[test]

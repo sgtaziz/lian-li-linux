@@ -15,6 +15,7 @@ import EditableName from "@/components/common/EditableName.vue";
 import HistorySparkline from "./HistorySparkline.vue";
 import { averageSpinningRpm } from "@/utils/telemetryHistory";
 import { fanQuantityKey, fanQuantityPort, stageFanQuantity } from "@/utils/fanQuantity";
+import { h264Disabled, setH264Disabled } from "@/utils/h264";
 import {
   FAMILY_DISPLAY,
   familySupportsDisplaySwitch,
@@ -84,6 +85,15 @@ function onFanQty(v: number | null) {
     devices.pending.clear(deviceId);
     if (error) message.error(String(error));
   });
+}
+
+const h264 = computed(() => d.value.h264 ?? null);
+const h264Enabled = computed(() => !h264.value?.jpeg_available || !h264Disabled(config.config, d.value));
+
+function onH264(enabled: boolean) {
+  if (!h264.value?.jpeg_available) return;
+  setH264Disabled(config.config, h264.value.key, !enabled);
+  config.markDirty();
 }
 
 const supportsDisplaySwitch = computed(() =>
@@ -257,6 +267,8 @@ async function ping() {
       <p v-if="d.telemetry?.error" class="error-text">{{ backendText(d.telemetry.error, d.telemetry.error_ui) }}</p>
       <p v-if="isUnboundWireless && isBindOther" class="subtitle">{{ t("devices.card.ownedByOther") }}</p>
       <p v-if="isBoundWireless && needsRebind" class="subtitle">{{ t("devices.card.needsRebindHint") }}</p>
+      <p v-if="h264 && !h264.jpeg_available" class="subtitle">{{ t("devices.card.h264Required") }}</p>
+      <p v-else-if="h264 && !h264Enabled" class="subtitle">{{ t("devices.card.h264OffHint") }}</p>
     </div>
 
     <span class="status" :class="`tone-${status.tone}`">
@@ -296,6 +308,15 @@ async function ping() {
           :max="d.max_fan_quantity ?? 0"
           :disabled="pending === 'fan-quantity'"
           @update:value="onFanQty"
+        />
+      </label>
+      <label v-if="h264" class="toggle" :title="h264.jpeg_available ? t('devices.card.useH264Hint') : t('devices.card.h264Required')">
+        <span class="muted">{{ t("devices.card.useH264") }}</span>
+        <n-switch
+          size="small"
+          :value="h264Enabled"
+          :disabled="!h264.jpeg_available"
+          @update:value="onH264"
         />
       </label>
       <n-button
@@ -503,6 +524,13 @@ async function ping() {
 }
 .qty .n-input-number {
   width: 84px;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
 }
 .ping-btn {
   display: inline-flex;

@@ -767,6 +767,33 @@ pub fn lookup_device(vid: u16, pid: u16) -> Option<&'static DeviceEntry> {
         .find(|entry| entry.id.vid == vid && entry.id.pid == pid)
 }
 
+pub fn usb_port_path(bus: u8, address: u8, ports: &[u8]) -> String {
+    let port = if ports.is_empty() {
+        address.to_string()
+    } else {
+        ports
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(".")
+    };
+    format!("{bus}-{port}")
+}
+
+// A panel re-enumerates at the same port with a different PID when it changes display mode.
+pub fn panel_key_for_port(port_path: &str) -> String {
+    format!("usb:{port_path}")
+}
+
+pub fn panel_key(device_id: &str) -> Option<String> {
+    let topology = device_id.strip_prefix("hid:").unwrap_or(device_id);
+    let mut parts = topology.splitn(3, ':');
+    let (vid, pid, port) = (parts.next()?, parts.next()?, parts.next()?);
+    let hex = |part: &str| part.len() == 4 && part.bytes().all(|b| b.is_ascii_hexdigit());
+    (hex(vid) && hex(pid) && !port.is_empty() && !port.contains(':'))
+        .then(|| panel_key_for_port(port))
+}
+
 /// Returns true if this device family uses HID transport.
 ///
 /// Prefer `DeviceFamily::uses_hid()`; this free function is retained for
@@ -788,6 +815,25 @@ pub fn uses_usb_bulk(family: DeviceFamily) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_key_is_shared_by_both_display_modes_at_one_port() {
+        let lcd = format!("hid:1cbe:a021:{}", usb_port_path(1, 9, &[3, 2]));
+        let desktop = "hid:1a86:ad21:1-3.2";
+        assert_eq!(panel_key(&lcd).as_deref(), Some("usb:1-3.2"));
+        assert_eq!(panel_key(&lcd), panel_key(desktop));
+        assert_eq!(panel_key("1a86:ad21:1-3.2").as_deref(), Some("usb:1-3.2"));
+        assert_ne!(panel_key("hid:1cbe:a021:1-3.1"), panel_key(desktop));
+        assert_eq!(usb_port_path(2, 7, &[]), "2-7");
+        for unrelated in [
+            "wireless:aa:bb:cc:dd:ee:ff",
+            "hid:serial-number",
+            "hid:0cf2:a102:1-3:port2",
+            "hid:1cbe:a021:",
+        ] {
+            assert_eq!(panel_key(unrelated), None, "{unrelated}");
+        }
+    }
 
     /// `has_*` predicates must agree with `capabilities()` so callers can
     /// migrate to the typed form without behaviour drift.

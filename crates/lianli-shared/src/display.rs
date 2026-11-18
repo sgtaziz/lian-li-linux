@@ -31,6 +31,12 @@ pub enum SoftwareEncodingReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopCodecSupport {
+    pub h264: bool,
+    pub mjpeg: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DesktopEncodingStatus {
     pub encoder: DesktopEncoder,
     pub gpu_input: bool,
@@ -68,6 +74,8 @@ pub struct OutputRequest {
     pub modes: Vec<DisplayMode>,
     pub max_width: u32,
     pub max_height: u32,
+    #[serde(default)]
+    pub max_frame_bytes: Option<u32>,
 }
 
 impl OutputRequest {
@@ -82,6 +90,12 @@ impl OutputRequest {
         );
         for mode in &self.modes {
             self.validate_mode(*mode)?;
+        }
+        if let Some(bytes) = self.max_frame_bytes {
+            ensure!(
+                (1..=MAX_ENCODED_BYTES as u32).contains(&bytes),
+                "Invalid encoded frame limit"
+            );
         }
         self.validate_mode(self.preferred)
     }
@@ -206,11 +220,19 @@ mod tests {
             modes: vec![mode],
             max_width: 480,
             max_height: 480,
+            max_frame_bytes: None,
         };
         output.validate().unwrap();
         output.preferred.refresh_hz = 60;
         assert!(output.validate().is_err());
         output.preferred = mode;
+        output.max_frame_bytes = Some(131_030);
+        output.validate().unwrap();
+        for invalid in [0, MAX_ENCODED_BYTES as u32 + 1] {
+            output.max_frame_bytes = Some(invalid);
+            assert!(output.validate().is_err());
+        }
+        output.max_frame_bytes = None;
         output.edid.resize(1024, 0);
         assert!(output.validate().is_err());
     }

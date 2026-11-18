@@ -9,7 +9,7 @@ use crate::ui_message::{ui_message_of, UiError, UiMessage, UiText};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -284,6 +284,8 @@ pub struct AppConfig {
     pub rgb_drift_detection_enabled: bool,
     #[serde(default = "default_drift_interval_ms")]
     pub rgb_drift_detection_interval_ms: u64,
+    #[serde(default)]
+    pub h264_disabled: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -324,6 +326,7 @@ impl Default for AppConfig {
             thermal_alert: ThermalAlertSettings::default(),
             rgb_drift_detection_enabled: default_true(),
             rgb_drift_detection_interval_ms: default_drift_interval_ms(),
+            h264_disabled: BTreeSet::new(),
         }
     }
 }
@@ -333,6 +336,10 @@ fn default_fps() -> f32 {
 }
 
 impl AppConfig {
+    pub fn h264_allowed(&self, device_id: &str) -> bool {
+        crate::device_id::panel_key(device_id).is_none_or(|key| !self.h264_disabled.contains(&key))
+    }
+
     /// Load and validate config. Returns the config and a list of non-fatal warnings
     /// (e.g. invalid LCD entries that were skipped).
     pub fn load(path: &Path) -> Result<(Self, Vec<String>)> {
@@ -533,6 +540,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn h264_stays_allowed_for_legacy_configs_and_opt_out_covers_both_display_modes() {
+        let legacy: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(legacy.h264_disabled.is_empty());
+        assert!(legacy.h264_allowed("hid:1cbe:a021:1-3.2"));
+        let config: AppConfig =
+            serde_json::from_value(serde_json::json!({ "h264_disabled": ["usb:1-3.2"] })).unwrap();
+        assert!(!config.h264_allowed("hid:1cbe:a021:1-3.2"));
+        assert!(!config.h264_allowed("hid:1a86:ad21:1-3.2"));
+        assert!(config.h264_allowed("hid:1cbe:a021:1-4"));
+        assert!(config.h264_allowed("wireless:aa:bb:cc:dd:ee:ff"));
+        let encoded = serde_json::to_value(&config).unwrap();
+        assert_eq!(encoded["h264_disabled"], serde_json::json!(["usb:1-3.2"]));
+    }
 
     #[test]
     fn lcd_shutdown_defaults_on_and_preserves_explicit_false() {

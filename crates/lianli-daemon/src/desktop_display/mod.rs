@@ -10,7 +10,7 @@ pub use enumerate::{enumerate_turzx, TurzxDeviceMatch};
 use lianli_devices::turzx;
 use lianli_shared::ui_message::{UiMessage, UiText};
 use policy::SharedVideoPolicy;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -28,6 +28,7 @@ pub struct DesktopDisplayHandle {
     healthy: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
     pid: u16,
+    h264_allowed: bool,
 }
 
 impl Drop for DesktopDisplayHandle {
@@ -50,6 +51,7 @@ const HEALTHY_UPTIME: Duration = Duration::from_secs(60);
 
 struct DisplayWorker {
     pid: u16,
+    panel_key: String,
     retiring: bool,
     retry_requested: bool,
     status: Arc<status::StreamStatus>,
@@ -86,6 +88,7 @@ pub struct DesktopDisplayRegistry {
     switching: HashSet<DeviceKey>,
     workers: HashMap<DeviceKey, DisplayWorker>,
     video_policy: Arc<SharedVideoPolicy>,
+    h264_disabled: BTreeSet<String>,
     session: Option<session::SessionCoordinator>,
     session_epoch: u64,
 }
@@ -129,6 +132,51 @@ impl DesktopDisplayRegistry {
         self.video_policy.set(enabled, fps_limit);
     }
 
+    pub fn set_h264_disabled(&mut self, disabled: &BTreeSet<String>) {
+        if &self.h264_disabled == disabled {
+            return;
+        }
+        self.h264_disabled = disabled.clone();
+        for (key, worker) in &mut self.workers {
+            let Some(handle) = &worker.handle else {
+                continue;
+            };
+            let allowed = !self.h264_disabled.contains(&worker.panel_key);
+            if worker.retiring
+                || self.switching.contains(key)
+                || handle.h264_allowed == allowed
+                || !worker::streams_h264_by_default(worker.pid)
+                || !worker::jpeg_available(worker.status.codec_support())
+                || handle.join.as_ref().is_none_or(|join| join.is_finished())
+            {
+                continue;
+            }
+            info!(
+                "TURZX {:04x} at {key:?} restarting to apply H.264 preference",
+                worker.pid
+            );
+            handle.stop.store(true, Ordering::SeqCst);
+            worker.retry_requested = true;
+        }
+    }
+
+    pub fn restart_pending(&self) -> bool {
+        self.workers.iter().any(|(key, worker)| {
+            worker.retry_requested && !worker.retiring && !self.switching.contains(key)
+        })
+    }
+
+    pub fn h264_setting(&self, panel_key: &str, pid: u16) -> Option<bool> {
+        worker::streams_h264_by_default(pid).then(|| {
+            worker::jpeg_available(
+                self.workers
+                    .values()
+                    .find(|worker| !worker.retiring && worker.panel_key == panel_key)
+                    .and_then(|worker| worker.status.codec_support()),
+            )
+        })
+    }
+
     pub fn start_session(&mut self, socket: &std::path::Path) -> anyhow::Result<()> {
         self.session = Some(session::SessionCoordinator::start(socket)?);
         Ok(())
@@ -162,6 +210,7 @@ impl DesktopDisplayRegistry {
                 .entry(target.key)
                 .or_insert_with(|| DisplayWorker {
                     pid: target.pid,
+                    panel_key: target.panel_key.clone(),
                     retiring: false,
                     retry_requested: false,
                     status: Arc::new(status::StreamStatus::new(target.key, target.pid)),
@@ -210,6 +259,7 @@ impl DesktopDisplayRegistry {
             };
             match spawn_worker(
                 target.clone(),
+                !self.h264_disabled.contains(&target.panel_key),
                 Arc::clone(&self.video_policy),
                 session.client.clone(),
                 Arc::clone(&worker.status),
@@ -300,6 +350,7 @@ mod tests {
                 (1, 2),
                 DisplayWorker {
                     pid: 0xad21,
+                    panel_key: "usb:1-2".into(),
                     retiring: false,
                     retry_requested: false,
                     status: Arc::new(status::StreamStatus::new((1, 2), 0xad21)),
@@ -311,6 +362,7 @@ mod tests {
                             let _ = wait.recv_timeout(Duration::from_secs(2));
                         })),
                         pid: 0xad21,
+                        h264_allowed: true,
                     }),
                 },
             );
@@ -352,6 +404,7 @@ mod tests {
             (1, 2),
             DisplayWorker {
                 pid: 0xad21,
+                panel_key: "usb:1-2".into(),
                 retiring: false,
                 retry_requested: false,
                 status,
@@ -366,6 +419,7 @@ mod tests {
                         wait.recv().unwrap();
                     })),
                     pid: 0xad21,
+                    h264_allowed: true,
                 }),
             },
         );
@@ -413,6 +467,7 @@ mod tests {
                 key,
                 DisplayWorker {
                     pid: 0xad21,
+                    panel_key: "usb:1-2".into(),
                     retiring: false,
                     retry_requested: false,
                     status: Arc::new(status::StreamStatus::new(key, 0xad21)),
@@ -421,6 +476,7 @@ mod tests {
                         healthy: Arc::new(AtomicBool::new(false)),
                         join: None,
                         pid: 0xad21,
+                        h264_allowed: true,
                     }),
                     retry: RetryState::new(now),
                 },
@@ -443,6 +499,7 @@ mod tests {
             (1, 2),
             DisplayWorker {
                 pid: 0xad21,
+                panel_key: "usb:1-2".into(),
                 retiring: false,
                 retry_requested: false,
                 status: Arc::new(status::StreamStatus::new((1, 2), 0xad21)),
@@ -452,6 +509,7 @@ mod tests {
                     healthy: Arc::new(AtomicBool::new(false)),
                     join: Some(thread_fixture(wait)),
                     pid: 0xad21,
+                    h264_allowed: true,
                 }),
             },
         );
@@ -472,6 +530,69 @@ mod tests {
         registry.finish_switch((1, 2));
         assert!(!registry.switching.contains(&(1, 2)));
         assert!(!registry.workers[&(1, 2)].retry.ready(Instant::now()));
+    }
+
+    #[test]
+    fn h264_preference_restarts_only_workers_whose_codec_changes() {
+        let mut registry = DesktopDisplayRegistry::new();
+        let mut releases = Vec::new();
+        let mut stops = Vec::new();
+        let h264_only = lianli_shared::display::DesktopCodecSupport {
+            h264: true,
+            mjpeg: false,
+        };
+        for (address, pid, panel, support) in [
+            (2, 0xad22, "usb:1-2", None),
+            (3, 0xad26, "usb:1-3", None),
+            (4, 0xad21, "usb:1-4", Some(h264_only)),
+            (5, 0xad21, "usb:1-5", None),
+        ] {
+            let (release, wait) = std::sync::mpsc::channel();
+            releases.push(release);
+            let stop = Arc::new(AtomicBool::new(false));
+            stops.push(Arc::clone(&stop));
+            let status = Arc::new(status::StreamStatus::new((1, address), pid));
+            if let Some(support) = support {
+                status.codecs(support);
+            }
+            registry.workers.insert(
+                (1, address),
+                DisplayWorker {
+                    pid,
+                    panel_key: panel.into(),
+                    retiring: false,
+                    retry_requested: false,
+                    status,
+                    retry: RetryState::new(Instant::now()),
+                    handle: Some(DesktopDisplayHandle {
+                        stop,
+                        healthy: Arc::new(AtomicBool::new(false)),
+                        join: Some(thread_fixture(wait)),
+                        pid,
+                        h264_allowed: true,
+                    }),
+                },
+            );
+        }
+        assert!(!registry.restart_pending());
+        let disabled: BTreeSet<String> = ["usb:1-2", "usb:1-3", "usb:1-4"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        registry.set_h264_disabled(&disabled);
+        let stopped: Vec<_> = stops
+            .iter()
+            .map(|stop| stop.load(Ordering::SeqCst))
+            .collect();
+        assert_eq!(stopped, [true, false, false, false]);
+        assert!(registry.restart_pending());
+        assert_eq!(registry.h264_setting("usb:1-2", 0xad22), Some(true));
+        assert_eq!(registry.h264_setting("usb:1-3", 0xad26), None);
+        assert_eq!(registry.h264_setting("usb:1-4", 0xad21), Some(false));
+        assert_eq!(registry.h264_setting("usb:9-9", 0xad21), Some(true));
+        for release in releases {
+            release.send(()).unwrap();
+        }
     }
 
     fn thread_fixture(wait: std::sync::mpsc::Receiver<()>) -> JoinHandle<()> {

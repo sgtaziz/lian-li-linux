@@ -674,6 +674,7 @@ impl ServiceManager {
                     port_index: None,
                     wireless_group_mac: None,
                     topology_key: Some(topology_key.clone()),
+                    h264: None,
                 });
             }
             fan_devices.insert(base_id.clone(), fan_ctrl);
@@ -1079,6 +1080,7 @@ impl ServiceManager {
                 self.cleaner_reload_pending = false;
                 self.desktop_displays
                     .set_video_policy(cfg.hardware_video, cfg.default_fps);
+                self.desktop_displays.set_h264_disabled(&cfg.h264_disabled);
                 self.config = Some(cfg);
                 self.ipc.state.lock().config = self.config.clone();
                 self.ipc

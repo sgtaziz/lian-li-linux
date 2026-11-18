@@ -20,6 +20,7 @@ pub(super) struct MediaJob {
     pub config: LcdConfig,
     pub key: ConfigKey,
     pub target: MediaTarget,
+    pub h264: bool,
 }
 
 pub(super) struct PreparationRequest {
@@ -37,6 +38,7 @@ pub(super) struct PreparedMedia {
     pub config: LcdConfig,
     pub result: Result<Arc<MediaAsset>, String>,
     pub target: MediaTarget,
+    pub h264: bool,
 }
 
 struct RunningPreparation {
@@ -182,7 +184,10 @@ fn prepare(
         if control.check().is_err() {
             return;
         }
-        let screen = job.target.screen;
+        let screen = ScreenInfo {
+            h264: job.h264,
+            ..job.target.screen
+        };
         let dependencies =
             lianli_shared::media_dependencies::lcd_dependencies(&job.config, &request.templates)
                 .unwrap_or_else(|_| {
@@ -226,6 +231,7 @@ fn prepare(
                 index: job.index,
                 config: job.config,
                 target: job.target,
+                h264: job.h264,
                 result,
             },
             &control,
@@ -308,6 +314,7 @@ mod tests {
                 config,
                 result: Err("old".into()),
                 target: target(),
+                h264: false,
             },
             &control
         ));
@@ -328,6 +335,7 @@ mod tests {
                 config: config.clone(),
                 result: Err("first".into()),
                 target: target(),
+                h264: false,
             })
             .ok()
             .unwrap();
@@ -340,6 +348,7 @@ mod tests {
                     config,
                     result: Err("second".into()),
                     target: target(),
+                    h264: false,
                 },
                 &worker_control,
             )

@@ -242,6 +242,7 @@ pub struct ServiceManager {
     media_requested_keys: Vec<lianli_shared::config::ConfigKey>,
     media_targets: HashMap<usize, media_preparation::MediaTarget>,
     media_asset_targets: HashMap<usize, media_preparation::MediaTarget>,
+    media_asset_h264: HashMap<usize, bool>,
     media_reload_pending: bool,
     media_preparation: media_preparation::MediaPreparation,
     targets: Arc<Mutex<HashMap<usize, ActiveTarget>>>,
@@ -319,6 +320,7 @@ impl ServiceManager {
             media_requested_keys: Vec::new(),
             media_targets: HashMap::new(),
             media_asset_targets: HashMap::new(),
+            media_asset_h264: HashMap::new(),
             media_reload_pending: false,
             media_preparation: Default::default(),
             targets: Arc::new(Mutex::new(HashMap::new())),
@@ -837,6 +839,7 @@ impl ServiceManager {
                     DEVICE_POLL_GATE.dequeued();
                     self.poll_startup_image();
                     self.refresh_after_mode_switch();
+                    self.respawn_pending_desktop_workers();
                     self.check_pixel_clean_sessions();
                     self.device_poll();
                     if self.restart_requested {

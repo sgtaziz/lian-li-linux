@@ -124,7 +124,15 @@ fn encode_compressed_with(
         }
         return Ok(buf);
     }
-    let preferred = screen.jpeg_quality;
+    encode_jpeg_to_fit(tj_image, screen.jpeg_quality, screen.max_payload, memo)
+}
+
+pub fn encode_jpeg_to_fit(
+    tj_image: turbojpeg::Image<&[u8]>,
+    preferred: u8,
+    max_payload: usize,
+    memo: &JpegQualityMemo,
+) -> Result<Vec<u8>, MediaError> {
     let start = match memo.0.load(Ordering::Relaxed) {
         0 => preferred,
         remembered => remembered,
@@ -133,17 +141,17 @@ fn encode_compressed_with(
     for quality in jpeg_qualities(preferred).skip_while(|q| *q > start) {
         let buf = turbojpeg::compress(tj_image, quality as i32, turbojpeg::Subsamp::Sub2x2)
             .map_err(|e| MediaError::ImageError(format!("turbojpeg encode: {e}")))?;
-        if buf.len() <= screen.max_payload {
+        if buf.len() <= max_payload {
             if quality < start {
                 debug!(
                     quality,
                     preferred,
                     size = buf.len(),
-                    limit = screen.max_payload,
+                    limit = max_payload,
                     "lowered JPEG quality to fit the LCD payload limit"
                 );
             }
-            let next = next_start_quality(preferred, quality, buf.len(), screen.max_payload);
+            let next = next_start_quality(preferred, quality, buf.len(), max_payload);
             memo.0.store(next, Ordering::Relaxed);
             return Ok(buf.to_vec());
         }

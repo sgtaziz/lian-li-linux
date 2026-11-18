@@ -534,6 +534,7 @@ mod tests {
                 applied_generation: None,
                 applied_policy: None,
                 encoding: None,
+                codecs: None,
             }],
         };
         let text = summary(&input, Some(Err(anyhow::anyhow!("Access denied")))).unwrap();

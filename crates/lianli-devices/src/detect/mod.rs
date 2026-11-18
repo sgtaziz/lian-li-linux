@@ -57,16 +57,8 @@ impl DetectedDevice {
 }
 
 pub(crate) fn usb_topology(vid: u16, pid: u16, bus: u8, address: u8, ports: &[u8]) -> String {
-    let port = if ports.is_empty() {
-        address.to_string()
-    } else {
-        ports
-            .iter()
-            .map(u8::to_string)
-            .collect::<Vec<_>>()
-            .join(".")
-    };
-    format!("{vid:04x}:{pid:04x}:{bus}-{port}")
+    let port = lianli_shared::device_id::usb_port_path(bus, address, ports);
+    format!("{vid:04x}:{pid:04x}:{port}")
 }
 
 pub(crate) fn wired_identity(topology: &str) -> String {

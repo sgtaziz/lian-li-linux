@@ -47,6 +47,10 @@ export default {
     takeOverTitle: "Take over this device?",
     takeOverContent: "It currently belongs to another controller. Taking it over will disconnect it from that PC.",
     pingFailed: "Ping failed",
+    useH264: "Use H.264",
+    useH264Hint: "Turn off to send JPEG frames instead. JPEG can look sharper on some panels but uses more USB bandwidth.",
+    h264OffHint: "H.264 is off. This screen receives JPEG frames, which can look sharper but use more USB bandwidth.",
+    h264Required: "This panel does not accept JPEG frames in desktop mode, so it always uses H.264.",
     status: {
       switching: "Switching…",
       binding: "Binding…",

@@ -85,6 +85,12 @@ export interface DeviceInfo {
   supports_c_command?: boolean;
   port_index?: [number, number] | null;
   wireless_group_mac?: string | null;
+  h264?: H264Setting | null;
+}
+
+export interface H264Setting {
+  key: string;
+  jpeg_available: boolean;
 }
 
 export interface OpenRgbServerStatus {
@@ -554,6 +560,7 @@ export interface AppConfig {
   thermal_alert: ThermalAlertSettings;
   rgb_drift_detection_enabled: boolean;
   rgb_drift_detection_interval_ms: number;
+  h264_disabled: string[];
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ pub use device::{DeviceIdentity, TurzxDisplay};
 pub use edid::{build_edid, patch_edid_serial};
 pub use framing::{
     build_config_packet, build_power_off, fragment_stream_a, pack_fragment, pack_frame, tlv,
+    FRAME_OVERHEAD,
 };
 pub use vendor_caps::{parse_vendor_desc, pick_format, pick_mode, Mode, VendorCaps};
 
