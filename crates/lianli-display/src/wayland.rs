@@ -9,6 +9,7 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 use std::os::unix::fs::FileExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool};
 use wayland_client::{
     delegate_noop, event_created_child, Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
@@ -531,7 +532,12 @@ fn dispatch(
         }
         return Err(error.into());
     }
-    guard.read()?;
+    // The socket can wake for a partial event or for display-only events such as delete_id,
+    // which the library handles itself and reports as WouldBlock.
+    match guard.read() {
+        Err(WaylandError::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+        result => result?,
+    };
     queue.dispatch_pending(state)?;
     state.check_error()
 }
@@ -866,6 +872,39 @@ mod tests {
         assert_eq!(pending.since_epoch.as_secs(), (1u64 << 32) + 2);
         assert_eq!(pending.since_epoch.subsec_nanos(), 3);
         assert_eq!(state.timestamp, Some(previous));
+    }
+
+    #[test]
+    fn split_compositor_event_is_handled_once_the_rest_arrives() {
+        use std::io::Write;
+        let (client, mut compositor) = std::os::unix::net::UnixStream::pair().unwrap();
+        let connection = Connection::from_socket(client).unwrap();
+        let mut queue = connection.new_event_queue::<State>();
+        let registry = connection.display().get_registry(&queue.handle(), ());
+        let mut state = State::new(Mode {
+            width: 480,
+            height: 480,
+            refresh_hz: 30,
+        });
+        let (global_opcode, global_name, version, wl_shm_with_nul) = (0u32, 7u32, 1u32, 7u32);
+        let interface = b"wl_shm\0\0";
+        let event_bytes = 8 + 4 + 4 + interface.len() as u32 + 4;
+        let mut event = Vec::new();
+        event.extend_from_slice(&registry.id().protocol_id().to_ne_bytes());
+        event.extend_from_slice(&((event_bytes << 16) | global_opcode).to_ne_bytes());
+        event.extend_from_slice(&global_name.to_ne_bytes());
+        event.extend_from_slice(&wl_shm_with_nul.to_ne_bytes());
+        event.extend_from_slice(interface);
+        event.extend_from_slice(&version.to_ne_bytes());
+        let deadline = Instant::now() + Duration::from_secs(1);
+
+        compositor.write_all(&event[..12]).unwrap();
+        dispatch(&connection, &mut queue, &mut state, deadline).unwrap();
+        assert!(state.shm.is_none());
+
+        compositor.write_all(&event[12..]).unwrap();
+        dispatch(&connection, &mut queue, &mut state, deadline).unwrap();
+        assert!(state.shm.is_some());
     }
 
     #[test]
