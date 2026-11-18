@@ -1,0 +1,2030 @@
+{
+  "id": "graphite-perfmon-yellow-vertical",
+  "name": "Graphite Perfmon Yellow (Vertical)",
+  "base_width": 480,
+  "base_height": 1920,
+  "rotated": false,
+  "target_device": "Universal Screen 8.8\" (480×1920)",
+  "background": {
+    "type": "image",
+    "path": "background.png"
+  },
+  "widgets": [
+    {
+      "id": "Cpu Temp Gauge",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 20,
+        "value_max": 100,
+        "start_angle": 120,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          255,
+          255,
+          255,
+          20
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              255,
+              214,
+              40
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 8,
+        "value_corner_radius": 8,
+        "gradient": false,
+        "gradient_stops": [
+          {
+            "position": 0,
+            "color": [
+              255,
+              228,
+              115
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 55,
+            "color": [
+              255,
+              214,
+              40
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 80,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 100,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 156,
+      "y": 186,
+      "width": 216,
+      "height": 216,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "Cpu Temp Value",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "BarlowSemiCondensed-Light.ttf"
+        },
+        "font_size": 84,
+        "color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "align": "center",
+        "value_min": 20,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 156,
+      "y": 178,
+      "width": 180,
+      "height": 96,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "Cpu Temp Unit",
+      "kind": {
+        "type": "label",
+        "text": "°C",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 28,
+        "color": [
+          255,
+          214,
+          40,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 2
+      },
+      "x": 156,
+      "y": 238,
+      "width": 90,
+      "height": 34,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Cpu Temp Caption",
+      "kind": {
+        "type": "label",
+        "text": "TEMP HISTORY",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 17,
+        "color": [
+          150,
+          148,
+          142,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 3
+      },
+      "x": 389,
+      "y": 130,
+      "width": 170,
+      "height": 26,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Cpu Temp History",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 20,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          255,
+          214,
+          40,
+          255
+        ],
+        "fill_color": [
+          255,
+          214,
+          40,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              255,
+              214,
+              40
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": true,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
+      },
+      "x": 372.0,
+      "y": 208,
+      "width": 136,
+      "height": 108,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null,
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "Cpu Load Gauge",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 120,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          255,
+          255,
+          255,
+          20
+        ],
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              255,
+              214,
+              40
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 8,
+        "value_corner_radius": 8,
+        "gradient": false,
+        "gradient_stops": [
+          {
+            "position": 0,
+            "color": [
+              255,
+              228,
+              115
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 55,
+            "color": [
+              255,
+              214,
+              40
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 80,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 100,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 156,
+      "y": 506,
+      "width": 216,
+      "height": 216,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "Cpu Load Value",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "BarlowSemiCondensed-Light.ttf"
+        },
+        "font_size": 84,
+        "color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 156,
+      "y": 498,
+      "width": 180,
+      "height": 96,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "Cpu Load Unit",
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 28,
+        "color": [
+          255,
+          214,
+          40,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 2
+      },
+      "x": 156,
+      "y": 558,
+      "width": 90,
+      "height": 34,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Cpu Load Caption",
+      "kind": {
+        "type": "label",
+        "text": "LOAD HISTORY",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 17,
+        "color": [
+          150,
+          148,
+          142,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 3
+      },
+      "x": 389,
+      "y": 450,
+      "width": 170,
+      "height": 26,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Cpu Load History",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          255,
+          214,
+          40,
+          255
+        ],
+        "fill_color": [
+          255,
+          214,
+          40,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              255,
+              214,
+              40
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": true,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
+      },
+      "x": 372.0,
+      "y": 528,
+      "width": 136,
+      "height": 108,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null,
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "Gpu Temp Gauge",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 20,
+        "value_max": 100,
+        "start_angle": 120,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          255,
+          255,
+          255,
+          20
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              255,
+              246,
+              168
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 8,
+        "value_corner_radius": 8,
+        "gradient": false,
+        "gradient_stops": [
+          {
+            "position": 0,
+            "color": [
+              255,
+              249,
+              198
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 55,
+            "color": [
+              255,
+              246,
+              168
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 80,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 100,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 156,
+      "y": 826,
+      "width": 216,
+      "height": 216,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "Gpu Temp Value",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "BarlowSemiCondensed-Light.ttf"
+        },
+        "font_size": 84,
+        "color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "align": "center",
+        "value_min": 20,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 156,
+      "y": 818,
+      "width": 180,
+      "height": 96,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "Gpu Temp Unit",
+      "kind": {
+        "type": "label",
+        "text": "°C",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 28,
+        "color": [
+          255,
+          246,
+          168,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 2
+      },
+      "x": 156,
+      "y": 878,
+      "width": 90,
+      "height": 34,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Gpu Temp Caption",
+      "kind": {
+        "type": "label",
+        "text": "TEMP HISTORY",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 17,
+        "color": [
+          150,
+          148,
+          142,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 3
+      },
+      "x": 389,
+      "y": 770,
+      "width": 170,
+      "height": 26,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Gpu Temp History",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 20,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          255,
+          246,
+          168,
+          255
+        ],
+        "fill_color": [
+          255,
+          246,
+          168,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              255,
+              246,
+              168
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": true,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
+      },
+      "x": 372.0,
+      "y": 848,
+      "width": 136,
+      "height": 108,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null,
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "Gpu Load Gauge",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 120,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          255,
+          255,
+          255,
+          20
+        ],
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              255,
+              246,
+              168
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 8,
+        "value_corner_radius": 8,
+        "gradient": false,
+        "gradient_stops": [
+          {
+            "position": 0,
+            "color": [
+              255,
+              249,
+              198
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 55,
+            "color": [
+              255,
+              246,
+              168
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 80,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 100,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 156,
+      "y": 1146,
+      "width": 216,
+      "height": 216,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "Gpu Load Value",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "BarlowSemiCondensed-Light.ttf"
+        },
+        "font_size": 84,
+        "color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 156,
+      "y": 1138,
+      "width": 180,
+      "height": 96,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "Gpu Load Unit",
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 28,
+        "color": [
+          255,
+          246,
+          168,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 2
+      },
+      "x": 156,
+      "y": 1198,
+      "width": 90,
+      "height": 34,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Gpu Load Caption",
+      "kind": {
+        "type": "label",
+        "text": "LOAD HISTORY",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 17,
+        "color": [
+          150,
+          148,
+          142,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 3
+      },
+      "x": 389,
+      "y": 1090,
+      "width": 170,
+      "height": 26,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Gpu Load History",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          255,
+          246,
+          168,
+          255
+        ],
+        "fill_color": [
+          255,
+          246,
+          168,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              255,
+              246,
+              168
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": true,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
+      },
+      "x": 372.0,
+      "y": 1168,
+      "width": 136,
+      "height": 108,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null,
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "Memory Gauge",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 120,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          255,
+          255,
+          255,
+          20
+        ],
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 8,
+        "value_corner_radius": 8,
+        "gradient": false,
+        "gradient_stops": [
+          {
+            "position": 0,
+            "color": [
+              243,
+              240,
+              234
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 55,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 80,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 100,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 156,
+      "y": 1466,
+      "width": 216,
+      "height": 216,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "Memory Value",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "BarlowSemiCondensed-Light.ttf"
+        },
+        "font_size": 84,
+        "color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 156,
+      "y": 1458,
+      "width": 180,
+      "height": 96,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null,
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "Memory Unit",
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 28,
+        "color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 2
+      },
+      "x": 156,
+      "y": 1518,
+      "width": 90,
+      "height": 34,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Memory Caption",
+      "kind": {
+        "type": "label",
+        "text": "USAGE HISTORY",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 17,
+        "color": [
+          150,
+          148,
+          142,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 3
+      },
+      "x": 389,
+      "y": 1410,
+      "width": 170,
+      "height": 26,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Memory History",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "fill_color": [
+          238,
+          233,
+          224,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 75,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 90,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": true,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
+      },
+      "x": 372.0,
+      "y": 1488,
+      "width": 136,
+      "height": 108,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null,
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "Nvme Gauge",
+      "kind": {
+        "type": "radial_gauge",
+        "source": {
+          "type": "hwmon",
+          "name": "nvme",
+          "label": "Composite",
+          "device_path": ""
+        },
+        "value_min": 20,
+        "value_max": 100,
+        "start_angle": 120,
+        "sweep_angle": 300,
+        "inner_radius_pct": 0.88,
+        "background_color": [
+          255,
+          255,
+          255,
+          20
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              174,
+              236,
+              175
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "bg_corner_radius": 8,
+        "value_corner_radius": 8,
+        "gradient": false,
+        "gradient_stops": [
+          {
+            "position": 0,
+            "color": [
+              202,
+              242,
+              203
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 55,
+            "color": [
+              174,
+              236,
+              175
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 80,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "position": 100,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "x": 156,
+      "y": 1786,
+      "width": 216,
+      "height": 216,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Nvme Value",
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "hwmon",
+          "name": "nvme",
+          "label": "Composite",
+          "device_path": ""
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "BarlowSemiCondensed-Light.ttf"
+        },
+        "font_size": 84,
+        "color": [
+          238,
+          233,
+          224,
+          255
+        ],
+        "align": "center",
+        "value_min": 20,
+        "value_max": 100,
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              238,
+              233,
+              224
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "letter_spacing": 0
+      },
+      "x": 156,
+      "y": 1778,
+      "width": 180,
+      "height": 96,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Nvme Unit",
+      "kind": {
+        "type": "label",
+        "text": "°C",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 28,
+        "color": [
+          174,
+          236,
+          175,
+          255
+        ],
+        "align": "center",
+        "letter_spacing": 2
+      },
+      "x": 156,
+      "y": 1838,
+      "width": 90,
+      "height": 34,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Nvme Caption",
+      "kind": {
+        "type": "label",
+        "text": "TEMP HISTORY",
+        "font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "font_size": 17,
+        "color": [
+          150,
+          148,
+          142,
+          255
+        ],
+        "align": "left",
+        "letter_spacing": 3
+      },
+      "x": 389,
+      "y": 1730,
+      "width": 170,
+      "height": 26,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": null,
+      "fps": null
+    },
+    {
+      "id": "Nvme History",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "hwmon",
+          "name": "nvme",
+          "label": "Composite",
+          "device_path": ""
+        },
+        "value_min": 20,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          174,
+          236,
+          175,
+          255
+        ],
+        "fill_color": [
+          174,
+          236,
+          175,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              174,
+              236,
+              175
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              122,
+              30
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              50,
+              50
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": true,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "BarlowSemiCondensed-Medium.ttf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
+      },
+      "x": 372.0,
+      "y": 1808,
+      "width": 136,
+      "height": 108,
+      "rotation": 0,
+      "visible": true,
+      "update_interval_ms": 1000,
+      "fps": null
+    }
+  ]
+}
