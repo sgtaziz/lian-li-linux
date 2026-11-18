@@ -3,6 +3,20 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.3.0 — 2026-11-18
+
+### Features
+- **lcd**: Allow video backgrounds in custom templates  ([#295](https://github.com/sgtaziz/lian-li-linux/pull/295))
+- **lcd**: Add a per-device switch to stream JPEG instead of H.264  (`8f22a3c`)
+
+### Fixes
+- **gui**: Keep fan curve references valid when renaming or deleting curves  ([#293](https://github.com/sgtaziz/lian-li-linux/pull/293))
+- **desktop**: Give small panels enough H.264 bitrate for sharp keyframes  (`ea5586f`)
+
+### Other changes
+- GUI Redesign  ([#298](https://github.com/sgtaziz/lian-li-linux/pull/298))
+- [TEMPLATE] add Graphite and Neon dashboards (Universal Screen 8.8", HydroShift II OLED Curve, Lancool 207)  ([#296](https://github.com/sgtaziz/lian-li-linux/pull/296))
+
 ## v1.2.8 — 2026-11-15
 
 ### Fixes
