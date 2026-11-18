@@ -409,6 +409,11 @@ pub fn run() {
         )
         .init();
 
+    let context = tauri::generate_context!();
+    // GTK takes the Wayland app ID and X11 WM_CLASS from the program name, which defaults to the
+    // binary name. Use the identifier so desktops match the window to its .desktop file and icon.
+    gio::glib::set_prgname(Some(context.config().identifier.as_str()));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
@@ -472,6 +477,6 @@ pub fn run() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
