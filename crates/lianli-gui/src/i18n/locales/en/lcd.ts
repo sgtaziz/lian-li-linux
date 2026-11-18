@@ -24,6 +24,8 @@ export default {
     noFile: "No file",
   },
   configCard: {
+    screenSection: "Screen",
+    contentSection: "Content",
     renameTitle: "Rename this screen",
     unsaved: "Unsaved changes",
     saveAll: "Save all",

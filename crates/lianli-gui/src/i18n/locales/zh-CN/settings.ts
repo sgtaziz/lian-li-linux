@@ -1,6 +1,37 @@
 import type en from "../en/settings";
 
 const messages: typeof en = {
+  tray: {
+    closeToTray: "关闭窗口后在托盘中继续运行",
+    closeToTrayHint: "显示托盘图标，关闭窗口会将其隐藏到托盘。在托盘菜单中选择“退出”可退出程序。在 GNOME 中，托盘图标需要 AppIndicator 扩展。",
+    unavailable: "没有正在运行的系统托盘。面板需要支持 StatusNotifierItem，例如 GNOME 中的 AppIndicator 扩展。",
+    icon: "托盘图标",
+    iconHint: "“自动”跟随桌面的浅色或深色样式。深色面板请选择“浅色”，浅色面板请选择“深色”。",
+    iconAuto: "自动",
+    iconLight: "浅色",
+    iconDark: "深色",
+  },
+  appearance: {
+    title: "外观",
+    style: "样式",
+    styleHint: "“跟随系统”会使用桌面的浅色或深色偏好。",
+    system: "跟随系统",
+    light: "浅色",
+    dark: "深色",
+    accent: "强调色",
+    followDesktop: "跟随桌面强调色",
+    detected: "从桌面检测到：{color}",
+    notShared: "桌面未提供强调色，因此使用默认颜色。",
+    custom: "自定义颜色",
+    useColor: "使用 {color}",
+    pickColor: "选择任意颜色",
+    preview: "根据强调色生成的颜色",
+    rolePrimary: "主色",
+    rolePrimaryContainer: "主色容器",
+    roleSecondary: "辅助色",
+    roleTertiary: "第三色",
+    roleSurface: "表面",
+  },
   configuration: {
     title: "配置",
     hidBackend: "HID 后端",

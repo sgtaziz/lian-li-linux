@@ -2,9 +2,16 @@ import type en from "../en/devices";
 
 const messages: typeof en = {
   page: {
-    noDevicesFound: "未找到设备",
-    daemonRunning: "守护进程是否正在运行？",
     switchTimeout: "{name}：守护进程未检测到切换到新模式后的面板。重试前，请检查守护进程日志中的 USB 热插拔警告。",
+  },
+  hero: {
+    connected: "已连接设备",
+    cpu: "CPU",
+    gpu: "GPU",
+    cooling: "风扇和水泵",
+    lighting: "灯光",
+    screens: "屏幕",
+    hardware: "已连接的硬件",
   },
   summary: {
     fanGroupOne: "{count} 个风扇组",
@@ -55,15 +62,16 @@ const messages: typeof en = {
       desktopMode: "桌面模式",
     },
   },
+  history: {
+    fanSpeed: "风扇转速",
+    coolant: "冷却液",
+    window: "最近 5 分钟",
+    range: "{min} – {max}",
+    summary: "{label}最近 5 分钟的范围为 {min} 至 {max}",
+    collecting: "正在收集读数…",
+    noReading: "当前无读数",
+  },
   aio: {
-    empty: "未检测到一体式水冷设备。",
-    curveOption: "曲线：{name}",
-    constantPwm: "固定 PWM",
-    mbSync: "主板同步",
-    fanTelemetry: "风扇 {index} {rpm} RPM",
-    pumpTelemetry: "水泵 {rpm} RPM",
-    coolantTelemetry: "冷却液 {temp}°C",
-    pumpSpeed: "水泵转速",
     fan: "风扇 {index}",
     controlUnavailable: "控制通道不可用",
     pumpMbSyncUnavailable: "此设备不支持已保存的主板同步设置。请选择其他模式以控制水泵。",
@@ -80,6 +88,13 @@ const messages: typeof en = {
     theme: "主题",
     themeOption: "主题 {index}",
     loopInterval: "循环间隔",
+    statPump: "水泵",
+    statCoolant: "冷却液",
+    coolingSection: "散热",
+    screenSection: "屏幕",
+    readoutsGroup: "传感器读数",
+    lookGroup: "显示",
+    textColorsGroup: "文字颜色",
   },
   family: {
     wirelessTx: "无线发射器",

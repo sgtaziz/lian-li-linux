@@ -146,11 +146,11 @@ fn fixed_identity(profile: RgbRenderProfile, led_count: u16) -> bool {
     profile.fan_count == 0 && profile.led_count == led_count
 }
 
-fn tl_fan_map() -> Vec<Option<usize>> {
+pub(super) fn tl_fan_map() -> Vec<Option<usize>> {
     (0..13).chain(0..13).map(Some).collect()
 }
 
-fn sl_fan_map() -> Vec<Option<usize>> {
+pub(super) fn sl_fan_map() -> Vec<Option<usize>> {
     const SIDE: [usize; 8] = [0, 1, 3, 5, 6, 8, 10, 11];
     (0..12)
         .chain(SIDE)
@@ -164,7 +164,7 @@ fn sl_v4_fan_map() -> Vec<Option<usize>> {
     (0..13).chain(0..13).map(Some).collect()
 }
 
-fn cl_fan_map() -> Vec<Option<usize>> {
+pub(super) fn cl_fan_map() -> Vec<Option<usize>> {
     (0..8)
         .chain((0..8).rev())
         .chain((0..8).rev())
@@ -172,7 +172,7 @@ fn cl_fan_map() -> Vec<Option<usize>> {
         .collect()
 }
 
-fn sl_inf_fan_map(right_attach: bool) -> Vec<Option<usize>> {
+pub(super) fn sl_inf_fan_map(right_attach: bool) -> Vec<Option<usize>> {
     const LEFT_INNER: [usize; 8] = [3, 5, 7, 6, 4, 2, 0, 1];
     const RIGHT_INNER: [usize; 8] = [4, 2, 0, 1, 3, 5, 7, 6];
     const LEFT_LONG: [usize; 10] = [0, 1, 2, 2, 3, 4, 5, 6, 6, 7];
@@ -225,7 +225,7 @@ fn hydroshift_ii_map(profile: RgbRenderProfile) -> Option<Vec<Option<usize>>> {
     )
 }
 
-fn hs2_oled_map() -> Vec<Option<usize>> {
+pub(super) fn hs2_oled_map() -> Vec<Option<usize>> {
     (0..14)
         .rev()
         .map(Some)
@@ -234,7 +234,7 @@ fn hs2_oled_map() -> Vec<Option<usize>> {
         .collect()
 }
 
-fn universal_screen_map() -> Vec<Option<usize>> {
+pub(super) fn universal_screen_map() -> Vec<Option<usize>> {
     (13..31)
         .chain((0..30).rev())
         .chain(1..13)

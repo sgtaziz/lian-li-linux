@@ -1,29 +1,34 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { useTranslate } from "@/i18n";
+import { CURVE_TEMP_MAX, CURVE_TEMP_MIN, MAX_CURVE_POINTS, canInsertCurvePoint, speedAt } from "./curvePoints";
+import { newCurveGesture } from "./useCurveHistory";
 
 const props = defineProps<{
   modelValue: [number, number][];
   disabled?: boolean;
+  liveCelsius?: number | null;
 }>();
 
 const emit = defineEmits<{
-  "update:modelValue": [value: [number, number][]];
+  "update:modelValue": [value: [number, number][], gesture: number | null];
 }>();
 
 const t = useTranslate();
 
 // X axis: 20–100 °C. Y axis: 0–100 %.
-const X_MIN = 20;
-const X_MAX = 100;
+const X_MIN = CURVE_TEMP_MIN;
+const X_MAX = CURVE_TEMP_MAX;
 const Y_MIN = 0;
 const Y_MAX = 100;
 const W = 480;
 const H = 300;
 const PAD = 34;
 
+const svgRef = ref<SVGSVGElement | null>(null);
 const hoverIndex = ref<number | null>(null);
 const dragIndex = ref<number | null>(null);
+let dragGesture: number | null = null;
 
 const innerW = computed(() => W - PAD * 2);
 const innerH = computed(() => H - PAD * 2);
@@ -47,12 +52,47 @@ const sorted = computed(() => {
   return copy;
 });
 
-const linePath = computed(() => {
-  const pts = sorted.value;
+// Imported curves can reach past the axes, so the drawn curve is cut at the plotted range.
+const visibleLine = computed<[number, number][]>(() => {
+  const pts = sorted.value.map((pt) => pt.p);
+  if (pts.length === 0) return [];
+  const inside = pts.filter(([temp]) => temp >= X_MIN && temp <= X_MAX);
+  const line: [number, number][] = [];
+  if (pts[0][0] < X_MIN) line.push([X_MIN, speedAt(pts, X_MIN)]);
+  line.push(...inside);
+  if (pts[pts.length - 1][0] > X_MAX) line.push([X_MAX, speedAt(pts, X_MAX)]);
+  return line;
+});
+
+function pathOf(points: [number, number][]): string {
+  return points.map(([temp, speed]) => `L ${xToPx(temp)} ${yToPx(speed)}`).join(" ");
+}
+
+// The daemon holds the first and last speeds outside the curve, so the fill extends to both axes.
+const areaPath = computed(() => {
+  const pts = sorted.value.map((pt) => pt.p);
   if (pts.length === 0) return "";
-  return pts
-    .map((pt, idx) => `${idx === 0 ? "M" : "L"} ${xToPx(pt.p[0])} ${yToPx(pt.p[1])}`)
-    .join(" ");
+  const line = pathOf(visibleLine.value);
+  return `M ${xToPx(X_MIN)} ${yToPx(Y_MIN)} L ${xToPx(X_MIN)} ${yToPx(speedAt(pts, X_MIN))} ${line} L ${xToPx(X_MAX)} ${yToPx(speedAt(pts, X_MAX))} L ${xToPx(X_MAX)} ${yToPx(Y_MIN)} Z`;
+});
+
+const liveMarker = computed(() => {
+  const celsius = props.liveCelsius;
+  if (celsius === null || celsius === undefined || !props.modelValue.length) return null;
+  const temp = clamp(celsius, X_MIN, X_MAX);
+  const speed = Math.round(speedAt(props.modelValue, celsius));
+  const x = xToPx(temp);
+  const y = yToPx(speed);
+  const labelX = clamp(x, PAD + 56, W - PAD - 56);
+  const labelY = y > PAD + 40 ? y - 30 : y + 14;
+  const tone = celsius < 60 ? "cool" : celsius < 80 ? "warm" : "hot";
+  return { x, y, labelX, labelY, tone, label: t("fans.live.marker", { temp: Math.round(celsius), speed }) };
+});
+
+const linePath = computed(() => {
+  const line = visibleLine.value;
+  if (line.length === 0) return "";
+  return `M${pathOf(line).slice(1)}`;
 });
 
 const xGrid = computed(() => {
@@ -66,66 +106,63 @@ const yGrid = computed(() => {
   return arr;
 });
 
-function svgPoint(evt: MouseEvent | DragEvent): { x: number; y: number } {
-  const svg = (evt.currentTarget as SVGElement).closest("svg")!;
-  const rect = svg.getBoundingClientRect();
-  const scaleX = W / rect.width;
-  const scaleY = H / rect.height;
-  return {
-    x: (evt.clientX - rect.left) * scaleX,
-    y: (evt.clientY - rect.top) * scaleY,
-  };
+function svgPoint(evt: MouseEvent): { x: number; y: number } | null {
+  const matrix = svgRef.value?.getScreenCTM();
+  if (!matrix) return null;
+  const point = new DOMPoint(evt.clientX, evt.clientY).matrixTransform(matrix.inverse());
+  return { x: point.x, y: point.y };
 }
 
 function onCanvasClick(evt: MouseEvent) {
-  if (props.disabled || dragIndex.value !== null) return;
-  const { x, y } = svgPoint(evt);
+  if (props.disabled || dragIndex.value !== null || !canInsertCurvePoint(props.modelValue)) return;
+  const point = svgPoint(evt);
+  if (!point) return;
+  const { x, y } = point;
   if (x < PAD || x > W - PAD || y < PAD || y > H - PAD) return;
   const temp = clamp(pxToX(x), X_MIN, X_MAX);
   const speed = clamp(pxToY(y), Y_MIN, Y_MAX);
   const next = [...props.modelValue, [round1(temp), round0(speed)] as [number, number]];
   next.sort((a, b) => a[0] - b[0]);
-  emit("update:modelValue", next);
+  emit("update:modelValue", next, null);
 }
 
 function onPointMouseDown(evt: MouseEvent, index: number) {
   if (props.disabled) return;
   evt.stopPropagation();
   dragIndex.value = index;
+  dragGesture = newCurveGesture();
   window.addEventListener("mousemove", onWindowMouseMove);
   window.addEventListener("mouseup", onWindowMouseUp);
 }
 
 function onWindowMouseMove(evt: MouseEvent) {
   if (dragIndex.value === null) return;
-  const svg = document.getElementById("curve-svg");
-  if (!svg) return;
-  const rect = svg.getBoundingClientRect();
-  const scaleX = W / rect.width;
-  const scaleY = H / rect.height;
-  const x = (evt.clientX - rect.left) * scaleX;
-  const y = (evt.clientY - rect.top) * scaleY;
-  const temp = clamp(pxToX(x), X_MIN, X_MAX);
-  const speed = clamp(pxToY(y), Y_MIN, Y_MAX);
+  const point = svgPoint(evt);
+  if (!point) return;
+  const temp = clamp(pxToX(point.x), X_MIN, X_MAX);
+  const speed = clamp(pxToY(point.y), Y_MIN, Y_MAX);
   const next = props.modelValue.map((p, i) =>
     i === dragIndex.value ? ([round1(temp), round0(speed)] as [number, number]) : p,
   );
   next.sort((a, b) => a[0] - b[0]);
-  emit("update:modelValue", next);
+  emit("update:modelValue", next, dragGesture);
 }
 
 function onWindowMouseUp() {
   dragIndex.value = null;
+  dragGesture = null;
   window.removeEventListener("mousemove", onWindowMouseMove);
   window.removeEventListener("mouseup", onWindowMouseUp);
 }
+
+onUnmounted(onWindowMouseUp);
 
 function onPointDblClick(evt: MouseEvent, index: number) {
   if (props.disabled) return;
   evt.stopPropagation();
   if (props.modelValue.length <= 1) return; // keep at least one point
   const next = props.modelValue.filter((_, i) => i !== index);
-  emit("update:modelValue", next);
+  emit("update:modelValue", next, null);
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -146,7 +183,7 @@ function pointPx(pt: [number, number]) {
 <template>
   <div class="curve-editor">
     <svg
-      id="curve-svg"
+      ref="svgRef"
       :viewBox="`0 0 ${W} ${H}`"
       class="svg"
       :class="{ disabled }"
@@ -191,8 +228,24 @@ function pointPx(pt: [number, number]) {
         </text>
       </g>
       <!-- curve -->
+      <defs>
+        <linearGradient id="curve-temp-band" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stop-color="var(--temp-cool)" />
+          <stop offset="0.55" stop-color="var(--temp-warm)" />
+          <stop offset="1" stop-color="var(--temp-hot)" />
+        </linearGradient>
+      </defs>
+      <rect :x="PAD" :y="H - PAD + 1" :width="innerW" height="4" rx="2" fill="url(#curve-temp-band)" />
+      <path v-if="areaPath" :d="areaPath" class="area" />
       <path :d="linePath" class="curve" v-if="linePath" />
       <!-- points -->
+      <g v-if="liveMarker" class="live" :class="`tone-${liveMarker.tone}`">
+        <line :x1="liveMarker.x" :x2="liveMarker.x" :y1="PAD" :y2="H - PAD" class="live-line" />
+        <line :x1="PAD" :x2="liveMarker.x" :y1="liveMarker.y" :y2="liveMarker.y" class="live-line faint" />
+        <circle :cx="liveMarker.x" :cy="liveMarker.y" r="7" class="live-dot" />
+        <rect :x="liveMarker.labelX - 52" :y="liveMarker.labelY" width="104" height="22" rx="11" class="live-label-bg" />
+        <text :x="liveMarker.labelX" :y="liveMarker.labelY + 15" text-anchor="middle" class="live-label">{{ liveMarker.label }}</text>
+      </g>
       <g v-for="(pt, idx) in sorted" :key="pt.i">
         <circle
           :cx="pointPx(pt.p).cx"
@@ -218,7 +271,7 @@ function pointPx(pt: [number, number]) {
             :y="pointPx(pt.p).cy - 34"
             width="104"
             height="22"
-            rx="4"
+            rx="11"
           />
           <text :x="pointPx(pt.p).cx" :y="pointPx(pt.p).cy - 19" text-anchor="middle">
             {{ pt.p[0] }}°C → {{ pt.p[1] }}%
@@ -226,7 +279,9 @@ function pointPx(pt: [number, number]) {
         </g>
       </g>
     </svg>
-    <div class="hint">{{ t("fans.curveEditor.hint") }}</div>
+    <div class="hint">
+      {{ canInsertCurvePoint(modelValue) ? t("fans.curveEditor.hint") : t("fans.points.limit", { max: MAX_CURVE_POINTS }) }}
+    </div>
   </div>
 </template>
 
@@ -240,13 +295,10 @@ function pointPx(pt: [number, number]) {
   display: block;
   /* Fixed height keeps the plot compact instead of stretching to fill the
      full card width (which made it ~650px tall). Width follows the viewBox. */
-  height: 260px;
+  height: 280px;
   width: auto;
   max-width: 100%;
   margin: 0 auto;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
   user-select: none;
 }
 .svg.disabled {
@@ -254,31 +306,39 @@ function pointPx(pt: [number, number]) {
   pointer-events: none;
 }
 .grid line {
-  stroke: var(--border);
+  stroke: var(--md-outline-variant);
   stroke-width: 1;
 }
 .axis-label text {
-  fill: var(--text-muted);
+  fill: var(--md-on-surface-variant);
   font-size: 10px;
 }
 .axis-title {
-  fill: var(--text-secondary);
+  fill: var(--md-on-surface-variant);
   font-size: 11px;
+}
+.area {
+  fill: var(--md-primary);
+  fill-opacity: 0.16;
+  pointer-events: none;
 }
 .curve {
   fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
+  stroke: var(--md-primary);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
 }
 .point {
-  fill: var(--accent);
-  stroke: #fff;
-  stroke-width: 1.5;
+  fill: var(--md-surface-container-low);
+  stroke: var(--md-primary);
+  stroke-width: 2.5;
   pointer-events: none;
   transition: r 0.1s;
 }
 .point.hover {
-  r: 6.5;
+  r: 7;
+  fill: var(--md-primary);
 }
 .point-hit {
   fill: transparent;
@@ -287,13 +347,40 @@ function pointPx(pt: [number, number]) {
 .point-hit:active {
   cursor: grabbing;
 }
+.live {
+  pointer-events: none;
+}
+.live.tone-cool { --live: var(--temp-cool); }
+.live.tone-warm { --live: var(--temp-warm); }
+.live.tone-hot { --live: var(--temp-hot); }
+.live-line {
+  stroke: var(--live);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+.live-line.faint {
+  opacity: 0.6;
+}
+.live-dot {
+  fill: var(--live);
+  stroke: var(--md-surface-container-low);
+  stroke-width: 3;
+}
+.live-label-bg {
+  fill: var(--md-inverse-surface);
+}
+.live-label {
+  fill: var(--md-inverse-on-surface);
+  font-size: 11px;
+  font-weight: 600;
+}
 .tooltip rect {
-  fill: var(--bg-elevated);
-  stroke: var(--border-strong);
+  fill: var(--md-inverse-surface);
 }
 .tooltip text {
-  fill: var(--text-primary);
+  fill: var(--md-inverse-on-surface);
   font-size: 11px;
+  font-weight: 600;
 }
 .hint {
   color: var(--text-muted);

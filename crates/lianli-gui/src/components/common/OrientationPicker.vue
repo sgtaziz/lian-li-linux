@@ -34,28 +34,38 @@ const rotation = computed(() => `rotate(${props.modelValue}deg)`);
 <style scoped>
 .orientation-picker {
   display: inline-flex;
-  gap: var(--space-1);
+  border: 1px solid var(--md-outline);
+  border-radius: 18px;
+  overflow: hidden;
 }
 .opt {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  height: 34px;
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: 0;
+  color: var(--md-on-surface-variant);
   cursor: pointer;
-  font-size: var(--font-size-xs);
-  transition: all 0.12s;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s;
 }
-.opt:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
+.opt + .opt {
+  border-left: 1px solid var(--md-outline);
+}
+.opt:hover:not(.active) {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  color: var(--md-on-surface);
+}
+.opt:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: -3px;
 }
 .opt.active {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
 }
 </style>

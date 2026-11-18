@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import { useRoute } from "vue-router";
-import { darkTheme, dateZhCN, zhCN, type GlobalTheme, type GlobalThemeOverrides } from "naive-ui";
+import { darkTheme, dateZhCN, zhCN, type GlobalTheme } from "naive-ui";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDaemonStore } from "@/stores/daemon";
+import { useTrayStore } from "@/stores/tray";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "@/stores/config";
 import { useThemeStore } from "@/stores/theme";
 import { useLanguageStore } from "@/stores/language";
@@ -14,8 +16,11 @@ import InstallationNotice from "@/components/common/InstallationNotice.vue";
 import CompatibilityNotice from "@/components/common/CompatibilityNotice.vue";
 import WirelessNotice from "@/components/common/WirelessNotice.vue";
 import UpdateNotice from "@/components/common/UpdateNotice.vue";
+import UnsavedChanges from "@/components/layout/UnsavedChanges.vue";
+import PageLoading from "@/components/layout/PageLoading.vue";
 
 const daemon = useDaemonStore();
+const tray = useTrayStore();
 const config = useConfigStore();
 const theme = useThemeStore();
 const language = useLanguageStore();
@@ -28,81 +33,27 @@ const isSecondaryWindow = computed(
   () => route.name === "editor" || route.name === "browser",
 );
 
-const compactAlert: GlobalThemeOverrides["Alert"] = {
-  padding: "8px",
-  iconSize: "20px",
-  iconMargin: "8px 8px 0 12px",
-  closeMargin: "8px 10px 0 0",
-  lineHeight: "1.5",
-};
-
-const darkOverrides: GlobalThemeOverrides = {
-  Alert: compactAlert,
-  common: {
-    bodyColor: "#0f1117",
-    cardColor: "#1a1d27",
-    modalColor: "#1a1d27",
-    popoverColor: "#232734",
-    primaryColor: "#4f9eff",
-    primaryColorHover: "#3a8be5",
-    primaryColorPressed: "#2f7acc",
-    textColorBase: "#e4e6eb",
-    textColor1: "#e4e6eb",
-    textColor2: "#c9cdd4",
-    textColor3: "#9ba1ac",
-    placeholderColor: "#6b7280",
-    dividerColor: "#2e3340",
-    borderColor: "#2e3340",
-    inputColor: "#232734",
-    inputColorDisabled: "#1a1d27",
-    actionColor: "#232734",
-    tableHeaderColor: "#1a1d27",
-    hoverColor: "rgba(79, 158, 255, 0.12)",
-    borderRadius: "8px",
-    borderRadiusSmall: "6px",
-  },
-};
-
-const lightOverrides: GlobalThemeOverrides = {
-  Alert: compactAlert,
-  common: {
-    bodyColor: "#f4f6f9",
-    cardColor: "#ffffff",
-    modalColor: "#ffffff",
-    popoverColor: "#ffffff",
-    primaryColor: "#2f7acc",
-    primaryColorHover: "#2569b0",
-    primaryColorPressed: "#1d5499",
-    textColorBase: "#1a1d27",
-    textColor1: "#1a1d27",
-    textColor2: "#3d4452",
-    textColor3: "#565d6b",
-    placeholderColor: "#868f9e",
-    dividerColor: "#e2e6ee",
-    borderColor: "#e2e6ee",
-    inputColor: "#ffffff",
-    inputColorDisabled: "#eef1f6",
-    actionColor: "#eef1f6",
-    tableHeaderColor: "#f4f6f9",
-    hoverColor: "rgba(47, 122, 204, 0.12)",
-    borderRadius: "8px",
-    borderRadiusSmall: "6px",
-  },
-};
-
 const naiveTheme = computed<GlobalTheme | null>(() =>
   theme.isDark ? darkTheme : null,
 );
-const themeOverrides = computed(() =>
-  theme.isDark ? darkOverrides : lightOverrides,
-);
+const themeOverrides = computed(() => theme.overrides);
 
 let unlistenTemplatesChanged: UnlistenFn | undefined;
 
+function isMainWindow(): boolean {
+  try {
+    return getCurrentWindow().label === "main";
+  } catch {
+    return false;
+  }
+}
+
 onMounted(async () => {
+  theme.start();
   // Kick off the initial config load + polling loop.
   await config.load().catch(() => undefined);
   daemon.start();
+  if (isMainWindow()) void tray.start();
 
   unlistenTemplatesChanged = await listen(LCD_TEMPLATES_CHANGED_EVENT, () => {
     config.refreshTemplates().catch(() => undefined);
@@ -140,11 +91,13 @@ onUnmounted(() => {
                 <AppHeader />
                 <div class="content">
                   <div class="notices">
+                    <UnsavedChanges />
                     <CompatibilityNotice />
                     <WirelessNotice />
                     <UpdateNotice />
                   </div>
-                  <router-view v-slot="{ Component }">
+                  <PageLoading v-if="!daemon.ready" />
+                  <router-view v-else v-slot="{ Component }">
                     <transition name="page" mode="out-in">
                       <component :is="Component" />
                     </transition>
@@ -170,11 +123,17 @@ onUnmounted(() => {
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  background: var(--md-surface);
 }
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-6);
+  padding: var(--space-2) 40px 40px;
+}
+@media (max-width: 960px) {
+  .content {
+    padding: var(--space-2) var(--space-6) var(--space-6);
+  }
 }
 .notices {
   display: flex;

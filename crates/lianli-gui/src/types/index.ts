@@ -133,6 +133,8 @@ export interface TelemetrySnapshot {
   }>;
   fan_rpms: Record<string, number[]>;
   coolant_temps: Record<string, number>;
+  /** Missing on daemons older than the live curve marker. */
+  curve_temperatures?: Record<string, CurveTemperature>;
   streaming_active: boolean;
   openrgb_status: OpenRgbServerStatus;
   /** Active pixel cleaner sessions keyed by target ID, card index, or "all" for multi-LCD concurrency. */
@@ -141,6 +143,12 @@ export interface TelemetrySnapshot {
 }
 
 export type WirelessDongle = "transmitter" | "receiver";
+
+export interface CurveTemperature {
+  celsius: number | null;
+  full_speed_fallback: boolean;
+  source?: SensorSource | null;
+}
 
 export interface DesktopStreamStatus {
   bus: number;
@@ -403,6 +411,17 @@ export interface RgbDeviceConfig {
   effect_memory?: RgbEffectMemory[];
 }
 
+export type RgbPreviewShape = "fan" | "pump" | "screen" | "strip";
+
+export interface RgbPreview {
+  elements: { shape: RgbPreviewShape; aspect: number }[];
+  leds: { element: number; x: number; y: number }[];
+  frames: string;
+  frame_count: number;
+  interval_ms: number;
+  fidelity: "exact" | "approximate";
+}
+
 export type RgbSyncKind = "Continuous" | "Matched";
 
 export interface MergeLightingConfig {
@@ -614,6 +633,8 @@ export interface CatalogTemplate {
   base_height?: number;
   rotated?: boolean;
   files?: CatalogFile[];
+  group?: string;
+  variant?: string;
 }
 
 export interface CatalogManifest {

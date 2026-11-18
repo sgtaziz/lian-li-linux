@@ -8,6 +8,7 @@ import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useThermalStore } from "@/stores/thermal";
 import StatusDot from "@/components/common/StatusDot.vue";
+import AppearanceSettings from "@/components/common/AppearanceSettings.vue";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import ServiceStatus from "@/components/common/ServiceStatus.vue";
 import StateBackups from "@/components/common/StateBackups.vue";
@@ -138,6 +139,8 @@ function onHidBackend(v: "hidraw" | "rusb") {
 
 <template>
   <div class="page settings-page">
+    <AppearanceSettings />
+
     <section class="card">
       <div class="section-head">
         <h2 class="section-title">{{ t("language.title") }}</h2>

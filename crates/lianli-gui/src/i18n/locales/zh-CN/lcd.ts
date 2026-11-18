@@ -26,6 +26,8 @@ const messages: typeof en = {
     noFile: "无文件",
   },
   configCard: {
+    screenSection: "屏幕",
+    contentSection: "内容",
     renameTitle: "重命名此屏幕",
     unsaved: "有未保存的更改",
     saveAll: "全部保存",

@@ -603,17 +603,23 @@ export default { components: { ColorInline } };
 }
 .group-title {
   font-size: var(--font-size-xs);
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  margin-top: var(--space-2);
-  padding-bottom: var(--space-1);
-  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.6px;
+  color: var(--md-on-surface-variant);
+  margin-top: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--md-outline-variant);
 }
 .field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+.field > label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
 }
 .field.check {
   flex-direction: row;

@@ -1,26 +1,55 @@
 :root {
-  /* Color palette (dark theme) */
-  --bg-base: #0f1117;
-  --bg-surface: #1a1d27;
-  --bg-elevated: #232734;
-  --bg-hover: #2a2f3d;
-  --border: #2e3340;
-  --border-strong: #3d4452;
-  --text-primary: #e4e6eb;
-  --text-secondary: #9ba1ac;
-  --text-muted: #6b7280;
-  --accent: #4f9eff;
-  --accent-hover: #3a8be5;
-  --accent-soft: rgba(79, 158, 255, 0.12);
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --purple: #a78bfa;
-  --teal: #2dd4bf;
-  --pink: #f472b6;
+  /* Material roles; the theme store overwrites these from the accent at startup. */
+  --md-primary: #a8c8ff;
+  --md-on-primary: #052f60;
+  --md-primary-container: #1f3d63;
+  --md-on-primary-container: #d6e3ff;
+  --md-primary-hover: #c2d8ff;
+  --md-primary-pressed: #8fb6f5;
+  --md-secondary: #bcc6d9;
+  --md-secondary-container: #333d4d;
+  --md-on-secondary-container: #dae3f4;
+  --md-tertiary: #d8bde6;
+  --md-tertiary-container: #4a3858;
+  --md-on-tertiary-container: #f2daff;
+  --md-surface: #111317;
+  --md-surface-container-low: #181a1f;
+  --md-surface-container: #1d2025;
+  --md-surface-container-high: #26292f;
+  --md-surface-container-highest: #303339;
+  --md-on-surface: #e8e9ec;
+  --md-on-surface-variant: #b8bec9;
+  --md-outline: #868d99;
+  --md-outline-variant: #3c414a;
+  --md-inverse-surface: #e3e4e8;
+  --md-inverse-on-surface: #1d2025;
+  --temp-cool: #5ac8d8;
+  --temp-warm: #f2b84b;
+  --temp-hot: #f2867c;
+  --success: #5ad08a;
+  --warning: #f2b84b;
+  --danger: #f2867c;
+
+  /* Older names used across components, kept as aliases of the roles above. */
+  --bg-base: var(--md-surface);
+  --bg-surface: var(--md-surface-container-low);
+  --bg-elevated: var(--md-surface-container-high);
+  --bg-hover: var(--md-surface-container-highest);
+  --border: var(--md-outline-variant);
+  --border-strong: var(--md-outline);
+  --text-primary: var(--md-on-surface);
+  --text-secondary: var(--md-on-surface-variant);
+  --text-muted: var(--md-outline);
+  --accent: var(--md-primary);
+  --accent-hover: var(--md-primary-hover);
+  --accent-soft: color-mix(in srgb, var(--md-primary) 16%, transparent);
+  --purple: var(--md-secondary);
+  --teal: var(--md-tertiary);
+  --pink: var(--md-primary);
 
   /* Typography */
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Outfit Variable", var(--font-sans);
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
@@ -36,31 +65,10 @@
   --space-4: 16px;
   --space-6: 24px;
   --space-8: 32px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-}
-
-/* Light-mode palette. Activated by `data-theme="light"` on <html>. */
-[data-theme="light"] {
-  --bg-base: #f4f6f9;
-  --bg-surface: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-hover: #eef1f6;
-  --border: #e2e6ee;
-  --border-strong: #cdd3de;
-  --text-primary: #1a1d27;
-  --text-secondary: #565d6b;
-  --text-muted: #868f9e;
-  --accent: #2f7acc;
-  --accent-hover: #2569b0;
-  --accent-soft: rgba(47, 122, 204, 0.12);
-  --success: #16a34a;
-  --warning: #d97706;
-  --danger: #dc2626;
-  --purple: #7c3aed;
-  --teal: #0d9488;
-  --pink: #db2777;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-card: 28px;
 }
 
 * {
@@ -127,9 +135,8 @@ a:hover {
 }
 
 .card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  background: var(--md-surface-container-low);
+  border-radius: var(--radius-card);
   padding: var(--space-6);
 }
 
@@ -145,7 +152,8 @@ a:hover {
 }
 
 .section-title {
-  font-size: var(--font-size-lg);
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
   font-weight: 600;
   margin: 0 0 var(--space-3);
   color: var(--text-primary);
@@ -190,4 +198,15 @@ a:hover {
 .sensor-select-menu {
   max-width: min(560px, 90vw);
   overflow-x: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

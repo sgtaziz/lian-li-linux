@@ -4,6 +4,7 @@ import { Plus, Trash2 } from "lucide-vue-next";
 import type { RGB, RGBA, RgbDirection, RgbEffect, RgbEffectParameters } from "@/types";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
+import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import { RGB_BRIGHTNESS, RGB_DIRECTIONS } from "@/constants";
 import { useTranslate } from "@/i18n";
 
@@ -11,6 +12,9 @@ const props = defineProps<{ effect: RgbEffect; parameters: RgbEffectParameters }
 const emit = defineEmits<{ update: [patch: Partial<RgbEffect>] }>();
 const t = useTranslate();
 
+const brightnessSegments = computed(() =>
+  RGB_BRIGHTNESS.map((option) => ({ value: String(option.value), label: option.label })),
+);
 const directionOptions = computed(() => RGB_DIRECTIONS.filter((option) =>
   props.parameters.directions.includes(option.value),
 ));
@@ -58,19 +62,32 @@ function removeColor(index: number) {
       <LabeledSlider v-if="parameters.supports_speed" :label="t('rgb.effect.speed')" :model-value="effect.speed" :min="0" :max="4" @update:model-value="(value) => emit('update', { speed: value })" />
       <div class="field">
         <label class="muted">{{ t("rgb.effect.brightness") }}</label>
-        <n-select :value="effect.brightness" :options="RGB_BRIGHTNESS" size="small" @update:value="(value) => emit('update', { brightness: value })" />
+        <SegmentedControl
+          size="small"
+          :model-value="String(effect.brightness)"
+          :options="brightnessSegments"
+          :label="t('rgb.effect.brightness')"
+          @update:model-value="(value) => emit('update', { brightness: Number(value) })"
+        />
       </div>
     </div>
     <div v-if="directionOptions.length" class="field">
       <label class="muted">{{ t("rgb.effect.direction") }}</label>
-      <n-select :value="effect.direction" :options="directionOptions" size="small" @update:value="(value: RgbDirection) => emit('update', { direction: value })" />
+      <SegmentedControl
+        size="small"
+        :model-value="effect.direction"
+        :options="directionOptions.map((option) => ({ value: option.value, label: option.label }))"
+        :label="t('rgb.effect.direction')"
+        @update:model-value="(value: RgbDirection) => emit('update', { direction: value })"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
 .effect-settings, .field { display: flex; flex-direction: column; gap: var(--space-3); }
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.field > .segmented { align-self: flex-start; }
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: var(--space-4); }
 .color-list, .color-item { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .effect-color { min-width: 130px; }
 @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }

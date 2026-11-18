@@ -719,6 +719,9 @@ fn handle_request(
             led_index,
             color,
         } => super::rgb::set_led_color(state, device_id, zone, led_index, color),
+        IpcRequest::RenderRgbPreview { device_id, config } => {
+            super::rgb::preview(state, device_id, *config)
+        }
         IpcRequest::GetZoneColors { device_id, zone } => {
             super::rgb::get_zone_colors(state, device_id, zone)
         }

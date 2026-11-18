@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useDialog } from "naive-ui";
-import { Plus, RotateCcw, Trash2 } from "lucide-vue-next";
+import { Check, Plus, RotateCcw, Trash2 } from "lucide-vue-next";
 import type { RgbDeviceCapabilities, RgbZoneConfig, RgbEffect, RGB } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
 import { useConfigStore } from "@/stores/config";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LedStrip from "@/components/rgb/LedStrip.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
+import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import { recallDeviceEffect, rememberDeviceEffect } from "@/components/rgb/effectMemory";
 import { RGB_DIRECTIONS, RGB_BRIGHTNESS, modeLabel, scopeLabel } from "@/constants";
 import { useTranslate } from "@/i18n";
@@ -125,6 +126,16 @@ function patchEffect(p: Partial<RgbEffect>) {
   config.rgbDeviceConfig(props.deviceId).active_preset = null;
   config.markDirty();
 }
+
+// Devices with long mode lists keep a dropdown so the chips do not crowd the card.
+const MAX_MODE_CHIPS = 14;
+const currentMode = computed(() => (props.directOnly ? "Direct" : effect.value.mode));
+const brightnessSegments = computed(() =>
+  RGB_BRIGHTNESS.map((option) => ({ value: String(option.value), label: option.label })),
+);
+const directionSegments = computed(() =>
+  RGB_DIRECTIONS.map((option) => ({ value: option.value, label: option.label })),
+);
 
 function modeOptions() {
   const modes = props.directOnly ? ["Direct"] : props.groupEffects ? props.cap.group_effect_modes ?? [] : props.perFanOnly ? props.cap.zone_effect_modes ?? [] : props.cap.supported_modes;
@@ -264,14 +275,29 @@ const zoneLabel = computed(() => {
         </div>
       </details>
       <div class="effect-controls" :class="{ 'sync-locked': lightingLocked }" :inert="lightingLocked || undefined">
-      <div class="row">
+      <div class="field">
         <label class="muted">{{ t("rgb.effect.mode") }}</label>
+        <div v-if="modeOptions().length <= MAX_MODE_CHIPS" class="mode-chips" role="group" :aria-label="t('rgb.effect.mode')">
+          <button
+            v-for="option in modeOptions()"
+            :key="option.value"
+            type="button"
+            class="mode-chip"
+            :class="{ selected: option.value === currentMode }"
+            :aria-pressed="option.value === currentMode"
+            @click="onMode(option.value)"
+          >
+            <Check v-if="option.value === currentMode" :size="14" :stroke-width="2.6" />
+            {{ option.label }}
+          </button>
+        </div>
         <n-select
+          v-else
           size="small"
-          :value="directOnly ? 'Direct' : effect.mode"
+          :value="currentMode"
           :options="modeOptions()"
           @update:value="onMode"
-          style="width: 200px"
+          style="max-width: 260px"
         />
       </div>
 
@@ -325,11 +351,12 @@ const zoneLabel = computed(() => {
         />
         <div class="field">
           <label class="muted">{{ t("rgb.effect.brightness") }}</label>
-          <n-select
+          <SegmentedControl
             size="small"
-            :value="effect.brightness"
-            :options="RGB_BRIGHTNESS"
-            @update:value="onBrightness"
+            :model-value="String(effect.brightness)"
+            :options="brightnessSegments"
+            :label="t('rgb.effect.brightness')"
+            @update:model-value="(value) => onBrightness(Number(value))"
           />
         </div>
       </div>
@@ -337,11 +364,12 @@ const zoneLabel = computed(() => {
       <div v-if="showDirection || showScope" class="two-col">
         <div v-if="showDirection" class="field">
           <label class="muted">{{ t("rgb.effect.direction") }}</label>
-          <n-select
+          <SegmentedControl
             size="small"
-            :value="effect.direction"
-            :options="RGB_DIRECTIONS"
-            @update:value="onDirection"
+            :model-value="effect.direction"
+            :options="directionSegments"
+            :label="t('rgb.effect.direction')"
+            @update:model-value="onDirection"
           />
         </div>
         <div v-if="showScope" class="field">
@@ -369,7 +397,7 @@ const zoneLabel = computed(() => {
 .sync-locked { opacity: 0.5; }
 .led-count-settings > summary {
   cursor: pointer;
-  color: var(--text-secondary);
+  color: var(--md-on-surface-variant);
   font-size: 12px;
 }
 .led-count-settings[open] > summary {
@@ -382,26 +410,70 @@ const zoneLabel = computed(() => {
 }
 .led-count-slider { flex: 1; min-width: 0; }
 .zone {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 22px;
+  background: var(--md-surface-container);
   overflow: hidden;
 }
 .zone-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-elevated);
+  padding: 14px 20px;
   cursor: pointer;
 }
+.zone-head:hover {
+  background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
+}
 .zone-name {
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
 }
 .zone-body {
-  padding: var(--space-3);
+  padding: 0 20px 20px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
+}
+.field > label.muted,
+.colors > label.muted {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--md-on-surface-variant);
+}
+.mode-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--md-outline);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mode-chip:hover:not(.selected) {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  color: var(--md-on-surface);
+}
+.mode-chip.selected {
+  border-color: var(--md-secondary-container);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+.mode-chip:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 1px;
 }
 .row {
   display: flex;
@@ -446,8 +518,11 @@ const zoneLabel = computed(() => {
 }
 .two-col {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: var(--space-4);
+}
+.field > .segmented {
+  align-self: flex-start;
 }
 .field {
   display: flex;

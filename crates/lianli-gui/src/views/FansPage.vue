@@ -1,21 +1,39 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
 import { useDialog, useMessage } from "naive-ui";
-import { Plus, X } from "lucide-vue-next";
+import { Download, Plus, Redo2, TriangleAlert, Undo2, Upload, X } from "lucide-vue-next";
+import { invoke } from "@/utils/backendText";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
+import { useDaemonStore } from "@/stores/daemon";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
 import FanCurveEditor from "@/components/fans/FanCurveEditor.vue";
+import CurvePointsEditor from "@/components/fans/CurvePointsEditor.vue";
 import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
+import SegmentedControl from "@/components/common/SegmentedControl.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import type { SensorSource, DeviceInfo, FanGroup } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate, type MessageKey } from "@/i18n";
-import { decodeSpeedMode, fillSlots, groupRunsCurves, isReservedCurveName, isSpeedModeKey, speedModeOf } from "@/components/fans/speedMode";
+import {
+  decodeSpeedMode,
+  effectiveCurveSource,
+  fillSlots,
+  groupRunsCurves,
+  isReservedCurveName,
+  isSpeedModeKey,
+  sameSensorSource,
+  speedModeOf,
+} from "@/components/fans/speedMode";
+import { MAX_CURVE_NAME_CHARS, speedAt } from "@/components/fans/curvePoints";
+import { CURVE_TEMPLATES } from "@/components/fans/curveTemplates";
+import { useCurveHistory } from "@/components/fans/useCurveHistory";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
+const daemon = useDaemonStore();
 const names = useDeviceNamesStore();
 const dialog = useDialog();
 const message = useMessage();
@@ -86,6 +104,68 @@ const allFansMode = computed(() => {
   return modes.size === 1 && allFanModeOptions.value.some((option) => option.value === mode) ? mode : null;
 });
 
+type ModeKind = "curve" | "fixed" | "mb" | "off";
+
+const allFansKind = computed<ModeKind | null>(() => {
+  const mode = allFansMode.value;
+  if (mode === null || mode === undefined) return null;
+  if (mode === "constant") return "fixed";
+  if (mode === "off") return "off";
+  if (mode === MB_SYNC_KEY) return "mb";
+  return "curve";
+});
+
+const allFansKindOptions = computed(() => [
+  {
+    value: "curve" as const,
+    label: t("fans.groupCard.modeCurve"),
+    disabled: !curves.value.length,
+    title: current.value ? t("fans.live.allFansCurveTitle", { name: current.value.name }) : t("fans.groupCard.noCurves"),
+  },
+  { value: "fixed" as const, label: t("fans.groupCard.modeFixed") },
+  { value: "mb" as const, label: t("fans.groupCard.modeMbSync"), disabled: true, title: t("fans.live.allFansMbTitle") },
+  { value: "off" as const, label: t("common.off") },
+]);
+
+function onAllFansKind(kind: ModeKind) {
+  if (kind === "mb") return;
+  if (kind === "curve") {
+    const name = current.value?.name ?? curves.value[0]?.name;
+    if (name) applyToAllFans(`curve:${name}`);
+    return;
+  }
+  applyToAllFans(kind === "fixed" ? "constant" : "off");
+}
+
+const lostCurves = computed(() => (daemon.connected ? devices.failingCurves : []));
+
+function curveIndex(name: string): number {
+  return curves.value.findIndex((curve) => curve.name === name);
+}
+
+// A reading belongs to the applied curve, so it is shown only while that curve reads the drafted sensor.
+const appliedReading = computed(() => (daemon.connected && current.value ? devices.curveTemperature(current.value.name) : null));
+const sourceChanged = computed(() => {
+  const source = appliedReading.value?.source;
+  return !!source && !!current.value && !sameSensorSource(source, effectiveCurveSource(current.value));
+});
+const liveReading = computed(() => (appliedReading.value?.source && !sourceChanged.value ? appliedReading.value : null));
+
+const liveState = computed(() => {
+  const reading = liveReading.value;
+  if (sourceChanged.value) return { kind: "idle", text: t("fans.live.sourceChanged"), tone: "" };
+  if (!reading || !current.value) return { kind: "idle", text: t("fans.live.notInUse"), tone: "" };
+  if (reading.full_speed_fallback || reading.celsius === null) {
+    return { kind: "fallback", text: t("fans.live.fallback"), tone: "" };
+  }
+  const celsius = reading.celsius;
+  const speed = Math.round(speedAt(current.value.curve, celsius));
+  const tone = celsius < 60 ? "cool" : celsius < 80 ? "warm" : "hot";
+  return { kind: "reading", text: t("fans.live.marker", { temp: Math.round(celsius), speed }), tone };
+});
+
+const usesDefaultSource = computed(() => !current.value?.temp_source && !current.value?.temp_command);
+
 function applyToAllFans(value: string) {
   const option = allFanModeOptions.value.find((o) => o.value === value);
   if (!option || option.disabled) return;
@@ -126,23 +206,143 @@ const curveUsers = computed(() => (current.value?.name && config.fanCurveRuns(cu
 
 const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, true, true));
 
-function onCurveChange(value: [number, number][]) {
+const history = useCurveHistory(() => curves.value, () => config.markDirty());
+
+function onCurveChange(value: [number, number][], gesture: number | null) {
   if (!current.value) return;
+  history.record(current.value, current.value.curve, value, gesture);
   current.value.curve = value;
   config.markDirty();
 }
 
-function addCurve() {
-  const name = uniqueName(t("fans.page.newCurveName"), curves.value.map((c) => c.name));
+function isTextEntry(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+function onHistoryKey(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || isTextEntry(event.target)) return;
+  const key = event.key.toLowerCase();
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    history.undo();
+  } else if ((key === "z" && event.shiftKey) || key === "y") {
+    event.preventDefault();
+    history.redo();
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onHistoryKey));
+onUnmounted(() => window.removeEventListener("keydown", onHistoryKey));
+
+interface PortableCurve {
+  name: string;
+  curve: [number, number][];
+}
+
+const fileBusy = ref(false);
+
+async function exportCurves() {
+  if (fileBusy.value || !curves.value.length) return;
+  fileBusy.value = true;
+  try {
+    const saved = await invoke<boolean>("export_fan_curves", {
+      curves: curves.value.map((c) => ({ name: c.name, curve: c.curve })),
+      title: t("fans.curveFiles.exportTitle"),
+      filter: t("fans.curveFiles.filter"),
+    });
+    if (saved) message.success(t("fans.curveFiles.exported"));
+  } catch (error) {
+    message.error(String(error));
+  } finally {
+    fileBusy.value = false;
+  }
+}
+
+async function importCurves() {
+  if (fileBusy.value) return;
+  fileBusy.value = true;
+  let found: PortableCurve[] = [];
+  try {
+    found = await invoke<PortableCurve[]>("import_fan_curves", {
+      title: t("fans.curveFiles.importTitle"),
+      filter: t("fans.curveFiles.filter"),
+    });
+  } catch (error) {
+    message.error(String(error));
+  } finally {
+    fileBusy.value = false;
+  }
+  if (found.length) confirmImport(found);
+}
+
+function planImport(found: PortableCurve[]) {
+  const taken = curves.value.map((c) => c.name);
+  return found.map((curve) => {
+    const name = uniqueName(curve.name, taken);
+    taken.push(name);
+    return { name, original: curve.name, curve: curve.curve };
+  });
+}
+
+function confirmImport(found: PortableCurve[]) {
+  const planned = planImport(found);
+  dialog.info({
+    title: t("fans.curveFiles.confirmTitle"),
+    content: () =>
+      h("div", { class: "import-preview" }, [
+        h(
+          "ul",
+          planned.map((item) =>
+            h("li", [
+              h("strong", item.name),
+              h("span", item.name === item.original
+                ? t("fans.curveFiles.points", { count: item.curve.length })
+                : t("fans.curveFiles.renamed", { name: item.original, count: item.curve.length })),
+            ]),
+          ),
+        ),
+        h("p", t("fans.curveFiles.sensorNote")),
+      ]),
+    positiveText: t("fans.curveFiles.importConfirm"),
+    negativeText: t("common.cancel"),
+    onPositiveClick: () => {
+      if (planImport(found).some((item, i) => item.name !== planned[i].name)) {
+        confirmImport(found);
+        return;
+      }
+      const first = curves.value.length;
+      for (const item of planned) {
+        config.addFanCurve({ name: item.name, temp_source: null, temp_command: "", curve: item.curve });
+      }
+      selectedCurve.value = first;
+      message.success(t("fans.curveFiles.imported"));
+    },
+  });
+}
+
+const BLANK_CURVE = "blank";
+
+const addCurveOptions = computed(() => [
+  ...CURVE_TEMPLATES.map((template) => ({ key: template.id, label: t(template.nameKey) })),
+  { type: "divider", key: "divider" },
+  { key: BLANK_CURVE, label: t("fans.templates.blank") },
+]);
+
+function onAddCurve(key: string | number) {
+  const template = CURVE_TEMPLATES.find((candidate) => candidate.id === key);
+  if (template) {
+    addCurveFrom(t(template.nameKey), template.points);
+  } else if (key === BLANK_CURVE) {
+    addCurveFrom(t("fans.page.newCurveName"), [[30, 30], [60, 70], [85, 100]]);
+  }
+}
+
+function addCurveFrom(baseName: string, points: [number, number][]) {
   config.addFanCurve({
-    name,
+    name: uniqueName(baseName, curves.value.map((c) => c.name)),
     temp_source: null,
     temp_command: "",
-    curve: [
-      [30, 30],
-      [60, 70],
-      [85, 100],
-    ],
+    curve: points.map(([temp, speed]) => [temp, speed]),
   });
   selectedCurve.value = curves.value.length - 1;
 }
@@ -170,6 +370,7 @@ function removeCurve(idx: number) {
 function curveNameError(name: string): MessageKey | null {
   if (!name) return "fans.page.curveNameEmpty";
   if (isReservedCurveName(name)) return "fans.page.curveNameReserved";
+  if ([...name].length > MAX_CURVE_NAME_CHARS) return "fans.page.curveNameTooLong";
   if (curves.value.some((c) => c !== current.value && c.name === name)) return "fans.page.curveNameTaken";
   return null;
 }
@@ -190,7 +391,7 @@ function renameCurve(input: string) {
   const name = input.trim();
   const error = curveNameError(name);
   if (error) {
-    message.warning(t(error, { name }));
+    message.warning(t(error, { name, max: MAX_CURVE_NAME_CHARS }));
     nameBuffer.value = current.value.name;
     return;
   }
@@ -218,19 +419,23 @@ function onTempCommand(value: string) {
 }
 
 const tempSourceValue = computed(() => {
-  if (!current.value?.temp_source) return "";
+  if (!current.value) return "";
   const s = current.value.temp_source;
-  if (s.type === "command") return current.value.temp_command ? "command" : "";
+  if (!s) return current.value.temp_command ? "command" : "";
+  if (s.type === "command") return "command";
   return encodeSensorOption(s);
 });
 
 function uniqueName(base: string, taken: string[]): string {
-  if (!taken.includes(base)) return base;
+  const fit = (suffix: string) =>
+    [...base].slice(0, MAX_CURVE_NAME_CHARS - suffix.length).join("").trimEnd() + suffix;
+  const plain = fit("");
+  if (!taken.includes(plain)) return plain;
   for (let i = 2; i < 1000; i++) {
-    const c = `${base} ${i}`;
+    const c = fit(` ${i}`);
     if (!taken.includes(c)) return c;
   }
-  return base;
+  return plain;
 }
 
 function encodeSensorOption(s: SensorSource): string {
@@ -264,10 +469,38 @@ function onHysteresisPwm(percent: number | null) {
 
 <template>
   <div class="page fans-page">
+    <div v-for="name in lostCurves" :key="name" class="sensor-lost" role="alert">
+      <TriangleAlert :size="20" :stroke-width="2.2" aria-hidden="true" />
+      <span class="sensor-lost-text">
+        <strong>{{ t("fans.sensorLost.title", { name }) }}</strong>
+        {{ t("fans.sensorLost.body") }}
+      </span>
+      <n-button v-if="curveIndex(name) >= 0" text type="primary" @click="selectedCurve = curveIndex(name)">
+        {{ t("fans.sensorLost.check") }}
+      </n-button>
+    </div>
+
     <!-- Section 1: Fan curves -->
     <section class="card section">
       <div class="section-head">
         <h2 class="section-title">{{ t("fans.page.fanCurves") }}</h2>
+        <div class="curve-actions">
+          <n-button quaternary circle :disabled="!history.canUndo.value" :title="t('fans.history.undo')" :aria-label="t('fans.history.undo')" @click="history.undo()">
+            <template #icon><Undo2 :size="18" /></template>
+          </n-button>
+          <n-button quaternary circle :disabled="!history.canRedo.value" :title="t('fans.history.redo')" :aria-label="t('fans.history.redo')" @click="history.redo()">
+            <template #icon><Redo2 :size="18" /></template>
+          </n-button>
+          <span class="actions-divider" />
+          <n-button round size="small" :disabled="fileBusy || !curves.length" @click="exportCurves">
+            <template #icon><Download :size="15" /></template>
+            {{ t("fans.curveFiles.export") }}
+          </n-button>
+          <n-button round size="small" :disabled="fileBusy" @click="importCurves">
+            <template #icon><Upload :size="15" /></template>
+            {{ t("fans.curveFiles.import") }}
+          </n-button>
+        </div>
       </div>
 
       <!-- Curve selector as tabs (clearer than a dropdown + separate label).
@@ -280,7 +513,10 @@ function onHysteresisPwm(percent: number | null) {
           :class="{ active: i === selectedCurve }"
           :title="c.name"
         >
-          <span class="curve-tab-name" @click="selectedCurve = i">{{ c.name }}</span>
+          <span class="curve-tab-name" @click="selectedCurve = i">
+            <span v-if="lostCurves.includes(c.name)" class="warn-dot" role="img" :aria-label="t('fans.sensorLost.chipTitle')" :title="t('fans.sensorLost.chipTitle')" />
+            {{ c.name }}
+          </span>
           <button
             class="curve-tab-del"
             :title="t('fans.page.deleteCurve')"
@@ -289,17 +525,34 @@ function onHysteresisPwm(percent: number | null) {
             <X :size="11" />
           </button>
         </div>
-        <button class="curve-tab add" @click="addCurve">
-          <Plus :size="13" /> {{ t("common.add") }}
-        </button>
+        <n-dropdown trigger="click" :options="addCurveOptions" @select="onAddCurve">
+          <button class="curve-tab add" type="button" aria-haspopup="menu">
+            <Plus :size="13" /> {{ t("common.add") }}
+          </button>
+        </n-dropdown>
       </div>
 
       <div v-if="current" class="curve-body">
-        <FanCurveEditor
-          :model-value="current.curve"
-          @update:model-value="onCurveChange"
-        />
+        <div class="curve-main">
+          <FanCurveEditor
+            :model-value="current.curve"
+            :live-celsius="liveReading?.celsius ?? null"
+            @update:model-value="onCurveChange"
+          />
+          <CurvePointsEditor
+            :model-value="current.curve"
+            @update:model-value="onCurveChange"
+          />
+        </div>
         <div class="curve-side">
+          <div class="now" :class="liveState.kind === 'reading' ? `tone-${liveState.tone}` : liveState.kind">
+            <span class="now-label">{{ t("fans.live.rightNow") }}</span>
+            <template v-if="liveState.kind === 'reading'">
+              <span class="now-value">{{ liveState.text }}</span>
+              <span class="now-text">{{ t("fans.live.estimate") }}</span>
+            </template>
+            <span v-else class="now-text">{{ liveState.text }}</span>
+          </div>
           <div class="field">
             <label class="muted">{{ t("fans.page.name") }}</label>
             <n-input
@@ -314,11 +567,13 @@ function onHysteresisPwm(percent: number | null) {
             <label class="muted">{{ t("fans.page.temperatureSource") }}</label>
             <SensorSelect
               size="small"
-              :value="tempSourceValue"
+              :value="tempSourceValue || null"
               :options="sensorOptions"
+              :placeholder="t('fans.live.defaultSource')"
               @update:value="onTempSource"
               filterable
             />
+            <span v-if="usesDefaultSource" class="source-hint">{{ t("fans.live.defaultSourceHint") }}</span>
           </div>
           <div class="field" v-if="tempSourceValue === 'command' || tempSourceValue === ''">
             <label class="muted">{{ t("fans.page.customCommand") }}</label>
@@ -352,12 +607,13 @@ function onHysteresisPwm(percent: number | null) {
         <h2 class="section-title">{{ t("fans.page.fanSpeedAssignments") }}</h2>
         <div v-if="assignmentGroups.length > 1" class="all-fans">
           <span class="muted">{{ t("fans.page.allFans") }}</span>
-          <n-select
+          <span v-if="allFansKind === null" class="mixed">{{ t("fans.groupCard.mixed") }}</span>
+          <SegmentedControl
             size="small"
-            :value="allFansMode"
-            :options="allFanModeOptions"
-            :placeholder="t('fans.groupCard.mixed')"
-            @update:value="applyToAllFans"
+            :model-value="allFansKind"
+            :options="allFansKindOptions"
+            :label="t('fans.page.allFans')"
+            @update:model-value="onAllFansKind"
           />
         </div>
       </div>
@@ -371,7 +627,7 @@ function onHysteresisPwm(percent: number | null) {
           :pwm-headers="config.pwmHeaders"
         />
       </div>
-      <div v-else class="empty muted">{{ t("fans.page.noFanDevices") }}</div>
+      <EmptyState v-else kind="fans" compact />
     </section>
 
     <section class="card settings-row">
@@ -433,6 +689,43 @@ function onHysteresisPwm(percent: number | null) {
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+.curve-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+.actions-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--md-outline-variant);
+}
+:global(.import-preview ul) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+:global(.import-preview li) {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--md-surface-container-highest);
+}
+:global(.import-preview li span) {
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+}
+:global(.import-preview p) {
+  margin: var(--space-3) 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--md-on-surface-variant);
+}
 .curve-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -442,14 +735,44 @@ function onHysteresisPwm(percent: number | null) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  max-width: 200px;
+  height: 34px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid var(--md-outline);
+  color: var(--md-on-surface-variant);
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  max-width: 220px;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.sensor-lost {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--warning) 16%, var(--md-surface-container-low));
+  color: var(--md-on-surface);
+}
+.sensor-lost > svg {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+.sensor-lost-text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.warn-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--warning);
+  vertical-align: middle;
 }
 .curve-tab-name {
   overflow: hidden;
@@ -458,13 +781,13 @@ function onHysteresisPwm(percent: number | null) {
   cursor: pointer;
 }
 .curve-tab:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  color: var(--md-on-surface);
 }
 .curve-tab.active {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--md-secondary-container);
+  border-color: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
 }
 .curve-tab-del {
   display: inline-flex;
@@ -480,7 +803,7 @@ function onHysteresisPwm(percent: number | null) {
 }
 .curve-tab-del:hover {
   opacity: 1;
-  background: rgba(248, 113, 113, 0.18);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
 }
 .curve-tab.add {
@@ -488,14 +811,24 @@ function onHysteresisPwm(percent: number | null) {
   align-items: center;
   gap: var(--space-1);
   border-style: dashed;
-  padding: var(--space-1) var(--space-3);
+  padding: 0 var(--space-4);
+  color: var(--md-primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
 .curve-body {
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr);
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: var(--space-6);
   align-items: start;
+}
+.curve-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
 }
 .curve-side {
   display: flex;
@@ -514,14 +847,59 @@ function onHysteresisPwm(percent: number | null) {
 .all-fans .muted {
   white-space: nowrap;
 }
-.all-fans .n-select {
-  width: 220px;
+.all-fans {
+  flex-wrap: wrap;
+}
+.mixed {
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--md-surface-container-highest);
+  color: var(--md-on-surface-variant);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+.now {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: 18px;
+  background: var(--md-surface-container-high);
+}
+.now-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
+}
+.now-value {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.now-text {
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+}
+.now.tone-cool .now-value { color: var(--temp-cool); }
+.now.tone-warm .now-value { color: var(--temp-warm); }
+.now.tone-hot .now-value { color: var(--temp-hot); }
+.now.fallback {
+  background: color-mix(in srgb, var(--danger) 16%, var(--md-surface-container-high));
+}
+.now.fallback .now-text {
+  color: var(--md-on-surface);
+}
+.source-hint {
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  color: var(--md-on-surface-variant);
 }
 .used-by {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
-@media (max-width: 860px) {
+@media (max-width: 1080px) {
   .curve-body {
     grid-template-columns: 1fr;
   }
@@ -534,7 +912,7 @@ function onHysteresisPwm(percent: number | null) {
 .groups {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: var(--space-3);
 }
 .settings-row {
   display: flex;
@@ -546,7 +924,12 @@ function onHysteresisPwm(percent: number | null) {
   margin: 0 var(--space-2) 6px 0;
 }
 .settings-row .field {
-  width: 150px;
+  width: 170px;
+}
+.settings-row .field label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .empty {
   padding: var(--space-4);

@@ -16,7 +16,7 @@ git clone --recurse-submodules https://github.com/sgtaziz/lian-li-linux.git && c
 # Arch
 sudo pacman -S libusb ffmpeg fontconfig mesa libxkbcommon wayland libx11 libinput libdrm \
   libjpeg-turbo clang cmake pkg-config nasm npm \
-  webkit2gtk-4.1 gtk3 glib2 libsoup3 libayatana-appindicator librsvg
+  webkit2gtk-4.1 gtk3 glib2 libsoup3 librsvg
 yay -S evdi-dkms             # optional runtime support for EVDI desktop mode
 
 # Ubuntu / Debian
@@ -25,7 +25,7 @@ sudo apt install libusb-1.0-0-dev libudev-dev libfontconfig-dev \
   libgl-dev libegl-dev clang cmake pkg-config ffmpeg nasm npm \
   libavcodec-dev libavformat-dev libswscale-dev libavutil-dev libavfilter-dev \
   libwebkit2gtk-4.1-dev libglib2.0-dev libgtk-3-dev libsoup-3.0-dev \
-  libayatana-appindicator3-dev librsvg2-dev
+  librsvg2-dev
 sudo apt install libevdi0 evdi-dkms  # optional runtime support for EVDI desktop mode
 
 # Fedora
@@ -34,7 +34,7 @@ sudo dnf install libusb1-devel fontconfig-devel \
   mesa-libGL-devel mesa-libEGL-devel clang cmake pkg-config ffmpeg \
   ffmpeg-devel nasm npm \
   webkit2gtk4.1-devel gtk3-devel glib2-devel libsoup3-devel \
-  libappindicator-gtk3-devel librsvg2-devel
+  librsvg2-devel
 # EVDI is optional at runtime and is not a build dependency. For EVDI desktop mode,
 # install libevdi 1.14/1.15 and a compatible host module:
 #   https://github.com/DisplayLink/evdi
@@ -76,6 +76,8 @@ sudo install -Dm755 target/release/lianli-gui /usr/bin/lianli-gui
 sudo install -Dm755 target/release/lianli-session /usr/bin/lianli-session
 sudo install -Dm755 target/release/lianli-control /usr/bin/lianli-control
 sudo install -Dm644 packaging/systemd/lianli-session.service /usr/lib/systemd/user/lianli-session.service
+sudo install -d /usr/lib/systemd/user/default.target.wants
+sudo ln -sfn ../lianli-session.service /usr/lib/systemd/user/default.target.wants/lianli-session.service
 sudo install -Dm644 packaging/desktop/com.sgtaziz.lianlilinux.session.desktop /etc/xdg/autostart/com.sgtaziz.lianlilinux.session.desktop
 
 sudo install -Dm644 packaging/systemd/lianli-daemon.service /usr/lib/systemd/user/lianli-daemon.service

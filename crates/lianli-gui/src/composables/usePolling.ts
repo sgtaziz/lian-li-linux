@@ -3,7 +3,7 @@ import { onScopeDispose, ref, type Ref } from "vue";
 type AsyncTask = () => Promise<void>;
 
 /**
- * Reusable 2s polling loop.
+ * Reusable polling loop.
  *
  * Runs `task` immediately, then every `intervalMs`. Pauses while a previous
  * tick is still in flight to avoid overlapping daemon round-trips. Disposes
@@ -14,6 +14,7 @@ export function usePolling(task: AsyncTask, intervalMs = 2000): {
   start: () => void;
   stop: () => void;
   tick: () => Promise<void>;
+  setIntervalMs: (ms: number) => void;
 } {
   const running = ref(false);
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -42,7 +43,16 @@ export function usePolling(task: AsyncTask, intervalMs = 2000): {
     }
   }
 
+  function setIntervalMs(ms: number) {
+    if (ms === intervalMs) return;
+    intervalMs = ms;
+    if (running.value) {
+      stop();
+      start();
+    }
+  }
+
   onScopeDispose(stop);
 
-  return { running, start, stop, tick };
+  return { running, start, stop, tick, setIntervalMs };
 }

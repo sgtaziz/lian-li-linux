@@ -18,6 +18,7 @@ export const useRgbStore = defineStore("rgb", () => {
 
   // Pending (debounced) effect requests keyed by `${deviceId}:${zone}`.
   const pendingEffects = ref<Map<string, () => void>>(new Map());
+  const directEdits = ref(0);
 
   /** Send a single SetRgbEffect now. */
   async function sendEffect(deviceId: string, zone: number, effect: RgbEffect) {
@@ -45,11 +46,13 @@ export const useRgbStore = defineStore("rgb", () => {
   /** Send the full per-zone direct LED buffer. */
   async function sendDirect(deviceId: string, zone: number, colors: RGB[]) {
     await ipc.request("SetRgbDirect", { device_id: deviceId, zone, colors });
+    directEdits.value += 1;
   }
 
   /** Set a single LED by index. */
   async function setLedColor(deviceId: string, zone: number, ledIndex: number, color: RGB) {
     await ipc.request("SetLedColor", { device_id: deviceId, zone, led_index: ledIndex, color });
+    directEdits.value += 1;
   }
 
   /** Fetch the live per-LED colors for a zone (wireless devices). */
@@ -78,7 +81,7 @@ export const useRgbStore = defineStore("rgb", () => {
   // ── Presets ────────────────────────────────────────────────────────────────
   async function savePreset(name: string, deviceId: string) {
     await ipc.request("SaveRgbPreset", { name, device_id: deviceId });
-    await config.load();
+    await config.load({ keepDraft: true });
   }
 
   async function applyPreset(name: string, deviceId: string) {
@@ -87,7 +90,7 @@ export const useRgbStore = defineStore("rgb", () => {
 
   async function deletePreset(name: string, deviceId: string) {
     await ipc.request("DeleteRgbPreset", { name, device_id: deviceId });
-    await config.load();
+    await config.load({ keepDraft: true });
   }
 
   /** Flush every pending effect immediately (called before config save). */
@@ -100,6 +103,7 @@ export const useRgbStore = defineStore("rgb", () => {
 
   return {
     pendingEffects,
+    directEdits,
     sendEffect,
     scheduleEffect,
     sendDirect,

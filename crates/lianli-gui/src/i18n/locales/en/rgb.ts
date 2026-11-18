@@ -20,8 +20,6 @@ export default {
     wirelessZoneCountOne: "Wireless · {count} zone",
     wirelessZoneCountMany: "Wireless · {count} zones",
     noRgbDevices: "No RGB devices detected.",
-    noRgbCapableDevices: "No RGB-capable devices detected.",
-    waitingForDaemon: "Waiting for the daemon to report RGB devices.",
   },
   deviceCard: {
     pingFailed: "Ping failed",
@@ -117,6 +115,23 @@ export default {
   },
   ledStrip: {
     led: "LED {index}",
+  },
+  colorPicker: {
+    choose: "Choose color, currently {color}",
+    chooseNamed: "{label}: choose color, currently {color}",
+    recent: "Recent",
+    presets: "Preset colors",
+    use: "Use {color}",
+  },
+  preview: {
+    label: "Preview of the lighting settings",
+    caption: "Preview of these settings",
+    approximate: "Preview of these settings · approximate, the controller renders this effect itself",
+    loading: "Rendering preview…",
+    unavailable: "No preview for these settings",
+    pump: "Pump",
+    mbSync: "Following the motherboard's RGB header",
+    fan: "Fan {index}",
   },
   modes: {
     off: "Off",

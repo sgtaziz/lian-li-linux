@@ -1,4 +1,6 @@
-use super::cooling::{curve_sources, FirstSamples, TemperatureState};
+use super::cooling::{
+    current_curve_temperatures, curve_sources, mark_evaluated, FirstSamples, TemperatureState,
+};
 use crate::service::suspend::ResumeWatch;
 use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::{
@@ -7,6 +9,7 @@ use lianli_devices::wireless::{
 use lianli_shared::aio::AioConfig;
 use lianli_shared::config::AppConfig;
 use lianli_shared::fan::{interpolate_curve, FanCurve, FanSpeed};
+use lianli_shared::ipc::CurveTemperature;
 use lianli_shared::media::SensorSourceConfig;
 use lianli_shared::sensors::{
     enumerate_sensors, read_sensor_reading, resolve_sensor, ResolvedSensor, SensorInfo,
@@ -28,6 +31,7 @@ struct SensorCache {
     resolved: HashMap<SensorSource, ResolvedSensor>,
     temperatures: HashMap<SensorSource, TemperatureState>,
     missing_curves: HashMap<String, TemperatureState>,
+    evaluated_curves: HashSet<String>,
     tick: Instant,
 }
 
@@ -39,6 +43,7 @@ impl Default for SensorCache {
             resolved: HashMap::new(),
             temperatures: HashMap::new(),
             missing_curves: HashMap::new(),
+            evaluated_curves: HashSet::new(),
             tick: Instant::now(),
         }
     }
@@ -50,6 +55,7 @@ pub struct AioController {
     state: Arc<Mutex<State>>,
     stop_flag: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    curve_temperatures: Arc<Mutex<HashMap<String, CurveTemperature>>>,
 }
 
 struct State {
@@ -116,7 +122,12 @@ impl AioController {
             })),
             stop_flag: Arc::new(AtomicBool::new(false)),
             thread: None,
+            curve_temperatures: Arc::default(),
         }
+    }
+
+    pub fn curve_temperatures(&self) -> HashMap<String, CurveTemperature> {
+        self.curve_temperatures.lock().clone()
     }
 
     pub fn set_config(&self, config: AppConfig) {
@@ -134,7 +145,10 @@ impl AioController {
         let wired = Arc::clone(&self.wired);
         let state = Arc::clone(&self.state);
         let stop = Arc::clone(&self.stop_flag);
-        self.thread = Some(thread::spawn(move || run(wireless, wired, state, stop)));
+        let curve_temperatures = Arc::clone(&self.curve_temperatures);
+        self.thread = Some(thread::spawn(move || {
+            run(wireless, wired, state, stop, curve_temperatures)
+        }));
     }
 
     pub fn stop(mut self) {
@@ -159,6 +173,7 @@ fn run(
     wired: Arc<HashMap<String, Box<dyn FanDevice>>>,
     state: Arc<Mutex<State>>,
     stop_flag: Arc<AtomicBool>,
+    curve_temperatures: Arc<Mutex<HashMap<String, CurveTemperature>>>,
 ) {
     let all_sensors = enumerate_sensors();
     let mut sensor_cache = SensorCache::default();
@@ -205,9 +220,12 @@ fn run(
 
     while !stop_flag.load(Ordering::Relaxed) {
         if resume_watch.resumed() {
+            curve_temperatures.lock().clear();
+            sensor_cache.temperatures.clear();
             wait_for_samples(&mut sensor_cache);
         }
         sensor_cache.tick = Instant::now();
+        sensor_cache.evaluated_curves.clear();
         let cfg = {
             let mut s = state.lock();
             if s.needs_reinit {
@@ -248,6 +266,12 @@ fn run(
         sensor_cache
             .missing_curves
             .retain(|_, state| state.checked_at == Some(sensor_cache.tick));
+        let published = current_curve_temperatures(
+            &sensor_cache.evaluated_curves,
+            &curves,
+            &sensor_cache.temperatures,
+        );
+        *curve_temperatures.lock() = published;
         let live_macs: HashSet<[u8; 6]> = devices.iter().map(|d| d.mac).collect();
         wireless_state.switched.retain(|m, _| live_macs.contains(m));
         wireless_state
@@ -553,6 +577,7 @@ fn read_curve_percent(
     sensor_cache: &mut SensorCache,
     all_sensors: &[SensorInfo],
 ) -> f32 {
+    mark_evaluated(&mut sensor_cache.evaluated_curves, &curve.name);
     let source = curve.effective_source();
     if sensor_cache
         .temperatures

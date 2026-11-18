@@ -11,6 +11,7 @@ import RgbDeviceCard from "@/components/rgb/RgbDeviceCard.vue";
 import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
 import OpenRgbOptions from "@/components/rgb/OpenRgbOptions.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
 import { useTranslate } from "@/i18n";
 import { backendText } from "@/utils/backendText";
@@ -137,7 +138,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
             @click="selectedRaw = QUICK_SYNC"
             @keydown.enter="selectedRaw = QUICK_SYNC"
           >
-            <Layers :size="16" class="item-icon" />
+            <span class="item-icon sync"><Layers :size="18" /></span>
             <span class="item-text">
               <span class="item-name">{{ t("rgb.quickSync") }}</span>
               <span class="item-sub">{{ syncSummary }}</span>
@@ -156,7 +157,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
           @click="selectedRaw = cap.device_id"
           @keydown.enter="selectedRaw = cap.device_id"
         >
-          <component :is="isWireless(cap) ? Wifi : Palette" :size="16" class="item-icon" />
+          <span class="item-icon"><component :is="isWireless(cap) ? Wifi : Palette" :size="18" /></span>
           <span class="item-text">
             <span class="item-name">{{ names.label(cap.device_id, defaultLabel(cap)) }}</span>
             <span class="item-sub">
@@ -183,9 +184,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
         :cap="selectedCap"
         :label="defaultLabel(selectedCap)"
       />
-      <div v-else class="card detail empty muted">
-        {{ daemon.connected ? t("rgb.page.noRgbCapableDevices") : t("rgb.page.waitingForDaemon") }}
-      </div>
+      <EmptyState v-else class="detail" kind="rgb" />
     </div>
   </div>
 </template>
@@ -200,7 +199,8 @@ function capSummary(cap: RgbDeviceCapabilities): string {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: 14px 20px;
+  border-radius: 22px;
 }
 .openrgb-row {
   display: flex;
@@ -209,14 +209,19 @@ function capSummary(cap: RgbDeviceCapabilities): string {
   gap: var(--space-2) var(--space-4);
 }
 .openrgb-title {
+  font-size: 15px;
   font-weight: 600;
 }
 .status-tag {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--md-surface-container-highest);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
   white-space: nowrap;
 }
 .openrgb-controls {
@@ -239,7 +244,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
 }
 .layout {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
@@ -255,52 +260,69 @@ function capSummary(cap: RgbDeviceCapabilities): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-2) var(--space-2);
 }
 .list-title {
-  font-weight: 600;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--md-on-surface-variant);
 }
 .list-count {
   font-size: var(--font-size-xs);
 }
 .list-divider {
   height: 1px;
-  margin: var(--space-1) 0;
-  background: var(--border);
+  margin: var(--space-1) var(--space-2);
+  background: var(--md-outline-variant);
 }
 .rgb-item {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-3);
   width: 100%;
-  padding: var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--text-primary);
+  box-sizing: border-box;
+  padding: 10px var(--space-3) 10px var(--space-2);
+  border-radius: 18px;
+  color: var(--md-on-surface);
   cursor: pointer;
+  transition: background 0.15s;
 }
 .rgb-item:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+.rgb-item:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: -2px;
 }
 .rgb-item.active {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.rgb-item.active .item-icon {
-  color: var(--accent);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
 }
 .item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--text-secondary);
+  border-radius: 14px;
+  background: var(--md-tertiary-container);
+  color: var(--md-on-tertiary-container);
+}
+.item-icon.sync {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
 }
 .item-text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 .item-name {
-  font-size: var(--font-size-sm);
+  font-size: 14px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -311,12 +333,16 @@ function capSummary(cap: RgbDeviceCapabilities): string {
   align-items: center;
   gap: 6px;
   font-size: var(--font-size-xs);
-  color: var(--text-secondary);
+  color: var(--md-on-surface-variant);
   overflow: hidden;
   white-space: nowrap;
 }
+.rgb-item.active .item-sub {
+  color: inherit;
+  opacity: 0.8;
+}
 .rgb-item.offline .item-name {
-  color: var(--text-muted);
+  color: var(--md-outline);
 }
 .state {
   display: inline-flex;
@@ -341,11 +367,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
   margin: var(--space-2) 0 0;
   font-size: var(--font-size-sm);
 }
-.empty {
-  padding: var(--space-6);
-  text-align: center;
-}
-@media (max-width: 760px) {
+@media (max-width: 1000px) {
   .layout {
     grid-template-columns: 1fr;
   }

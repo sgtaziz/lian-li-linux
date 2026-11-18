@@ -9,6 +9,7 @@ import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { lcdEntryKey, orderedLcdIndices, resolveLcdDevice } from "@/utils/lcdSelection";
 import { useTranslate, type MessageKey } from "@/i18n";
 import LcdConfigCard from "@/components/lcd/LcdConfigCard.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import MediaAccessNotice from "@/components/lcd/MediaAccessNotice.vue";
 import ManagedMediaImport from "@/components/lcd/ManagedMediaImport.vue";
 import StartupImageDialog from "@/components/lcd/StartupImageDialog.vue";
@@ -222,7 +223,9 @@ function addLcd(deviceId: string) {
           >
             <GripVertical :size="14" />
           </span>
-          <component :is="mediaMeta(entries[index]).icon" :size="16" class="item-icon" />
+          <span class="item-icon" :class="`media-${entries[index].type}`">
+            <component :is="mediaMeta(entries[index]).icon" :size="18" />
+          </span>
           <span class="item-text">
             <span class="item-name">{{ deviceLabel(entries[index]) ?? t("lcd.screenOffline") }}</span>
             <span class="item-sub">{{ mediaMeta(entries[index]).label }}<template v-if="summary(entries[index])"> · {{ summary(entries[index]) }}</template></span>
@@ -245,6 +248,7 @@ function addLcd(deviceId: string) {
         :entry="current"
         :index="selected"
       />
+      <EmptyState v-else-if="!devices.lcdDevices.length" class="detail" kind="lcd" />
       <div v-else class="card detail empty muted">
         {{ t("lcd.page.selectHint") }}
       </div>
@@ -265,7 +269,7 @@ function addLcd(deviceId: string) {
 }
 .layout {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
@@ -281,55 +285,91 @@ function addLcd(deviceId: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-2) var(--space-2);
 }
 .list-title {
-  font-weight: 600;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--md-on-surface-variant);
 }
 .lcd-item {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-3);
   width: 100%;
-  padding: var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  box-sizing: border-box;
+  padding: 10px var(--space-3) 10px var(--space-2);
+  border-radius: 18px;
   background: none;
-  color: var(--text-primary);
+  color: var(--md-on-surface);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background 0.15s;
 }
 .lcd-item:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+.lcd-item:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: -2px;
 }
 .lcd-item.active {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.lcd-item.active .item-icon {
-  color: var(--accent);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
 }
 .item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--text-secondary);
+  border-radius: 14px;
+  background: var(--md-surface-container-highest);
+  color: var(--md-on-surface-variant);
+}
+.item-icon.media-image,
+.item-icon.media-gif,
+.item-icon.media-video {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+.item-icon.media-sensor,
+.item-icon.media-doublegauge,
+.item-icon.media-cooler {
+  background: var(--md-tertiary-container);
+  color: var(--md-on-tertiary-container);
+}
+.item-icon.media-custom {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
 }
 .item-text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 .item-name {
-  font-size: var(--font-size-sm);
+  font-size: 14px;
   font-weight: 600;
-}
-.item-sub {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.item-sub {
+  font-size: var(--font-size-xs);
+  color: var(--md-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lcd-item.active .item-sub {
+  color: inherit;
+  opacity: 0.8;
 }
 .lcd-item.offline .item-name {
   color: var(--warning);
@@ -338,17 +378,17 @@ function addLcd(deviceId: string) {
   opacity: 0.5;
 }
 .lcd-item.drop-before {
-  box-shadow: inset 0 2px 0 var(--accent);
+  box-shadow: inset 0 3px 0 var(--md-primary);
 }
 .lcd-item.drop-after {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -3px 0 var(--md-primary);
 }
 .drag-handle {
   flex-shrink: 0;
   display: inline-flex;
-  margin: 1px -4px 0 -4px;
+  margin: 0 -6px 0 0;
   padding: 0 2px;
-  color: var(--text-muted);
+  color: var(--md-outline);
   cursor: grab;
   touch-action: none;
 }
@@ -369,7 +409,7 @@ function addLcd(deviceId: string) {
   padding: var(--space-6);
   text-align: center;
 }
-@media (max-width: 760px) {
+@media (max-width: 1000px) {
   .layout {
     grid-template-columns: 1fr;
   }

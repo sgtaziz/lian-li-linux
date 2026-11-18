@@ -267,11 +267,15 @@ const messages: typeof en = {
       notApplicable: "不适用",
     },
     openGuide: "打开指南",
-    allGood: "所有需要关注的检查均已通过。",
     otherChecks: "{count} 项已通过或不适用的检查",
     exportDiagnostics: "导出诊断信息和守护进程日志",
     aboutChecks: "关于这些检查",
     aboutChecksText: "检查范围包括安装、权限、服务状态以及上次配置加载情况。重新检查不会重新加载配置，也不会测试实际播放。",
+    needsAttention: "需要处理",
+    everythingGood: "一切正常",
+    lastChecked: "上次检查：{time}",
+    daemonTile: "守护进程",
+    passedTile: "已通过的检查",
   },
 };
 

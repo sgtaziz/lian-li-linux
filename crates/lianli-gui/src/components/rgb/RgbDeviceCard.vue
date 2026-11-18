@@ -9,6 +9,8 @@ import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { useIpc } from "@/composables/useIpc";
 import EditableName from "@/components/common/EditableName.vue";
 import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
+import RgbPreview from "@/components/rgb/RgbPreview.vue";
+import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
 import { useTranslate } from "@/i18n";
@@ -40,6 +42,12 @@ const devConfig = computed(() => config.rgbDeviceConfig(props.cap.device_id));
 const regional = computed(() => (props.cap.effect_regions?.length ?? 0) > 0);
 const portGroups = computed(() => (props.cap.group_effect_modes?.length ?? 0) > 0);
 const controlTab = ref<"regions" | "direct">("regions");
+const controlTabOptions = computed(() => [
+  { value: "regions" as const, label: t("rgb.deviceCard.groupEffects") },
+  ...(props.cap.supports_direct || portGroups.value
+    ? [{ value: "direct" as const, label: t("rgb.deviceCard.directZones") }]
+    : []),
+]);
 watch(() => devConfig.value.zones[0]?.effect.scope, (scope) => {
   if (portGroups.value) controlTab.value = scope === "Fan" ? "direct" : "regions";
 }, { immediate: true });
@@ -122,9 +130,8 @@ async function savePreset() {
 }
 async function applyPreset(name: string) {
   await rgb.applyPreset(name, props.cap.device_id);
-  // Reload config so the dropdown reflects the newly-active preset
-  // (the daemon persisted active_preset + the preset's effects).
-  await config.load();
+  // The daemon saved the preset into this device's config; other unsaved edits stay.
+  await config.load({ keepDraft: true, rgbDevice: props.cap.device_id });
 }
 async function deletePreset(name: string) {
   dialog.error({
@@ -174,11 +181,17 @@ const summary = computed(() =>
     <p v-if="cap.deferred_reason" class="notice warning">{{ backendText(cap.deferred_reason, cap.deferred_reason_ui) }}</p>
     <p v-if="syncActive" class="notice">{{ t(cap.fan_led_count_control ? "rgb.deviceCard.quickSyncNoticeLedCount" : "rgb.deviceCard.quickSyncNotice") }}</p>
 
+    <RgbPreview v-if="!syncActive" :cap="cap" :config="devConfig" :mb-sync="mbSync" />
+
     <div class="device-controls">
       <div v-if="cap.supports_mb_rgb_sync || (!mbSync && (regional || portGroups))" class="toolbar">
         <div v-if="!mbSync && (regional || portGroups)" class="control-tabs" :inert="syncActive || undefined">
-          <n-button size="small" :type="controlTab === 'regions' ? 'primary' : 'default'" @click="controlTab = 'regions'">{{ t("rgb.deviceCard.groupEffects") }}</n-button>
-          <n-button v-if="cap.supports_direct || portGroups" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">{{ t("rgb.deviceCard.directZones") }}</n-button>
+          <SegmentedControl
+            :model-value="controlTab"
+            :options="controlTabOptions"
+            :label="t('rgb.deviceCard.groupEffects')"
+            @update:model-value="(tab) => (controlTab = tab)"
+          />
         </div>
         <n-checkbox
           v-if="cap.supports_mb_rgb_sync"
@@ -252,7 +265,7 @@ const summary = computed(() =>
 .rgb-device {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 .head {
   display: flex;
@@ -262,13 +275,18 @@ const summary = computed(() =>
 }
 .title-wrap {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
 }
 .device-label {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--md-on-surface-variant);
   white-space: nowrap;
 }
 .ping-btn {
@@ -276,26 +294,32 @@ const summary = computed(() =>
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
+  border-radius: 50%;
+  background: var(--md-surface-container-high);
+  color: var(--md-on-surface);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s;
 }
 .ping-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: var(--md-surface-container-highest);
+}
+.ping-btn:focus-visible {
+  outline: 2px solid var(--md-primary);
 }
 .notice {
   margin: 0;
-  color: var(--accent);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 14px;
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
   font-size: var(--font-size-sm);
 }
 .notice.warning {
-  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 16%, var(--md-surface-container));
+  color: var(--md-on-surface);
 }
 .hint {
   margin: 0;
@@ -325,14 +349,14 @@ const summary = computed(() =>
 .zones {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 .preset-bar {
   display: flex;
   gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--md-outline-variant);
   padding-top: var(--space-3);
 }
 .preset-label {

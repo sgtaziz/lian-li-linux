@@ -23,6 +23,9 @@ function findTemp(sensors: SensorInfo[], kind: "cpu" | "gpu"): number | null {
   return match?.current_value ?? null;
 }
 
+const FOREGROUND_POLL_MS = 2000;
+const BACKGROUND_POLL_MS = 10000;
+
 export const useDaemonStore = defineStore("daemon", () => {
   const ipc = useIpc();
   const devices = useDevicesStore();
@@ -47,6 +50,7 @@ export const useDaemonStore = defineStore("daemon", () => {
   const openrgbPort = ref<number | null>(null);
   const unresponsiveDongle = ref<WirelessDongle | null>(null);
 
+  const ready = ref(false);
   let wasConnected = false;
   let lastDeviceCount = -1;
 
@@ -70,16 +74,16 @@ export const useDaemonStore = defineStore("daemon", () => {
       openrgbPort.value = result.telemetry.openrgb_status.port;
       unresponsiveDongle.value = result.telemetry.unresponsive_dongle ?? null;
 
-      devices.applyPoll(result.devices, result.telemetry);
+      const daemonChanged = previousInstance !== info.value?.instance_id || previousSocket !== result.socket_path;
+      devices.applyPoll(result.devices, result.telemetry, daemonChanged);
       lcd.applyCleanerTelemetry(result.telemetry.pixel_clean_statuses);
 
       if (result.connected) {
         const visible = result.devices.filter(
           (d) => !DONGLE_FAMILIES.includes(d.family),
         ).length;
-        if (!wasConnected || previousInstance !== info.value?.instance_id ||
-            previousSocket !== result.socket_path || visible !== lastDeviceCount) {
-          await config.load();
+        if (!wasConnected || daemonChanged || visible !== lastDeviceCount) {
+          await config.load({ keepDraft: true });
         }
         lastDeviceCount = visible;
 
@@ -88,9 +92,13 @@ export const useDaemonStore = defineStore("daemon", () => {
             const sensors = await ipc.request<SensorInfo[]>("ListSensors");
             thermal.setTemps(findTemp(sensors, "cpu"), findTemp(sensors, "gpu"));
           } catch {
-            // sensor read failure — thermal status just stays stale
+            thermal.setTemps(null, null);
           }
+        } else {
+          thermal.setTemps(null, null);
         }
+      } else {
+        thermal.setTemps(null, null);
       }
       wasConnected = result.connected;
     } catch (e) {
@@ -101,13 +109,16 @@ export const useDaemonStore = defineStore("daemon", () => {
       info.value = null;
       writeError.value = null;
       writeErrorUi.value = null;
+      thermal.setTemps(null, null);
       wasConnected = false;
       // eslint-disable-next-line no-console
       console.warn("poll failed", e);
+    } finally {
+      ready.value = true;
     }
   }
 
-  const polling = usePolling(tick, 2000);
+  const polling = usePolling(tick, FOREGROUND_POLL_MS);
 
   async function refresh() {
     await polling.tick();
@@ -121,7 +132,12 @@ export const useDaemonStore = defineStore("daemon", () => {
     polling.stop();
   }
 
+  function setBackground(background: boolean) {
+    polling.setIntervalMs(background ? BACKGROUND_POLL_MS : FOREGROUND_POLL_MS);
+  }
+
   return {
+    ready,
     connected,
     writeError,
     writeErrorUi,
@@ -141,5 +157,6 @@ export const useDaemonStore = defineStore("daemon", () => {
     refresh,
     start,
     stop,
+    setBackground,
   };
 });

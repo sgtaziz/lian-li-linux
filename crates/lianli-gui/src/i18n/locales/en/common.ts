@@ -17,6 +17,8 @@ export default {
   error: "Error",
   export: "Export",
   import: "Import",
+  increaseValue: "Increase {label}",
+  decreaseValue: "Decrease {label}",
   loading: "Loading…",
   no: "No",
   none: "None",

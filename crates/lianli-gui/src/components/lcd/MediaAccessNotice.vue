@@ -111,8 +111,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.media-access { min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-secondary); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
-.has-issues { border-left: 3px solid var(--warning); }
+.media-access { min-width: 0; padding: 10px 12px 10px 16px; border-radius: 18px; background: var(--md-surface-container); color: var(--md-on-surface-variant); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+.has-issues { background: color-mix(in srgb, var(--warning) 14%, var(--md-surface-container)); color: var(--md-on-surface); }
 .access-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: 22px; }
 .access-summary { flex: 1; min-width: 160px; }
 .status-icon { flex-shrink: 0; }

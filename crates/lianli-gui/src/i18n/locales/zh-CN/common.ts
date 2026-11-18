@@ -19,6 +19,8 @@ const messages: typeof en = {
   error: "错误",
   export: "导出",
   import: "导入",
+  increaseValue: "增大{label}",
+  decreaseValue: "减小{label}",
   loading: "加载中…",
   no: "否",
   none: "无",

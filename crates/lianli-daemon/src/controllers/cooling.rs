@@ -2,6 +2,7 @@ use lianli_shared::fan::{FanCurve, FanSpeed};
 use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
+use lianli_shared::ipc::CurveTemperature;
 use lianli_shared::sensors::SensorReading;
 use lianli_shared::sensors::SensorSource;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -31,11 +32,41 @@ pub(super) fn curve_sources<'a>(
         .collect()
 }
 
+/// Covers only curves evaluated this tick, so an unused curve differs from a lost one.
+pub(super) fn current_curve_temperatures(
+    evaluated: &HashSet<String>,
+    curves: &HashMap<String, FanCurve>,
+    temperatures: &HashMap<SensorSource, TemperatureState>,
+) -> HashMap<String, CurveTemperature> {
+    evaluated
+        .iter()
+        .filter_map(|name| {
+            let source = curves.get(name)?.effective_source();
+            let state = temperatures.get(&source)?;
+            Some((
+                name.clone(),
+                CurveTemperature {
+                    celsius: state.current,
+                    full_speed_fallback: state.fallback,
+                    source: Some(source),
+                },
+            ))
+        })
+        .collect()
+}
+
+pub(super) fn mark_evaluated(evaluated: &mut HashSet<String>, name: &str) {
+    if !evaluated.contains(name) {
+        evaluated.insert(name.to_owned());
+    }
+}
+
 // Sampled sources have no value until their background poll first completes. Their
 // channels are left as they are until a sample arrives or the wait ends, so that gap
 // is not read as a lost temperature.
 pub(super) struct FirstSamples {
     pending: HashSet<SensorSource>,
+    started: Instant,
     deadline: Instant,
 }
 
@@ -43,6 +74,7 @@ impl FirstSamples {
     pub fn new(sources: HashSet<SensorSource>, now: Instant) -> Self {
         Self {
             pending: sources,
+            started: now,
             deadline: now + FIRST_SAMPLE_WAIT,
         }
     }
@@ -57,8 +89,12 @@ impl FirstSamples {
         if now >= self.deadline {
             self.pending.clear();
         } else {
+            let started = self.started;
+            // The monotonic clock stops during suspend, so a pre-suspend sample can look recent.
             self.pending.retain(|source| {
-                !read(source).is_some_and(|reading| usable_reading(&reading, now))
+                !read(source).is_some_and(|reading| {
+                    reading.observed_at >= started && usable_reading(&reading, now)
+                })
             });
         }
         self.pending.len() != before
@@ -281,6 +317,9 @@ mod tests {
 
         let stale = start - TEMPERATURE_GRACE;
         assert!(!samples.refresh(now, |_| Some(reading(45.0, stale))));
+        assert!(samples.is_pending(&slow));
+        let before_resume = start - Duration::from_millis(1);
+        assert!(!samples.refresh(now, |_| Some(reading(45.0, before_resume))));
         assert!(samples.is_pending(&slow));
 
         assert!(samples.refresh(start + FIRST_SAMPLE_WAIT, |_| None));

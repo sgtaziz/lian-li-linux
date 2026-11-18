@@ -26,6 +26,7 @@ const effectiveH = computed(() => props.template.base_height);
 // The canvas stage fills the available space; we compute the largest
 // aspect-correct rectangle that fits inside it so the preview image and the
 // draggable widget boxes stay aligned regardless of window size.
+const FRAME_INSET = 12;
 const stageEl = ref<HTMLElement | null>(null);
 const boxW = ref(0);
 const boxH = ref(0);
@@ -34,8 +35,8 @@ let ro: ResizeObserver | null = null;
 function recompute() {
   const el = stageEl.value;
   if (!el) return;
-  const cw = el.clientWidth;
-  const ch = el.clientHeight;
+  const cw = el.clientWidth - 2 * FRAME_INSET;
+  const ch = el.clientHeight - 2 * FRAME_INSET;
   const ew = effectiveW.value;
   const eh = effectiveH.value;
   if (ew <= 0 || eh <= 0 || cw <= 0 || ch <= 0) {
@@ -76,7 +77,7 @@ const previewBg = computed(() => {
     const [r, g, b] = bg.rgb;
     return `rgb(${r}, ${g}, ${b})`;
   }
-  return "#1a1f29";
+  return "#000";
 });
 
 function widgetBoxStyle(w: Widget) {
@@ -181,8 +182,11 @@ function onUp() {
   justify-content: center;
   /* dark checkerboard so a transparent/letterboxed canvas is visible */
   background:
-    repeating-conic-gradient(#161922 0% 25%, #11141c 0% 50%) 50% / 24px 24px;
-  border-radius: var(--radius-md);
+    repeating-conic-gradient(
+      color-mix(in srgb, var(--md-surface-container-high) 80%, #000) 0% 25%,
+      color-mix(in srgb, var(--md-surface-container) 80%, #000) 0% 50%
+    ) 50% / 24px 24px;
+  border-radius: 20px;
   overflow: hidden;
   cursor: default;
 }
@@ -190,28 +194,29 @@ function onUp() {
   position: relative;
   background-size: cover;
   background-position: center;
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  box-shadow: 0 0 0 6px var(--md-surface-container-highest), 0 18px 40px -16px rgba(0, 0, 0, 0.6);
 }
 .widget-box {
   position: absolute;
-  border: 1px dashed rgba(79, 158, 255, 0.55);
-  border-radius: 2px;
+  border: 1px dashed color-mix(in srgb, var(--md-primary) 60%, transparent);
+  border-radius: 3px;
   cursor: grab;
 }
 .widget-box.selected {
-  border: 1px solid var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border: 2px solid var(--md-primary);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.18);
 }
 .widget-tag {
   position: absolute;
   top: 2px;
   left: 2px;
   font-size: 9px;
-  color: var(--accent);
-  background: rgba(0, 0, 0, 0.55);
-  padding: 1px 3px;
-  border-radius: 2px;
+  font-weight: 600;
+  color: var(--md-on-primary);
+  background: var(--md-primary);
+  padding: 1px 4px;
+  border-radius: 4px;
   pointer-events: none;
 }
 .loading {
@@ -219,17 +224,17 @@ function onUp() {
   top: var(--space-3);
   left: 50%;
   transform: translateX(-50%);
-  padding: 3px var(--space-3);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  padding: 4px var(--space-3);
+  background: var(--md-inverse-surface);
   border-radius: 999px;
   font-size: var(--font-size-xs);
-  color: var(--text-secondary);
+  font-weight: 600;
+  color: var(--md-inverse-on-surface);
   pointer-events: none;
   z-index: 2;
 }
 .dims {
   font-size: var(--font-size-xs);
-  color: var(--text-muted);
+  color: var(--md-on-surface-variant);
 }
 </style>

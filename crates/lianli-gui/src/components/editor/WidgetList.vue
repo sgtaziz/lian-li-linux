@@ -100,25 +100,26 @@ function friendly(kind: any): string {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-radius: 14px;
   cursor: pointer;
-  border: 1px solid transparent;
+  transition: background 0.15s;
 }
 .row:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 .row.selected {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
 }
 .label {
   flex: 1;
-  font-size: var(--font-size-sm);
+  font-size: 13px;
+  font-weight: 600;
 }
 .id {
   font-size: var(--font-size-xs);
-  color: var(--text-muted);
+  color: var(--md-on-surface-variant);
 }
 .ops {
   display: flex;
@@ -127,16 +128,17 @@ function friendly(kind: any): string {
 .op {
   background: transparent;
   border: none;
-  color: var(--text-secondary);
+  color: inherit;
+  opacity: 0.75;
   cursor: pointer;
-  padding: 2px;
+  padding: 4px;
   display: flex;
-  border-radius: var(--radius-sm);
-  transition: background 0.1s, color 0.1s;
+  border-radius: 8px;
+  transition: background 0.1s, opacity 0.1s;
 }
 .op:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  opacity: 1;
+  background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
 }
 .op:disabled {
   opacity: 0.3;
@@ -144,10 +146,9 @@ function friendly(kind: any): string {
 }
 .op:disabled:hover {
   background: transparent;
-  color: var(--text-secondary);
 }
 .op.danger:hover {
-  background: rgba(248, 113, 113, 0.15);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
   color: var(--danger);
 }
 .empty {
@@ -157,8 +158,9 @@ function friendly(kind: any): string {
 .hints {
   font-size: var(--font-size-xs);
   line-height: 1.5;
-  padding: var(--space-2);
-  border-top: 1px solid var(--border);
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  border-top: 1px solid var(--md-outline-variant);
   margin-top: var(--space-2);
+  color: var(--md-on-surface-variant);
 }
 </style>

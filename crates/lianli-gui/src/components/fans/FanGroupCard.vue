@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ChevronDown, ChevronRight, Fan } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, Fan, Info } from "lucide-vue-next";
 import type { DeviceInfo, FanGroup, FanSpeed, PwmHeader } from "@/types";
 import { MB_SYNC_KEY, MB_SYNC_PREFIX } from "@/types";
 import { decodeSpeedMode, fillSlots, isMbSyncGroup, speedModeOf } from "./speedMode";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
+import { useDaemonStore } from "@/stores/daemon";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
-import LabeledSlider from "@/components/common/LabeledSlider.vue";
+import { useThemeStore } from "@/stores/theme";
+import NumberField from "@/components/common/NumberField.vue";
+import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import { FAMILY_DISPLAY } from "@/constants";
 import { useTranslate } from "@/i18n";
 
@@ -24,6 +27,7 @@ const t = useTranslate();
 const expanded = ref(true);
 
 const devices = useDevicesStore();
+const daemon = useDaemonStore();
 const names = useDeviceNamesStore();
 
 const title = computed(() =>
@@ -76,21 +80,6 @@ function setAllSlots(value: FanSpeed) {
   fillSlots(props.group, value);
   config.markDirty();
 }
-
-// Speed mode dropdown options: Off / curve names / Constant PWM / MB Sync.
-const modeOptions = computed(() => {
-  const opts: { label: string; value: string; disabled?: boolean }[] = [
-    { label: t("common.off"), value: "off" },
-    ...props.curveNames.map((n) => ({ label: t("fans.speedMode.curve", { name: n }), value: `curve:${n}` })),
-    { label: t("fans.speedMode.constantPwm"), value: "constant" },
-    {
-      label: t("fans.speedMode.mbSync"),
-      value: MB_SYNC_KEY,
-      disabled: !props.device.mb_sync_support && !props.pwmHeaders.length,
-    },
-  ];
-  return opts;
-});
 
 // PWM header options for the MB Sync source dropdown.
 const pwmHeaderOptions = computed(() => {
@@ -149,59 +138,178 @@ function pwmOf(slot: number): number {
 function setPwm(slot: number, v: number) {
   setSpeed(slot, v);
 }
+
+function pctOf(slot: number): number {
+  return Math.round((pwmOf(slot) / 255) * 100);
+}
+function setPct(slot: number, pct: number) {
+  setPwm(slot, Math.round((pct / 100) * 255));
+}
+
+function slotLabel(slot: number): string {
+  return t(perFan.value ? "fans.groupCard.fanSlot" : "fans.groupCard.portSlot", { index: slot });
+}
+
+type ModeKind = "curve" | "fixed" | "mb" | "off";
+
+function kindOf(mode: string | null): ModeKind | null {
+  if (mode === null) return null;
+  if (mode === MB_SYNC_KEY) return "mb";
+  if (mode === "constant") return "fixed";
+  if (mode === "off") return "off";
+  return "curve";
+}
+
+const commonKind = computed(() => kindOf(commonMode.value));
+
+const theme = useThemeStore();
+const fixedSliderTheme = computed(() => ({
+  fillColor: theme.palette.tertiary,
+  fillColorHover: theme.palette.tertiary,
+}));
+
+const kindOptions = computed(() => [
+  {
+    value: "curve" as const,
+    label: t("fans.groupCard.modeCurve"),
+    disabled: !props.curveNames.length,
+    title: props.curveNames.length ? undefined : t("fans.groupCard.curveUnavailable"),
+  },
+  { value: "fixed" as const, label: t("fans.groupCard.modeFixed") },
+  {
+    value: "mb" as const,
+    label: t("fans.groupCard.modeMbSync"),
+    disabled: !mbAvailable.value,
+    title: mbAvailable.value ? undefined : t("fans.groupCard.mbUnavailable"),
+  },
+  { value: "off" as const, label: t("common.off") },
+]);
+
+const mbAvailable = computed(() => props.device.mb_sync_support || props.pwmHeaders.length > 0);
+
+const failingCurves = computed(() => new Set(daemon.connected ? devices.failingCurves : []));
+
+function slotCurveFailing(slot: number): boolean {
+  const mode = modeOf(slot);
+  return mode.startsWith("curve:") && failingCurves.value.has(mode.slice("curve:".length));
+}
+
+function kindValue(kind: ModeKind, slot: number): string | null {
+  if (kind === "curve") {
+    const current = modeOf(slot);
+    if (current.startsWith("curve:") && props.curveNames.includes(current.slice("curve:".length))) return current;
+    return props.curveNames.length ? `curve:${props.curveNames[0]}` : null;
+  }
+  if (kind === "fixed") return "constant";
+  if (kind === "mb") return MB_SYNC_KEY;
+  return "off";
+}
+
+function onKind(slot: number, kind: ModeKind) {
+  if (kindOf(modeOf(slot)) === kind) return;
+  const value = kindValue(kind, slot);
+  if (value) onMode(slot, value);
+}
+
+function onAllKind(kind: ModeKind) {
+  const value = kindValue(kind, 0);
+  if (value) onAllModes(value);
+}
 </script>
 
 <template>
   <div class="fan-group">
     <div class="head">
-      <button class="toggle" @click="expanded = !expanded">
-        <component :is="expanded ? ChevronDown : ChevronRight" :size="16" />
-        <span class="title">{{ title }}</span>
-        <span v-if="family" class="muted">{{ family }}</span>
-        <span class="muted">· {{ t(perFan ? "fans.groupCard.fanCount" : "fans.groupCard.portCount", { count: visibleSlots }) }}</span>
+      <button class="toggle" :aria-expanded="expanded" @click="expanded = !expanded">
+        <component :is="expanded ? ChevronDown : ChevronRight" :size="18" />
+        <span class="heading">
+          <span class="title">{{ title }}</span>
+          <span class="meta">
+            <template v-if="family">{{ family }} · </template>{{ t(perFan ? "fans.groupCard.fanCount" : "fans.groupCard.portCount", { count: visibleSlots }) }}
+          </span>
+        </span>
       </button>
       <div v-if="visibleSlots > 1" class="all">
-        <span class="muted">{{ t("fans.groupCard.all") }}</span>
-        <n-select
+        <span class="all-label">{{ t("fans.groupCard.all") }}</span>
+        <SegmentedControl
           size="small"
-          :value="commonMode"
-          :options="modeOptions"
-          :placeholder="t('fans.groupCard.mixed')"
-          @update:value="onAllModes"
+          :model-value="commonKind"
+          :options="kindOptions"
+          :label="t('fans.groupCard.allModesLabel', { device: title })"
+          @update:model-value="onAllKind"
         />
       </div>
     </div>
+
+    <p v-if="!mbAvailable" class="unavailable-note">
+      <Info :size="16" :stroke-width="2.2" aria-hidden="true" />
+      <span>{{ t("fans.groupCard.mbUnavailable") }}</span>
+    </p>
 
     <div v-if="expanded" class="slots">
       <div v-for="slot in visibleSlots" :key="slot - 1" class="slot">
-        <span class="slot-label">{{ t(perFan ? "fans.groupCard.fanSlot" : "fans.groupCard.portSlot", { index: slot }) }}</span>
-        <n-select
-          class="slot-mode"
-          size="small"
-          :value="modeOf(slot - 1)"
-          :options="modeOptions"
-          @update:value="(v: string) => onMode(slot - 1, v)"
-        />
-        <div class="slot-pwm">
-          <LabeledSlider
-            v-if="modeOf(slot - 1) === 'constant'"
-            :model-value="pwmOf(slot - 1)"
-            :min="0"
-            :max="255"
-            :step="1"
-            :format="(v: number) => `${Math.round((v / 255) * 100)}%`"
-            @update:model-value="(v: number) => setPwm(slot - 1, Math.round(v))"
-          />
+        <div class="slot-id">
+          <span class="slot-icon" :class="slotCurveFailing(slot - 1) ? 'kind-failing' : `kind-${kindOf(modeOf(slot - 1))}`"><Fan :size="20" /></span>
+          <span class="slot-text">
+            <span class="slot-label">{{ slotLabel(slot) }}</span>
+            <span class="mono rpm" :title="t('fans.groupCard.fanSpeedTooltip', { index: slot })">
+              {{ rpms[slot - 1] != null ? `${rpms[slot - 1]} rpm` : "—" }}
+            </span>
+          </span>
         </div>
-        <span class="rpm" :title="t('fans.groupCard.fanSpeedTooltip', { index: slot })">
-          <Fan :size="12" />
-          <span class="mono">{{ rpms[slot - 1] != null ? `${rpms[slot - 1]} rpm` : "—" }}</span>
-        </span>
+        <SegmentedControl
+          :model-value="kindOf(modeOf(slot - 1))"
+          :options="kindOptions"
+          :label="t('fans.groupCard.speedModeLabel', { slot: slotLabel(slot) })"
+          @update:model-value="(kind) => onKind(slot - 1, kind)"
+        />
+        <div class="slot-detail">
+          <div v-if="modeOf(slot - 1) === 'constant'" class="fixed">
+            <n-slider
+              :value="pwmOf(slot - 1)"
+              :min="0"
+              :max="255"
+              :step="1"
+              :format-tooltip="(v: number) => `${Math.round((v / 255) * 100)}%`"
+              :theme-overrides="fixedSliderTheme"
+              :aria-label="t('fans.groupCard.fixedSpeedLabel', { slot: slotLabel(slot) })"
+              @update:value="(v: number) => setPwm(slot - 1, Math.round(v))"
+            />
+            <NumberField
+              class="fixed-field"
+              :model-value="pctOf(slot - 1)"
+              :label="t('fans.groupCard.fixedSpeedLabel', { slot: slotLabel(slot) })"
+              unit="%"
+              @update:model-value="(v) => setPct(slot - 1, v)"
+            />
+          </div>
+          <div v-else-if="kindOf(modeOf(slot - 1)) === 'curve'" class="curve-chips">
+            <button
+              v-for="name in curveNames"
+              :key="name"
+              type="button"
+              class="chip"
+              :class="{ selected: modeOf(slot - 1) === `curve:${name}` }"
+              :aria-pressed="modeOf(slot - 1) === `curve:${name}`"
+              :title="failingCurves.has(name) ? t('fans.sensorLost.chipTitle') : undefined"
+              @click="onMode(slot - 1, `curve:${name}`)"
+            >
+              <span v-if="failingCurves.has(name)" class="warn-dot" aria-hidden="true" />
+              {{ name }}
+            </button>
+            <span v-if="slotCurveFailing(slot - 1)" class="failing-text">{{ t("fans.sensorLost.slot") }}</span>
+          </div>
+          <span v-else-if="modeOf(slot - 1) === MB_SYNC_KEY" class="detail-text">
+            {{ device.mb_sync_support ? t("fans.groupCard.mbFollowing") : t("fans.groupCard.mbFollowingSource") }}
+          </span>
+          <span v-else class="detail-text">{{ t("fans.groupCard.deviceControlled") }}</span>
+        </div>
       </div>
+      <p v-if="groupIsMbSync() && visibleSlots > 1" class="port-wide">{{ t("fans.groupCard.mbPortWide") }}</p>
     </div>
 
     <div v-if="groupIsMbSync() && !device.mb_sync_support" class="pwm-source-row">
-      <label class="muted">{{ t("fans.groupCard.pwmSource") }}</label>
+      <label class="pwm-label">{{ t("fans.groupCard.pwmSource") }}</label>
       <n-select
         size="small"
         :value="currentPwmSource"
@@ -218,92 +326,234 @@ function setPwm(slot: number, v: number) {
 .fan-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2) 0;
-}
-.fan-group + .fan-group {
-  border-top: 1px solid var(--border);
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-3);
+  border-radius: 24px;
+  border: 1px solid var(--md-outline-variant);
 }
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
 }
 .toggle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  padding: 0;
+  padding: var(--space-1);
   border: none;
+  border-radius: var(--radius-md);
   background: none;
-  color: var(--text-primary);
+  color: var(--md-on-surface);
   font: inherit;
+  text-align: left;
   cursor: pointer;
 }
+.toggle:focus-visible {
+  outline: 2px solid var(--md-primary);
+}
+.heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .title {
+  font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.muted {
+.meta {
   font-size: var(--font-size-sm);
-  white-space: nowrap;
+  color: var(--md-on-surface-variant);
 }
 .all {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  width: 240px;
-  flex-shrink: 0;
+}
+.all-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
 }
 .slots {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding-left: 24px;
+  gap: var(--space-2);
 }
 .slot {
-  display: grid;
-  grid-template-columns: 56px 200px minmax(0, 1fr) 90px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) 18px;
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
+  border-radius: 20px;
+  background: var(--md-surface-container-high);
+}
+.slot-id {
+  display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-height: 32px;
+  min-width: 150px;
+}
+.slot-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: var(--md-surface-container-highest);
+  color: var(--md-on-surface-variant);
+}
+.slot-icon.kind-curve {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+.slot-icon.kind-fixed {
+  background: var(--md-tertiary-container);
+  color: var(--md-on-tertiary-container);
+}
+.slot-icon.kind-mb {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+.slot-icon.kind-failing {
+  background: color-mix(in srgb, var(--warning) 18%, var(--md-surface-container-high));
+  color: var(--warning);
+}
+.unavailable-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 14px;
+  background: var(--md-surface-container-high);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--md-on-surface-variant);
+}
+.unavailable-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--md-primary);
+}
+.slot-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .slot-label {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
 }
 .rpm {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
   font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  color: var(--md-on-surface-variant);
 }
 .mono {
   font-family: var(--font-mono);
-  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.slot-detail {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.fixed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.fixed .n-slider {
+  flex: 1;
+  min-width: 80px;
+}
+.fixed-field {
+  flex: 0 0 96px;
+}
+.curve-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  height: 30px;
+  max-width: 200px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.chip:hover:not(.selected) {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  color: var(--md-on-surface);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.warn-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.failing-text {
+  align-self: center;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--warning);
+}
+.chip.selected {
+  border-color: var(--md-primary-container);
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+.chip:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 1px;
+}
+.detail-text {
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+}
+.port-wide {
+  margin: 0;
+  padding-left: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--md-on-surface-variant);
 }
 .pwm-source-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  padding-left: 24px;
+  gap: var(--space-2) var(--space-3);
+  padding-left: var(--space-1);
+}
+.pwm-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
 }
 .pwm-source-row .n-select {
   width: 260px;
-}
-@media (max-width: 720px) {
-  .slot {
-    grid-template-columns: 56px minmax(0, 1fr) 80px;
-  }
-  .slot-pwm {
-    grid-column: 2 / -1;
-  }
 }
 </style>

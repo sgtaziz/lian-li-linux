@@ -288,8 +288,8 @@ function patchEffect(patch: Partial<RgbEffect>) {
 .sync-description { font-size: var(--font-size-xs); color: var(--text-secondary); }
 .hint { margin: 0; }
 .sync-options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-.devices { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
-.sync-device { min-height: 42px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); }
+.devices { display: flex; flex-direction: column; gap: var(--space-1); border-radius: 22px; background: var(--md-surface-container); padding: var(--space-2); overflow: hidden; }
+.sync-device { min-height: 42px; padding: var(--space-2) var(--space-3); border-radius: 14px; }
 .sync-device:last-child { border-bottom: 0; }
 .unavailable, .led-count { margin-left: auto; font-size: var(--font-size-sm); }
 .order-buttons { display: flex; margin-left: var(--space-1); }

@@ -15,6 +15,8 @@ pub mod lancool217;
 pub mod lancool_v150;
 pub mod p28;
 pub mod parameters;
+pub mod preview;
+pub mod regions;
 #[cfg(test)]
 mod screen_palette_tests;
 pub mod sl_inf;

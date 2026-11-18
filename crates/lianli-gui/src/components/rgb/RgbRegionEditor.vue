@@ -214,7 +214,7 @@ function flipGroup(flip: boolean) {
 
 <style scoped>
 .regional, .region-body { display: flex; flex-direction: column; gap: var(--space-3); }
-.card-inset { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.card-inset { padding: 18px 20px 20px; border-radius: 22px; background: var(--md-surface-container); }
 .migration { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .region-tabs, .row, .color-list { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .row { justify-content: space-between; }

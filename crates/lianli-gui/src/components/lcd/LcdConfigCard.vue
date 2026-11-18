@@ -511,8 +511,8 @@ async function duplicateTemplate() {
   config.templates.push(copy);
   props.entry.template_id = newId;
   await lcd.setTemplates(config.templates);
-  await config.load();
   config.markDirty();
+  await config.load({ keepDraft: true });
   renderPreview();
 }
 
@@ -531,8 +531,8 @@ async function deleteTemplate() {
         if (e.template_id === id) e.template_id = null;
       }
       await lcd.setTemplates(config.templates);
-      await config.load();
       config.markDirty();
+      await config.load({ keepDraft: true });
       renderPreview();
     },
   });
@@ -740,6 +740,8 @@ async function handleStopClean() {
           />
         </div>
       </n-alert>
+    <section class="panel">
+      <h3 class="panel-title">{{ t("lcd.configCard.screenSection") }}</h3>
       <div class="grid">
       <div class="field">
         <label class="muted">{{ t("lcd.configCard.mediaType") }}</label>
@@ -777,9 +779,10 @@ async function handleStopClean() {
     <p v-if="selectedDeviceId && !brightnessConfigured" class="hint">
       {{ t("lcd.configCard.saveForBrightness") }}
     </p>
+    </section>
 
-    <div class="divider" />
-
+    <section class="panel">
+    <h3 class="panel-title">{{ t("lcd.configCard.contentSection") }}</h3>
     <div v-if="entry.type !== 'custom'" class="media-layout" :class="{ 'with-preview': showPreview }">
       <div class="media-settings">
         <div v-if="isFileMedia" class="field">
@@ -927,6 +930,7 @@ async function handleStopClean() {
         </div>
       </div>
     </template>
+    </section>
 
     <div v-if="supportsCCommand" class="checkboxes">
       <n-checkbox :checked="entry.aio_512_frame ?? aio512Default" @update:checked="(v) => { entry.aio_512_frame = v; config.markDirty(); }">{{ t("lcd.configCard.hidFrame512") }}</n-checkbox>
@@ -940,13 +944,38 @@ async function handleStopClean() {
 .lcd-config {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-4);
 }
 .head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 18px 20px 20px;
+  border-radius: 22px;
+  background: var(--md-surface-container);
+}
+.panel-title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--md-on-surface-variant);
+}
+.field > label.muted,
+.template-section > label.muted {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
 }
 .assign-alert .field label {
   font-size: var(--font-size-sm);
@@ -958,7 +987,12 @@ async function handleStopClean() {
 }
 .unsaved {
   margin-right: var(--space-1);
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  font-family: var(--font-sans);
   font-size: var(--font-size-xs);
+  font-weight: 600;
   color: var(--warning);
 }
 .cleaner-btn {
@@ -966,7 +1000,7 @@ async function handleStopClean() {
   transition: filter 0.2s ease, transform 0.15s ease;
 }
 .cleaner-btn:hover:not(:disabled) {
-  filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.55));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--warning) 55%, transparent));
 }
 .cleaner-btn-running {
   color: var(--warning);
@@ -975,11 +1009,11 @@ async function handleStopClean() {
 @keyframes pulse-glow {
   0%,
   100% {
-    filter: drop-shadow(0 0 2px rgba(251, 191, 36, 0.4));
+    filter: drop-shadow(0 0 2px color-mix(in srgb, var(--warning) 40%, transparent));
     opacity: 0.85;
   }
   50% {
-    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.85));
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--warning) 85%, transparent));
     opacity: 1;
   }
 }
@@ -987,21 +1021,19 @@ async function handleStopClean() {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  font-size: var(--font-size-xs);
-  color: var(--accent);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 16px;
+  background: var(--md-tertiary-container);
+  font-size: var(--font-size-sm);
+  color: var(--md-on-tertiary-container);
 }
 .cleaner-notice-icon {
   flex-shrink: 0;
-  color: var(--accent);
 }
 .card-content {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   transition: opacity 0.2s ease;
 }
 .card-body-locked {
@@ -1024,17 +1056,14 @@ async function handleStopClean() {
   flex: 1;
   min-width: 180px;
 }
-.divider {
-  border-top: 1px solid var(--border);
-}
 .media-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
+  gap: var(--space-6);
   align-items: start;
 }
 .media-layout.with-preview {
-  grid-template-columns: minmax(0, 1fr) 200px;
+  grid-template-columns: minmax(0, 1fr) 240px;
 }
 .media-settings {
   display: flex;
@@ -1091,8 +1120,8 @@ async function handleStopClean() {
   justify-content: center;
   overflow: hidden;
   background: #000;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 20px;
+  box-shadow: 0 0 0 6px var(--md-surface-container-highest), 0 12px 28px -12px rgba(0, 0, 0, 0.6);
 }
 .preview-frame img,
 .preview-frame video,
@@ -1106,18 +1135,19 @@ async function handleStopClean() {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 .preview-caption {
   font-size: var(--font-size-xs);
-  color: var(--text-muted);
+  color: var(--md-on-surface-variant);
 }
 .preview-play {
   display: inline-flex;
-  padding: 2px;
+  padding: 6px;
   border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-muted);
+  border-radius: 50%;
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
   cursor: pointer;
 }
 .preview-play:hover {
@@ -1135,7 +1165,7 @@ async function handleStopClean() {
   .media-preview {
     position: static;
     order: -1;
-    width: 200px;
+    width: 220px;
     justify-self: center;
   }
 }
@@ -1160,12 +1190,12 @@ async function handleStopClean() {
   gap: var(--space-3);
 }
 .template-preview {
-  width: 96px;
-  height: 96px;
+  width: 120px;
+  height: 120px;
   flex-shrink: 0;
-  background: #14171f;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  background: #000;
+  border-radius: 18px;
+  box-shadow: 0 0 0 4px var(--md-surface-container-highest);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -1199,10 +1229,10 @@ async function handleStopClean() {
 }
 /* Delete: red hover (Naive UI reads these vars for the hover state). */
 .template-buttons :deep(.btn-danger) {
-  --n-color-hover: rgba(248, 113, 113, 0.14) !important;
+  --n-color-hover: color-mix(in srgb, var(--danger) 14%, transparent) !important;
   --n-border-hover: 1px solid var(--danger) !important;
   --n-text-color-hover: var(--danger) !important;
-  --n-color-pressed: rgba(248, 113, 113, 0.22) !important;
+  --n-color-pressed: color-mix(in srgb, var(--danger) 22%, transparent) !important;
   --n-border-pressed: 1px solid var(--danger) !important;
   --n-text-color-pressed: var(--danger) !important;
 }

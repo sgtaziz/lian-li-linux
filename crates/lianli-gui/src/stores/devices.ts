@@ -1,11 +1,12 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
-import type { DeviceInfo, TelemetrySnapshot } from "@/types";
+import { computed, ref, shallowRef } from "vue";
+import type { CurveTemperature, DeviceInfo, TelemetrySnapshot } from "@/types";
 import { DONGLE_FAMILIES } from "@/constants";
 import { usePendingAction } from "@/composables/usePendingAction";
 import { DISPLAY_SWITCH_TIMEOUT_MS, displaySwitchComplete } from "@/utils/displaySwitch";
 import { deviceLabels } from "@/utils/deviceNames";
 import { tr } from "@/i18n";
+import { recordHistory, type DeviceHistory } from "@/utils/telemetryHistory";
 
 export type DisplaySwitchError = { message: string } | { timedOutDevice: string };
 
@@ -192,16 +193,46 @@ export const useDevicesStore = defineStore("devices", () => {
     return telemetry.value.fan_rpms[deviceId] ?? [];
   }
 
+  // Pump RPM rides in the slot after the fans on devices with a pump.
+  function fanSlotRpms(device: DeviceInfo, rpms: number[]): number[] {
+    return device.has_pump && device.fan_count != null ? rpms.slice(0, device.fan_count) : rpms;
+  }
+
   function coolantTemp(deviceId: string): number | null {
     return telemetry.value.coolant_temps[deviceId] ?? null;
   }
 
-  function applyPoll(devices: DeviceInfo[], snap: TelemetrySnapshot) {
+  function curveTemperature(curveName: string): CurveTemperature | null {
+    const readings = telemetry.value.curve_temperatures;
+    return readings && Object.prototype.hasOwnProperty.call(readings, curveName) ? readings[curveName] : null;
+  }
+
+  // Returning the previous array when nothing changed keeps every poll from re-rendering
+  // the warning banner, sidebar icon and tray status.
+  const failingCurves = computed<string[]>((previous) => {
+    const next = Object.entries(telemetry.value.curve_temperatures ?? {})
+      .filter(([, reading]) => reading.full_speed_fallback)
+      .map(([name]) => name)
+      .sort();
+    return previous && previous.length === next.length && previous.every((name, i) => name === next[i]) ? previous : next;
+  });
+
+  const history = shallowRef<Record<string, DeviceHistory>>({});
+
+  function applyPoll(devices: DeviceInfo[], snap: TelemetrySnapshot, daemonChanged = false) {
     for (const [id, source] of Object.entries(displaySwitches.value)) {
       if (displaySwitchComplete(source, devices)) finishDisplaySwitch(id);
     }
     list.value = devices;
     telemetry.value = snap;
+    const cooling = devices.filter((d) => d.has_fan || d.has_pump);
+    history.value = recordHistory(
+      daemonChanged ? {} : history.value,
+      cooling.map((d) => d.device_id),
+      Object.fromEntries(cooling.map((d) => [d.device_id, fanSlotRpms(d, snap.fan_rpms[d.device_id] ?? [])])),
+      snap.coolant_temps,
+      performance.now(),
+    );
     pending.expire(devices.map((d) => d.device_id));
   }
 
@@ -221,7 +252,11 @@ export const useDevicesStore = defineStore("devices", () => {
     displaySwitchErrors,
     byId,
     fanRpms,
+    fanSlotRpms,
     coolantTemp,
+    curveTemperature,
+    failingCurves,
+    history,
     applyPoll,
   };
 });

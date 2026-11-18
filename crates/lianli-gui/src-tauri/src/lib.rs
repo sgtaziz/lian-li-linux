@@ -1,6 +1,8 @@
 //! Tauri command handlers + multi-window setup for the Lian Li Linux GUI.
 
 mod command_error;
+mod curve_files;
+mod desktop_appearance;
 mod diagnostic_export;
 mod external_link;
 mod installation;
@@ -10,6 +12,7 @@ mod media_preview;
 mod service_operations;
 mod session_worker;
 mod startup_image_input;
+mod tray;
 
 use command_error::CommandError;
 use ipc::PollResult;
@@ -342,6 +345,29 @@ pub(crate) fn ui_text(translated: Option<String>, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
+pub(crate) fn main_window(app: &tauri::AppHandle) -> Option<WebviewWindow> {
+    if let Some(window) = app.get_webview_window("main") {
+        return Some(window);
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")?
+        .clone();
+    match WebviewWindowBuilder::from_config(app, &config).and_then(|builder| builder.build()) {
+        Ok(window) => {
+            apply_platform_decorations(&window);
+            Some(window)
+        }
+        Err(error) => {
+            tracing::warn!("Cannot reopen the main window: {error}");
+            None
+        }
+    }
+}
+
 fn open_secondary_window(
     app: &tauri::AppHandle,
     label: &str,
@@ -384,6 +410,9 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
@@ -409,6 +438,13 @@ pub fn run() {
             service_change,
             container_setup_proposal,
             container_setup,
+            desktop_appearance::desktop_appearance,
+            tray::tray_available,
+            tray::set_tray_status,
+            tray::quit_app,
+            tray::set_editor_draft,
+            curve_files::export_fan_curves,
+            curve_files::import_fan_curves,
         ])
         .setup(|app| {
             tauri::async_runtime::spawn_blocking(|| {
@@ -417,12 +453,24 @@ pub fn run() {
                 }
             });
             session_worker::start();
+            desktop_appearance::watch(app.handle().clone());
+            tray::init(app.handle());
             if let Some(win) = app.get_webview_window("main") {
                 apply_platform_decorations(&win);
                 #[cfg(debug_assertions)]
                 win.open_devtools();
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if !matches!(event, tauri::WindowEvent::Destroyed) {
+                return;
+            }
+            match window.label() {
+                "main" => tray::hide(window.app_handle()),
+                "editor" => tray::clear_editor_draft(window.app_handle()),
+                _ => {}
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

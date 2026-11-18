@@ -12,6 +12,8 @@ import { useDaemonStore } from "@/stores/daemon";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { useIpc } from "@/composables/useIpc";
 import EditableName from "@/components/common/EditableName.vue";
+import HistorySparkline from "./HistorySparkline.vue";
+import { averageSpinningRpm } from "@/utils/telemetryHistory";
 import { fanQuantityKey, fanQuantityPort, stageFanQuantity } from "@/utils/fanQuantity";
 import {
   FAMILY_DISPLAY,
@@ -55,6 +57,9 @@ const coolant = computed(() => devices.coolantTemp(d.value.device_id));
 const fanRpmText = computed(() =>
   fanRpms.value.length ? fanRpms.value.join(", ") : "",
 );
+const rpmHistory = computed(() => devices.history[d.value.device_id]?.rpm ?? []);
+const currentRpm = computed(() => averageSpinningRpm(devices.fanSlotRpms(d.value, fanRpms.value)));
+const coolantHistory = computed(() => devices.history[d.value.device_id]?.coolant ?? []);
 const coolantText = computed(() =>
   coolant.value !== null ? `${coolant.value.toFixed(1)}\u00B0C` : "",
 );
@@ -275,6 +280,12 @@ async function ping() {
       </span>
     </div>
 
+    <div v-if="rpmHistory.length || coolantHistory.length" class="histories">
+      <span class="histories-title">{{ t("devices.history.window") }}</span>
+      <HistorySparkline v-if="rpmHistory.length" :samples="rpmHistory" :current="currentRpm" :label="t('devices.history.fanSpeed')" unit=" rpm" :digits="0" tone="rpm" />
+      <HistorySparkline v-if="coolantHistory.length" :samples="coolantHistory" :current="coolant" :label="t('devices.history.coolant')" unit=" °C" :digits="1" tone="coolant" />
+    </div>
+
     <div class="actions">
       <label v-if="supportsFanQuantity" class="qty">
         <span class="muted">{{ t("devices.card.fanQuantity") }}</span>
@@ -326,24 +337,65 @@ async function ping() {
 
 <style scoped>
 .device-row {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: subgrid;
-  align-items: center;
-  padding: var(--space-2) 0;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon identity status"
+    "icon readings actions"
+    "history history history";
+  align-items: start;
+  gap: var(--space-2) var(--space-4);
+  padding: 20px;
+  border-radius: 28px;
+  border: 1px solid var(--md-outline-variant);
+  background: var(--md-surface-container-low);
+  transition: border-color 0.2s, background 0.2s;
 }
-.device-row + .device-row {
-  border-top: 1px solid var(--border);
+.device-row:hover {
+  border-color: var(--md-outline);
 }
 .icon-box {
+  grid-area: icon;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+.identity {
+  grid-area: identity;
+  align-self: center;
+}
+.status {
+  grid-area: status;
+  align-self: center;
+}
+.readings {
+  grid-area: readings;
+}
+.actions {
+  grid-area: actions;
+}
+.histories {
+  grid-area: history;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.histories-title {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--md-on-surface-variant);
+}
+.actions:empty {
+  display: none;
 }
 .identity {
   min-width: 0;
@@ -358,10 +410,15 @@ async function ping() {
   gap: 4px;
   flex-shrink: 0;
 }
-.cap-lcd { color: var(--purple); }
-.cap-fan { color: var(--accent); }
-.cap-pump { color: var(--teal); }
-.cap-rgb { color: var(--pink); }
+.caps svg {
+  box-sizing: content-box;
+  padding: 3px;
+  border-radius: 6px;
+}
+.cap-lcd { color: var(--md-on-secondary-container); background: var(--md-secondary-container); }
+.cap-fan { color: var(--md-on-primary-container); background: var(--md-primary-container); }
+.cap-pump { color: var(--md-on-tertiary-container); background: var(--md-tertiary-container); }
+.cap-rgb { color: var(--md-on-surface); background: var(--md-surface-container-highest); }
 .subtitle {
   margin: 0;
   font-size: var(--font-size-xs);
@@ -401,10 +458,15 @@ async function ping() {
 .readings {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
+  gap: var(--space-1) var(--space-4);
   min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--md-outline-variant);
   font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  color: var(--md-on-surface-variant);
+}
+.readings:empty {
+  display: none;
 }
 .reading {
   display: inline-flex;
@@ -431,6 +493,7 @@ async function ping() {
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
+  padding-top: var(--space-2);
 }
 .qty {
   display: inline-flex;
@@ -462,18 +525,5 @@ async function ping() {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-@container (max-width: 760px) {
-  .device-row {
-    grid-template-columns: 36px minmax(0, 1fr) auto;
-    gap: var(--space-3);
-  }
-  .readings {
-    grid-column: 2 / -1;
-  }
-  .actions {
-    grid-column: 2 / -1;
-    justify-content: flex-start;
-  }
 }
 </style>

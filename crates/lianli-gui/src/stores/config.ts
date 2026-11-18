@@ -4,6 +4,7 @@ import { LCD_TEMPLATES_CHANGED_EVENT } from "@/stores/lcd";
 import { computed, reactive, ref } from "vue";
 import { useIpc } from "@/composables/useIpc";
 import { tr } from "@/i18n";
+import { router } from "@/router";
 import { isSpeedModeKey } from "@/components/fans/speedMode";
 import type {
   AppConfig,
@@ -52,6 +53,7 @@ export const useConfigStore = defineStore("config", () => {
   const config = reactive<AppConfig>(defaultConfig());
   const savedLcds = ref<LcdConfig[]>([]);
   const dirty = ref(false);
+  const dirtyPages = ref<string[]>([]);
   const loaded = ref(false);
 
   const rgbCaps = ref<RgbDeviceCapabilities[]>([]);
@@ -60,9 +62,15 @@ export const useConfigStore = defineStore("config", () => {
   const imported = ref<{ instance: string; originals: LcdTemplate[]; copies: LcdTemplate[] } | null>(null);
   const presets = ref<RgbPreset[]>([]);
   const pwmHeaders = ref<PwmHeader[]>([]);
+  let editRevision = 0;
 
   function markDirty() {
+    editRevision++;
     dirty.value = true;
+    const page = router.currentRoute.value.name;
+    if (typeof page === "string" && !dirtyPages.value.includes(page)) {
+      dirtyPages.value = [...dirtyPages.value, page];
+    }
   }
 
   /** Replace the entire config object (used after a daemon reload). */
@@ -70,11 +78,21 @@ export const useConfigStore = defineStore("config", () => {
     savedLcds.value = structuredClone(next.lcds);
     Object.assign(config, defaultConfig(), next);
     dirty.value = false;
+    dirtyPages.value = [];
     loaded.value = true;
     imported.value = null;
   }
 
-  async function load() {
+  function adoptRgbDevice(saved: AppConfig, deviceId: string) {
+    const fresh = saved.rgb?.devices.find((d) => d.device_id === deviceId);
+    const rgb = ensureRgb();
+    const index = rgb.devices.findIndex((d) => d.device_id === deviceId);
+    if (fresh && index >= 0) rgb.devices[index] = structuredClone(fresh);
+    else if (fresh) rgb.devices.push(structuredClone(fresh));
+    else if (index >= 0) rgb.devices.splice(index, 1);
+  }
+
+  async function load(options: { keepDraft?: boolean; rgbDevice?: string } = {}) {
     const [cfg, caps, sens, tpls, pres, pwm] = await Promise.all([
       ipc.request<AppConfig | null>("GetConfig").catch(() => null),
       ipc.request<RgbDeviceCapabilities[]>("GetRgbCapabilities").catch(() => []),
@@ -83,7 +101,8 @@ export const useConfigStore = defineStore("config", () => {
       ipc.request<RgbPreset[]>("ListRgbPresets").catch(() => []),
       ipc.request<PwmHeader[]>("ListPwmHeaders").catch(() => []),
     ]);
-    if (cfg) replace(cfg);
+    if (cfg && !(options.keepDraft && dirty.value)) replace(cfg);
+    else if (cfg && options.rgbDevice) adoptRgbDevice(cfg, options.rgbDevice);
     rgbCaps.value = caps ?? [];
     sensors.value = sens ?? [];
     templates.value = tpls ?? [];
@@ -99,7 +118,8 @@ export const useConfigStore = defineStore("config", () => {
     templates.value = [...current.filter((item) => !ids.has(item.id)), ...JSON.parse(JSON.stringify(copies))];
   }
 
-  async function save() {
+  /** Resolves true when the draft is clean afterwards; false when edits arrived while saving. */
+  async function save(): Promise<boolean> {
     // Flush any pending debounced effect requests first.
     await Promise.all([...flushRegistry].map((fn) => fn()));
     const staged = imported.value;
@@ -114,14 +134,22 @@ export const useConfigStore = defineStore("config", () => {
       staged.originals = JSON.parse(JSON.stringify(staged.copies));
       await emit(LCD_TEMPLATES_CHANGED_EVENT);
     }
+    const sentRevision = editRevision;
+    const payload: AppConfig = JSON.parse(JSON.stringify(config));
     try {
-      await ipc.request("SetConfig", { config }, staged?.instance);
+      await ipc.request("SetConfig", { config: payload }, staged?.instance);
     } catch (error) {
       if (staged?.copies.length) throw new Error(tr("shell.config.lcdNotConfirmed", { error: String(error) }));
       throw error;
     }
+    if (sentRevision !== editRevision) {
+      savedLcds.value = payload.lcds;
+      return false;
+    }
     dirty.value = false;
-    await load();
+    dirtyPages.value = [];
+    await load({ keepDraft: true });
+    return !dirty.value;
   }
 
   function stageImportedMedia(lcds: LcdConfig[], copies: LcdTemplate[], instance: string) {
@@ -246,6 +274,7 @@ export const useConfigStore = defineStore("config", () => {
     config,
     savedLcds,
     dirty,
+    dirtyPages,
     loaded,
     rgbCaps,
     sensors,
