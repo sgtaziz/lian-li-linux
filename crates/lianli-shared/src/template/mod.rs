@@ -60,6 +60,11 @@ pub enum TemplateBackground {
     Image {
         path: PathBuf,
     },
+    Video {
+        path: PathBuf,
+        #[serde(default)]
+        fps: Option<f32>,
+    },
 }
 
 impl Default for TemplateBackground {
@@ -325,6 +330,17 @@ mod tests {
         assert!(matches!(
             widget(&template, "gpu_usage").bound_sensor_source(),
             Some(SensorSourceConfig::NvidiaGpu { .. })
+        ));
+    }
+
+    #[test]
+    fn video_background_defaults_to_the_template_frame_rate() {
+        let background: TemplateBackground =
+            serde_json::from_value(serde_json::json!({"type": "video", "path": "loop.mp4"}))
+                .unwrap();
+        assert!(matches!(
+            background,
+            TemplateBackground::Video { path, fps: None } if path == std::path::Path::new("loop.mp4")
         ));
     }
 }

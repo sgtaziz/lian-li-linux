@@ -147,7 +147,12 @@ fn template_dependencies_for(template: &LcdTemplate, lcd: Option<&str>) -> Vec<A
         None => (english, UiMessage::new(key)),
     };
     let mut dependencies = Vec::new();
-    if let TemplateBackground::Image { path } = &template.background {
+    let background = match &template.background {
+        TemplateBackground::Image { path } => Some((path, AssetKind::Image)),
+        TemplateBackground::Video { path, .. } => Some((path, AssetKind::Video)),
+        TemplateBackground::Color { .. } => None,
+    };
+    if let Some((path, kind)) = background {
         let (owner, owner_ui) = owned(
             format!("Template '{}' background", template.id),
             "status.mediaAccess.templateBackground",
@@ -157,7 +162,7 @@ fn template_dependencies_for(template: &LcdTemplate, lcd: Option<&str>) -> Vec<A
             path: path.clone(),
             owner,
             owner_ui: Some(owner_ui.param("template", &template.id)),
-            kind: AssetKind::Image,
+            kind,
         });
     }
     for widget in &template.widgets {
@@ -277,8 +282,9 @@ pub fn lcd_dependencies(
 }
 
 pub fn map_template_paths(template: &mut LcdTemplate, mut map: impl FnMut(&mut PathBuf)) {
-    if let TemplateBackground::Image { path } = &mut template.background {
-        map(path);
+    match &mut template.background {
+        TemplateBackground::Image { path } | TemplateBackground::Video { path, .. } => map(path),
+        TemplateBackground::Color { .. } => {}
     }
     for widget in &mut template.widgets {
         if let Some(path) = widget.kind.asset_path_mut() {
@@ -317,6 +323,25 @@ mod tests {
             assert_eq!(new.path, PathBuf::from("/managed").join(&old.path));
             assert_eq!(new.owner, old.owner);
         }
+    }
+
+    #[test]
+    fn video_background_is_a_video_dependency_and_is_rewritten() {
+        let mut template: LcdTemplate = serde_json::from_value(serde_json::json!({
+            "id": "custom", "name": "Custom", "base_width": 400, "base_height": 400,
+            "background": {"type": "video", "path": "background.mp4", "fps": 24},
+            "widgets": []
+        }))
+        .unwrap();
+        let dependencies = template_dependencies(&template);
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies[0].kind, AssetKind::Video);
+        assert!(dependencies[0].owner.contains("background"));
+        map_template_paths(&mut template, |path| {
+            *path = PathBuf::from("/managed").join(&*path)
+        });
+        let rewritten = template_dependencies(&template);
+        assert_eq!(rewritten[0].path, PathBuf::from("/managed/background.mp4"));
     }
 
     #[test]

@@ -587,7 +587,8 @@ export interface Widget {
 
 export type TemplateBackground =
   | { type: "color"; rgb: RGBA }
-  | { type: "image"; path: string };
+  | { type: "image"; path: string }
+  | { type: "video"; path: string; fps?: number | null };
 
 export interface LcdTemplate {
   id: string;

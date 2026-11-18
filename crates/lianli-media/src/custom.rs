@@ -26,7 +26,7 @@ use lianli_shared::fonts::default_font_path;
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::{read_sensor_value, SensorInfo};
 use lianli_shared::systeminfo::SysSensor;
-use lianli_shared::template::{LcdTemplate, TemplateBackground, WidgetKind};
+use lianli_shared::template::{ImageFit, LcdTemplate, TemplateBackground, WidgetKind};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -57,6 +57,7 @@ pub struct CustomAsset {
     sensors: Vec<SensorInfo>,
     widget_states: Mutex<Vec<WidgetState>>,
     template_image: RgbaImage,
+    background_video: Mutex<Option<crate::video::widget_stream::VideoStream>>,
     scratch: Mutex<RgbaImage>,
     screen: ScreenInfo,
     orientation: f32,
@@ -162,7 +163,7 @@ impl CustomAsset {
 
         let letterbox_rgb = match template.background {
             TemplateBackground::Color { rgb } => [rgb[0], rgb[1], rgb[2]],
-            TemplateBackground::Image { .. } => [0, 0, 0],
+            TemplateBackground::Image { .. } | TemplateBackground::Video { .. } => [0, 0, 0],
         };
         let mut composite = RgbaImage::from_pixel(
             canvas_w,
@@ -170,6 +171,7 @@ impl CustomAsset {
             Rgba([letterbox_rgb[0], letterbox_rgb[1], letterbox_rgb[2], 255]),
         );
 
+        let mut background_video = None;
         match &template.background {
             TemplateBackground::Color { rgb } => {
                 let fill = Rgba(*rgb);
@@ -191,6 +193,32 @@ impl CustomAsset {
                     )))
                 }
             },
+            TemplateBackground::Video {
+                path,
+                fps: background_fps,
+            } => {
+                let requested = background_fps.unwrap_or(30.0).min(fps).clamp(1.0, 60.0);
+                let decode_fps =
+                    crate::video::ffmpeg::cap_fps_cancellable(path, requested, &control)?;
+                background_video = Some(
+                    crate::video::widget_stream::VideoStream::new(
+                        path,
+                        decode_fps,
+                        (scaled_w, scaled_h),
+                        ImageFit::Stretch,
+                        true,
+                        &control,
+                    )
+                    .map_err(|error| match error {
+                        MediaError::Cancelled => error,
+                        error => MediaError::InvalidConfig(format!(
+                            "Template '{}' background video '{}': {error}",
+                            template.id,
+                            path.display()
+                        )),
+                    })?,
+                );
+            }
         }
 
         let mut widget_states: Vec<WidgetState> = Vec::with_capacity(template.widgets.len());
@@ -289,6 +317,7 @@ impl CustomAsset {
             sensors: all_sensors.to_vec(),
             widget_states: Mutex::new(widget_states),
             template_image: composite,
+            background_video: Mutex::new(background_video),
             scratch: Mutex::new(scratch),
             screen: *screen,
             orientation,
@@ -342,7 +371,9 @@ impl CustomAsset {
     pub fn blank_frame(&self) -> FrameInfo {
         let fill = match self.template.background {
             TemplateBackground::Color { rgb } => Rgba([rgb[0], rgb[1], rgb[2], 255]),
-            TemplateBackground::Image { .. } => Rgba([0, 0, 0, 255]),
+            TemplateBackground::Image { .. } | TemplateBackground::Video { .. } => {
+                Rgba([0, 0, 0, 255])
+            }
         };
         let image = RgbaImage::from_pixel(self.canonical_width, self.canonical_height, fill);
         FrameInfo {
@@ -504,6 +535,18 @@ impl CustomAsset {
             }
         }
 
+        let mut background_video = self.background_video.lock();
+        if let Some(stream) = background_video.as_mut() {
+            if stream.advance(now).map_err(|error| {
+                MediaError::Ffmpeg(format!(
+                    "Template '{}' background video: {error}",
+                    self.template.id
+                ))
+            })? {
+                any_dynamic_changed = true;
+            }
+        }
+
         if !any_dynamic_changed {
             return Ok(None);
         }
@@ -512,6 +555,15 @@ impl CustomAsset {
         scratch
             .as_mut()
             .copy_from_slice(self.template_image.as_raw());
+        if let Some(stream) = background_video.as_ref() {
+            fast_overlay(
+                &mut scratch,
+                stream.frame(),
+                self.offset_x as i64,
+                self.offset_y as i64,
+            );
+        }
+        drop(background_video);
         for (widget, state) in self.template.widgets.iter().zip(states.iter_mut()) {
             if !widget.visible {
                 continue;
@@ -565,6 +617,7 @@ mod tests {
             template,
             sensors: Vec::new(),
             template_image: RgbaImage::new(8, 8),
+            background_video: Mutex::new(None),
             scratch: Mutex::new(RgbaImage::new(8, 8)),
             screen: ScreenInfo::WIRELESS_LCD,
             orientation: 0.0,

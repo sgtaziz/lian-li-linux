@@ -9,6 +9,7 @@ export default {
     backgroundType: "Background type",
     backgroundColor: "Color",
     backgroundImage: "Image",
+    backgroundVideo: "Video",
     copyJson: "Copy JSON",
     jsonCopied: "Template JSON copied to clipboard",
     copyFailed: "Copy failed: {error}",
