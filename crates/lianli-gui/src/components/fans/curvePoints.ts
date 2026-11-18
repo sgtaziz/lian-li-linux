@@ -54,7 +54,9 @@ export function insertCurvePoint(points: CurvePoint[]): CurvePoint[] {
   if (!canInsertCurvePoint(points)) return points;
   const sorted = sortCurve(points);
   const range = curveAxisRange(sorted);
-  const bounds = [range.min, ...sorted.map(([temp]) => temp), range.max];
+  // A hand-edited config can hold points past the axis; only gaps on the chart count.
+  const visible = sorted.map(([temp]) => temp).filter((temp) => temp >= range.min && temp <= range.max);
+  const bounds = [range.min, ...visible, range.max];
   let gapStart = range.min;
   let gapWidth = -1;
   for (let i = 1; i < bounds.length; i++) {
