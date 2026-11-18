@@ -9,6 +9,7 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 use std::os::unix::fs::FileExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool};
 use wayland_client::{
     delegate_noop, event_created_child, Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
@@ -531,7 +532,12 @@ fn dispatch(
         }
         return Err(error.into());
     }
-    guard.read()?;
+    // The socket can wake for a partial event or for display-only events such as delete_id,
+    // which the library handles itself and reports as WouldBlock.
+    match guard.read() {
+        Err(WaylandError::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+        result => result?,
+    };
     queue.dispatch_pending(state)?;
     state.check_error()
 }
