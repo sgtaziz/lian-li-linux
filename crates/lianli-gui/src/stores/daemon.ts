@@ -74,16 +74,16 @@ export const useDaemonStore = defineStore("daemon", () => {
       openrgbPort.value = result.telemetry.openrgb_status.port;
       unresponsiveDongle.value = result.telemetry.unresponsive_dongle ?? null;
 
-      devices.applyPoll(result.devices, result.telemetry);
+      const daemonChanged = previousInstance !== info.value?.instance_id || previousSocket !== result.socket_path;
+      devices.applyPoll(result.devices, result.telemetry, daemonChanged);
       lcd.applyCleanerTelemetry(result.telemetry.pixel_clean_statuses);
 
       if (result.connected) {
         const visible = result.devices.filter(
           (d) => !DONGLE_FAMILIES.includes(d.family),
         ).length;
-        if (!wasConnected || previousInstance !== info.value?.instance_id ||
-            previousSocket !== result.socket_path || visible !== lastDeviceCount) {
-          await config.load();
+        if (!wasConnected || daemonChanged || visible !== lastDeviceCount) {
+          await config.load({ keepDraft: true });
         }
         lastDeviceCount = visible;
 
@@ -92,9 +92,13 @@ export const useDaemonStore = defineStore("daemon", () => {
             const sensors = await ipc.request<SensorInfo[]>("ListSensors");
             thermal.setTemps(findTemp(sensors, "cpu"), findTemp(sensors, "gpu"));
           } catch {
-            // sensor read failure — thermal status just stays stale
+            thermal.setTemps(null, null);
           }
+        } else {
+          thermal.setTemps(null, null);
         }
+      } else {
+        thermal.setTemps(null, null);
       }
       wasConnected = result.connected;
     } catch (e) {
@@ -105,6 +109,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       info.value = null;
       writeError.value = null;
       writeErrorUi.value = null;
+      thermal.setTemps(null, null);
       wasConnected = false;
       // eslint-disable-next-line no-console
       console.warn("poll failed", e);

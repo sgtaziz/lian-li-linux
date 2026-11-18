@@ -24,7 +24,7 @@ const theme = useThemeStore();
 
 const aio = computed<AioConfig>(() => config.aioConfigFor(props.device.device_id));
 const fanCount = computed(() => props.device.fan_count ?? 0);
-const hasPump = computed(() => props.device.has_pump ?? false);
+const pumpControl = computed(() => props.device.has_pump_control ?? props.device.has_pump ?? false);
 const hasFan = computed(() => props.device.has_fan ?? false);
 
 const pumpRpm = computed(() => {
@@ -226,7 +226,7 @@ const mac = computed(() =>
           :model-value="kindOf(pumpMode)"
           :options="pumpKindOptions"
           :label="t('fans.groupCard.speedModeLabel', { slot: t('devices.aio.statPump') })"
-          :disabled="!hasPump"
+          :disabled="!pumpControl"
           @update:model-value="onPumpKind"
         />
         <div class="slot-detail">
@@ -239,6 +239,7 @@ const mac = computed(() =>
               :format-tooltip="(v: number) => `${percentOf(v)}%`"
               :theme-overrides="fixedSliderTheme"
               :aria-label="t('fans.groupCard.fixedSpeedLabel', { slot: t('devices.aio.statPump') })"
+              :disabled="!pumpControl"
               @update:value="(v: number) => setPumpPwm(Math.round(v))"
             />
             <NumberField
@@ -246,6 +247,7 @@ const mac = computed(() =>
               :model-value="percentOf(pumpPwm())"
               :label="t('fans.groupCard.fixedSpeedLabel', { slot: t('devices.aio.statPump') })"
               unit="%"
+              :disabled="!pumpControl"
               @update:model-value="(v) => setPumpPwm(pwmOf(v))"
             />
           </div>
@@ -255,6 +257,7 @@ const mac = computed(() =>
               :key="name"
               type="button"
               class="chip"
+              :disabled="!pumpControl"
               :class="{ selected: pumpMode === `curve:${name}` }"
               :aria-pressed="pumpMode === `curve:${name}`"
               @click="onPumpMode(`curve:${name}`)"
@@ -265,9 +268,9 @@ const mac = computed(() =>
           <span v-else-if="pumpMode === '__mb_sync__'" class="note">
             {{ device.pump_mb_sync_support ? t("fans.groupCard.mbFollowing") : t("devices.aio.pumpMbSyncUnavailable") }}
           </span>
-          <span v-else class="note">{{ t("fans.groupCard.stopped") }}</span>
+          <span v-else class="note">{{ t("fans.groupCard.deviceControlled") }}</span>
         </div>
-        <span v-if="!hasPump" class="note full">{{ t("devices.aio.controlUnavailable") }}</span>
+        <span v-if="!pumpControl" class="note full">{{ t("devices.aio.controlUnavailable") }}</span>
       </div>
 
       <div v-for="slot in fanSlots" :key="slot - 1" class="slot">
@@ -321,7 +324,7 @@ const mac = computed(() =>
           <span v-else-if="speedMode(aio.fan_speeds[slot - 1]) === '__mb_sync__'" class="note">
             {{ device.mb_sync_support ? t("fans.groupCard.mbFollowing") : t("devices.aio.fanMbSyncUnavailable") }}
           </span>
-          <span v-else class="note">{{ t("fans.groupCard.stopped") }}</span>
+          <span v-else class="note">{{ t("fans.groupCard.deviceControlled") }}</span>
         </div>
         <span v-if="!hasFan && slot === 1" class="note full">{{ t("devices.aio.controlUnavailable") }}</span>
       </div>

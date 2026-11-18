@@ -41,6 +41,7 @@ const messages: typeof en = {
     controllerMissing: "RGB 控制器未初始化",
     invalidConfig: "RGB 配置无效：{error}",
     effectFailed: "RGB 灯效错误：{error}",
+    previewFailed: "RGB 预览错误：{error}",
     directFailed: "RGB 直接颜色错误：{error}",
     framesFailed: "RGB 帧错误：{error}",
     mbSyncFailed: "主板 RGB 同步错误：{error}",

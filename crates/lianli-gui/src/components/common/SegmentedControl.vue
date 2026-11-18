@@ -1,4 +1,5 @@
 <script setup lang="ts" generic="T extends string">
+import { ref, useId } from "vue";
 import { Check, Info } from "lucide-vue-next";
 
 defineProps<{
@@ -10,27 +11,46 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{ "update:modelValue": [value: T] }>();
+const reasonId = useId();
+const explaining = ref<string | null>(null);
 </script>
 
 <template>
   <div class="segmented" :class="size ?? 'medium'" role="group" :aria-label="label">
     <!-- Unavailable options stay focusable so their reason can be read on hover or focus. -->
-    <button
-      v-for="option in options"
+    <n-tooltip
+      v-for="(option, index) in options"
       :key="option.value"
-      type="button"
-      class="segment"
-      :class="{ selected: option.value === modelValue, unavailable: option.disabled, explained: option.disabled && option.title }"
-      :aria-pressed="option.value === modelValue"
-      :aria-disabled="option.disabled || undefined"
-      :disabled="disabled"
-      :title="option.title"
-      @click="option.disabled || emit('update:modelValue', option.value)"
+      trigger="manual"
+      :show="explaining === option.value"
+      :disabled="!(option.disabled && option.title)"
     >
-      <Check v-if="option.value === modelValue" :size="size === 'small' ? 13 : 15" :stroke-width="2.6" />
-      <span>{{ option.label }}</span>
-      <Info v-if="option.disabled && option.title" class="reason-icon" :size="size === 'small' ? 13 : 14" :stroke-width="2.2" />
-    </button>
+      <template #trigger>
+        <button
+          type="button"
+          class="segment"
+          :class="{ selected: option.value === modelValue, unavailable: option.disabled, explained: option.disabled && option.title }"
+          :aria-pressed="option.value === modelValue"
+          :aria-disabled="option.disabled || undefined"
+          :aria-describedby="option.disabled && option.title ? `${reasonId}-${index}` : undefined"
+          :disabled="disabled"
+          :title="option.disabled ? undefined : option.title"
+          @click="option.disabled || emit('update:modelValue', option.value)"
+          @focus="explaining = option.value"
+          @mouseenter="explaining = option.value"
+          @blur="explaining = null"
+          @mouseleave="explaining = null"
+        >
+          <Check v-if="option.value === modelValue" :size="size === 'small' ? 13 : 15" :stroke-width="2.6" />
+          <span>{{ option.label }}</span>
+          <Info v-if="option.disabled && option.title" class="reason-icon" :size="size === 'small' ? 13 : 14" :stroke-width="2.2" />
+        </button>
+      </template>
+      {{ option.title }}
+    </n-tooltip>
+    <template v-for="(option, index) in options" :key="`reason-${option.value}`">
+      <span v-if="option.disabled && option.title" :id="`${reasonId}-${index}`" class="reason-text">{{ option.title }}</span>
+    </template>
   </div>
 </template>
 
@@ -93,6 +113,14 @@ const emit = defineEmits<{ "update:modelValue": [value: T] }>();
 }
 .reason-icon {
   opacity: 0.7;
+}
+.reason-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .segment:disabled {
   opacity: 0.45;

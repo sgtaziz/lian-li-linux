@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@/utils/backendText";
 import { useDaemonStore } from "@/stores/daemon";
 import { useDevicesStore } from "@/stores/devices";
@@ -11,6 +11,8 @@ export type TrayIconStyle = "auto" | "light" | "dark";
 
 const CLOSE_TO_TRAY_KEY = "lianli-linux.closeToTray";
 const ICON_STYLE_KEY = "lianli-linux.trayIcon";
+const RETRY_MIN_MS = 2_000;
+const RETRY_MAX_MS = 60_000;
 
 function readStorage(key: string): string | null {
   try {
@@ -38,12 +40,12 @@ export const useTrayStore = defineStore("tray", () => {
   const storedStyle = readStorage(ICON_STYLE_KEY);
   const iconStyle = ref<TrayIconStyle>(storedStyle === "light" || storedStyle === "dark" ? storedStyle : "auto");
   const quitRequested = ref(0);
-  const hideOnClose = computed(() => available.value && closeToTray.value);
+  const iconShown = ref(false);
+  const hideOnClose = computed(() => available.value && closeToTray.value && iconShown.value);
 
   const glyph = computed(() => {
     if (iconStyle.value !== "auto") return iconStyle.value;
-    const desktopDark = (theme.desktopScheme ?? theme.mode) === "dark";
-    return desktopDark ? "light" : "dark";
+    return theme.desktopMode === "dark" ? "light" : "dark";
   });
 
   const status = computed(() => {
@@ -56,6 +58,7 @@ export const useTrayStore = defineStore("tray", () => {
       quit: tr("shell.tray.quit"),
       glyph: glyph.value,
       state: !daemon.connected ? "offline" : failing.length ? "warning" : "normal",
+      visible: closeToTray.value,
     };
   });
 
@@ -73,38 +76,68 @@ export const useTrayStore = defineStore("tray", () => {
     daemon.setBackground(hidden);
   }
 
+  let sent = "";
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = RETRY_MIN_MS;
+
+  function push(next: typeof status.value) {
+    clearTimeout(retry);
+    retry = undefined;
+    const key = JSON.stringify(next);
+    if (key === sent) return;
+    sent = key;
+    invoke("set_tray_status", { status: next })
+      .then(() => {
+        if (sent !== key) return;
+        retryDelay = RETRY_MIN_MS;
+        iconShown.value = next.visible;
+      })
+      .catch(() => {
+        if (sent !== key) return;
+        sent = "";
+        iconShown.value = false;
+        retry = setTimeout(() => push(status.value), retryDelay);
+        retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+      });
+  }
+
   let started = false;
   async function start() {
     if (started) return;
     started = true;
+    const trayRunning = await invoke<boolean>("tray_available").catch(() => false);
+    if (!trayRunning) return;
+    const unlisten: UnlistenFn[] = [];
     try {
-      available.value = await invoke<boolean>("tray_available");
+      unlisten.push(await listen("tray://shown", () => setHidden(false)));
+      unlisten.push(
+        await listen("tray://quit", () => {
+          quitRequested.value += 1;
+        }),
+      );
     } catch {
-      available.value = false;
+      unlisten.forEach((stop) => stop());
+      started = false;
+      return;
     }
-    if (!available.value) return;
-    let sent = "";
-    watch(
-      status,
-      (next) => {
-        const key = JSON.stringify(next);
-        if (key === sent) return;
-        sent = key;
-        void invoke("set_tray_status", { status: next }).catch(() => {
-          sent = "";
-        });
-      },
-      { immediate: true },
-    );
-    await listen("tray://shown", () => setHidden(false));
-    await listen("tray://quit", () => {
-      quitRequested.value += 1;
-    });
+    available.value = true;
+    watch(status, push, { immediate: true });
   }
 
   async function quit() {
     await invoke("quit_app");
   }
 
-  return { available, closeToTray, iconStyle, hideOnClose, quitRequested, setCloseToTray, setIconStyle, setHidden, start, quit };
+  return {
+    available,
+    closeToTray,
+    iconStyle,
+    hideOnClose,
+    quitRequested,
+    setCloseToTray,
+    setIconStyle,
+    setHidden,
+    start,
+    quit,
+  };
 });

@@ -6,7 +6,7 @@ mod direct_color;
 mod live_loop;
 mod live_wireless;
 mod playback;
-mod regions;
+use lianli_media::rgb::regions;
 mod render;
 mod strimer_sync;
 mod sync_clock;
@@ -253,6 +253,16 @@ impl RgbController {
     fn regional_profile(&self, id: &str) -> Option<lianli_shared::rgb::RgbRenderProfile> {
         self.render_profile(id)
             .filter(|p| !lianli_media::rgb::family::modes(p.family).is_empty())
+    }
+
+    pub fn preview_profile(&self, id: &str) -> Option<lianli_shared::rgb::RgbRenderProfile> {
+        self.regional_profile(id)
+    }
+
+    pub fn wired_preview_info(&self, id: &str) -> Option<(String, usize)> {
+        self.wired
+            .get(id)
+            .map(|device| (device.device_name(), device.zone_info().len()))
     }
 
     pub fn ping(&self, id: &str, zone: u8) -> anyhow::Result<()> {

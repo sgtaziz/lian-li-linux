@@ -15,6 +15,10 @@ const devices = useDevicesStore();
 const t = useTranslate();
 const APP_VERSION = ref("...");
 
+const statusTitle = computed(() => daemon.connected
+  ? t("shell.sidebar.connectedTitle", { summary: devices.summary })
+  : t("shell.sidebar.offlineTitle", { summary: devices.summary }));
+
 const UTILITY_ROUTES = new Set(["settings", "installation"]);
 const primaryRoutes = computed(() => MAIN_ROUTES.filter((r) => !UTILITY_ROUTES.has(r.name)));
 const utilityRoutes = computed(() => MAIN_ROUTES.filter((r) => UTILITY_ROUTES.has(r.name)));
@@ -59,7 +63,7 @@ function iconFor(name: string) {
         <component :is="iconFor(r.icon)" :size="20" :stroke-width="2" />
         <span class="nav-label">{{ t(r.labelKey) }}</span>
         <icons.TriangleAlert v-if="r.name === 'fans' && daemon.connected && devices.failingCurves.length" class="warn-icon" :size="16" :stroke-width="2.4" role="img" :aria-label="t('fans.sensorLost.navTitle')" />
-        <span v-else-if="config.dirtyPages.includes(r.name)" class="dirty-dot" role="img" :aria-label="t('shell.unsaved.pageHasChanges')" :title="t('shell.unsaved.pageHasChanges')" />
+        <span v-if="config.dirtyPages.includes(r.name)" class="dirty-dot" role="img" :aria-label="t('shell.unsaved.pageHasChanges')" :title="t('shell.unsaved.pageHasChanges')" />
       </RouterLink>
       <div class="nav-spacer" />
       <RouterLink
@@ -76,9 +80,9 @@ function iconFor(name: string) {
       </RouterLink>
     </nav>
 
-    <div class="status" :class="{ ok: daemon.connected, bad: !daemon.connected }" :title="devices.summary">
+    <div class="status" :class="{ ok: daemon.connected, bad: !daemon.connected }" :title="statusTitle">
       <div class="conn">
-        <span class="dot" />
+        <component :is="daemon.connected ? icons.CircleCheck : icons.CircleX" class="conn-icon" :size="14" :stroke-width="2.6" aria-hidden="true" />
         <span class="status-text">{{ daemon.connected ? t("shell.sidebar.connected") : t("common.offline") }}</span>
       </div>
       <div class="device-count">{{ daemon.connected ? devices.summary : t("shell.sidebar.lastSeen", { summary: devices.summary }) }}</div>
@@ -196,18 +200,14 @@ function iconFor(name: string) {
   font-size: 13px;
   font-weight: 600;
 }
-.dot {
-  width: 8px;
-  height: 8px;
+.conn-icon {
   flex-shrink: 0;
-  border-radius: 50%;
 }
-.status.ok .dot {
-  background: var(--success);
-  box-shadow: 0 0 8px var(--success);
+.status.ok .conn-icon {
+  color: var(--success);
 }
-.status.bad .dot {
-  background: var(--danger);
+.status.bad .conn-icon {
+  color: var(--danger);
 }
 .device-count {
   font-size: var(--font-size-sm);
@@ -224,10 +224,17 @@ function iconFor(name: string) {
     padding: 0;
   }
   .brand-text,
-  .nav-label,
-  .status-text,
   .device-count {
     display: none;
+  }
+  .nav-label,
+  .status-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .nav-item {
     position: relative;
@@ -244,7 +251,12 @@ function iconFor(name: string) {
     top: 2px;
     right: 4px;
   }
+  .warn-icon + .dirty-dot {
+    top: auto;
+    bottom: 8px;
+  }
   .status {
+    position: relative;
     display: flex;
     justify-content: center;
     padding: var(--space-3);

@@ -17,9 +17,9 @@ export function useSaveConfig() {
     if (saving.value || !config.dirty || !daemon.canWrite) return false;
     saving.value = true;
     try {
-      await config.save();
+      const clean = await config.save();
       message.success(t("shell.header.saved"));
-      return true;
+      return clean;
     } catch (error) {
       message.error(
         t("shell.header.saveFailed", { error: error instanceof Error ? error.message : String(error) }),

@@ -182,7 +182,7 @@ const summary = computed(() =>
     <p v-if="cap.deferred_reason" class="notice warning">{{ backendText(cap.deferred_reason, cap.deferred_reason_ui) }}</p>
     <p v-if="syncActive" class="notice">{{ t(cap.fan_led_count_control ? "rgb.deviceCard.quickSyncNoticeLedCount" : "rgb.deviceCard.quickSyncNotice") }}</p>
 
-    <RgbPreview :cap="cap" :config="devConfig" :mb-sync="mbSync" />
+    <RgbPreview v-if="!syncActive" :cap="cap" :config="devConfig" :mb-sync="mbSync" />
 
     <div class="device-controls">
       <div v-if="cap.supports_mb_rgb_sync || (!mbSync && (regional || portGroups))" class="toolbar">

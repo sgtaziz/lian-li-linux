@@ -5,13 +5,71 @@ use lianli_shared::daemon::DaemonInfo;
 use lianli_shared::ipc::{IpcRequest, IpcResponse, TelemetrySnapshot};
 use lianli_shared::ui_message::{UiError, UiMessage};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::debug;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
+const CONNECT_RETRY: Duration = Duration::from_millis(50);
+
+// A blocking connect waits forever while a stalled daemon leaves its accept backlog full.
+fn connect(path: &str) -> io::Result<UnixStream> {
+    let bytes = std::path::Path::new(path).as_os_str().as_bytes();
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.len() >= addr.sun_path.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "socket path is too long",
+        ));
+    }
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (slot, byte) in addr.sun_path.iter_mut().zip(bytes) {
+        *slot = *byte as libc::c_char;
+    }
+    let raw = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            0,
+        )
+    };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let result = unsafe {
+            libc::connect(
+                fd.as_raw_fd(),
+                std::ptr::addr_of!(addr).cast::<libc::sockaddr>(),
+                std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
+            )
+        };
+        if result == 0 {
+            break;
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EINTR) => {}
+            Some(libc::EAGAIN) if Instant::now() < deadline => std::thread::sleep(CONNECT_RETRY),
+            Some(libc::EAGAIN) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the daemon did not accept the connection in time",
+                ))
+            }
+            _ => return Err(error),
+        }
+    }
+    let stream = UnixStream::from(fd);
+    stream.set_nonblocking(false)?;
+    Ok(stream)
+}
 
 fn system_socket() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
@@ -80,7 +138,7 @@ fn send_raw(request: IpcRequest, expected: Option<&str>) -> Result<IpcResponse, 
     let mut last_err: Option<CommandError> = None;
 
     for path in candidate_paths() {
-        let stream = match UnixStream::connect(&path) {
+        let stream = match connect(&path) {
             Ok(s) => s,
             Err(e) => {
                 last_err = Some(CommandError::ui(
@@ -257,7 +315,7 @@ pub fn ping() -> bool {
 pub fn poll() -> PollResult {
     for path in candidate_paths() {
         let result = poll_at(&path, |method| {
-            let stream = UnixStream::connect(&path).map_err(|e| e.to_string())?;
+            let stream = connect(&path).map_err(|e| e.to_string())?;
             let json = serde_json::json!({ "method": method, "params": null }).to_string();
             ipc_round_trip(stream, &json)
         });
@@ -484,5 +542,25 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(error, "service unavailable");
+    }
+
+    #[test]
+    fn connect_gives_up_when_the_daemon_stops_accepting() {
+        let path =
+            std::env::temp_dir().join(format!("lianli-gui-backlog-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        let path_text = path.to_str().unwrap();
+        let mut pending = Vec::new();
+        let error = loop {
+            match connect(path_text) {
+                Ok(stream) => pending.push(stream),
+                Err(error) => break error,
+            }
+            assert!(pending.len() < 8, "backlog never filled");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -193,12 +193,18 @@ export const useDevicesStore = defineStore("devices", () => {
     return telemetry.value.fan_rpms[deviceId] ?? [];
   }
 
+  // Pump RPM rides in the slot after the fans on devices with a pump.
+  function fanSlotRpms(device: DeviceInfo, rpms: number[]): number[] {
+    return device.has_pump && device.fan_count != null ? rpms.slice(0, device.fan_count) : rpms;
+  }
+
   function coolantTemp(deviceId: string): number | null {
     return telemetry.value.coolant_temps[deviceId] ?? null;
   }
 
   function curveTemperature(curveName: string): CurveTemperature | null {
-    return telemetry.value.curve_temperatures?.[curveName] ?? null;
+    const readings = telemetry.value.curve_temperatures;
+    return readings && Object.prototype.hasOwnProperty.call(readings, curveName) ? readings[curveName] : null;
   }
 
   // Returning the previous array when nothing changed keeps every poll from re-rendering
@@ -213,18 +219,19 @@ export const useDevicesStore = defineStore("devices", () => {
 
   const history = shallowRef<Record<string, DeviceHistory>>({});
 
-  function applyPoll(devices: DeviceInfo[], snap: TelemetrySnapshot) {
+  function applyPoll(devices: DeviceInfo[], snap: TelemetrySnapshot, daemonChanged = false) {
     for (const [id, source] of Object.entries(displaySwitches.value)) {
       if (displaySwitchComplete(source, devices)) finishDisplaySwitch(id);
     }
     list.value = devices;
     telemetry.value = snap;
+    const cooling = devices.filter((d) => d.has_fan || d.has_pump);
     history.value = recordHistory(
-      history.value,
-      devices.filter((d) => d.has_fan || d.has_pump).map((d) => d.device_id),
-      snap.fan_rpms,
+      daemonChanged ? {} : history.value,
+      cooling.map((d) => d.device_id),
+      Object.fromEntries(cooling.map((d) => [d.device_id, fanSlotRpms(d, snap.fan_rpms[d.device_id] ?? [])])),
       snap.coolant_temps,
-      Date.now(),
+      performance.now(),
     );
     pending.expire(devices.map((d) => d.device_id));
   }
@@ -245,6 +252,7 @@ export const useDevicesStore = defineStore("devices", () => {
     displaySwitchErrors,
     byId,
     fanRpms,
+    fanSlotRpms,
     coolantTemp,
     curveTemperature,
     failingCurves,

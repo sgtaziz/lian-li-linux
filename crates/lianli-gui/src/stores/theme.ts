@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@/utils/backendText";
-import { applyPalette, buildPalette, DEFAULT_ACCENT, isHexColor, naiveOverrides } from "@/theme/palette";
+import { applyPalette, buildPalette, DEFAULT_ACCENT, naiveOverrides, normalizeHex } from "@/theme/palette";
 
 export type ThemeMode = "dark" | "light";
 export type ThemePreference = ThemeMode | "system";
@@ -53,15 +53,14 @@ export const useThemeStore = defineStore("theme", () => {
   );
   const accentMode = ref<AccentMode>(readStored(ACCENT_MODE_KEY) === "custom" ? "custom" : "system");
   const storedCustom = readStored(CUSTOM_ACCENT_KEY);
-  const customAccent = ref(isHexColor(storedCustom) ? storedCustom : DEFAULT_ACCENT);
+  const customAccent = ref(normalizeHex(storedCustom) ?? DEFAULT_ACCENT);
 
   const desktopAccent = ref<string | null>(null);
   const desktopScheme = ref<ThemeMode | null>(null);
   const fallbackScheme = ref<ThemeMode>(browserScheme());
+  const desktopMode = computed<ThemeMode>(() => desktopScheme.value ?? fallbackScheme.value);
 
-  const mode = computed<ThemeMode>(() =>
-    preference.value === "system" ? (desktopScheme.value ?? fallbackScheme.value) : preference.value,
-  );
+  const mode = computed<ThemeMode>(() => (preference.value === "system" ? desktopMode.value : preference.value));
   const isDark = computed(() => mode.value === "dark");
   const accent = computed(() =>
     accentMode.value === "custom" ? customAccent.value : (desktopAccent.value ?? DEFAULT_ACCENT),
@@ -85,14 +84,15 @@ export const useThemeStore = defineStore("theme", () => {
     accentMode.value = next;
   }
 
-  function setCustomAccent(hex: string) {
-    if (!isHexColor(hex)) return;
-    customAccent.value = hex.toLowerCase();
+  function setCustomAccent(value: string) {
+    const hex = normalizeHex(value);
+    if (!hex) return;
+    customAccent.value = hex;
     accentMode.value = "custom";
   }
 
   function applyChange(change: AppearanceChange) {
-    if (change.key === "accent") desktopAccent.value = isHexColor(change.value) ? change.value : null;
+    if (change.key === "accent") desktopAccent.value = normalizeHex(change.value);
     else desktopScheme.value = change.value;
   }
 
@@ -107,13 +107,19 @@ export const useThemeStore = defineStore("theme", () => {
     } catch {
       // Without matchMedia the dark fallback stays in place.
     }
+    let changedDuringRead: Set<AppearanceChange["key"]> | null = new Set();
     try {
-      await listen<AppearanceChange>(APPEARANCE_EVENT, (event) => applyChange(event.payload));
+      await listen<AppearanceChange>(APPEARANCE_EVENT, (event) => {
+        changedDuringRead?.add(event.payload.key);
+        applyChange(event.payload);
+      });
       const appearance = await invoke<DesktopAppearance>("desktop_appearance");
-      desktopAccent.value = isHexColor(appearance.accent) ? appearance.accent : null;
-      desktopScheme.value = appearance.color_scheme;
+      if (!changedDuringRead.has("accent")) desktopAccent.value = normalizeHex(appearance.accent);
+      if (!changedDuringRead.has("color_scheme")) desktopScheme.value = appearance.color_scheme;
     } catch {
       // Outside Tauri, or without a desktop portal, the defaults stay in place.
+    } finally {
+      changedDuringRead = null;
     }
   }
 
@@ -136,6 +142,7 @@ export const useThemeStore = defineStore("theme", () => {
     mode,
     isDark,
     desktopScheme,
+    desktopMode,
     accentMode,
     customAccent,
     desktopAccent,

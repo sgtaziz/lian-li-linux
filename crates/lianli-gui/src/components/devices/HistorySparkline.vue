@@ -5,6 +5,7 @@ import { useTranslate } from "@/i18n";
 
 const props = defineProps<{
   samples: Sample[];
+  current: number | null;
   label: string;
   unit: string;
   digits: number;
@@ -18,7 +19,7 @@ const HEIGHT = 48;
 const stats = computed(() => {
   const values = props.samples.map((sample) => sample.value);
   if (!values.length) return null;
-  return { min: Math.min(...values), max: Math.max(...values), latest: values[values.length - 1] };
+  return { min: Math.min(...values), max: Math.max(...values) };
 });
 
 const paths = computed(() => {
@@ -51,7 +52,8 @@ const ariaLabel = computed(() =>
   <div class="history" :class="`tone-${tone}`">
     <div class="history-head">
       <span class="history-label">{{ label }}</span>
-      <span v-if="stats" class="mono history-now">{{ format(stats.latest) }}</span>
+      <span v-if="current !== null" class="mono history-now">{{ format(current) }}</span>
+      <span v-else class="history-stale">{{ t("devices.history.noReading") }}</span>
     </div>
     <svg v-if="paths" class="history-chart" :viewBox="`0 0 ${WIDTH} ${HEIGHT}`" preserveAspectRatio="none" role="img" :aria-label="ariaLabel">
       <path :d="paths.area" class="area" />
@@ -89,6 +91,10 @@ const ariaLabel = computed(() =>
   font-size: 14px;
   font-weight: 600;
   color: var(--tone);
+}
+.history-stale {
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
 }
 .history-chart {
   display: block;

@@ -34,7 +34,7 @@ The interface follows your desktop's accent color and light or dark preference. 
 ## What it does
 
 - **Fan curves.** Drag points on a chart or type exact temperatures and speeds. Give each
-  port or fan its own Curve, Fixed, Motherboard or Off mode.
+  port or fan its own Curve, Fixed or Off mode. Motherboard mode applies to the whole group.
 - **AIO coolers.** Control pump and radiator fan speeds, and choose the sensor readouts,
   theme and colors shown on AIO screens.
 - **LCD screens.** Show images, GIFs, videos, solid colors, sensor gauges or custom

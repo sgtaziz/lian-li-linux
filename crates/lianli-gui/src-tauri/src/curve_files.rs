@@ -2,7 +2,8 @@ use crate::command_error::CommandError;
 use lianli_shared::fan::{MB_SYNC_KEY, OFF_KEY};
 use lianli_shared::ui_message::UiMessage;
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::io::{Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tauri::WebviewWindow;
 use tauri_plugin_dialog::DialogExt;
@@ -14,8 +15,7 @@ const MAX_CURVES: usize = 32;
 const MAX_POINTS: usize = 32;
 const MAX_NAME_CHARS: usize = 64;
 
-/// Only names and points are exchanged. Temperature sources can be shell
-/// commands run by the daemon, so they never travel in a curve file.
+/// Sources never travel in a file, since a command source is a shell command the daemon runs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PortableCurve {
     name: String,
@@ -32,50 +32,86 @@ struct CurveFile {
 #[derive(Debug, PartialEq)]
 enum CurveFileError {
     TooLarge,
-    Invalid(String),
+    Invalid { english: String, ui: UiMessage },
 }
 
-fn invalid(detail: impl Into<String>) -> CurveFileError {
-    CurveFileError::Invalid(detail.into())
+fn invalid(english: impl Into<String>, ui: UiMessage) -> CurveFileError {
+    CurveFileError::Invalid {
+        english: english.into(),
+        ui,
+    }
 }
 
 fn parse_curve_file(bytes: &[u8]) -> Result<Vec<PortableCurve>, CurveFileError> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err(CurveFileError::TooLarge);
     }
-    let file: CurveFile =
-        serde_json::from_slice(bytes).map_err(|error| invalid(error.to_string()))?;
+    let file: CurveFile = serde_json::from_slice(bytes).map_err(|error| {
+        invalid(
+            format!("This is not a valid fan curve file: {error}"),
+            UiMessage::new("gui.curveFiles.malformed").param("error", &error),
+        )
+    })?;
     if file.format != FORMAT {
-        return Err(invalid("not a Lian Li Linux fan curve file"));
+        return Err(invalid(
+            "This is not a Lian Li Linux fan curve file",
+            UiMessage::new("gui.curveFiles.wrongFormat"),
+        ));
     }
     if file.version != VERSION {
-        return Err(invalid(format!("unsupported version {}", file.version)));
+        return Err(invalid(
+            format!("Unsupported fan curve file version {}", file.version),
+            UiMessage::new("gui.curveFiles.unsupportedVersion").param("version", file.version),
+        ));
     }
     if file.curves.is_empty() || file.curves.len() > MAX_CURVES {
-        return Err(invalid(format!(
-            "expected 1 to {MAX_CURVES} curves, found {}",
-            file.curves.len()
-        )));
+        return Err(invalid(
+            format!(
+                "A fan curve file holds 1 to {MAX_CURVES} curves, this one has {}",
+                file.curves.len()
+            ),
+            UiMessage::new("gui.curveFiles.curveCount")
+                .param("max", MAX_CURVES)
+                .param("count", file.curves.len()),
+        ));
     }
     file.curves.into_iter().map(validate_curve).collect()
 }
 
-/// Fan slots store a curve by name, and these names mean "firmware controlled" or
-/// motherboard sync instead, so a curve called this would silently change fan modes.
+/// These names mean firmware control or motherboard sync in a fan slot, not a curve.
 fn is_reserved_name(name: &str) -> bool {
     name == OFF_KEY || name.starts_with(MB_SYNC_KEY)
 }
 
 fn validate_curve(curve: PortableCurve) -> Result<PortableCurve, CurveFileError> {
-    let name: String = curve.name.trim().chars().take(MAX_NAME_CHARS).collect();
+    let name = curve.name.trim().to_string();
     if name.is_empty() {
-        return Err(invalid("a curve has no name"));
+        return Err(invalid(
+            "A curve in the file has no name",
+            UiMessage::new("gui.curveFiles.unnamed"),
+        ));
+    }
+    if name.chars().count() > MAX_NAME_CHARS {
+        return Err(invalid(
+            format!("\"{name}\" is longer than {MAX_NAME_CHARS} characters"),
+            UiMessage::new("gui.curveFiles.nameTooLong")
+                .param("name", &name)
+                .param("max", MAX_NAME_CHARS),
+        ));
     }
     if is_reserved_name(&name) {
-        return Err(invalid(format!("{name} is a reserved name")));
+        return Err(invalid(
+            format!("\"{name}\" is reserved for a fan mode"),
+            UiMessage::new("gui.curveFiles.reservedName").param("name", &name),
+        ));
     }
     if curve.curve.is_empty() || curve.curve.len() > MAX_POINTS {
-        return Err(invalid(format!("{name} needs 1 to {MAX_POINTS} points")));
+        return Err(invalid(
+            format!("\"{name}\" needs 1 to {MAX_POINTS} points"),
+            UiMessage::new("gui.curveFiles.pointCount")
+                .param("name", &name)
+                .param("max", MAX_POINTS),
+        ));
     }
     let valid = |&(temp, speed): &(f32, f32)| {
         temp.is_finite()
@@ -84,9 +120,10 @@ fn validate_curve(curve: PortableCurve) -> Result<PortableCurve, CurveFileError>
             && (0.0..=100.0).contains(&speed)
     };
     if !curve.curve.iter().all(valid) {
-        return Err(invalid(format!(
-            "{name} has a point outside 0 to 120 °C or 0 to 100%"
-        )));
+        return Err(invalid(
+            format!("\"{name}\" has a point outside 0 to 120 °C or 0 to 100%"),
+            UiMessage::new("gui.curveFiles.pointRange").param("name", &name),
+        ));
     }
     let mut points = curve.curve;
     points.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -107,16 +144,48 @@ fn read_curve_file(path: &Path) -> Result<Vec<PortableCurve>, CommandError> {
     std::fs::File::open(path)
         .and_then(|file| file.take(MAX_BYTES + 1).read_to_end(&mut bytes))
         .map_err(unreadable)?;
-    parse_curve_file(&bytes).map_err(|error| match error {
+    parse_curve_file(&bytes).map_err(command_error)
+}
+
+fn command_error(error: CurveFileError) -> CommandError {
+    match error {
         CurveFileError::TooLarge => CommandError::ui(
             "The fan curve file is larger than 64 KB",
             UiMessage::new("gui.curveFiles.tooLarge"),
         ),
-        CurveFileError::Invalid(detail) => CommandError::ui(
-            format!("This is not a valid fan curve file: {detail}"),
-            UiMessage::new("gui.curveFiles.invalid").param("detail", &detail),
-        ),
+        CurveFileError::Invalid { english, ui } => CommandError::ui(english, ui),
+    }
+}
+
+fn encode_curve_file(curves: Vec<PortableCurve>) -> Result<Vec<u8>, CurveFileError> {
+    let json = serde_json::to_vec_pretty(&CurveFile {
+        format: FORMAT.into(),
+        version: VERSION,
+        curves,
     })
+    .map_err(|error| {
+        invalid(
+            format!("This is not a valid fan curve file: {error}"),
+            UiMessage::new("gui.curveFiles.malformed").param("error", &error),
+        )
+    })?;
+    parse_curve_file(&json)?;
+    Ok(json)
+}
+
+fn write_replacing(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temp = tempfile::Builder::new()
+        .prefix(".fan-curves")
+        .permissions(std::fs::Permissions::from_mode(0o666))
+        .tempfile_in(directory)?;
+    temp.write_all(bytes)?;
+    temp.as_file().sync_all()?;
+    temp.persist(path).map_err(|error| error.error)?;
+    Ok(())
 }
 
 fn require_main(window: &WebviewWindow) -> Result<(), CommandError> {
@@ -141,12 +210,7 @@ pub async fn export_fan_curves(
     require_main(&window)?;
     let title = crate::ui_text(title, "Export fan curves");
     let filter = crate::ui_text(filter, "Fan curves (JSON)");
-    let json = serde_json::to_vec_pretty(&CurveFile {
-        format: FORMAT.into(),
-        version: VERSION,
-        curves,
-    })
-    .map_err(|error| error.to_string())?;
+    let json = encode_curve_file(curves).map_err(command_error)?;
     tauri::async_runtime::spawn_blocking(move || {
         let Some(selected) = app
             .dialog()
@@ -159,7 +223,7 @@ pub async fn export_fan_curves(
             return Ok(false);
         };
         let path = selected.into_path().map_err(|error| error.to_string())?;
-        std::fs::write(&path, json).map_err(|error| {
+        write_replacing(&path, &json).map_err(|error| {
             CommandError::ui(
                 format!("Cannot save the fan curve file: {error}"),
                 UiMessage::new("gui.curveFiles.writeFailed").param("error", &error),
@@ -239,7 +303,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             parse_curve_file(&wrong_format),
-            Err(CurveFileError::Invalid(_))
+            Err(CurveFileError::Invalid { .. })
         ));
         let wrong_version = serde_json::to_vec(&serde_json::json!({
             "format": FORMAT, "version": 2, "curves": [{ "name": "A", "curve": [[30, 30]] }]
@@ -247,7 +311,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             parse_curve_file(&wrong_version),
-            Err(CurveFileError::Invalid(_))
+            Err(CurveFileError::Invalid { .. })
         ));
         assert!(parse_curve_file(&file(serde_json::json!([]))).is_err());
         let many: Vec<_> = (0..=MAX_CURVES)
@@ -287,12 +351,31 @@ mod tests {
             name: "Standard".into(),
             curve: vec![(30.0, 30.0), (85.0, 100.0)],
         }];
-        let bytes = serde_json::to_vec(&CurveFile {
-            format: FORMAT.into(),
-            version: VERSION,
-            curves: curves.clone(),
-        })
-        .unwrap();
+        let bytes = encode_curve_file(curves.clone()).unwrap();
         assert_eq!(parse_curve_file(&bytes).unwrap(), curves);
+    }
+
+    #[test]
+    fn export_refuses_curves_the_importer_would_reject_or_change() {
+        let curve = |name: String, points: usize| PortableCurve {
+            name,
+            curve: (0..points).map(|i| (i as f32, 50.0)).collect(),
+        };
+        assert!(encode_curve_file(vec![curve("A".into(), MAX_POINTS)]).is_ok());
+        assert!(encode_curve_file(vec![curve("A".into(), MAX_POINTS + 1)]).is_err());
+        let longest = "é".repeat(MAX_NAME_CHARS);
+        let exported = encode_curve_file(vec![curve(longest.clone(), 2)]).unwrap();
+        assert_eq!(parse_curve_file(&exported).unwrap()[0].name, longest);
+        assert!(encode_curve_file(vec![curve(format!("{longest}x"), 2)]).is_err());
+    }
+
+    #[test]
+    fn replacing_an_export_leaves_only_the_new_contents() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("fan-curves.json");
+        std::fs::write(&path, b"old").unwrap();
+        write_replacing(&path, b"new").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }

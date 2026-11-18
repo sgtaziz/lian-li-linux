@@ -345,6 +345,29 @@ pub(crate) fn ui_text(translated: Option<String>, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
+pub(crate) fn main_window(app: &tauri::AppHandle) -> Option<WebviewWindow> {
+    if let Some(window) = app.get_webview_window("main") {
+        return Some(window);
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")?
+        .clone();
+    match WebviewWindowBuilder::from_config(app, &config).and_then(|builder| builder.build()) {
+        Ok(window) => {
+            apply_platform_decorations(&window);
+            Some(window)
+        }
+        Err(error) => {
+            tracing::warn!("Cannot reopen the main window: {error}");
+            None
+        }
+    }
+}
+
 fn open_secondary_window(
     app: &tauri::AppHandle,
     label: &str,
@@ -419,6 +442,7 @@ pub fn run() {
             tray::tray_available,
             tray::set_tray_status,
             tray::quit_app,
+            tray::set_editor_draft,
             curve_files::export_fan_curves,
             curve_files::import_fan_curves,
         ])
@@ -437,6 +461,16 @@ pub fn run() {
                 win.open_devtools();
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if !matches!(event, tauri::WindowEvent::Destroyed) {
+                return;
+            }
+            match window.label() {
+                "main" => tray::hide(window.app_handle()),
+                "editor" => tray::clear_editor_draft(window.app_handle()),
+                _ => {}
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

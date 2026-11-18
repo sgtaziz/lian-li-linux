@@ -39,6 +39,7 @@ export default {
     controllerMissing: "RGB controller not initialized",
     invalidConfig: "Invalid RGB configuration: {error}",
     effectFailed: "RGB effect error: {error}",
+    previewFailed: "RGB preview error: {error}",
     directFailed: "RGB direct error: {error}",
     framesFailed: "RGB frames error: {error}",
     mbSyncFailed: "MB RGB sync error: {error}",

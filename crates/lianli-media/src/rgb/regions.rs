@@ -1,15 +1,15 @@
 use anyhow::{ensure, Context, Result};
 use lianli_shared::rgb::{RgbDeviceConfig, RgbMode, RgbRegionConfig, RgbScope};
 
-pub(super) fn expand_all(
+pub fn expand_all(
     profile: lianli_shared::rgb::RgbRenderProfile,
     all: &RgbRegionConfig,
 ) -> Vec<RgbRegionConfig> {
-    lianli_media::rgb::parameters::scopes(profile)
+    super::parameters::scopes(profile)
         .into_iter()
         .filter(|&scope| {
             scope != RgbScope::All
-                && lianli_media::rgb::parameters::for_scope(profile, scope)
+                && super::parameters::for_scope(profile, scope)
                     .iter()
                     .any(|parameters| parameters.mode == all.effect.mode)
         })
@@ -21,12 +21,12 @@ pub(super) fn expand_all(
         .collect()
 }
 
-pub(super) fn resolve(
+pub fn resolve(
     config: &RgbDeviceConfig,
     profile: lianli_shared::rgb::RgbRenderProfile,
 ) -> Result<Option<Vec<RgbRegionConfig>>> {
     use lianli_shared::rgb::RgbRenderFamily;
-    let scopes = lianli_media::rgb::parameters::scopes(profile);
+    let scopes = super::parameters::scopes(profile);
     if let Some(regions) = &config.regions {
         ensure!(
             !regions.is_empty() && regions.len() <= scopes.len(),
@@ -88,7 +88,7 @@ pub(super) fn resolve(
             let Some(mut regions) = legacy_whole_region(config)? else {
                 return Ok(None);
             };
-            if !lianli_media::rgb::parameters::for_scope(profile, RgbScope::All)
+            if !super::parameters::for_scope(profile, RgbScope::All)
                 .iter()
                 .any(|controls| controls.mode == regions[0].effect.mode)
             {
@@ -250,7 +250,7 @@ mod tests {
         assert!(expanded
             .iter()
             .all(|region| region.effect.scope != RgbScope::All));
-        lianli_media::rgb::family::render(profile, &expanded).unwrap();
+        crate::rgb::family::render(profile, &expanded).unwrap();
         profile.family = RgbRenderFamily::Sl;
         profile.led_count = 120;
         all.effect.mode = RgbMode::GradientRibbon;
@@ -314,7 +314,7 @@ mod tests {
             assert!(regions
                 .iter()
                 .all(|region| region.effect.scope != RgbScope::All));
-            let animation = lianli_media::rgb::family::render(profile, &regions).unwrap();
+            let animation = crate::rgb::family::render(profile, &regions).unwrap();
             assert!(animation
                 .frames
                 .iter()

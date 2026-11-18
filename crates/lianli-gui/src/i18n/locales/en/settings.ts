@@ -1,8 +1,8 @@
 export default {
   tray: {
     closeToTray: "Keep running in the tray when closed",
-    closeToTrayHint: "Closing the window hides it to the tray. Use Quit in the tray menu to exit. On GNOME, tray icons need the AppIndicator extension.",
-    unavailable: "No system tray is available. Install libayatana-appindicator, then restart Lian Li Linux.",
+    closeToTrayHint: "Shows a tray icon, and closing the window hides it there. Use Quit in the tray menu to exit. On GNOME, tray icons need the AppIndicator extension.",
+    unavailable: "No system tray is running. Your panel needs StatusNotifierItem support, such as the AppIndicator extension on GNOME.",
     icon: "Tray icon",
     iconHint: "Automatic follows your desktop's light or dark style. Choose Light for a dark panel and Dark for a light panel.",
     iconAuto: "Automatic",

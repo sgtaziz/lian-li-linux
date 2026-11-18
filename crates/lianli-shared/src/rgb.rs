@@ -1,5 +1,6 @@
 //! RGB/LED effect types shared between daemon, devices, and GUI.
 
+pub mod preview;
 pub mod profile;
 pub use profile::{RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, MAX_RGB_ANIMATION_FRAMES};
 

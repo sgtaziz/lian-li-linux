@@ -3,7 +3,6 @@ export default {
     switchTimeout: "{name}: the daemon did not detect the panel in its new mode. Check the daemon log for USB hotplug warnings before retrying.",
   },
   hero: {
-    eyebrow: "Overview",
     connected: "Connected devices",
     cpu: "CPU",
     gpu: "GPU",
@@ -68,6 +67,7 @@ export default {
     range: "{min} – {max}",
     summary: "{label} over the last 5 minutes, from {min} to {max}",
     collecting: "Collecting readings…",
+    noReading: "No current reading",
   },
   aio: {
     fan: "Fan {index}",

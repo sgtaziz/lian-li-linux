@@ -3,16 +3,25 @@ import { computed } from "vue";
 import { Plus, X } from "lucide-vue-next";
 import NumberField from "@/components/common/NumberField.vue";
 import { useTranslate } from "@/i18n";
-import { CURVE_TEMP_MAX, CURVE_TEMP_MIN, insertCurvePoint, sortCurve } from "./curvePoints";
+import {
+  CURVE_POINT_TEMP_MAX,
+  CURVE_POINT_TEMP_MIN,
+  MAX_CURVE_POINTS,
+  canInsertCurvePoint,
+  insertCurvePoint,
+  sortCurve,
+} from "./curvePoints";
 
 const props = defineProps<{
   modelValue: [number, number][];
   disabled?: boolean;
 }>();
 
-const emit = defineEmits<{ "update:modelValue": [value: [number, number][]] }>();
+const emit = defineEmits<{ "update:modelValue": [value: [number, number][], gesture: number | null] }>();
 
 const t = useTranslate();
+
+const canAdd = computed(() => canInsertCurvePoint(props.modelValue));
 
 const duplicateTemps = computed(() => {
   const counts = new Map<number, number>();
@@ -23,21 +32,21 @@ const duplicateTemps = computed(() => {
 function setValue(index: number, axis: 0 | 1, value: number) {
   const next = props.modelValue.map((point) => [...point] as [number, number]);
   next[index][axis] = value;
-  emit("update:modelValue", next);
+  emit("update:modelValue", next, null);
 }
 
 function commitOrder() {
   const sorted = sortCurve(props.modelValue);
-  if (sorted.some((point, index) => point !== props.modelValue[index])) emit("update:modelValue", sorted);
+  if (sorted.some((point, index) => point !== props.modelValue[index])) emit("update:modelValue", sorted, null);
 }
 
 function remove(index: number) {
   if (props.modelValue.length <= 1) return;
-  emit("update:modelValue", props.modelValue.filter((_, i) => i !== index));
+  emit("update:modelValue", props.modelValue.filter((_, i) => i !== index), null);
 }
 
 function add() {
-  emit("update:modelValue", insertCurvePoint(props.modelValue));
+  if (canAdd.value) emit("update:modelValue", insertCurvePoint(props.modelValue), null);
 }
 </script>
 
@@ -74,8 +83,8 @@ function add() {
             <NumberField
               :model-value="point[0]"
               :label="t('fans.points.temperatureLabel', { index: index + 1 })"
-              :min="CURVE_TEMP_MIN"
-              :max="CURVE_TEMP_MAX"
+              :min="CURVE_POINT_TEMP_MIN"
+              :max="CURVE_POINT_TEMP_MAX"
               :precision="1"
               unit="°C"
               :invalid="duplicateTemps.has(point[0])"
@@ -98,11 +107,12 @@ function add() {
           </label>
         </div>
       </div>
-      <button type="button" class="add" :disabled="disabled" @click="add">
+      <button type="button" class="add" :disabled="disabled || !canAdd" @click="add">
         <Plus :size="18" :stroke-width="2.2" />
         {{ t("fans.points.add") }}
       </button>
     </div>
+    <p v-if="!canAdd" class="limit">{{ t("fans.points.limit", { max: MAX_CURVE_POINTS }) }}</p>
     <p v-if="duplicateTemps.size" class="warning">{{ t("fans.points.duplicate") }}</p>
   </div>
 </template>
@@ -211,5 +221,10 @@ function add() {
   margin: 0;
   font-size: var(--font-size-sm);
   color: var(--danger);
+}
+.limit {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--md-on-surface-variant);
 }
 </style>

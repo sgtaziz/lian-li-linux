@@ -5,7 +5,6 @@ const messages: typeof en = {
     switchTimeout: "{name}：守护进程未检测到切换到新模式后的面板。重试前，请检查守护进程日志中的 USB 热插拔警告。",
   },
   hero: {
-    eyebrow: "概览",
     connected: "已连接设备",
     cpu: "CPU",
     gpu: "GPU",
@@ -70,6 +69,7 @@ const messages: typeof en = {
     range: "{min} – {max}",
     summary: "{label}最近 5 分钟的范围为 {min} 至 {max}",
     collecting: "正在收集读数…",
+    noReading: "当前无读数",
   },
   aio: {
     fan: "风扇 {index}",

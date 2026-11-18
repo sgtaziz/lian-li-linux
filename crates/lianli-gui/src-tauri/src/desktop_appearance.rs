@@ -1,6 +1,9 @@
 use gio::glib::{ToVariant, Variant, VariantTy};
+use gio::prelude::{FileExt, FileMonitorExt};
 use gio::DBusConnection;
 use serde::Serialize;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 
 pub const CHANGED_EVENT: &str = "desktop-appearance-changed";
@@ -12,6 +15,9 @@ const APPEARANCE_NAMESPACE: &str = "org.freedesktop.appearance";
 const ACCENT_KEY: &str = "accent-color";
 const COLOR_SCHEME_KEY: &str = "color-scheme";
 const READ_TIMEOUT_MS: i32 = 2_000;
+const GTK_CSS_FILES: [&str; 2] = ["gtk-4.0/gtk.css", "gtk-3.0/gtk.css"];
+const GTK_ACCENT_NAMES: [&str; 2] = ["accent_bg_color", "accent_color"];
+const MAX_GTK_CSS_BYTES: u64 = 256 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct DesktopAppearance {
@@ -42,17 +48,103 @@ fn read() -> DesktopAppearance {
         }
     };
     DesktopAppearance {
-        accent: read_setting(&bus, ACCENT_KEY)
-            .as_ref()
-            .and_then(accent_from),
+        accent: read_accent(&bus),
         color_scheme: read_setting(&bus, COLOR_SCHEME_KEY)
             .as_ref()
             .and_then(color_scheme_from),
     }
 }
 
+fn read_accent(bus: &DBusConnection) -> Option<String> {
+    read_setting(bus, ACCENT_KEY)
+        .as_ref()
+        .and_then(accent_from)
+        .or_else(gtk_accent)
+}
+
+fn gtk_css_paths() -> Vec<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
+    config
+        .map(|dir| GTK_CSS_FILES.iter().map(|file| dir.join(file)).collect())
+        .unwrap_or_default()
+}
+
+/// Theme generators such as matugen write the accent into GTK's user CSS, not the portal.
+fn gtk_accent() -> Option<String> {
+    gtk_css_paths().iter().find_map(|path| {
+        let css = read_small(path)?;
+        gtk_accent_from_css(&css).or_else(|| {
+            imports(&css).find_map(|import| {
+                let imported = read_small(&path.parent()?.join(import))?;
+                gtk_accent_from_css(&imported)
+            })
+        })
+    })
+}
+
+fn read_small(path: &Path) -> Option<String> {
+    let mut css = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_GTK_CSS_BYTES)
+        .read_to_string(&mut css)
+        .ok()?;
+    Some(css)
+}
+
+fn imports(css: &str) -> impl Iterator<Item = &str> {
+    css.lines().filter_map(|line| {
+        let rest = line.trim().strip_prefix("@import")?.trim();
+        let rest = rest.strip_prefix("url(").unwrap_or(rest);
+        let path = rest.trim_matches(|c: char| matches!(c, '"' | '\'' | ')' | ';' | ' '));
+        (!path.is_empty() && !path.contains("://")).then_some(path)
+    })
+}
+
+fn gtk_accent_from_css(css: &str) -> Option<String> {
+    GTK_ACCENT_NAMES.iter().find_map(|name| {
+        css.lines().find_map(|line| {
+            let rest = line.trim().strip_prefix("@define-color")?.trim_start();
+            let value = rest.strip_prefix(name)?.trim().trim_end_matches(';').trim();
+            let hex = value.strip_prefix('#')?;
+            (hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()))
+                .then(|| format!("#{}", hex.to_ascii_lowercase()))
+        })
+    })
+}
+
+fn watch_gtk_accent(app: &AppHandle) {
+    for path in gtk_css_paths() {
+        let monitor = match gio::File::for_path(&path)
+            .monitor_file(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)
+        {
+            Ok(monitor) => monitor,
+            Err(error) => {
+                tracing::debug!("Cannot watch {}: {error}", path.display());
+                continue;
+            }
+        };
+        let app = app.clone();
+        monitor.connect_changed(move |_, _, _, _| {
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let accent = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)
+                    .ok()
+                    .and_then(|bus| read_accent(&bus))
+                    .or_else(gtk_accent);
+                let _ = app.emit(CHANGED_EVENT, AppearanceChange::Accent(accent));
+            });
+        });
+        // The monitor must live as long as the process to keep delivering changes.
+        std::mem::forget(monitor);
+    }
+}
+
 /// Subscribes on the calling thread's main context, so call it from the GTK main thread.
 pub fn watch(app: AppHandle) {
+    watch_gtk_accent(&app);
     let bus = match gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) {
         Ok(bus) => bus,
         Err(error) => {
@@ -80,6 +172,7 @@ pub fn watch(app: AppHandle) {
 }
 
 fn read_setting(bus: &DBusConnection, key: &str) -> Option<Variant> {
+    let reply_type = VariantTy::new("(v)").ok();
     // Read is the deprecated predecessor of ReadOne and still the only method on older portals.
     for method in ["ReadOne", "Read"] {
         match bus.call_sync(
@@ -88,7 +181,7 @@ fn read_setting(bus: &DBusConnection, key: &str) -> Option<Variant> {
             SETTINGS_INTERFACE,
             method,
             Some(&(APPEARANCE_NAMESPACE, key).to_variant()),
-            None,
+            reply_type,
             gio::DBusCallFlags::NONE,
             READ_TIMEOUT_MS,
             gio::Cancellable::NONE,
@@ -166,6 +259,21 @@ mod tests {
         assert_eq!(accent_hex(-1.0, -1.0, -1.0), None);
         assert_eq!(accent_hex(0.5, 1.2, 0.5), None);
         assert_eq!(accent_hex(f64::NAN, 0.5, 0.5), None);
+    }
+
+    #[test]
+    fn gtk_css_accent_prefers_the_background_accent() {
+        let css = "@import url(\"dank-colors.css\");\n@define-color accent_color #8CCFF0;\n@define-color accent_bg_color #123abc;\n";
+        assert_eq!(gtk_accent_from_css(css).as_deref(), Some("#123abc"));
+        assert_eq!(
+            gtk_accent_from_css("@define-color accent_color #8ccff0;").as_deref(),
+            Some("#8ccff0")
+        );
+        assert_eq!(
+            gtk_accent_from_css("@define-color accent_bg_color @blue_3;"),
+            None
+        );
+        assert_eq!(imports(css).collect::<Vec<_>>(), ["dank-colors.css"]);
     }
 
     #[test]

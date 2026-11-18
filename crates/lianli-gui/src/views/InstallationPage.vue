@@ -28,10 +28,16 @@ const stateLabels: Record<CheckState, MessageKey> = {
 };
 
 const heroTone = computed(() => {
+  if (installation.error) return "failed";
   if (!installation.report) return "unknown";
   if (needsAttention.value.some((finding) => finding.severity === "error")) return "error";
   if (needsAttention.value.length) return "warning";
   return "good";
+});
+const heroHeadline = computed<MessageKey>(() => {
+  if (heroTone.value === "failed") return "service.installation.checkFailedTitle";
+  if (heroTone.value === "good") return "service.installation.everythingGood";
+  return installation.report ? "service.installation.needsAttention" : "service.installation.notChecked";
 });
 
 function tone(finding: InstallationFinding): string {
@@ -67,44 +73,33 @@ async function recheck() {
       {{ t("service.installation.checkFailed", { error: installation.error }) }}
     </n-alert>
 
-    <section class="hero" :class="`hero-${heroTone}`">
-      <div class="hero-main">
-        <span class="eyebrow">{{ installation.contextLabel }}</span>
-        <div v-if="heroTone === 'good'" class="hero-headline">
-          <span class="good-mark"><Check :size="28" :stroke-width="2.6" /></span>
-          <span class="headline-text">{{ t("service.installation.everythingGood") }}</span>
+    <section class="status" :class="`status-${heroTone}`">
+      <div class="status-main">
+        <div class="headline">
+          <span v-if="heroTone === 'good'" class="good-mark"><Check :size="16" :stroke-width="2.8" /></span>
+          <span v-else-if="heroTone === 'failed'" class="count"><X :size="20" :stroke-width="2.8" /></span>
+          <span v-else-if="installation.report" class="count">{{ needsAttention.length }}</span>
+          <span class="headline-text">{{ t(heroHeadline) }}</span>
         </div>
-        <div v-else-if="installation.report" class="hero-headline">
-          <span class="count">{{ needsAttention.length }}</span>
-          <span class="headline-text">{{ t("service.installation.needsAttention") }}</span>
+        <div class="chips">
+          <span class="chip">{{ installation.contextLabel }}</span>
+          <span class="chip daemon-chip" :class="{ offline: !daemon.connected }">
+            <span class="dot" />{{ t("service.installation.daemonTile") }}:
+            {{ t(daemon.connected ? "service.installation.connected" : "service.installation.offline") }}
+            <template v-if="daemon.info"> · {{ daemon.info.version }} · {{ t(DAEMON_MODE_LABELS[daemon.info.mode]) }}</template>
+          </span>
+          <span v-if="installation.report" class="chip"><Check :size="14" />{{ passedCount }} {{ t("service.installation.passedTile") }}</span>
+          <span class="chip muted">{{ t("service.installation.lastChecked", { time: checkedAt }) }}</span>
         </div>
-        <div v-else class="hero-headline">
-          <span class="headline-text">{{ t("service.installation.notChecked") }}</span>
-        </div>
-        <p class="hero-sub">{{ t("service.installation.lastChecked", { time: checkedAt }) }}</p>
       </div>
-      <div class="hero-actions">
-        <n-button type="primary" :loading="installation.checking" @click="recheck">{{ t("service.installation.recheck") }}</n-button>
-        <n-button secondary @click="guide(installation.report?.context.kind === 'distrobox' ? 'distrobox' : 'service_modes')">
+      <div class="status-actions">
+        <n-button size="small" type="primary" :loading="installation.checking" @click="recheck">{{ t("service.installation.recheck") }}</n-button>
+        <n-button size="small" secondary @click="guide(installation.report?.context.kind === 'distrobox' ? 'distrobox' : 'service_modes')">
           {{ t("service.installation.setupGuide") }}
         </n-button>
+        <router-link class="settings-link" to="/settings">{{ t("service.installation.serviceSettings") }}</router-link>
       </div>
     </section>
-
-    <div class="tiles">
-      <div class="tile tile-daemon" :class="{ offline: !daemon.connected }">
-        <span class="tile-label"><span class="dot" />{{ t("service.installation.daemonTile") }}</span>
-        <span class="tile-value">{{ t(daemon.connected ? "service.installation.connected" : "service.installation.offline") }}</span>
-        <span class="tile-sub">
-          <template v-if="daemon.info">{{ daemon.info.version }} · {{ t(DAEMON_MODE_LABELS[daemon.info.mode]) }} · </template>
-          <router-link to="/settings">{{ t("service.installation.serviceSettings") }}</router-link>
-        </span>
-      </div>
-      <div class="tile tile-passed">
-        <span class="tile-label"><Check :size="15" />{{ t("service.installation.passedTile") }}</span>
-        <span class="tile-value">{{ installation.report ? passedCount : "—" }}</span>
-      </div>
-    </div>
 
     <p v-if="!daemon.connected" class="hint">{{ t("service.installation.startServiceHint") }}</p>
 
@@ -185,112 +180,85 @@ p {
   margin: var(--space-2) 0;
   overflow-wrap: anywhere;
 }
-.hero {
+.status {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-6);
-  padding: 28px 32px;
-  border-radius: 32px;
+  gap: var(--space-3) var(--space-6);
+  padding: var(--space-3) 20px;
+  border-radius: 20px;
   background: var(--md-surface-container-high);
   color: var(--md-on-surface);
 }
-.hero-good {
+.status-good {
   background: var(--md-primary-container);
   color: var(--md-on-primary-container);
 }
-.hero-warning {
+.status-warning {
   background: color-mix(in srgb, var(--warning) 22%, var(--md-surface-container));
 }
-.hero-error {
+.status-error,
+.status-failed {
   background: color-mix(in srgb, var(--danger) 22%, var(--md-surface-container));
 }
-.hero-main {
+.status-main {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
 }
-.eyebrow {
-  align-self: flex-start;
-  padding: 4px 12px;
-  border-radius: 12px;
-  background: color-mix(in srgb, currentColor 14%, transparent);
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-.hero-headline {
+.headline {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .count {
   font-family: var(--font-display);
-  font-size: 56px;
+  font-size: 24px;
   font-weight: 600;
   line-height: 1;
 }
-.hero-warning .count {
+.status-warning .count {
   color: var(--warning);
 }
-.hero-error .count {
+.status-error .count,
+.status-failed .count {
   color: var(--danger);
 }
 .headline-text {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 18px;
   font-weight: 600;
 }
 .good-mark {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   background: var(--md-primary);
   color: var(--md-on-primary);
 }
-.hero-sub {
-  margin: 0;
-  font-size: 14px;
-  opacity: 0.8;
-}
-.hero-actions {
+.chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--space-3);
-}
-.tile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-4) 20px;
-  border-radius: 24px;
-}
-.tile-daemon {
-  background: var(--md-secondary-container);
-  color: var(--md-on-secondary-container);
-}
-.tile-passed {
-  background: var(--md-tertiary-container);
-  color: var(--md-on-tertiary-container);
-}
-.tile-label {
-  display: flex;
+.chip {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--font-size-sm);
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: var(--font-size-xs);
   font-weight: 600;
-  opacity: 0.9;
+}
+.chip.muted {
+  font-weight: 500;
+  opacity: 0.8;
 }
 .dot {
   width: 8px;
@@ -299,22 +267,19 @@ p {
   background: var(--success);
   box-shadow: 0 0 8px var(--success);
 }
-.tile-daemon.offline .dot {
+.daemon-chip.offline .dot {
   background: var(--danger);
   box-shadow: none;
 }
-.tile-value {
-  font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 600;
-  line-height: 1.15;
+.status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
-.tile-sub {
-  font-size: var(--font-size-sm);
-  opacity: 0.85;
-}
-.tile-sub a {
+.settings-link {
   color: inherit;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;

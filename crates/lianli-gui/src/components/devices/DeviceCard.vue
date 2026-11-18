@@ -13,6 +13,7 @@ import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { useIpc } from "@/composables/useIpc";
 import EditableName from "@/components/common/EditableName.vue";
 import HistorySparkline from "./HistorySparkline.vue";
+import { averageSpinningRpm } from "@/utils/telemetryHistory";
 import { fanQuantityKey, fanQuantityPort, stageFanQuantity } from "@/utils/fanQuantity";
 import {
   FAMILY_DISPLAY,
@@ -57,6 +58,7 @@ const fanRpmText = computed(() =>
   fanRpms.value.length ? fanRpms.value.join(", ") : "",
 );
 const rpmHistory = computed(() => devices.history[d.value.device_id]?.rpm ?? []);
+const currentRpm = computed(() => averageSpinningRpm(devices.fanSlotRpms(d.value, fanRpms.value)));
 const coolantHistory = computed(() => devices.history[d.value.device_id]?.coolant ?? []);
 const coolantText = computed(() =>
   coolant.value !== null ? `${coolant.value.toFixed(1)}\u00B0C` : "",
@@ -280,8 +282,8 @@ async function ping() {
 
     <div v-if="rpmHistory.length || coolantHistory.length" class="histories">
       <span class="histories-title">{{ t("devices.history.window") }}</span>
-      <HistorySparkline v-if="rpmHistory.length" :samples="rpmHistory" :label="t('devices.history.fanSpeed')" unit=" rpm" :digits="0" tone="rpm" />
-      <HistorySparkline v-if="coolantHistory.length" :samples="coolantHistory" :label="t('devices.history.coolant')" unit=" °C" :digits="1" tone="coolant" />
+      <HistorySparkline v-if="rpmHistory.length" :samples="rpmHistory" :current="currentRpm" :label="t('devices.history.fanSpeed')" unit=" rpm" :digits="0" tone="rpm" />
+      <HistorySparkline v-if="coolantHistory.length" :samples="coolantHistory" :current="coolant" :label="t('devices.history.coolant')" unit=" °C" :digits="1" tone="coolant" />
     </div>
 
     <div class="actions">

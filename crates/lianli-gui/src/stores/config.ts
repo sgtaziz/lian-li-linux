@@ -62,8 +62,10 @@ export const useConfigStore = defineStore("config", () => {
   const imported = ref<{ instance: string; originals: LcdTemplate[]; copies: LcdTemplate[] } | null>(null);
   const presets = ref<RgbPreset[]>([]);
   const pwmHeaders = ref<PwmHeader[]>([]);
+  let editRevision = 0;
 
   function markDirty() {
+    editRevision++;
     dirty.value = true;
     const page = router.currentRoute.value.name;
     if (typeof page === "string" && !dirtyPages.value.includes(page)) {
@@ -81,7 +83,7 @@ export const useConfigStore = defineStore("config", () => {
     imported.value = null;
   }
 
-  async function load() {
+  async function load(options: { keepDraft?: boolean } = {}) {
     const [cfg, caps, sens, tpls, pres, pwm] = await Promise.all([
       ipc.request<AppConfig | null>("GetConfig").catch(() => null),
       ipc.request<RgbDeviceCapabilities[]>("GetRgbCapabilities").catch(() => []),
@@ -90,7 +92,7 @@ export const useConfigStore = defineStore("config", () => {
       ipc.request<RgbPreset[]>("ListRgbPresets").catch(() => []),
       ipc.request<PwmHeader[]>("ListPwmHeaders").catch(() => []),
     ]);
-    if (cfg) replace(cfg);
+    if (cfg && !(options.keepDraft && dirty.value)) replace(cfg);
     rgbCaps.value = caps ?? [];
     sensors.value = sens ?? [];
     templates.value = tpls ?? [];
@@ -106,7 +108,8 @@ export const useConfigStore = defineStore("config", () => {
     templates.value = [...current.filter((item) => !ids.has(item.id)), ...JSON.parse(JSON.stringify(copies))];
   }
 
-  async function save() {
+  /** Resolves true when the draft is clean afterwards; false when edits arrived while saving. */
+  async function save(): Promise<boolean> {
     // Flush any pending debounced effect requests first.
     await Promise.all([...flushRegistry].map((fn) => fn()));
     const staged = imported.value;
@@ -121,15 +124,22 @@ export const useConfigStore = defineStore("config", () => {
       staged.originals = JSON.parse(JSON.stringify(staged.copies));
       await emit(LCD_TEMPLATES_CHANGED_EVENT);
     }
+    const sentRevision = editRevision;
+    const payload: AppConfig = JSON.parse(JSON.stringify(config));
     try {
-      await ipc.request("SetConfig", { config }, staged?.instance);
+      await ipc.request("SetConfig", { config: payload }, staged?.instance);
     } catch (error) {
       if (staged?.copies.length) throw new Error(tr("shell.config.lcdNotConfirmed", { error: String(error) }));
       throw error;
     }
+    if (sentRevision !== editRevision) {
+      savedLcds.value = payload.lcds;
+      return false;
+    }
     dirty.value = false;
     dirtyPages.value = [];
-    await load();
+    await load({ keepDraft: true });
+    return !dirty.value;
   }
 
   function stageImportedMedia(lcds: LcdConfig[], copies: LcdTemplate[], instance: string) {

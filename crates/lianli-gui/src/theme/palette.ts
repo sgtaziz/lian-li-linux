@@ -40,6 +40,26 @@ export function isHexColor(value: unknown): value is string {
   return typeof value === "string" && HEX.test(value);
 }
 
+export function normalizeHex(value: unknown): string | null {
+  const match = typeof value === "string" ? HEX.exec(value.trim()) : null;
+  return match ? `#${match[1].toLowerCase()}` : null;
+}
+
+function luminance(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  const linear = (channel: number) => {
+    const v = channel / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear((n >> 16) & 255) + 0.7152 * linear((n >> 8) & 255) + 0.0722 * linear(n & 255);
+}
+
+function toneUnderWhiteText(h: number, s: number, l: number): number {
+  let tone = l;
+  while (tone > 0 && 1.05 / (luminance(hsl(h, s, tone)) + 0.05) < 4.5) tone -= 1;
+  return tone;
+}
+
 function toHsl(hex: string): [number, number, number] {
   const match = HEX.exec(hex);
   const n = parseInt(match ? match[1] : DEFAULT_ACCENT.slice(1), 16);
@@ -118,8 +138,9 @@ export function buildPalette(accent: string, dark: boolean): Palette {
       tempHot: hsl(4, 85, 65),
     };
   }
+  const tone = toneUnderWhiteText(h, p * 0.9, 37);
   return {
-    primary: hsl(h, p * 0.9, 37),
+    primary: hsl(h, p * 0.9, tone),
     onPrimary: "#ffffff",
     primaryContainer: hsl(h, p, 89),
     onPrimaryContainer: hsl(h, p, 14),
@@ -140,8 +161,8 @@ export function buildPalette(accent: string, dark: boolean): Palette {
     outlineVariant: hsl(h, nv, 80),
     inverseSurface: hsl(h, n, 18),
     inverseOnSurface: hsl(h, n, 94),
-    primaryHover: hsl(h, p * 0.9, 32),
-    primaryPressed: hsl(h, p * 0.9, 27),
+    primaryHover: hsl(h, p * 0.9, tone - 5),
+    primaryPressed: hsl(h, p * 0.9, tone - 10),
     success: "#1e8a4c",
     warning: "#a35f00",
     danger: "#c4302b",

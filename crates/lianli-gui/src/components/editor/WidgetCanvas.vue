@@ -26,6 +26,7 @@ const effectiveH = computed(() => props.template.base_height);
 // The canvas stage fills the available space; we compute the largest
 // aspect-correct rectangle that fits inside it so the preview image and the
 // draggable widget boxes stay aligned regardless of window size.
+const FRAME_INSET = 12;
 const stageEl = ref<HTMLElement | null>(null);
 const boxW = ref(0);
 const boxH = ref(0);
@@ -34,8 +35,8 @@ let ro: ResizeObserver | null = null;
 function recompute() {
   const el = stageEl.value;
   if (!el) return;
-  const cw = el.clientWidth;
-  const ch = el.clientHeight;
+  const cw = el.clientWidth - 2 * FRAME_INSET;
+  const ch = el.clientHeight - 2 * FRAME_INSET;
   const ew = effectiveW.value;
   const eh = effectiveH.value;
   if (ew <= 0 || eh <= 0 || cw <= 0 || ch <= 0) {

@@ -1,8 +1,8 @@
 use crate::config::{AppConfig, LcdConfig};
 use crate::device_id::DeviceFamily;
 use crate::fan::FanConfig;
-use crate::rgb::{RgbAppConfig, RgbEffect};
-use crate::sensors::SensorCategory;
+use crate::rgb::{RgbAppConfig, RgbDeviceConfig, RgbEffect};
+use crate::sensors::{SensorCategory, SensorSource};
 use crate::template::catalog::CatalogTemplate;
 use crate::template::{LcdTemplate, SensorBindings};
 use serde::{Deserialize, Serialize};
@@ -224,6 +224,11 @@ pub enum IpcRequest {
         width: u32,
         height: u32,
     },
+    /// Returns an `RgbPreview` of how a device would play an unsaved config.
+    RenderRgbPreview {
+        device_id: String,
+        config: Box<RgbDeviceConfig>,
+    },
     Ping,
     GetDaemonInfo,
     GetInstallationHealth,
@@ -303,6 +308,7 @@ impl IpcRequest {
             | Self::GetLcdTemplates
             | Self::RenderTemplatePreview { .. }
             | Self::RenderSensorPreview { .. }
+            | Self::RenderRgbPreview { .. }
             | Self::Ping
             | Self::GetDaemonInfo
             | Self::GetInstallationHealth
@@ -687,7 +693,7 @@ pub struct TelemetrySnapshot {
     pub fan_rpms: HashMap<String, Vec<u16>>,
     /// Coolant temperatures keyed by device_id.
     pub coolant_temps: HashMap<String, f32>,
-    /// The reading the fan controller last used for each curve that drives a fan, keyed by curve name.
+    /// The reading the cooling controllers last used for each curve that drives a fan or pump, keyed by curve name.
     #[serde(default)]
     pub curve_temperatures: HashMap<String, CurveTemperature>,
     /// Whether the daemon is actively streaming frames to LCD devices.
@@ -703,11 +709,14 @@ pub struct TelemetrySnapshot {
     pub unresponsive_dongle: Option<WirelessDongle>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CurveTemperature {
     pub celsius: Option<f32>,
     /// Fans on this curve run at full speed because no valid reading is available.
     pub full_speed_fallback: bool,
+    /// The applied curve's effective sensor, so a reading is not paired with an unsaved source.
+    #[serde(default)]
+    pub source: Option<SensorSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { ChevronDown, ChevronUp } from "lucide-vue-next";
 import { useTranslate } from "@/i18n";
 
@@ -58,22 +58,30 @@ const textInvalid = computed(() => focused.value && parse(text.value) === null);
 
 function onInput(event: Event) {
   text.value = (event.target as HTMLInputElement).value;
-  const value = parse(text.value);
-  if (value !== null && value !== props.modelValue) emit("update:modelValue", value);
+}
+
+// Listeners read the new value from their props on commit, which Vue only refreshes after the update.
+function commitAfter(changed: boolean) {
+  if (changed) void nextTick(() => emit("commit"));
+  else emit("commit");
 }
 
 function onBlur() {
   focused.value = false;
+  const value = parse(text.value);
+  const changed = value !== null && value !== props.modelValue;
+  if (changed) emit("update:modelValue", value);
   text.value = format(props.modelValue);
-  emit("commit");
+  commitAfter(changed);
 }
 
 function stepBy(direction: 1 | -1) {
   const base = parse(text.value) ?? props.modelValue ?? props.min;
   const next = Math.min(props.max, Math.max(props.min, round(base + direction * props.step)));
+  const changed = next !== props.modelValue;
   text.value = format(next);
-  if (next !== props.modelValue) emit("update:modelValue", next);
-  if (!focused.value) emit("commit");
+  if (changed) emit("update:modelValue", next);
+  if (!focused.value) commitAfter(changed);
 }
 
 function onKeydown(event: KeyboardEvent) {

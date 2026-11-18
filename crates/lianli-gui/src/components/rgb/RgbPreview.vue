@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { RGB, RgbDeviceCapabilities, RgbDeviceConfig, RgbEffect } from "@/types";
-import { BRIGHTNESS_OFF } from "@/constants";
-import { previewLed } from "./previewColors";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import type { RgbDeviceCapabilities, RgbDeviceConfig, RgbPreview } from "@/types";
+import { useIpc } from "@/composables/useIpc";
+import { useRgbStore } from "@/stores/rgb";
 import { useTranslate } from "@/i18n";
 
 const props = defineProps<{
@@ -12,88 +12,194 @@ const props = defineProps<{
 }>();
 
 const t = useTranslate();
+const ipc = useIpc();
+const rgb = useRgbStore();
 
-const MAX_RING_LEDS = 24;
-const MAX_STRIP_LEDS = 30;
-const RING = 140;
-const RADIUS = 56;
+const ELEMENT_HEIGHT = 132;
+const GAP = 20;
+const LABEL_HEIGHT = 22;
+const PAD = 20;
 
-function effectFor(index: number): RgbEffect | null {
-  const regions = props.config.regions;
-  if (regions?.length) return regions[Math.min(index, regions.length - 1)].effect;
-  const zones = props.config.zones;
-  if (!zones.length) return null;
-  return zones[Math.min(index, zones.length - 1)].effect;
-}
+const preview = ref<RgbPreview | null>(null);
+const frames = ref<Uint8Array | null>(null);
+const error = ref("");
+const loading = ref(false);
+const root = ref<HTMLElement | null>(null);
+const canvas = ref<HTMLCanvasElement | null>(null);
+const width = ref(0);
 
-function ledStyle(effect: RgbEffect | null, i: number, n: number, group: number) {
-  if (props.mbSync || !effect || effect.disabled || effect.brightness === BRIGHTNESS_OFF) {
-    return { color: "#2a2a32", opacity: 1, glow: false };
-  }
-  const led = previewLed(effect.mode, effect.colors as RGB[], effect.brightness, i, n, group);
-  return { color: led.color, opacity: led.opacity, glow: led.opacity > 0.3 };
-}
+const caption = computed(() => {
+  if (props.mbSync) return t("rgb.preview.mbSync");
+  if (error.value) return error.value;
+  if (!preview.value) return loading.value ? t("rgb.preview.loading") : t("rgb.preview.unavailable");
+  return preview.value.fidelity === "exact" ? t("rgb.preview.caption") : t("rgb.preview.approximate");
+});
 
-const profile = computed(() => props.cap.render_profile ?? null);
-const showRings = computed(() => !!profile.value && profile.value.family !== "Strimer" && profile.value.fan_count > 0);
-
-const rings = computed(() => {
-  if (!showRings.value || !profile.value) return [];
-  const count = Math.min(profile.value.fan_count, 6);
-  const n = Math.min(Math.max(profile.value.led_count, 8), MAX_RING_LEDS);
-  return Array.from({ length: count }, (_, group) => {
-    const effect = effectFor(group);
-    const clockwise = effect?.direction !== "CounterClockwise";
-    const leds = Array.from({ length: n }, (_, i) => {
-      const angle = (clockwise ? 1 : -1) * (i / n) * Math.PI * 2 - Math.PI / 2;
-      const style = ledStyle(effect, i, n, group);
-      return { x: RING / 2 + RADIUS * Math.cos(angle) - 5, y: RING / 2 + RADIUS * Math.sin(angle) - 5, ...style };
-    });
-    return { leds, label: t("rgb.preview.fan", { index: group + 1 }) };
+const boxes = computed(() => {
+  const elements = preview.value?.elements ?? [];
+  const natural = elements.reduce((sum, element) => sum + element.aspect * ELEMENT_HEIGHT, 0) + GAP * Math.max(0, elements.length - 1);
+  const room = width.value - 2 * PAD;
+  const scale = natural > 0 && room > 0 ? Math.min(1, room / natural) : 1;
+  const height = ELEMENT_HEIGHT * scale;
+  let x = 0;
+  return elements.map((element) => {
+    const box = { x, width: element.aspect * height, height, shape: element.shape };
+    x += box.width + GAP * scale;
+    return box;
   });
 });
 
-const strips = computed(() => {
-  if (showRings.value) return [];
-  return props.cap.zones.slice(0, 8).map((zone, index) => {
-    const effect = effectFor(index);
-    const n = Math.min(Math.max(zone.led_count, 1), MAX_STRIP_LEDS);
-    const leds = Array.from({ length: n }, (_, i) => ledStyle(effect, i, n, index));
-    return { leds, label: zone.name };
+const labels = computed(() => {
+  let fan = 0;
+  return boxes.value.map((box) => {
+    if (box.shape === "fan") return t("rgb.preview.fan", { index: ++fan });
+    if (box.shape === "pump") return t("rgb.preview.pump");
+    return "";
   });
+});
+
+let request = 0;
+let debounce: ReturnType<typeof setTimeout> | undefined;
+async function load() {
+  const id = ++request;
+  loading.value = true;
+  try {
+    const result = await ipc.request<RgbPreview | null>("RenderRgbPreview", { device_id: props.cap.device_id, config: props.config });
+    if (id !== request) return;
+    error.value = "";
+    preview.value = result;
+    frames.value = result ? Uint8Array.from(atob(result.frames), (c) => c.charCodeAt(0)) : null;
+  } catch (e) {
+    if (id !== request) return;
+    preview.value = null;
+    frames.value = null;
+    error.value = String(e);
+  } finally {
+    if (id === request) loading.value = false;
+  }
+}
+
+watch(
+  () => [props.cap.device_id, props.mbSync, rgb.directEdits, JSON.stringify(props.config)],
+  () => {
+    clearTimeout(debounce);
+    if (props.mbSync) return;
+    debounce = setTimeout(() => void load(), 200);
+  },
+  { immediate: true },
+);
+
+let shown = -1;
+function draw(index: number) {
+  const el = canvas.value;
+  const data = frames.value;
+  const layout = preview.value;
+  if (!el || !layout || !data) return;
+  const ratio = window.devicePixelRatio || 1;
+  const height = (boxes.value[0]?.height ?? ELEMENT_HEIGHT) + LABEL_HEIGHT + 2 * PAD;
+  const total = boxes.value.reduce((end, box) => Math.max(end, box.x + box.width), 0) + 2 * PAD;
+  if (el.width !== Math.round(total * ratio) || el.height !== Math.round(height * ratio)) {
+    el.width = Math.round(total * ratio);
+    el.height = Math.round(height * ratio);
+    el.style.width = `${total}px`;
+    el.style.height = `${height}px`;
+  }
+  const ctx = el.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, total, height);
+  ctx.translate(PAD, PAD);
+  for (const box of boxes.value) {
+    ctx.fillStyle = "#16161d";
+    ctx.beginPath();
+    if (box.shape === "pump") ctx.arc(box.x + box.width / 2, box.height / 2, box.height / 2, 0, Math.PI * 2);
+    else ctx.roundRect(box.x, 0, box.width, box.height, Math.min(18, box.height / 5));
+    ctx.fill();
+  }
+  const perFrame = layout.leds.length * 3;
+  const offset = (index % layout.frame_count) * perFrame;
+  const size = Math.max(2.5, Math.min(6, (boxes.value[0]?.height ?? ELEMENT_HEIGHT) / 26));
+  layout.leds.forEach((led, i) => {
+    const box = boxes.value[led.element];
+    if (!box) return;
+    const [r, g, b] = [data[offset + i * 3], data[offset + i * 3 + 1], data[offset + i * 3 + 2]];
+    const x = box.x + led.x * box.width;
+    const y = led.y * box.height;
+    const lit = r + g + b > 24;
+    ctx.shadowBlur = lit ? size * 2.5 : 0;
+    ctx.shadowColor = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillStyle = lit ? `rgb(${r}, ${g}, ${b})` : "#2a2a32";
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "rgba(232, 232, 238, 0.75)";
+  ctx.font = "600 12px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  boxes.value.forEach((box, i) => {
+    if (labels.value[i]) ctx.fillText(labels.value[i], box.x + box.width / 2, box.height + 16);
+  });
+}
+
+let raf = 0;
+let started = 0;
+let visible = true;
+function tick(now: number) {
+  raf = 0;
+  const layout = preview.value;
+  if (!layout || !visible || document.hidden) return;
+  if (!started) started = now;
+  const index = layout.frame_count > 1 ? Math.floor((now - started) / Math.max(1, layout.interval_ms)) % layout.frame_count : 0;
+  if (index !== shown) {
+    shown = index;
+    draw(index);
+  }
+  if (layout.frame_count > 1) raf = requestAnimationFrame(tick);
+}
+
+function restart() {
+  if (raf) cancelAnimationFrame(raf);
+  shown = -1;
+  started = 0;
+  raf = requestAnimationFrame(tick);
+}
+
+watch([preview, boxes], restart);
+
+let observer: IntersectionObserver | undefined;
+let resize: ResizeObserver | undefined;
+function onVisibility() {
+  if (!document.hidden) restart();
+}
+onMounted(() => {
+  if (!root.value) return;
+  observer = new IntersectionObserver(([entry]) => {
+    visible = entry?.isIntersecting ?? true;
+    if (visible) restart();
+  });
+  observer.observe(root.value);
+  resize = new ResizeObserver(([entry]) => {
+    width.value = Math.max(0, (entry?.contentRect.width ?? 0));
+  });
+  resize.observe(root.value);
+  document.addEventListener("visibilitychange", onVisibility);
+});
+onUnmounted(() => {
+  request += 1;
+  clearTimeout(debounce);
+  if (raf) cancelAnimationFrame(raf);
+  observer?.disconnect();
+  resize?.disconnect();
+  document.removeEventListener("visibilitychange", onVisibility);
 });
 </script>
 
 <template>
-  <div class="preview" role="img" :aria-label="t('rgb.preview.label')">
-    <span class="caption">{{ mbSync ? t("rgb.preview.mbSync") : t("rgb.preview.caption") }}</span>
-    <div v-if="showRings" class="rings">
-      <div v-for="(ring, r) in rings" :key="r" class="ring-wrap">
-        <div class="ring">
-          <span
-            v-for="(led, i) in ring.leds"
-            :key="i"
-            class="led"
-            :class="{ glow: led.glow }"
-            :style="{ left: `${led.x}px`, top: `${led.y}px`, background: led.color, opacity: led.opacity, color: led.color }"
-          />
-        </div>
-        <span class="ring-label">{{ ring.label }}</span>
-      </div>
-    </div>
-    <div v-else class="strips">
-      <div v-for="(strip, s) in strips" :key="s" class="strip-row">
-        <span class="strip-label">{{ strip.label }}</span>
-        <div class="strip">
-          <span
-            v-for="(led, i) in strip.leds"
-            :key="i"
-            class="led inline"
-            :class="{ glow: led.glow }"
-            :style="{ background: led.color, opacity: led.opacity, color: led.color }"
-          />
-        </div>
-      </div>
+  <div class="preview">
+    <span class="caption" role="status">{{ caption }}</span>
+    <div ref="root" class="stage" role="img" :aria-label="t('rgb.preview.label')">
+      <canvas v-show="preview && !mbSync" ref="canvas" />
     </div>
   </div>
 </template>
@@ -101,9 +207,7 @@ const strips = computed(() => {
 <style scoped>
 .preview {
   position: relative;
-  display: flex;
-  justify-content: center;
-  padding: 44px var(--space-6) var(--space-6);
+  padding: 28px var(--space-2) var(--space-1);
   border-radius: 24px;
   background: #0b0b10;
   color: #e8e8ee;
@@ -112,73 +216,16 @@ const strips = computed(() => {
   position: absolute;
   top: 14px;
   left: 16px;
+  max-width: calc(100% - 32px);
   padding: 4px 12px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.09);
   font-size: var(--font-size-xs);
   font-weight: 600;
 }
-.rings {
+.stage {
   display: flex;
-  flex-wrap: wrap;
   justify-content: center;
-  gap: var(--space-6);
-}
-.ring-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-}
-.ring {
-  position: relative;
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
-  background: #15151b;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-}
-.ring-label,
-.strip-label {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: #b9b9c4;
-}
-.led {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-.led.inline {
-  position: static;
-  flex-shrink: 0;
-}
-.led.glow {
-  box-shadow: 0 0 10px 2px currentColor;
-}
-.strips {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  max-width: 100%;
-}
-.strip-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-.strip-label {
-  width: 80px;
-  flex-shrink: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.strip {
-  display: flex;
-  gap: 6px;
-  overflow: hidden;
+  min-height: 24px;
 }
 </style>

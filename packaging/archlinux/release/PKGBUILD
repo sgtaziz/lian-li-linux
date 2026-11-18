@@ -8,8 +8,7 @@ url="https://github.com/sgtaziz/lian-li-linux"
 license=('MIT' 'GPL-2.0-only WITH Linux-syscall-note')
 depends=('cairo' 'dbus' 'ffmpeg' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'libgcc' 'libsoup3'
          'libstdc++' 'libusb' 'systemd-libs' 'webkit2gtk-4.1')
-optdepends=('evdi-dkms: EVDI desktop mode (userspace library and kernel module)' 'polkit: administrator authorization for service mode switching'
-            'libayatana-appindicator: system tray icon')
+optdepends=('evdi-dkms: EVDI desktop mode (userspace library and kernel module)' 'polkit: administrator authorization for service mode switching')
 makedepends=('cargo' 'clang' 'cmake' 'nasm' 'npm')
 conflicts=('lianli-linux-git')
 # Submodule commits referenced by the v$pkgver tag; GitHub tag archives omit them.

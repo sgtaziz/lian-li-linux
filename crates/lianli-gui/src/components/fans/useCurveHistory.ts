@@ -1,13 +1,20 @@
-import { computed, shallowRef } from "vue";
+import { computed, shallowRef, watch } from "vue";
 import type { FanCurve } from "@/types";
 import type { CurvePoint } from "./curvePoints";
 
 const MAX_STEPS = 50;
-const MERGE_WINDOW_MS = 600;
+
+let lastGesture = 0;
+
+/** Identifies one press-to-release edit, so all of its updates undo as one step. */
+export function newCurveGesture(): number {
+  lastGesture += 1;
+  return lastGesture;
+}
 
 interface Step {
   curve: FanCurve;
-  name: string;
+  gesture: number | null;
   before: CurvePoint[];
   after: CurvePoint[];
 }
@@ -16,37 +23,33 @@ function copy(points: CurvePoint[]): CurvePoint[] {
   return points.map(([temp, speed]) => [temp, speed]);
 }
 
-/**
- * Undo and redo for curve points. Edits to the same curve that arrive within
- * MERGE_WINDOW_MS of each other form one step, so a drag undoes in one go.
- */
 export function useCurveHistory(curves: () => FanCurve[], onRestore: () => void) {
   const undoStack = shallowRef<Step[]>([]);
   const redoStack = shallowRef<Step[]>([]);
-  let lastEditAt = 0;
 
-  function record(curve: FanCurve, before: CurvePoint[], after: CurvePoint[]) {
-    const now = Date.now();
+  // A reloaded configuration holds new curve objects, so earlier steps no longer apply.
+  watch(curves, () => {
+    undoStack.value = [];
+    redoStack.value = [];
+  });
+
+  function record(curve: FanCurve, before: CurvePoint[], after: CurvePoint[], gesture: number | null = null) {
     const last = undoStack.value[undoStack.value.length - 1];
-    if (last && last.curve === curve && now - lastEditAt < MERGE_WINDOW_MS) {
+    if (gesture !== null && last && last.curve === curve && last.gesture === gesture) {
       undoStack.value = [...undoStack.value.slice(0, -1), { ...last, after: copy(after) }];
     } else {
-      undoStack.value = [...undoStack.value, { curve, name: curve.name, before: copy(before), after: copy(after) }].slice(-MAX_STEPS);
+      undoStack.value = [...undoStack.value, { curve, gesture, before: copy(before), after: copy(after) }].slice(-MAX_STEPS);
     }
     redoStack.value = [];
-    lastEditAt = now;
   }
 
   function move(from: typeof undoStack, to: typeof undoStack, pick: (step: Step) => CurvePoint[]) {
     while (from.value.length) {
       const step = from.value[from.value.length - 1];
       from.value = from.value.slice(0, -1);
-      const list = curves();
-      const target = list.find((curve) => curve === step.curve) ?? list.find((curve) => curve.name === step.name);
-      if (!target) continue;
-      target.curve = copy(pick(step));
-      to.value = [...to.value, { ...step, curve: target, name: target.name }];
-      lastEditAt = 0;
+      if (!curves().includes(step.curve)) continue;
+      step.curve.curve = copy(pick(step));
+      to.value = [...to.value, { ...step, gesture: null }];
       onRestore();
       return;
     }

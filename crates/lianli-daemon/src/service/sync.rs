@@ -1,7 +1,7 @@
 use super::ServiceManager;
 use lianli_devices::detect::{enumerate_devices, probe_tl_lcd_port_indices};
 use lianli_shared::device_id::DeviceFamily;
-use lianli_shared::ipc::DeviceInfo;
+use lianli_shared::ipc::{CurveTemperature, DeviceInfo};
 use lianli_shared::screen::screen_info_for;
 use lianli_shared::ui_message::{UiMessage, UiText};
 use std::collections::{HashMap, HashSet};
@@ -540,12 +540,18 @@ impl ServiceManager {
         );
 
         let desktop_streams = self.desktop_displays.statuses();
-        let curve_temperatures = self
-            .controllers
-            .fan
-            .as_ref()
-            .map(|fan| fan.curve_temperatures())
-            .unwrap_or_default();
+        let curve_temperatures = merge_curve_temperatures(
+            self.controllers
+                .fan
+                .as_ref()
+                .map(|fan| fan.curve_temperatures())
+                .unwrap_or_default(),
+            self.controllers
+                .aio
+                .as_ref()
+                .map(|aio| aio.curve_temperatures())
+                .unwrap_or_default(),
+        );
         {
             let mut ipc_state = self.ipc.state.lock();
             for (index, status) in &mut ipc_state.telemetry.media_preparation {
@@ -563,6 +569,21 @@ impl ServiceManager {
             ipc_state.devices = devices;
         }
     }
+}
+
+fn merge_curve_temperatures(
+    mut fans: HashMap<String, CurveTemperature>,
+    aio: HashMap<String, CurveTemperature>,
+) -> HashMap<String, CurveTemperature> {
+    for (name, reading) in aio {
+        fans.entry(name)
+            .and_modify(|merged| {
+                merged.full_speed_fallback |= reading.full_speed_fallback;
+                merged.celsius = merged.celsius.or(reading.celsius);
+            })
+            .or_insert(reading);
+    }
+    fans
 }
 
 fn base_of_port_suffix(device_id: &str) -> &str {
@@ -638,6 +659,23 @@ fn with_pump_rpm(mut rpms: Vec<u16>, fan_count: u8, pump: Option<u16>) -> Vec<u1
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aio_only_and_aio_lost_curves_reach_the_gui() {
+        let reading = |celsius, full_speed_fallback| CurveTemperature {
+            celsius,
+            full_speed_fallback,
+            source: None,
+        };
+        let fans = HashMap::from([("shared".to_string(), reading(Some(55.0), false))]);
+        let aio = HashMap::from([
+            ("shared".to_string(), reading(None, true)),
+            ("pump".to_string(), reading(Some(40.0), false)),
+        ]);
+        let merged = merge_curve_temperatures(fans, aio);
+        assert_eq!(merged["shared"], reading(Some(55.0), true));
+        assert_eq!(merged["pump"], reading(Some(40.0), false));
+    }
 
     #[test]
     fn pump_telemetry_occupies_its_own_slot_even_without_fans() {

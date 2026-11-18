@@ -18,12 +18,23 @@ const { saving, save } = useSaveConfig();
 const closeAsked = ref(false);
 let closeConfirmed = false;
 let quitAfterClose = false;
+let closeRequest = 0;
 let unlistenClose: UnlistenFn | undefined;
+
+// Fields such as curve names commit on blur, so the shortcut must flush them before saving.
+function commitActiveField() {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) return;
+  active.blur();
+  active.focus();
+}
 
 function onKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    if (!event.repeat) void save();
+    if (event.repeat) return;
+    commitActiveField();
+    void save();
   }
 }
 
@@ -31,8 +42,14 @@ async function closeWindow() {
   closeConfirmed = true;
   closeAsked.value = false;
   try {
-    if (quitAfterClose) await tray.quit();
-    else await getCurrentWindow().destroy();
+    if (!quitAfterClose) {
+      await getCurrentWindow().destroy();
+      return;
+    }
+    // Resolving means the exit was deferred, for example to an editor with its own unsaved draft.
+    await tray.quit();
+    closeConfirmed = false;
+    quitAfterClose = false;
   } catch {
     closeConfirmed = false;
   }
@@ -62,12 +79,15 @@ async function quitFromTray() {
 }
 
 function cancelClose() {
+  closeRequest++;
   closeAsked.value = false;
   quitAfterClose = false;
 }
 
 async function saveAndClose() {
-  if (await save()) await closeWindow();
+  const request = ++closeRequest;
+  if (config.dirty && !(await save())) return;
+  if (request === closeRequest && closeAsked.value) await closeWindow();
 }
 
 watch(() => tray.quitRequested, () => void quitFromTray());

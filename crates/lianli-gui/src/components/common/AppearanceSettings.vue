@@ -3,7 +3,7 @@ import { computed } from "vue";
 import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import { useThemeStore, type ThemePreference } from "@/stores/theme";
 import { useTrayStore, type TrayIconStyle } from "@/stores/tray";
-import { DEFAULT_ACCENT, isHexColor } from "@/theme/palette";
+import { DEFAULT_ACCENT } from "@/theme/palette";
 import { useTranslate } from "@/i18n";
 
 const theme = useThemeStore();
@@ -46,8 +46,7 @@ const roles = computed(() => [
 ]);
 
 function onCustomPicked(value: string) {
-  const hex = value.slice(0, 7);
-  if (isHexColor(hex)) theme.setCustomAccent(hex);
+  theme.setCustomAccent(value.slice(0, 7));
 }
 </script>
 
@@ -92,7 +91,7 @@ function onCustomPicked(value: string) {
         :model-value="tray.iconStyle"
         :options="trayIconOptions"
         :label="t('settings.tray.icon')"
-        :disabled="!tray.available"
+        :disabled="!tray.available || !tray.closeToTray"
         @update:model-value="(v: TrayIconStyle) => tray.setIconStyle(v)"
       />
     </div>
@@ -143,14 +142,25 @@ function onCustomPicked(value: string) {
           />
           <n-color-picker
             class="picker"
-            :style="{ width: '128px' }"
             size="small"
             :value="theme.customAccent"
             :modes="['hex']"
             :show-alpha="false"
-            :aria-label="t('settings.appearance.pickColor')"
             @update:value="onCustomPicked"
-          />
+          >
+            <template #trigger="{ onClick, ref: setTriggerRef }">
+              <button
+                :ref="setTriggerRef"
+                type="button"
+                class="picker-trigger"
+                :aria-label="t('settings.appearance.pickColor')"
+                @click="onClick"
+              >
+                <span class="swatch small" :style="{ background: theme.customAccent }" />
+                <span class="picker-hex">{{ theme.customAccent }}</span>
+              </button>
+            </template>
+          </n-color-picker>
         </div>
       </div>
     </div>
@@ -305,6 +315,35 @@ button.option {
 }
 .picker {
   flex: 0 0 auto;
+}
+.swatch.small {
+  width: 22px;
+  height: 22px;
+  cursor: inherit;
+}
+.picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3) 0 5px;
+  border: 1px solid var(--md-outline);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--md-on-surface);
+  font: inherit;
+  cursor: pointer;
+}
+.picker-trigger:hover {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+.picker-trigger:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+.picker-hex {
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .preview {
   display: flex;

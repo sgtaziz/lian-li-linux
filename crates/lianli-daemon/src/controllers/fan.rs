@@ -1,6 +1,8 @@
 #[cfg(test)]
 use super::cooling::TEMPERATURE_GRACE;
-use super::cooling::{curve_sources, FirstSamples, TemperatureState};
+use super::cooling::{
+    current_curve_temperatures, curve_sources, mark_evaluated, FirstSamples, TemperatureState,
+};
 use crate::service::suspend::ResumeWatch;
 use crate::service::DaemonEvent;
 use lianli_devices::traits::FanDevice;
@@ -114,32 +116,12 @@ struct FanControlInputs {
     curve_temperatures: Arc<Mutex<HashMap<String, CurveTemperature>>>,
 }
 
-/// Curves whose sensor the controller does not sample are omitted, so callers can tell
-/// an unused curve from one that has lost its reading.
-fn current_curve_temperatures(
-    curves: &HashMap<String, FanCurve>,
-    temperatures: &HashMap<SensorSource, TemperatureState>,
-) -> HashMap<String, CurveTemperature> {
-    curves
-        .iter()
-        .filter_map(|(name, curve)| {
-            let state = temperatures.get(&curve.effective_source())?;
-            Some((
-                name.clone(),
-                CurveTemperature {
-                    celsius: state.current,
-                    full_speed_fallback: state.fallback,
-                },
-            ))
-        })
-        .collect()
-}
-
 #[derive(Default)]
 struct FanSensors {
     resolved: HashMap<SensorSource, ResolvedSensor>,
     commands: sensors::CommandSampler,
     missing_curves: HashMap<String, TemperatureState>,
+    evaluated_curves: HashSet<String>,
 }
 
 fn fan_control_thread(inputs: FanControlInputs) {
@@ -313,6 +295,8 @@ fn fan_control_thread(inputs: FanControlInputs) {
 
         if resume_watch.resumed() {
             first_samples = FirstSamples::new(sampled_sources(), now);
+            temperatures.clear();
+            curve_temperatures.lock().clear();
         }
         let samples_arrived = first_samples.waiting()
             && first_samples.refresh(now, |source| {
@@ -329,6 +313,7 @@ fn fan_control_thread(inputs: FanControlInputs) {
 
         let tick_start = Instant::now();
         last_update = tick_start;
+        sensor_cache.evaluated_curves.clear();
 
         let mut wireless_pwm_changed = false;
 
@@ -495,7 +480,9 @@ fn fan_control_thread(inputs: FanControlInputs) {
             thread::sleep(Duration::from_millis(5));
         }
 
-        *curve_temperatures.lock() = current_curve_temperatures(&curves, &temperatures);
+        let published =
+            current_curve_temperatures(&sensor_cache.evaluated_curves, &curves, &temperatures);
+        *curve_temperatures.lock() = published;
 
         // Re-apply RGB immediately if wireless fan PWM changed, to prevent
         // the ~1s rainbow flicker caused by RF fan packets interrupting the
@@ -638,6 +625,7 @@ fn calculate_fan_speeds(
                     continue;
                 };
 
+                mark_evaluated(&mut sensor_cache.evaluated_curves, curve_name);
                 let source = curve.effective_source();
                 let state = temperatures.entry(source.clone()).or_default();
                 if state.checked_at != Some(hysteresis.now) {
@@ -822,47 +810,61 @@ mod sync_tests {
     }
 
     #[test]
-    fn curve_temperatures_report_readings_and_fallback_for_sampled_curves_only() {
-        let sensor = |label: &str| SensorSource::Hwmon {
-            name: "test".into(),
-            label: label.into(),
+    fn only_assigned_curves_publish_a_lost_shared_sensor() {
+        let source = SensorSource::Hwmon {
+            name: "lianli-nonexistent-test-sensor".into(),
+            label: "shared".into(),
             device_path: String::new(),
         };
-        let curve = |name: &str, source: SensorSource| FanCurve {
+        let curve = |name: &str| FanCurve {
             name: name.into(),
-            temp_source: Some(source),
+            temp_source: Some(source.clone()),
             temp_command: String::new(),
             curve: vec![(20.0, 20.0), (100.0, 100.0)],
         };
         let curves = HashMap::from([
-            ("cpu".to_string(), curve("cpu", sensor("cpu"))),
-            ("lost".to_string(), curve("lost", sensor("lost"))),
-            ("unused".to_string(), curve("unused", sensor("unused"))),
+            ("quiet".to_string(), curve("quiet")),
+            ("silent".to_string(), curve("silent")),
+            ("boost".to_string(), curve("boost")),
         ]);
-        let now = Instant::now();
-        let mut reading = TemperatureState::default();
-        reading.update(Some(58.0), now);
-        let mut lost = TemperatureState::default();
-        lost.update(None, now);
-        let temperatures = HashMap::from([(sensor("cpu"), reading), (sensor("lost"), lost)]);
-
-        let published = current_curve_temperatures(&curves, &temperatures);
-
-        assert_eq!(
-            published.get("cpu"),
-            Some(&CurveTemperature {
-                celsius: Some(58.0),
-                full_speed_fallback: false
-            })
+        let speeds = [
+            FanSpeed::Curve("quiet".into()),
+            FanSpeed::Curve("silent".into()),
+            FanSpeed::Curve("quiet".into()),
+            FanSpeed::Constant(0),
+        ];
+        let mut sensor_cache = FanSensors::default();
+        let mut temperatures = HashMap::new();
+        calculate_fan_speeds(
+            &speeds,
+            &curves,
+            &mut sensor_cache,
+            &mut temperatures,
+            &[],
+            FanHysteresis {
+                previous: None,
+                temperature: 0.0,
+                pwm: 0,
+                now: Instant::now(),
+            },
+            &HashMap::new(),
         );
+
+        let published =
+            current_curve_temperatures(&sensor_cache.evaluated_curves, &curves, &temperatures);
+
+        let lost = CurveTemperature {
+            celsius: None,
+            full_speed_fallback: true,
+            source: Some(source.clone()),
+        };
         assert_eq!(
-            published.get("lost"),
-            Some(&CurveTemperature {
-                celsius: None,
-                full_speed_fallback: true
-            })
+            published,
+            HashMap::from([
+                ("quiet".to_string(), lost.clone()),
+                ("silent".to_string(), lost)
+            ])
         );
-        assert!(!published.contains_key("unused"));
     }
 
     #[test]

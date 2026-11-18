@@ -22,6 +22,7 @@ const t = useTranslate();
 
 const stringValue = computed<string>(() => toCss(props.modelValue, props.alpha));
 let valueWhenOpened = "";
+let open = false;
 
 function toCss(c: RGB | RGBA | null, alpha: boolean): string {
   if (!c) return alpha ? "#00000000" : "#000000";
@@ -51,6 +52,8 @@ function onUpdate(value: string) {
 }
 
 function onShow(show: boolean) {
+  if (show === open) return;
+  open = show;
   if (show) {
     valueWhenOpened = stringValue.value;
   } else if (stringValue.value !== valueWhenOpened) {
@@ -58,7 +61,7 @@ function onShow(show: boolean) {
   }
 }
 
-function pickRecent(hex: string) {
+function pickSwatch(hex: string) {
   const alphaSuffix = props.alpha ? stringValue.value.slice(7, 9) || "ff" : "";
   onUpdate(hex + alphaSuffix);
 }
@@ -71,7 +74,6 @@ function pickRecent(hex: string) {
       :value="stringValue"
       :show-alpha="alpha"
       :modes="['hex']"
-      :swatches="PRESET_COLORS"
       :disabled="disabled"
       size="small"
       @update:value="onUpdate"
@@ -90,21 +92,35 @@ function pickRecent(hex: string) {
           <span class="cp-hex">{{ stringValue }}</span>
         </button>
       </template>
-      <template v-if="recentColors.length" #action>
+      <template #action>
         <div class="cp-recent">
-          <span class="cp-recent-label">{{ t("rgb.colorPicker.recent") }}</span>
-          <div class="cp-recent-list">
+          <div class="cp-recent-list" role="group" :aria-label="t('rgb.colorPicker.presets')">
             <button
-              v-for="hex in recentColors"
+              v-for="hex in PRESET_COLORS"
               :key="hex"
               type="button"
               class="cp-recent-swatch"
               :style="{ background: hex }"
-              :aria-label="hex"
+              :aria-label="t('rgb.colorPicker.use', { color: hex })"
               :title="hex"
-              @click="pickRecent(hex)"
+              @click="pickSwatch(hex)"
             />
           </div>
+          <template v-if="recentColors.length">
+            <span class="cp-recent-label">{{ t("rgb.colorPicker.recent") }}</span>
+            <div class="cp-recent-list">
+              <button
+                v-for="hex in recentColors"
+                :key="hex"
+                type="button"
+                class="cp-recent-swatch"
+                :style="{ background: hex }"
+                :aria-label="t('rgb.colorPicker.use', { color: hex })"
+                :title="hex"
+                @click="pickSwatch(hex)"
+              />
+            </div>
+          </template>
         </div>
       </template>
     </n-color-picker>

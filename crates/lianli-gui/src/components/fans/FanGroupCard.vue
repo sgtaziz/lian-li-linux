@@ -194,10 +194,11 @@ function slotCurveFailing(slot: number): boolean {
   return mode.startsWith("curve:") && failingCurves.value.has(mode.slice("curve:".length));
 }
 
-function kindValue(kind: ModeKind, slot: number): string {
+function kindValue(kind: ModeKind, slot: number): string | null {
   if (kind === "curve") {
     const current = modeOf(slot);
-    return current.startsWith("curve:") ? current : `curve:${props.curveNames[0]}`;
+    if (current.startsWith("curve:") && props.curveNames.includes(current.slice("curve:".length))) return current;
+    return props.curveNames.length ? `curve:${props.curveNames[0]}` : null;
   }
   if (kind === "fixed") return "constant";
   if (kind === "mb") return MB_SYNC_KEY;
@@ -206,11 +207,13 @@ function kindValue(kind: ModeKind, slot: number): string {
 
 function onKind(slot: number, kind: ModeKind) {
   if (kindOf(modeOf(slot)) === kind) return;
-  onMode(slot, kindValue(kind, slot));
+  const value = kindValue(kind, slot);
+  if (value) onMode(slot, value);
 }
 
 function onAllKind(kind: ModeKind) {
-  onAllModes(kindValue(kind, 0));
+  const value = kindValue(kind, 0);
+  if (value) onAllModes(value);
 }
 </script>
 
@@ -299,7 +302,7 @@ function onAllKind(kind: ModeKind) {
           <span v-else-if="modeOf(slot - 1) === MB_SYNC_KEY" class="detail-text">
             {{ device.mb_sync_support ? t("fans.groupCard.mbFollowing") : t("fans.groupCard.mbFollowingSource") }}
           </span>
-          <span v-else class="detail-text">{{ t("fans.groupCard.stopped") }}</span>
+          <span v-else class="detail-text">{{ t("fans.groupCard.deviceControlled") }}</span>
         </div>
       </div>
       <p v-if="groupIsMbSync() && visibleSlots > 1" class="port-wide">{{ t("fans.groupCard.mbPortWide") }}</p>

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RefreshCw, Download, CheckCircle, AlertCircle, Loader2, X, ExternalLink } from "lucide-vue-next";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useExternalLink } from "@/composables/useExternalLink";
 import { getVersion } from "@tauri-apps/api/app";
-import type { CatalogManifest, CatalogTemplate, LcdTemplate, SensorBindings, SensorCategory, SensorInfo } from "@/types";
+import type { CatalogManifest, CatalogTemplate, DeviceInfo, LcdTemplate, SensorBindings, SensorCategory, SensorInfo } from "@/types";
+import SegmentedControl from "@/components/common/SegmentedControl.vue";
+import { screenPresets } from "@/constants/screen";
 import { useConfigStore } from "@/stores/config";
 import { useLcdStore, LCD_TEMPLATES_CHANGED_EVENT, type CatalogInstallStatus } from "@/stores/lcd";
 import { emit } from "@tauri-apps/api/event";
@@ -53,7 +55,72 @@ const preparingId = ref("");
 const bindingRequest = ref<SensorBindingRequest | null>(null);
 let bindingEntry: CatalogTemplate | null = null;
 
+type RotationFilter = "all" | "upright" | "rotated";
+
+const screens = ref<DeviceInfo[]>([]);
+const sizeFilter = ref<string | null>(null);
+const rotationFilter = ref<RotationFilter>("all");
+
+function sizeKey(width = 0, height = 0): string {
+  return `${Math.max(width, height)}x${Math.min(width, height)}`;
+}
+
+const sizeOptions = computed(() => {
+  const keys = new Set(templates.value.filter((tpl) => tpl.base_width && tpl.base_height).map((tpl) => sizeKey(tpl.base_width, tpl.base_height)));
+  return [...keys].sort().map((key) => {
+    const [long, short] = key.split("x");
+    const owners = [
+      ...screenPresets
+        .filter((preset) => sizeKey(preset.width, preset.height) === key)
+        .flatMap((preset) => preset.label.replace(/\s*\(.*\)$/, "").split(" / ")),
+      ...screens.value
+        .filter((device) => device.screen_width && device.screen_height && sizeKey(device.screen_width, device.screen_height) === key)
+        .map((device) => device.name),
+    ];
+    const size = `${long}×${short}`;
+    return { value: key, label: owners.length ? t("editor.browser.sizeForDevices", { size, devices: [...new Set(owners)].join(", ") }) : size };
+  });
+});
+
+const rotationOptions = computed(() => [
+  { value: "all" as const, label: t("editor.browser.rotationAll") },
+  { value: "upright" as const, label: t("editor.browser.rotationUpright") },
+  { value: "rotated" as const, label: t("editor.browser.rotated") },
+]);
+
+const visibleTemplates = computed(() =>
+  templates.value.filter((tpl) =>
+    (!sizeFilter.value || sizeKey(tpl.base_width, tpl.base_height) === sizeFilter.value)
+    && (rotationFilter.value === "all" || !!tpl.rotated === (rotationFilter.value === "rotated")),
+  ),
+);
+
+const selectedVariant = ref<Record<string, string>>({});
+
+const cards = computed(() => {
+  const groups = new Map<string, CatalogTemplate[]>();
+  for (const tpl of visibleTemplates.value) {
+    const key = tpl.group || tpl.id;
+    groups.set(key, [...(groups.get(key) ?? []), tpl]);
+  }
+  return [...groups].map(([key, variants]) => ({
+    key,
+    variants,
+    tpl: variants.find((variant) => variant.id === selectedVariant.value[key]) ?? variants[0],
+  }));
+});
+
+async function loadScreens() {
+  try {
+    const devices = await ipc.request<DeviceInfo[]>("ListDevices");
+    screens.value = devices.filter((device) => device.has_lcd);
+  } catch {
+    screens.value = [];
+  }
+}
+
 onMounted(async () => {
+  void loadScreens();
   await config.load().catch(() => undefined);
   for (const t of config.templates) installedIds.value.add(t.id);
   if (!disposed) void checkInstall();
@@ -76,6 +143,7 @@ async function fetchCatalog() {
     }
     if (!Array.isArray(manifest.templates) || manifest.templates.length > 128
       || manifest.templates.some((t) => !t || [t.id, t.name, t.folder, t.preview, t.min_daemon_version].some((value) => typeof value !== "string" || value.length > 512))
+      || manifest.templates.some((t) => [t.group, t.variant].some((value) => value !== undefined && (typeof value !== "string" || value.length > 64)))
       || new Set(manifest.templates.map((t) => t.id)).size !== manifest.templates.length) {
       throw new Error(t("editor.browser.invalidCatalog"));
     }
@@ -293,8 +361,30 @@ function previewAspect(t: CatalogTemplate): string {
         {{ t("editor.browser.noTemplates") }}
       </div>
 
+      <template v-else>
+      <div class="filters">
+        <n-select
+          size="small"
+          class="size-filter"
+          clearable
+          :value="sizeFilter"
+          :options="sizeOptions"
+          :consistent-menu-width="false"
+          :placeholder="t('editor.browser.allScreens')"
+          :aria-label="t('editor.browser.screenFilter')"
+          @update:value="(v: string | null) => (sizeFilter = v)"
+        />
+        <SegmentedControl
+          size="small"
+          :model-value="rotationFilter"
+          :options="rotationOptions"
+          :label="t('editor.browser.rotationFilter')"
+          @update:model-value="(v: RotationFilter) => (rotationFilter = v)"
+        />
+      </div>
+      <div v-if="!visibleTemplates.length" class="state muted">{{ t("editor.browser.noMatches") }}</div>
       <div v-else class="grid">
-        <div v-for="tpl in templates" :key="tpl.id" class="card tpl-card">
+        <div v-for="{ key, tpl, variants } in cards" :key="key" class="card tpl-card">
           <button
             type="button"
             class="preview"
@@ -315,6 +405,19 @@ function previewAspect(t: CatalogTemplate): string {
               <span class="badge" v-if="tpl.rotated">{{ t("editor.browser.rotated") }}</span>
             </div>
             <div class="desc muted">{{ tpl.description }}</div>
+            <div v-if="variants.length > 1" class="variants" role="group" :aria-label="t('editor.browser.variants')">
+              <button
+                v-for="variant in variants"
+                :key="variant.id"
+                type="button"
+                class="variant"
+                :class="{ selected: variant.id === tpl.id }"
+                :aria-pressed="variant.id === tpl.id"
+                @click="selectedVariant[key] = variant.id"
+              >
+                <CheckCircle v-if="installedIds.has(variant.id)" :size="12" />{{ variant.variant || variant.name }}
+              </button>
+            </div>
             <n-button
               size="small"
               type="primary"
@@ -330,6 +433,7 @@ function previewAspect(t: CatalogTemplate): string {
           </div>
         </div>
       </div>
+      </template>
     </div>
     <n-modal
       v-model:show="previewOpen"
@@ -411,6 +515,16 @@ function previewAspect(t: CatalogTemplate): string {
 .state.error {
   color: var(--danger);
 }
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.size-filter {
+  width: min(360px, 100%);
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -491,6 +605,33 @@ function previewAspect(t: CatalogTemplate): string {
   padding: 3px 9px;
   border-radius: 8px;
   color: var(--md-on-secondary-container);
+}
+.variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.variant {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 10px;
+  background: none;
+  color: var(--md-on-surface-variant);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.variant.selected {
+  border-color: var(--md-primary);
+  background: color-mix(in srgb, var(--md-primary) 16%, transparent);
+  color: var(--md-on-surface);
+}
+.variant:focus-visible {
+  outline: 2px solid var(--md-primary);
 }
 .desc {
   font-size: 13px;

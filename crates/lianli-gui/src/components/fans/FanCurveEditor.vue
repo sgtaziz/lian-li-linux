@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { useTranslate } from "@/i18n";
-import { CURVE_TEMP_MAX, CURVE_TEMP_MIN, speedAt } from "./curvePoints";
+import { CURVE_TEMP_MAX, CURVE_TEMP_MIN, MAX_CURVE_POINTS, canInsertCurvePoint, speedAt } from "./curvePoints";
+import { newCurveGesture } from "./useCurveHistory";
 
 const props = defineProps<{
   modelValue: [number, number][];
@@ -10,7 +11,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  "update:modelValue": [value: [number, number][]];
+  "update:modelValue": [value: [number, number][], gesture: number | null];
 }>();
 
 const t = useTranslate();
@@ -24,8 +25,10 @@ const W = 480;
 const H = 300;
 const PAD = 34;
 
+const svgRef = ref<SVGSVGElement | null>(null);
 const hoverIndex = ref<number | null>(null);
 const dragIndex = ref<number | null>(null);
+let dragGesture: number | null = null;
 
 const innerW = computed(() => W - PAD * 2);
 const innerH = computed(() => H - PAD * 2);
@@ -49,14 +52,28 @@ const sorted = computed(() => {
   return copy;
 });
 
+// Imported curves can reach past the axes, so the drawn curve is cut at the plotted range.
+const visibleLine = computed<[number, number][]>(() => {
+  const pts = sorted.value.map((pt) => pt.p);
+  if (pts.length === 0) return [];
+  const inside = pts.filter(([temp]) => temp >= X_MIN && temp <= X_MAX);
+  const line: [number, number][] = [];
+  if (pts[0][0] < X_MIN) line.push([X_MIN, speedAt(pts, X_MIN)]);
+  line.push(...inside);
+  if (pts[pts.length - 1][0] > X_MAX) line.push([X_MAX, speedAt(pts, X_MAX)]);
+  return line;
+});
+
+function pathOf(points: [number, number][]): string {
+  return points.map(([temp, speed]) => `L ${xToPx(temp)} ${yToPx(speed)}`).join(" ");
+}
+
 // The daemon holds the first and last speeds outside the curve, so the fill extends to both axes.
 const areaPath = computed(() => {
-  const pts = sorted.value;
+  const pts = sorted.value.map((pt) => pt.p);
   if (pts.length === 0) return "";
-  const first = pts[0].p;
-  const last = pts[pts.length - 1].p;
-  const line = pts.map((pt) => `L ${xToPx(pt.p[0])} ${yToPx(pt.p[1])}`).join(" ");
-  return `M ${xToPx(X_MIN)} ${yToPx(Y_MIN)} L ${xToPx(X_MIN)} ${yToPx(first[1])} ${line} L ${xToPx(X_MAX)} ${yToPx(last[1])} L ${xToPx(X_MAX)} ${yToPx(Y_MIN)} Z`;
+  const line = pathOf(visibleLine.value);
+  return `M ${xToPx(X_MIN)} ${yToPx(Y_MIN)} L ${xToPx(X_MIN)} ${yToPx(speedAt(pts, X_MIN))} ${line} L ${xToPx(X_MAX)} ${yToPx(speedAt(pts, X_MAX))} L ${xToPx(X_MAX)} ${yToPx(Y_MIN)} Z`;
 });
 
 const liveMarker = computed(() => {
@@ -73,11 +90,9 @@ const liveMarker = computed(() => {
 });
 
 const linePath = computed(() => {
-  const pts = sorted.value;
-  if (pts.length === 0) return "";
-  return pts
-    .map((pt, idx) => `${idx === 0 ? "M" : "L"} ${xToPx(pt.p[0])} ${yToPx(pt.p[1])}`)
-    .join(" ");
+  const line = visibleLine.value;
+  if (line.length === 0) return "";
+  return `M${pathOf(line).slice(1)}`;
 });
 
 const xGrid = computed(() => {
@@ -91,66 +106,63 @@ const yGrid = computed(() => {
   return arr;
 });
 
-function svgPoint(evt: MouseEvent | DragEvent): { x: number; y: number } {
-  const svg = (evt.currentTarget as SVGElement).closest("svg")!;
-  const rect = svg.getBoundingClientRect();
-  const scaleX = W / rect.width;
-  const scaleY = H / rect.height;
-  return {
-    x: (evt.clientX - rect.left) * scaleX,
-    y: (evt.clientY - rect.top) * scaleY,
-  };
+function svgPoint(evt: MouseEvent): { x: number; y: number } | null {
+  const matrix = svgRef.value?.getScreenCTM();
+  if (!matrix) return null;
+  const point = new DOMPoint(evt.clientX, evt.clientY).matrixTransform(matrix.inverse());
+  return { x: point.x, y: point.y };
 }
 
 function onCanvasClick(evt: MouseEvent) {
-  if (props.disabled || dragIndex.value !== null) return;
-  const { x, y } = svgPoint(evt);
+  if (props.disabled || dragIndex.value !== null || !canInsertCurvePoint(props.modelValue)) return;
+  const point = svgPoint(evt);
+  if (!point) return;
+  const { x, y } = point;
   if (x < PAD || x > W - PAD || y < PAD || y > H - PAD) return;
   const temp = clamp(pxToX(x), X_MIN, X_MAX);
   const speed = clamp(pxToY(y), Y_MIN, Y_MAX);
   const next = [...props.modelValue, [round1(temp), round0(speed)] as [number, number]];
   next.sort((a, b) => a[0] - b[0]);
-  emit("update:modelValue", next);
+  emit("update:modelValue", next, null);
 }
 
 function onPointMouseDown(evt: MouseEvent, index: number) {
   if (props.disabled) return;
   evt.stopPropagation();
   dragIndex.value = index;
+  dragGesture = newCurveGesture();
   window.addEventListener("mousemove", onWindowMouseMove);
   window.addEventListener("mouseup", onWindowMouseUp);
 }
 
 function onWindowMouseMove(evt: MouseEvent) {
   if (dragIndex.value === null) return;
-  const svg = document.getElementById("curve-svg");
-  if (!svg) return;
-  const rect = svg.getBoundingClientRect();
-  const scaleX = W / rect.width;
-  const scaleY = H / rect.height;
-  const x = (evt.clientX - rect.left) * scaleX;
-  const y = (evt.clientY - rect.top) * scaleY;
-  const temp = clamp(pxToX(x), X_MIN, X_MAX);
-  const speed = clamp(pxToY(y), Y_MIN, Y_MAX);
+  const point = svgPoint(evt);
+  if (!point) return;
+  const temp = clamp(pxToX(point.x), X_MIN, X_MAX);
+  const speed = clamp(pxToY(point.y), Y_MIN, Y_MAX);
   const next = props.modelValue.map((p, i) =>
     i === dragIndex.value ? ([round1(temp), round0(speed)] as [number, number]) : p,
   );
   next.sort((a, b) => a[0] - b[0]);
-  emit("update:modelValue", next);
+  emit("update:modelValue", next, dragGesture);
 }
 
 function onWindowMouseUp() {
   dragIndex.value = null;
+  dragGesture = null;
   window.removeEventListener("mousemove", onWindowMouseMove);
   window.removeEventListener("mouseup", onWindowMouseUp);
 }
+
+onUnmounted(onWindowMouseUp);
 
 function onPointDblClick(evt: MouseEvent, index: number) {
   if (props.disabled) return;
   evt.stopPropagation();
   if (props.modelValue.length <= 1) return; // keep at least one point
   const next = props.modelValue.filter((_, i) => i !== index);
-  emit("update:modelValue", next);
+  emit("update:modelValue", next, null);
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -171,7 +183,7 @@ function pointPx(pt: [number, number]) {
 <template>
   <div class="curve-editor">
     <svg
-      id="curve-svg"
+      ref="svgRef"
       :viewBox="`0 0 ${W} ${H}`"
       class="svg"
       :class="{ disabled }"
@@ -267,7 +279,9 @@ function pointPx(pt: [number, number]) {
         </g>
       </g>
     </svg>
-    <div class="hint">{{ t("fans.curveEditor.hint") }}</div>
+    <div class="hint">
+      {{ canInsertCurvePoint(modelValue) ? t("fans.curveEditor.hint") : t("fans.points.limit", { max: MAX_CURVE_POINTS }) }}
+    </div>
   </div>
 </template>
 

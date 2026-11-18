@@ -17,8 +17,17 @@ import type { SensorSource, DeviceInfo, FanGroup } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate, type MessageKey } from "@/i18n";
-import { decodeSpeedMode, fillSlots, groupRunsCurves, isReservedCurveName, isSpeedModeKey, speedModeOf } from "@/components/fans/speedMode";
-import { speedAt } from "@/components/fans/curvePoints";
+import {
+  decodeSpeedMode,
+  effectiveCurveSource,
+  fillSlots,
+  groupRunsCurves,
+  isReservedCurveName,
+  isSpeedModeKey,
+  sameSensorSource,
+  speedModeOf,
+} from "@/components/fans/speedMode";
+import { MAX_CURVE_NAME_CHARS, speedAt } from "@/components/fans/curvePoints";
 import { CURVE_TEMPLATES } from "@/components/fans/curveTemplates";
 import { useCurveHistory } from "@/components/fans/useCurveHistory";
 
@@ -134,10 +143,17 @@ function curveIndex(name: string): number {
   return curves.value.findIndex((curve) => curve.name === name);
 }
 
-const liveReading = computed(() => (current.value ? devices.curveTemperature(current.value.name) : null));
+// A reading belongs to the applied curve, so it is shown only while that curve reads the drafted sensor.
+const appliedReading = computed(() => (daemon.connected && current.value ? devices.curveTemperature(current.value.name) : null));
+const sourceChanged = computed(() => {
+  const source = appliedReading.value?.source;
+  return !!source && !!current.value && !sameSensorSource(source, effectiveCurveSource(current.value));
+});
+const liveReading = computed(() => (appliedReading.value?.source && !sourceChanged.value ? appliedReading.value : null));
 
 const liveState = computed(() => {
   const reading = liveReading.value;
+  if (sourceChanged.value) return { kind: "idle", text: t("fans.live.sourceChanged"), tone: "" };
   if (!reading || !current.value) return { kind: "idle", text: t("fans.live.notInUse"), tone: "" };
   if (reading.full_speed_fallback || reading.celsius === null) {
     return { kind: "fallback", text: t("fans.live.fallback"), tone: "" };
@@ -192,9 +208,9 @@ const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, t
 
 const history = useCurveHistory(() => curves.value, () => config.markDirty());
 
-function onCurveChange(value: [number, number][]) {
+function onCurveChange(value: [number, number][], gesture: number | null) {
   if (!current.value) return;
-  history.record(current.value, current.value.curve, value);
+  history.record(current.value, current.value.curve, value, gesture);
   current.value.curve = value;
   config.markDirty();
 }
@@ -256,13 +272,20 @@ async function importCurves() {
   } finally {
     fileBusy.value = false;
   }
-  if (!found.length) return;
+  if (found.length) confirmImport(found);
+}
+
+function planImport(found: PortableCurve[]) {
   const taken = curves.value.map((c) => c.name);
-  const planned = found.map((curve) => {
+  return found.map((curve) => {
     const name = uniqueName(curve.name, taken);
     taken.push(name);
     return { name, original: curve.name, curve: curve.curve };
   });
+}
+
+function confirmImport(found: PortableCurve[]) {
+  const planned = planImport(found);
   dialog.info({
     title: t("fans.curveFiles.confirmTitle"),
     content: () =>
@@ -283,6 +306,10 @@ async function importCurves() {
     positiveText: t("fans.curveFiles.importConfirm"),
     negativeText: t("common.cancel"),
     onPositiveClick: () => {
+      if (planImport(found).some((item, i) => item.name !== planned[i].name)) {
+        confirmImport(found);
+        return;
+      }
       const first = curves.value.length;
       for (const item of planned) {
         config.addFanCurve({ name: item.name, temp_source: null, temp_command: "", curve: item.curve });
@@ -343,6 +370,7 @@ function removeCurve(idx: number) {
 function curveNameError(name: string): MessageKey | null {
   if (!name) return "fans.page.curveNameEmpty";
   if (isReservedCurveName(name)) return "fans.page.curveNameReserved";
+  if ([...name].length > MAX_CURVE_NAME_CHARS) return "fans.page.curveNameTooLong";
   if (curves.value.some((c) => c !== current.value && c.name === name)) return "fans.page.curveNameTaken";
   return null;
 }
@@ -363,7 +391,7 @@ function renameCurve(input: string) {
   const name = input.trim();
   const error = curveNameError(name);
   if (error) {
-    message.warning(t(error, { name }));
+    message.warning(t(error, { name, max: MAX_CURVE_NAME_CHARS }));
     nameBuffer.value = current.value.name;
     return;
   }
@@ -391,19 +419,23 @@ function onTempCommand(value: string) {
 }
 
 const tempSourceValue = computed(() => {
-  if (!current.value?.temp_source) return "";
+  if (!current.value) return "";
   const s = current.value.temp_source;
-  if (s.type === "command") return current.value.temp_command ? "command" : "";
+  if (!s) return current.value.temp_command ? "command" : "";
+  if (s.type === "command") return "command";
   return encodeSensorOption(s);
 });
 
 function uniqueName(base: string, taken: string[]): string {
-  if (!taken.includes(base)) return base;
+  const fit = (suffix: string) =>
+    [...base].slice(0, MAX_CURVE_NAME_CHARS - suffix.length).join("").trimEnd() + suffix;
+  const plain = fit("");
+  if (!taken.includes(plain)) return plain;
   for (let i = 2; i < 1000; i++) {
-    const c = `${base} ${i}`;
+    const c = fit(` ${i}`);
     if (!taken.includes(c)) return c;
   }
-  return base;
+  return plain;
 }
 
 function encodeSensorOption(s: SensorSource): string {
@@ -515,7 +547,10 @@ function onHysteresisPwm(percent: number | null) {
         <div class="curve-side">
           <div class="now" :class="liveState.kind === 'reading' ? `tone-${liveState.tone}` : liveState.kind">
             <span class="now-label">{{ t("fans.live.rightNow") }}</span>
-            <span v-if="liveState.kind === 'reading'" class="now-value">{{ liveState.text }}</span>
+            <template v-if="liveState.kind === 'reading'">
+              <span class="now-value">{{ liveState.text }}</span>
+              <span class="now-text">{{ t("fans.live.estimate") }}</span>
+            </template>
             <span v-else class="now-text">{{ liveState.text }}</span>
           </div>
           <div class="field">
@@ -889,7 +924,12 @@ function onHysteresisPwm(percent: number | null) {
   margin: 0 var(--space-2) 6px 0;
 }
 .settings-row .field {
-  width: 150px;
+  width: 170px;
+}
+.settings-row .field label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .empty {
   padding: var(--space-4);

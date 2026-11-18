@@ -24,6 +24,7 @@ const MAX_METADATA_BYTES: usize = 1024 * 1024;
 const MAX_ASSET_BYTES: usize = 64 * 1024 * 1024;
 const MAX_INSTALL_BYTES: usize = 256 * 1024 * 1024;
 const MAX_FILES: usize = 128;
+const MAX_VARIANT_LABEL_CHARS: usize = 64;
 const INSTALL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn fetch_bytes(url: &str, limit: usize) -> Result<Vec<u8>> {
@@ -111,6 +112,11 @@ fn validate_catalog_template(template: &CatalogTemplate) -> Result<()> {
     if template.id.contains('/') || template.id.starts_with('.') || template.id.len() > 128 {
         bail!("template ID must be a single visible directory name of at most 128 bytes");
     }
+    for label in [&template.group, &template.variant].into_iter().flatten() {
+        if label.trim().is_empty() || label.chars().count() > MAX_VARIANT_LABEL_CHARS {
+            bail!("catalog group and variant labels must have 1 to {MAX_VARIANT_LABEL_CHARS} characters");
+        }
+    }
     validate_relative_path(&template.folder).context("invalid catalog folder")?;
     validate_relative_path(&template.template_file).context("invalid template file")?;
     validate_relative_path(&template.preview).context("invalid preview file")?;
@@ -175,6 +181,10 @@ pub struct CatalogTemplate {
     pub rotated: bool,
     #[serde(default)]
     pub files: Vec<CatalogFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -685,6 +695,18 @@ mod tests {
         assert!(validate_catalog_template(&template).is_err());
         template = original;
         template.template_sha256 = "bad".into();
+        assert!(validate_catalog_template(&template).is_err());
+    }
+
+    #[test]
+    fn catalog_variants_need_short_visible_labels() {
+        let mut template = catalog().templates.remove(0);
+        template.group = Some("graphite-vertical".into());
+        template.variant = Some("Cyan".into());
+        assert!(validate_catalog_template(&template).is_ok());
+        template.variant = Some("  ".into());
+        assert!(validate_catalog_template(&template).is_err());
+        template.variant = Some("x".repeat(MAX_VARIANT_LABEL_CHARS + 1));
         assert!(validate_catalog_template(&template).is_err());
     }
 

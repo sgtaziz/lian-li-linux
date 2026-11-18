@@ -182,6 +182,19 @@ Add an entry:
 **not** list `template.json` or `preview.png` in `files[]` — they have their
 own top-level sha256 fields.
 
+#### Variants
+
+Colourways or layouts of one design share a single card in the browser. Give
+each entry the same `group` and its own short `variant` label, keeping a
+separate `id`, folder and preview per variant:
+
+```json
+{ "id": "graphite-cyan-vertical", "name": "Graphite Cyan (Vertical)", "group": "graphite-vertical", "variant": "Cyan", ... }
+```
+
+The first entry in a group sets the card's name, description and author.
+Older clients ignore both fields and list every variant separately.
+
 ### 6. Bump `min_daemon_version` if you use new features
 
 If your template uses a widget kind, sensor category, or background type
