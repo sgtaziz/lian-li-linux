@@ -81,7 +81,7 @@ export const useRgbStore = defineStore("rgb", () => {
   // ── Presets ────────────────────────────────────────────────────────────────
   async function savePreset(name: string, deviceId: string) {
     await ipc.request("SaveRgbPreset", { name, device_id: deviceId });
-    await config.load();
+    await config.load({ keepDraft: true });
   }
 
   async function applyPreset(name: string, deviceId: string) {
@@ -90,7 +90,7 @@ export const useRgbStore = defineStore("rgb", () => {
 
   async function deletePreset(name: string, deviceId: string) {
     await ipc.request("DeleteRgbPreset", { name, device_id: deviceId });
-    await config.load();
+    await config.load({ keepDraft: true });
   }
 
   /** Flush every pending effect immediately (called before config save). */

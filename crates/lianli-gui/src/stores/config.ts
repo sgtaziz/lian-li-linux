@@ -83,7 +83,16 @@ export const useConfigStore = defineStore("config", () => {
     imported.value = null;
   }
 
-  async function load(options: { keepDraft?: boolean } = {}) {
+  function adoptRgbDevice(saved: AppConfig, deviceId: string) {
+    const fresh = saved.rgb?.devices.find((d) => d.device_id === deviceId);
+    const rgb = ensureRgb();
+    const index = rgb.devices.findIndex((d) => d.device_id === deviceId);
+    if (fresh && index >= 0) rgb.devices[index] = structuredClone(fresh);
+    else if (fresh) rgb.devices.push(structuredClone(fresh));
+    else if (index >= 0) rgb.devices.splice(index, 1);
+  }
+
+  async function load(options: { keepDraft?: boolean; rgbDevice?: string } = {}) {
     const [cfg, caps, sens, tpls, pres, pwm] = await Promise.all([
       ipc.request<AppConfig | null>("GetConfig").catch(() => null),
       ipc.request<RgbDeviceCapabilities[]>("GetRgbCapabilities").catch(() => []),
@@ -93,6 +102,7 @@ export const useConfigStore = defineStore("config", () => {
       ipc.request<PwmHeader[]>("ListPwmHeaders").catch(() => []),
     ]);
     if (cfg && !(options.keepDraft && dirty.value)) replace(cfg);
+    else if (cfg && options.rgbDevice) adoptRgbDevice(cfg, options.rgbDevice);
     rgbCaps.value = caps ?? [];
     sensors.value = sens ?? [];
     templates.value = tpls ?? [];

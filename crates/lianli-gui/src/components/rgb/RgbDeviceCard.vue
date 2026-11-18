@@ -130,9 +130,8 @@ async function savePreset() {
 }
 async function applyPreset(name: string) {
   await rgb.applyPreset(name, props.cap.device_id);
-  // Reload config so the dropdown reflects the newly-active preset
-  // (the daemon persisted active_preset + the preset's effects).
-  await config.load();
+  // The daemon saved the preset into this device's config; other unsaved edits stay.
+  await config.load({ keepDraft: true, rgbDevice: props.cap.device_id });
 }
 async function deletePreset(name: string) {
   dialog.error({

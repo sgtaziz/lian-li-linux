@@ -511,8 +511,8 @@ async function duplicateTemplate() {
   config.templates.push(copy);
   props.entry.template_id = newId;
   await lcd.setTemplates(config.templates);
-  await config.load();
   config.markDirty();
+  await config.load({ keepDraft: true });
   renderPreview();
 }
 
@@ -531,8 +531,8 @@ async function deleteTemplate() {
         if (e.template_id === id) e.template_id = null;
       }
       await lcd.setTemplates(config.templates);
-      await config.load();
       config.markDirty();
+      await config.load({ keepDraft: true });
       renderPreview();
     },
   });
