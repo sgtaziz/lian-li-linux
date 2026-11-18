@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 pub fn enumerate_nvidia(sensors: &mut Vec<SensorInfo>) {
     let Ok(output) = Command::new("nvidia-smi")
         .args([
-            "--query-gpu=index,name,temperature.gpu,utilization.gpu",
+            "--query-gpu=index,name,temperature.gpu,utilization.gpu,memory.used,memory.free,memory.total,clocks.current.graphics,clocks.current.memory",
             "--format=csv,noheader,nounits",
         ])
         .output()
@@ -26,13 +26,18 @@ pub fn enumerate_nvidia(sensors: &mut Vec<SensorInfo>) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split(", ").collect();
-        if parts.len() < 4 {
+        if parts.len() < 9 {
             continue;
         }
         let gpu_index: u32 = parts[0].trim().parse().unwrap_or(0);
         let gpu_name = parts[1].trim();
         let temp: Option<f32> = parts[2].trim().parse().ok();
         let usage: Option<f32> = parts[3].trim().parse().ok();
+        let mem_used: Option<f32> = parts[4].trim().parse().ok();
+        let mem_free: Option<f32> = parts[5].trim().parse().ok();
+        let mem_total: Option<f32> = parts[6].trim().parse().ok();
+        let clock_core: Option<f32> = parts[7].trim().parse().ok();
+        let clock_memory: Option<f32> = parts[8].trim().parse().ok();
 
         sensors.push(SensorInfo {
             source: SensorSource::NvidiaGpu {
@@ -55,6 +60,70 @@ pub fn enumerate_nvidia(sensors: &mut Vec<SensorInfo>) {
             display_name: Some(format!("{gpu_name}: Usage")),
             current_value: usage,
             unit: Unit::PERCENT,
+            divider: 1,
+        });
+
+        let mem_usage = match (mem_used, mem_total) {
+            (Some(used), Some(total)) if total > 0.0 => Some(used / total * 100.0),
+            _ => None,
+        };
+        sensors.push(SensorInfo {
+            source: SensorSource::NvidiaGpu {
+                gpu_index,
+                metric: NvidiaMetric::MemUsage,
+            },
+            sensor_name: None,
+            display_name: Some(format!("{gpu_name}: Mem Usage")),
+            current_value: mem_usage,
+            unit: Unit::PERCENT,
+            divider: 1,
+        });
+
+        sensors.push(SensorInfo {
+            source: SensorSource::NvidiaGpu {
+                gpu_index,
+                metric: NvidiaMetric::MemFree,
+            },
+            sensor_name: None,
+            display_name: Some(format!("{gpu_name}: Mem Free")),
+            current_value: mem_free,
+            unit: Unit::MiB,
+            divider: 1,
+        });
+
+        sensors.push(SensorInfo {
+            source: SensorSource::NvidiaGpu {
+                gpu_index,
+                metric: NvidiaMetric::MemTotal,
+            },
+            sensor_name: None,
+            display_name: Some(format!("{gpu_name}: Mem Total")),
+            current_value: mem_total,
+            unit: Unit::MiB,
+            divider: 1,
+        });
+
+        sensors.push(SensorInfo {
+            source: SensorSource::NvidiaGpu {
+                gpu_index,
+                metric: NvidiaMetric::ClockCore,
+            },
+            sensor_name: None,
+            display_name: Some(format!("{gpu_name}: Core Clock")),
+            current_value: clock_core,
+            unit: Unit::FREQ,
+            divider: 1,
+        });
+
+        sensors.push(SensorInfo {
+            source: SensorSource::NvidiaGpu {
+                gpu_index,
+                metric: NvidiaMetric::ClockMemory,
+            },
+            sensor_name: None,
+            display_name: Some(format!("{gpu_name}: Memory Clock")),
+            current_value: clock_memory,
+            unit: Unit::FREQ,
             divider: 1,
         });
     }

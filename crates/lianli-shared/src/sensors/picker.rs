@@ -68,6 +68,24 @@ pub fn find_default_gpu_temp(sensors: &[SensorInfo]) -> Option<SensorSource> {
         .map(|s| s.source.clone())
 }
 
+fn find_nvidia_metric(sensors: &[SensorInfo], metric: NvidiaMetric) -> Option<SensorSourceConfig> {
+    let sources: Vec<&SensorInfo> = sensors
+        .iter()
+        .filter(|s| {
+            matches!(
+                &s.source,
+                SensorSource::NvidiaGpu { metric: m, .. } if *m == metric
+            )
+        })
+        .collect();
+
+    sources
+        .iter()
+        .find(|s| s.current_value.is_some())
+        .or_else(|| sources.first())
+        .map(|s| source_to_config(s.source.clone()))
+}
+
 /// Resolve a `SensorCategory` to a concrete `SensorSourceConfig` based on
 /// what the current machine exposes. Returns `None` when no suitable sensor
 /// is available.
@@ -94,6 +112,11 @@ pub fn pick_source_for_category(
                 )
             })
             .map(|s| source_to_config(s.source.clone())),
+        SensorCategory::GpuMemUsage => find_nvidia_metric(sensors, NvidiaMetric::MemUsage),
+        SensorCategory::GpuMemFree => find_nvidia_metric(sensors, NvidiaMetric::MemFree),
+        SensorCategory::GpuMemTotal => find_nvidia_metric(sensors, NvidiaMetric::MemTotal),
+        SensorCategory::GpuClockCore => find_nvidia_metric(sensors, NvidiaMetric::ClockCore),
+        SensorCategory::GpuClockMemory => find_nvidia_metric(sensors, NvidiaMetric::ClockMemory),
         SensorCategory::NetworkRx => {
             default_route_iface().map(|iface| SensorSourceConfig::NetworkRx { iface })
         }
@@ -123,6 +146,26 @@ pub fn infer_sensor_category(source: &SensorSourceConfig) -> Option<SensorCatego
             metric: NvidiaMetric::Usage,
             ..
         } => Some(SensorCategory::GpuUsage),
+        SensorSourceConfig::NvidiaGpu {
+            metric: NvidiaMetric::MemUsage,
+            ..
+        } => Some(SensorCategory::GpuMemUsage),
+        SensorSourceConfig::NvidiaGpu {
+            metric: NvidiaMetric::MemFree,
+            ..
+        } => Some(SensorCategory::GpuMemFree),
+        SensorSourceConfig::NvidiaGpu {
+            metric: NvidiaMetric::MemTotal,
+            ..
+        } => Some(SensorCategory::GpuMemTotal),
+        SensorSourceConfig::NvidiaGpu {
+            metric: NvidiaMetric::ClockCore,
+            ..
+        } => Some(SensorCategory::GpuClockCore),
+        SensorSourceConfig::NvidiaGpu {
+            metric: NvidiaMetric::ClockMemory,
+            ..
+        } => Some(SensorCategory::GpuClockMemory),
         SensorSourceConfig::AmdGpuUsage { .. } => Some(SensorCategory::GpuUsage),
         SensorSourceConfig::Hwmon { name, label, .. } => {
             let l = label.to_lowercase();

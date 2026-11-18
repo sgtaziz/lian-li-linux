@@ -76,6 +76,11 @@ const GAUGE_LABELS: Record<string, string> = {
   mem_free: "RAM Free",
   gpu_usage: "GPU",
   gpu_temp: "GPU",
+  gpu_mem_usage: "VRAM",
+  gpu_mem_free: "VRAM Free",
+  gpu_mem_total: "VRAM Total",
+  gpu_clock_core: "GPU Clock",
+  gpu_clock_memory: "VRAM Clock",
   network_rx: "Net RX",
   network_tx: "Net TX",
   disk_read: "Disk Read",
@@ -107,6 +112,7 @@ const UNIT_LABELS: Record<string, string> = {
   FREQ: "MHz",
   PERCENT: "%",
   SIZE: "GB",
+  MiB: "MiB",
   MBps: "MB/s",
   WO: "",
 };
@@ -137,6 +143,11 @@ export const SENSOR_CATEGORY_LABELS: Record<SensorCategory, MessageKey> = {
   gpu_temp: "editor.sensorBinding.categories.gpuTemp",
   cpu_usage: "editor.sensorBinding.categories.cpuUsage",
   gpu_usage: "editor.sensorBinding.categories.gpuUsage",
+  gpu_mem_usage: "editor.sensorBinding.categories.gpuMemUsage",
+  gpu_mem_free: "editor.sensorBinding.categories.gpuMemFree",
+  gpu_mem_total: "editor.sensorBinding.categories.gpuMemTotal",
+  gpu_clock_core: "editor.sensorBinding.categories.gpuClockCore",
+  gpu_clock_memory: "editor.sensorBinding.categories.gpuClockMemory",
   mem_usage: "editor.sensorBinding.categories.memUsage",
   mem_used: "editor.sensorBinding.categories.memUsed",
   mem_free: "editor.sensorBinding.categories.memFree",
@@ -166,7 +177,22 @@ export function inferSensorCategory(src: SensorSourceConfig): SensorCategory | n
     case "mem_free":
       return "mem_free";
     case "nvidia_gpu":
-      return src.metric === "usage" ? "gpu_usage" : "gpu_temp";
+      switch (src.metric) {
+        case "usage":
+          return "gpu_usage";
+        case "mem_usage":
+          return "gpu_mem_usage";
+        case "mem_free":
+          return "gpu_mem_free";
+        case "mem_total":
+          return "gpu_mem_total";
+        case "clock_core":
+          return "gpu_clock_core";
+        case "clock_memory":
+          return "gpu_clock_memory";
+        default:
+          return "gpu_temp";
+      }
     case "amd_gpu_usage":
       return "gpu_usage";
     case "network_rx":
