@@ -216,13 +216,21 @@ fn try_open_encoder(
     Ok(enc.open_with(opts)?)
 }
 
+/// Below this, small panels starve keyframes and visibly soften at every GOP.
+const DESKTOP_MIN_BITRATE: u64 = 6_000_000;
+const DESKTOP_MAX_BITRATE: u64 = 20_000_000;
+
+fn desktop_bitrate(width: u32, height: u32, fps: u32) -> u64 {
+    super::h264::bitrate(width, height, fps).clamp(DESKTOP_MIN_BITRATE, DESKTOP_MAX_BITRATE)
+}
+
 pub(super) fn desktop_rate_control(
     encoder: &mut ffmpeg::encoder::video::Video,
     width: u32,
     height: u32,
     fps: u32,
 ) {
-    let bitrate = super::h264::bitrate(width, height, fps).min(i32::MAX as u64);
+    let bitrate = desktop_bitrate(width, height, fps).min(i32::MAX as u64);
     encoder.set_bit_rate(bitrate as usize);
     // Bound bursts to two frames instead of NVENC's default two seconds of bitrate.
     unsafe {
@@ -236,11 +244,21 @@ pub(super) fn desktop_rate_control(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn small_desktop_panels_get_enough_bitrate_for_sharp_keyframes() {
+        assert_eq!(super::desktop_bitrate(480, 480, 30), 6_000_000);
+        assert_eq!(
+            super::desktop_bitrate(1920, 480, 30),
+            super::super::h264::bitrate(1920, 480, 30)
+        );
+        assert_eq!(super::desktop_bitrate(2288, 1080, 60), 20_000_000);
+    }
+
+    #[test]
     fn sustained_motion_has_bounded_packets_without_delayed_output() {
         let mut encoder = super::H264Encoder::new(320, 240, 60, false, false).unwrap();
         let mut pixels = vec![0; 320 * 240 * 4];
         let mut seed = 1u32;
-        let allowance = super::super::h264::bitrate(320, 240, 60) as usize / 60 / 8 * 4;
+        let allowance = super::desktop_bitrate(320, 240, 60) as usize / 60 / 8 * 4;
         for _ in 0..20 {
             for pixel in pixels.as_chunks_mut::<4>().0 {
                 seed ^= seed << 13;
