@@ -1,26 +1,5 @@
 # Building and installing from source
 
-## Install script
-
-On Arch, Debian, Ubuntu and Fedora, `packaging/install-from-source.sh` performs every
-step on this page: it installs dependencies, builds, installs the files, applies the
-udev, user and tmpfiles configuration, and restarts a daemon service that is already
-running. Run it from a clone as your normal user; it asks for sudo when needed:
-
-```bash
-git clone --recurse-submodules https://github.com/sgtaziz/lian-li-linux.git && cd lian-li-linux
-packaging/install-from-source.sh
-```
-
-Run it again to update. It pulls the current branch first unless the checkout has local
-changes; use `--no-pull` to build the checkout as it is and `--skip-deps` to skip
-installing packages. It stops if a distribution package already owns
-`/usr/bin/lianli-gui`, because that package's updates would replace the build. On a
-first install, open Lian Li Linux afterwards and choose a service mode. EVDI is not
-installed by the script; if `evdi` is available, it enables the module at boot.
-
-## Manual steps
-
 1) Clone the repo and submodules:
 ```bash
 git clone --recurse-submodules https://github.com/sgtaziz/lian-li-linux.git && cd lian-li-linux

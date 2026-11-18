@@ -194,11 +194,9 @@ changes the host deployment and requires reboots. Prefer Distrobox for normal us
 
 ### From Source
 
-On Arch, Debian, Ubuntu or Fedora, run `packaging/install-from-source.sh` from a
-clone to install dependencies, build and install everything. Run it again to update.
-See [building from source](docs/building-from-source.md) for the options and the
-manual steps. `cargo build --release` builds the daemon, GUI, control helper and
-session helper, including the frontend.
+See [build dependencies and installation](docs/building-from-source.md).
+`cargo build --release` builds the daemon, GUI, control helper and session helper,
+including the frontend.
 
 ## First launch
 

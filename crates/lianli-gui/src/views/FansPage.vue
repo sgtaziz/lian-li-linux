@@ -13,11 +13,11 @@ import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
 import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
-import type { SensorSource, DeviceInfo } from "@/types";
+import type { SensorSource, DeviceInfo, FanGroup } from "@/types";
 import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
-import { useTranslate } from "@/i18n";
-import { decodeSpeedMode, fillSlots, isReservedCurveName, speedModeOf } from "@/components/fans/speedMode";
+import { useTranslate, type MessageKey } from "@/i18n";
+import { decodeSpeedMode, fillSlots, groupRunsCurves, isReservedCurveName, isSpeedModeKey, speedModeOf } from "@/components/fans/speedMode";
 import { speedAt } from "@/components/fans/curvePoints";
 import { CURVE_TEMPLATES } from "@/components/fans/curveTemplates";
 import { useCurveHistory } from "@/components/fans/useCurveHistory";
@@ -168,19 +168,25 @@ function applyToAllFans(value: string) {
 }
 
 const fanLabels = computed(() => devices.labels);
-const curveUsers = computed(() => {
-  const name = current.value?.name;
-  if (!name) return [];
+function curveSlotCount(group: FanGroup, name: string): number {
+  if (isSpeedModeKey(name) || !groupRunsCurves(group)) return 0;
+  const device = group.device_id ? devices.byId(group.device_id) : undefined;
+  const slots = device ? group.speeds.slice(0, device.fan_count ?? 1) : group.speeds;
+  return slots.filter((speed) => speed === name).length;
+}
+
+function fanGroupUsers(name: string): string[] {
   return fanCfg.value.speeds.flatMap((group) => {
-    const device = group.device_id ? devices.byId(group.device_id) : undefined;
-    const slots = device ? group.speeds.slice(0, device.fan_count ?? 1) : group.speeds;
-    const count = slots.filter((speed) => speed === name).length;
+    const count = curveSlotCount(group, name);
     if (!count) return [];
+    const device = group.device_id ? devices.byId(group.device_id) : undefined;
     if (!device) return [t("fans.page.curveUserOffline", { device: group.device_id ?? t("fans.page.unknownDevice") })];
     const label = names.label(device.device_id, fanLabels.value.get(device.device_id) ?? device.name);
     return [t(count === 1 ? "fans.page.curveUserOneFan" : "fans.page.curveUserFans", { label, count })];
   });
-});
+}
+
+const curveUsers = computed(() => (current.value?.name && config.fanCurveRuns(current.value) ? fanGroupUsers(current.value.name) : []));
 
 const sensorOptions = computed(() => enumerateSensorsAsOptions(config.sensors, true, true));
 
@@ -315,9 +321,12 @@ function addCurveFrom(baseName: string, points: [number, number][]) {
 }
 
 function removeCurve(idx: number) {
+  const curve = curves.value[idx];
+  if (!curve) return;
+  const name = curve.name || t("fans.page.curveFallbackName");
   dialog.error({
     title: t("fans.page.deleteCurveTitle"),
-    content: t("fans.page.deleteCurveContent", { name: curves.value[idx]?.name ?? t("fans.page.curveFallbackName") }),
+    content: t(config.fanCurveReferenced(curve) ? "fans.page.deleteCurveInUseContent" : "fans.page.deleteCurveContent", { name }),
     positiveText: t("common.delete"),
     negativeText: t("common.cancel"),
     onPositiveClick: () => {
@@ -331,18 +340,35 @@ function removeCurve(idx: number) {
   });
 }
 
-function renameCurve(name: string) {
+function curveNameError(name: string): MessageKey | null {
+  if (!name) return "fans.page.curveNameEmpty";
+  if (isReservedCurveName(name)) return "fans.page.curveNameReserved";
+  if (curves.value.some((c) => c !== current.value && c.name === name)) return "fans.page.curveNameTaken";
+  return null;
+}
+
+function isUnchangedName(input: string): boolean {
+  const saved = current.value?.name;
+  return input === saved || input.trim() === saved;
+}
+
+const nameError = computed(() => (isUnchangedName(nameBuffer.value) ? null : curveNameError(nameBuffer.value.trim())));
+
+function renameCurve(input: string) {
   if (!current.value) return;
-  const trimmed = name.trim();
-  if (trimmed === current.value.name) return;
-  if (!trimmed || isReservedCurveName(trimmed)) {
-    message.error(t(trimmed ? "fans.page.reservedCurveName" : "fans.page.emptyCurveName", { name: trimmed }));
+  if (isUnchangedName(input)) {
     nameBuffer.value = current.value.name;
     return;
   }
-  current.value.name = trimmed;
-  nameBuffer.value = trimmed;
-  config.markDirty();
+  const name = input.trim();
+  const error = curveNameError(name);
+  if (error) {
+    message.warning(t(error, { name }));
+    nameBuffer.value = current.value.name;
+    return;
+  }
+  nameBuffer.value = name;
+  config.renameFanCurve(current.value, name);
 }
 
 function onTempSource(value: string) {
@@ -497,6 +523,7 @@ function onHysteresisPwm(percent: number | null) {
             <n-input
               size="small"
               v-model:value="nameBuffer"
+              :status="nameError ? 'error' : undefined"
               @blur="renameCurve(nameBuffer)"
               :placeholder="t('fans.page.curveNamePlaceholder')"
             />
