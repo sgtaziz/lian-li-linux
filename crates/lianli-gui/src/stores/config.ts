@@ -4,6 +4,7 @@ import { LCD_TEMPLATES_CHANGED_EVENT } from "@/stores/lcd";
 import { computed, reactive, ref } from "vue";
 import { useIpc } from "@/composables/useIpc";
 import { tr } from "@/i18n";
+import { isSpeedModeKey } from "@/components/fans/speedMode";
 import type {
   AppConfig,
   LcdTemplate,
@@ -12,6 +13,7 @@ import type {
   SensorInfo,
   LcdConfig,
   FanCurve,
+  FanSpeed,
   PwmHeader,
 } from "@/types";
 
@@ -195,6 +197,41 @@ export const useConfigStore = defineStore("config", () => {
     return config.fan_curves.map((c) => c.name);
   }
 
+  function fanCurveNameShared(curve: FanCurve): boolean {
+    return config.fan_curves.some((c) => c !== curve && c.name === curve.name);
+  }
+
+  // The daemon keys curves by name, so the last curve with a given name is the one that runs.
+  function fanCurveRuns(curve: FanCurve): boolean {
+    const sameName = config.fan_curves.filter((c) => c.name === curve.name);
+    return sameName[sameName.length - 1] === curve;
+  }
+
+  // Every fan and AIO slot naming the curve, active or not. A shared name falls back to the other copy.
+  function fanCurveReferenced(curve: FanCurve): boolean {
+    if (isSpeedModeKey(curve.name) || fanCurveNameShared(curve)) return false;
+    const named = (speed: FanSpeed) => speed === curve.name;
+    return (config.fans?.speeds ?? []).some((group) => group.speeds.some(named))
+      || Object.values(config.aio).some((aio) => named(aio.pump_target_rpm) || aio.fan_speeds.some(named));
+  }
+
+  function renameFanCurve(curve: FanCurve, name: string) {
+    const previous = curve.name;
+    if (previous === name) return;
+    if (!isSpeedModeKey(previous) && fanCurveRuns(curve)) {
+      const follow = (speed: FanSpeed) => (speed === previous ? name : speed);
+      for (const group of config.fans?.speeds ?? []) {
+        if (group.speeds.includes(previous)) group.speeds = group.speeds.map(follow);
+      }
+      for (const aio of Object.values(config.aio)) {
+        if (aio.pump_target_rpm === previous) aio.pump_target_rpm = name;
+        if (aio.fan_speeds.includes(previous)) aio.fan_speeds = aio.fan_speeds.map(follow);
+      }
+    }
+    curve.name = name;
+    markDirty();
+  }
+
   function addLcd(entry: LcdConfig) {
     config.lcds.push(entry);
     markDirty();
@@ -234,6 +271,10 @@ export const useConfigStore = defineStore("config", () => {
     presetsFor,
     aioConfigFor,
     curveNames,
+    fanCurveNameShared,
+    fanCurveRuns,
+    fanCurveReferenced,
+    renameFanCurve,
     addLcd,
     addFanCurve,
   };
