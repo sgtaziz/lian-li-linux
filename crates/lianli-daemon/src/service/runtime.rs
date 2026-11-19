@@ -643,7 +643,10 @@ impl StreamFailure {
     }
 
     fn from_error(message: UiText, error: &anyhow::Error) -> Self {
-        Self::new(message, is_transfer_interrupted(error))
+        // A panel that re-enumerates on the same port is invisible to the hotplug poll.
+        let interrupted =
+            is_transfer_interrupted(error) || lianli_devices::winusb::lcd::lost_lcd_handle(error);
+        Self::new(message, interrupted)
     }
 }
 
@@ -2717,6 +2720,27 @@ mod tests {
             ),
             &error,
         )
+    }
+
+    #[test]
+    fn lost_lcd_handle_schedules_recreation_instead_of_stopping_media() {
+        let delivered = |error: anyhow::Error| {
+            let delivery = FrameDelivery::default();
+            delivery.submit(|| Err(error));
+            let failure = delivery.failure.lock().clone().unwrap();
+            failure.interrupted
+        };
+        assert!(delivered(
+            anyhow::Error::from(lianli_transport::TransportError::Usb(rusb::Error::NoDevice))
+                .context("recovering from frame write error")
+        ));
+        assert!(delivered(
+            anyhow::Error::from(lianli_devices::winusb::lcd::LcdRediscoveryRequired)
+                .context("recovering from frame write error")
+        ));
+        assert!(!delivered(anyhow::anyhow!(
+            "frame payload 999999 exceeds LCD limit 1000"
+        )));
     }
 
     #[test]

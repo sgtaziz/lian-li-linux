@@ -26,8 +26,8 @@ mod ring;
 mod slv3;
 mod trait_;
 
-pub use self::core::{LcdLink, PendingCmd, SharedTransport};
-pub use self::playback::LcdTransferInterrupted;
+pub use self::core::{lost_lcd_handle, LcdLink, PendingCmd, SharedTransport};
+pub use self::playback::{LcdRediscoveryRequired, LcdTransferInterrupted};
 use self::trait_::BoxedWinUsbLcd;
 
 pub struct WinUsbLcdDevice(BoxedWinUsbLcd, u16);

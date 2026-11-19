@@ -4,6 +4,10 @@ use anyhow::Result;
 #[error("LCD packet transfer was interrupted")]
 pub struct LcdTransferInterrupted;
 
+#[derive(Debug, thiserror::Error)]
+#[error("LCD handle is stale; re-discovery required")]
+pub struct LcdRediscoveryRequired;
+
 #[derive(Default)]
 pub(super) enum PlaybackState {
     #[default]

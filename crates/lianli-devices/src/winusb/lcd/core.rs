@@ -1,4 +1,4 @@
-use super::playback::{LcdTransferInterrupted, PlaybackState};
+use super::playback::{LcdRediscoveryRequired, LcdTransferInterrupted, PlaybackState};
 use super::ring::{RingDelivery, RingKey};
 use crate::crypto::{PacketBuilder, CMD_GET_H2_PARAMS, CMD_PUSH_RGB_DATA, CMD_SYNC_PUMP_FAN};
 use anyhow::{bail, Context, Result};
@@ -938,7 +938,7 @@ impl WinUsbLcdCore {
             bail!("LCD stopping; skipping recovery");
         }
         if self.device_gone {
-            bail!("device handle is stale; re-discovery required");
+            return Err(LcdRediscoveryRequired.into());
         }
         self.consecutive_failures += 1;
 
@@ -968,7 +968,8 @@ impl WinUsbLcdCore {
         }
 
         self.device_gone = true;
-        bail!("device unresponsive after recovery attempts; re-discovery required")
+        Err(anyhow::Error::new(LcdRediscoveryRequired)
+            .context("device unresponsive after recovery attempts"))
     }
 
     /// Only for the stream thread, the sole writer while streaming.
@@ -1831,6 +1832,11 @@ fn device_unplugged(error: &anyhow::Error) -> bool {
         error.downcast_ref::<lianli_transport::TransportError>(),
         Some(lianli_transport::TransportError::Usb(rusb::Error::NoDevice))
     )
+}
+
+pub fn lost_lcd_handle(error: &anyhow::Error) -> bool {
+    !lianli_transport::usb::shutting_down()
+        && (error.is::<LcdRediscoveryRequired>() || device_unplugged(error))
 }
 
 /// An unplugged device takes the detach path, and shutdown recreates nothing.
