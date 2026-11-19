@@ -3,6 +3,16 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.3.1 — 2026-11-19
+
+### Features
+- **sensors**: Add NVIDIA memory and clock metrics  ([#299](https://github.com/sgtaziz/lian-li-linux/pull/299))
+
+### Fixes
+- **desktop**: Stop the Hyprland panel going black when a Wayland read finds no complete event  ([#300](https://github.com/sgtaziz/lian-li-linux/pull/300))
+- **gui**: Use the app identifier as the GTK program name  ([#303](https://github.com/sgtaziz/lian-li-linux/pull/303))
+- **gui**: Widen the fan curve chart to fit points outside 20-100 °C  ([#302](https://github.com/sgtaziz/lian-li-linux/pull/302))
+
 ## v1.3.0 — 2026-11-18
 
 ### Features
