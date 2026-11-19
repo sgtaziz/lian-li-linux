@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
 import { useTranslate } from "@/i18n";
-import { CURVE_TEMP_MAX, CURVE_TEMP_MIN, MAX_CURVE_POINTS, canInsertCurvePoint, speedAt } from "./curvePoints";
+import {
+  CURVE_TEMP_MAX,
+  CURVE_TEMP_MIN,
+  MAX_CURVE_POINTS,
+  canInsertCurvePoint,
+  curveAxisRange,
+  speedAt,
+  type CurveAxisRange,
+} from "./curvePoints";
 import { newCurveGesture } from "./useCurveHistory";
 
 const props = defineProps<{
@@ -16,9 +24,7 @@ const emit = defineEmits<{
 
 const t = useTranslate();
 
-// X axis: 20–100 °C. Y axis: 0–100 %.
-const X_MIN = CURVE_TEMP_MIN;
-const X_MAX = CURVE_TEMP_MAX;
+// Y axis: 0-100 %. The X axis comes from the points (see curveAxisRange).
 const Y_MIN = 0;
 const Y_MAX = 100;
 const W = 480;
@@ -29,18 +35,24 @@ const svgRef = ref<SVGSVGElement | null>(null);
 const hoverIndex = ref<number | null>(null);
 const dragIndex = ref<number | null>(null);
 let dragGesture: number | null = null;
+// Held while dragging, so the axis doesn't rescale under the cursor.
+const dragRange = ref<CurveAxisRange | null>(null);
+
+const xRange = computed(() => dragRange.value ?? curveAxisRange(props.modelValue));
+const X_MIN = computed(() => xRange.value.min);
+const X_MAX = computed(() => xRange.value.max);
 
 const innerW = computed(() => W - PAD * 2);
 const innerH = computed(() => H - PAD * 2);
 
 function xToPx(x: number): number {
-  return PAD + ((x - X_MIN) / (X_MAX - X_MIN)) * innerW.value;
+  return PAD + ((x - X_MIN.value) / (X_MAX.value - X_MIN.value)) * innerW.value;
 }
 function yToPx(y: number): number {
   return PAD + (1 - (y - Y_MIN) / (Y_MAX - Y_MIN)) * innerH.value;
 }
 function pxToX(px: number): number {
-  return X_MIN + ((px - PAD) / innerW.value) * (X_MAX - X_MIN);
+  return X_MIN.value + ((px - PAD) / innerW.value) * (X_MAX.value - X_MIN.value);
 }
 function pxToY(py: number): number {
   return Y_MIN + (1 - (py - PAD) / innerH.value) * (Y_MAX - Y_MIN);
@@ -52,17 +64,18 @@ const sorted = computed(() => {
   return copy;
 });
 
-// Imported curves can reach past the axes, so the drawn curve is cut at the plotted range.
+// The axis stops at 0-120 °C, but a hand-edited config can hold points past it, so the line is cut there.
 const visibleLine = computed<[number, number][]>(() => {
   const pts = sorted.value.map((pt) => pt.p);
   if (pts.length === 0) return [];
-  const inside = pts.filter(([temp]) => temp >= X_MIN && temp <= X_MAX);
+  const [lo, hi] = [X_MIN.value, X_MAX.value];
   const line: [number, number][] = [];
-  if (pts[0][0] < X_MIN) line.push([X_MIN, speedAt(pts, X_MIN)]);
-  line.push(...inside);
-  if (pts[pts.length - 1][0] > X_MAX) line.push([X_MAX, speedAt(pts, X_MAX)]);
+  if (pts[0][0] < lo) line.push([lo, speedAt(pts, lo)]);
+  line.push(...pts.filter(([temp]) => temp >= lo && temp <= hi));
+  if (pts[pts.length - 1][0] > hi) line.push([hi, speedAt(pts, hi)]);
   return line;
 });
+const visiblePoints = computed(() => sorted.value.filter(({ p: [temp] }) => temp >= X_MIN.value && temp <= X_MAX.value));
 
 function pathOf(points: [number, number][]): string {
   return points.map(([temp, speed]) => `L ${xToPx(temp)} ${yToPx(speed)}`).join(" ");
@@ -73,13 +86,14 @@ const areaPath = computed(() => {
   const pts = sorted.value.map((pt) => pt.p);
   if (pts.length === 0) return "";
   const line = pathOf(visibleLine.value);
-  return `M ${xToPx(X_MIN)} ${yToPx(Y_MIN)} L ${xToPx(X_MIN)} ${yToPx(speedAt(pts, X_MIN))} ${line} L ${xToPx(X_MAX)} ${yToPx(speedAt(pts, X_MAX))} L ${xToPx(X_MAX)} ${yToPx(Y_MIN)} Z`;
+  const [lo, hi] = [X_MIN.value, X_MAX.value];
+  return `M ${xToPx(lo)} ${yToPx(Y_MIN)} L ${xToPx(lo)} ${yToPx(speedAt(pts, lo))} ${line} L ${xToPx(hi)} ${yToPx(speedAt(pts, hi))} L ${xToPx(hi)} ${yToPx(Y_MIN)} Z`;
 });
 
 const liveMarker = computed(() => {
   const celsius = props.liveCelsius;
   if (celsius === null || celsius === undefined || !props.modelValue.length) return null;
-  const temp = clamp(celsius, X_MIN, X_MAX);
+  const temp = clamp(celsius, X_MIN.value, X_MAX.value);
   const speed = Math.round(speedAt(props.modelValue, celsius));
   const x = xToPx(temp);
   const y = yToPx(speed);
@@ -97,7 +111,7 @@ const linePath = computed(() => {
 
 const xGrid = computed(() => {
   const arr: number[] = [];
-  for (let x = X_MIN; x <= X_MAX; x += 10) arr.push(x);
+  for (let x = X_MIN.value; x <= X_MAX.value; x += 10) arr.push(x);
   return arr;
 });
 const yGrid = computed(() => {
@@ -119,7 +133,7 @@ function onCanvasClick(evt: MouseEvent) {
   if (!point) return;
   const { x, y } = point;
   if (x < PAD || x > W - PAD || y < PAD || y > H - PAD) return;
-  const temp = clamp(pxToX(x), X_MIN, X_MAX);
+  const temp = clamp(pxToX(x), X_MIN.value, X_MAX.value);
   const speed = clamp(pxToY(y), Y_MIN, Y_MAX);
   const next = [...props.modelValue, [round1(temp), round0(speed)] as [number, number]];
   next.sort((a, b) => a[0] - b[0]);
@@ -130,6 +144,7 @@ function onPointMouseDown(evt: MouseEvent, index: number) {
   if (props.disabled) return;
   evt.stopPropagation();
   dragIndex.value = index;
+  dragRange.value = xRange.value;
   dragGesture = newCurveGesture();
   window.addEventListener("mousemove", onWindowMouseMove);
   window.addEventListener("mouseup", onWindowMouseUp);
@@ -139,7 +154,7 @@ function onWindowMouseMove(evt: MouseEvent) {
   if (dragIndex.value === null) return;
   const point = svgPoint(evt);
   if (!point) return;
-  const temp = clamp(pxToX(point.x), X_MIN, X_MAX);
+  const temp = clamp(pxToX(point.x), X_MIN.value, X_MAX.value);
   const speed = clamp(pxToY(point.y), Y_MIN, Y_MAX);
   const next = props.modelValue.map((p, i) =>
     i === dragIndex.value ? ([round1(temp), round0(speed)] as [number, number]) : p,
@@ -150,6 +165,7 @@ function onWindowMouseMove(evt: MouseEvent) {
 
 function onWindowMouseUp() {
   dragIndex.value = null;
+  dragRange.value = null;
   dragGesture = null;
   window.removeEventListener("mousemove", onWindowMouseMove);
   window.removeEventListener("mouseup", onWindowMouseUp);
@@ -229,7 +245,14 @@ function pointPx(pt: [number, number]) {
       </g>
       <!-- curve -->
       <defs>
-        <linearGradient id="curve-temp-band" x1="0" x2="1" y1="0" y2="0">
+        <linearGradient
+          id="curve-temp-band"
+          gradientUnits="userSpaceOnUse"
+          :x1="xToPx(CURVE_TEMP_MIN)"
+          :x2="xToPx(CURVE_TEMP_MAX)"
+          y1="0"
+          y2="0"
+        >
           <stop offset="0" stop-color="var(--temp-cool)" />
           <stop offset="0.55" stop-color="var(--temp-warm)" />
           <stop offset="1" stop-color="var(--temp-hot)" />
@@ -246,7 +269,7 @@ function pointPx(pt: [number, number]) {
         <rect :x="liveMarker.labelX - 52" :y="liveMarker.labelY" width="104" height="22" rx="11" class="live-label-bg" />
         <text :x="liveMarker.labelX" :y="liveMarker.labelY + 15" text-anchor="middle" class="live-label">{{ liveMarker.label }}</text>
       </g>
-      <g v-for="(pt, idx) in sorted" :key="pt.i">
+      <g v-for="pt in visiblePoints" :key="pt.i">
         <circle
           :cx="pointPx(pt.p).cx"
           :cy="pointPx(pt.p).cy"
