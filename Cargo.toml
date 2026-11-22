@@ -66,7 +66,7 @@ gio = "0.18"
 signal-hook = "0.3"
 
 # Video encoding
-ffmpeg-next = { version = "9.0", default-features = false, features = ["codec", "software-scaling", "format", "filter", "non-exhaustive-enums"] }
+ffmpeg-next = { version = "9.1", default-features = false, features = ["codec", "software-scaling", "format", "filter", "non-exhaustive-enums"] }
 
 # Template catalog
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
