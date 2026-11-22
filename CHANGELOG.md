@@ -3,6 +3,15 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.3.2 — 2026-11-22
+
+### Features
+- **tl**: Add merged port lighting (fixes [#304](https://github.com/sgtaziz/lian-li-linux/issues/304))
+
+### Fixes
+- **lcd**: Recover from same-port re-enumeration  (`8efd859`)
+- **media**: Update ffmpeg-sys-next for newer FFmpeg (fixes [#305](https://github.com/sgtaziz/lian-li-linux/issues/305))
+
 ## v1.3.1 — 2026-11-19
 
 ### Features
