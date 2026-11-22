@@ -158,8 +158,11 @@ impl RgbController {
                         .iter()
                         .find(|preset| &preset.name == name && preset.device_id == device.device_id)
                 });
+                let merge = self.port_merge(config, &device.device_id);
                 let signature = serde_json::to_string(&(
                     mb_rgb_sync,
+                    &merge,
+                    device.reverse_port,
                     device.fan_led_count,
                     &device.zones,
                     &device.regions,
@@ -169,8 +172,16 @@ impl RgbController {
                     return Ok(());
                 }
                 self.configured.remove(&device.device_id);
+                if merge == Some(None) && !mb_rgb_sync {
+                    self.wired[&device.device_id].apply_port_merge(None)?;
+                }
                 if mb_rgb_sync {
                     self.set_mb_rgb_sync(&device.device_id, true)?;
+                } else if let Some(Some(merge)) = &merge {
+                    if self.is_merge_leader(&device.device_id) {
+                        self.wired[&device.device_id].apply_port_merge(Some(merge))?;
+                    }
+                    self.apply_directions(device)?;
                 } else if self.software_controlled(&device.device_id) {
                     let next = self.configured_render(device, presets)?;
                     self.apply_render(&device.device_id, next.state)?;
@@ -187,15 +198,8 @@ impl RgbController {
                 } else {
                     for zone in &device.zones {
                         self.set_effect(&device.device_id, zone.zone_index, &zone.effect)?;
-                        if zone.swap_lr || zone.swap_tb {
-                            self.set_fan_direction(
-                                &device.device_id,
-                                zone.zone_index,
-                                zone.swap_lr,
-                                zone.swap_tb,
-                            )?;
-                        }
                     }
+                    self.apply_directions(device)?;
                 }
                 if mb_rgb_sync || !self.software_controlled(&device.device_id) {
                     self.configured_direct_colors
@@ -390,6 +394,84 @@ impl RgbController {
             direct_colors,
         })
     }
+
+    /// None when the device cannot merge, Some(None) when its ports run separately.
+    fn port_merge(
+        &self,
+        config: &RgbAppConfig,
+        id: &str,
+    ) -> Option<Option<lianli_shared::rgb::RgbPortMerge>> {
+        let device = self.wired.get(id)?;
+        if device.merged_effect_modes().is_empty() {
+            return None;
+        }
+        let base = port_base(id)?;
+        // Quick Sync drives ports separately, so it suspends the merge controller-wide.
+        if self
+            .sync_active
+            .iter()
+            .any(|synced| port_base(synced) == Some(base))
+        {
+            return Some(None);
+        }
+        Some(
+            config
+                .devices
+                .iter()
+                .filter(|saved| port_base(&saved.device_id) == Some(base))
+                .filter_map(|saved| {
+                    saved
+                        .port_merge
+                        .as_ref()
+                        .filter(|merge| merge.enabled)
+                        .map(|merge| (&saved.device_id, merge))
+                })
+                .min_by_key(|(id, _)| *id)
+                .map(|(_, merge)| merge.clone()),
+        )
+    }
+
+    /// Sends every flag, so clearing a swap reaches the hardware.
+    fn apply_directions(&self, device: &lianli_shared::rgb::RgbDeviceConfig) -> anyhow::Result<()> {
+        let Some(wired) = self.wired.get(&device.device_id) else {
+            return Ok(());
+        };
+        if wired.supports_port_reverse() {
+            wired.set_port_reverse(device.reverse_port)?;
+        }
+        if wired.supports_direction() {
+            let zones = wired.zone_info().len();
+            for zone in device
+                .zones
+                .iter()
+                .filter(|zone| usize::from(zone.zone_index) < zones)
+            {
+                self.set_fan_direction(
+                    &device.device_id,
+                    zone.zone_index,
+                    zone.swap_lr,
+                    zone.swap_tb,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The lowest connected port drives the merged group.
+    fn is_merge_leader(&self, id: &str) -> bool {
+        let Some(base) = port_base(id) else {
+            return false;
+        };
+        self.wired
+            .keys()
+            .filter(|other| port_base(other) == Some(base))
+            .min()
+            .is_some_and(|leader| leader == id)
+    }
+}
+
+pub(super) fn port_base(id: &str) -> Option<&str> {
+    id.rsplit_once(":port").map(|(base, _)| base)
 }
 
 #[cfg(test)]
@@ -439,6 +521,8 @@ mod tests {
             active_preset: None,
             regions: None,
             effect_memory: Vec::new(),
+            port_merge: None,
+            reverse_port: false,
             zones: Vec::new(),
         }
     }
@@ -950,6 +1034,8 @@ mod tests {
             active_preset: None,
             regions: None,
             effect_memory: Vec::new(),
+            port_merge: None,
+            reverse_port: false,
             zones: (0..4)
                 .map(|zone_index| RgbZoneConfig {
                     zone_index,

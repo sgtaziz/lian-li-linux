@@ -38,6 +38,26 @@ impl RgbController {
                 }
             }
         }
+        for item in &plan {
+            let id = item.id();
+            let Some(base) = super::configuration::port_base(id) else {
+                continue;
+            };
+            let Some(device) = self
+                .wired
+                .get(id)
+                .filter(|device| !device.merged_effect_modes().is_empty())
+                .cloned()
+            else {
+                continue;
+            };
+            self.configured
+                .retain(|other, _| super::configuration::port_base(other) != Some(base));
+            if let Err(error) = device.apply_port_merge(None) {
+                warn!("Failed to suspend the port merge for {id}: {error:#}");
+                reset_failures.insert(id.to_owned());
+            }
+        }
         let clocks = ids
             .iter()
             .filter_map(|id| self.wired.get(id).cloned())
@@ -64,9 +84,7 @@ impl RgbController {
         for item in plan {
             let id = item.id().to_owned();
             if reset_failures.contains(&id) {
-                failure = Some(anyhow::anyhow!(
-                    "failed to leave motherboard RGB sync for {id}"
-                ));
+                failure = Some(anyhow::anyhow!("failed to prepare {id} for RGB sync"));
                 continue;
             }
             if let Err(error) = self.submit_sync(item) {

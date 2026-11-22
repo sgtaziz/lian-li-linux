@@ -183,7 +183,9 @@ pub(super) fn validate(effect: &RgbEffect, fans: usize) -> Result<()> {
         !effect.colors.is_empty()
             || matches!(
                 effect.mode,
-                lianli_shared::rgb::RgbMode::Voice | lianli_shared::rgb::RgbMode::Kaleidoscope
+                lianli_shared::rgb::RgbMode::Voice
+                    | lianli_shared::rgb::RgbMode::Kaleidoscope
+                    | lianli_shared::rgb::RgbMode::MeteorShower
             ),
         "TL effect requires at least one color"
     );

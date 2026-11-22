@@ -175,6 +175,8 @@ fn apply_config_and_leds(
                 zones: Vec::new(),
                 regions: None,
                 effect_memory: Vec::new(),
+                port_merge: None,
+                reverse_port: false,
             });
             rgb_cfg.devices.last_mut().unwrap()
         };

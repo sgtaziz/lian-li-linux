@@ -22,8 +22,11 @@ const props = defineProps<{
   directOnly?: boolean;
   groupEffects?: boolean;
   perFanOnly?: boolean;
+  mergedPorts?: boolean;
   lightingLocked?: boolean;
+  title?: string;
 }>();
+const emit = defineEmits<{ change: [] }>();
 
 const t = useTranslate();
 const rgb = useRgbStore();
@@ -70,7 +73,14 @@ const supportedScopes = computed(
   () => props.cap.supported_scopes?.[props.zoneIndex] ?? [],
 );
 const showScope = computed(() => !props.perFanOnly && !isSoftware.value && supportedScopes.value.length > 0);
-const showDirection = computed(() => (isSoftware.value && isAnimated.value) || props.cap.supports_direction);
+const modeParameters = computed(() =>
+  isSoftware.value ? undefined : props.cap.effect_parameters?.find((entry) => entry.mode === effect.value.mode),
+);
+const maxColors = computed(() => Math.min(4, modeParameters.value?.max_colors ?? 4));
+const showSpeed = computed(() => isAnimated.value && (modeParameters.value?.supports_speed ?? true));
+const showDirection = computed(
+  () => (isSoftware.value && isAnimated.value) || (props.cap.supports_direction && (modeParameters.value?.directions.length ?? 1) > 0),
+);
 
 const propagateChoice = ref<"ask" | "yes" | "no">("ask");
 
@@ -82,6 +92,11 @@ function propagateToZones() {
 }
 
 function patchEffect(p: Partial<RgbEffect>) {
+  if (props.mergedPorts) {
+    Object.assign(effect.value, p, { scope: "All" });
+    emit("change");
+    return;
+  }
   if (props.perFanOnly) {
     const device = config.rgbDeviceConfig(props.deviceId);
     for (const zone of device.zones) {
@@ -147,6 +162,7 @@ function modeOptions() {
 
 function onMode(value: string) {
   if (effect.value.mode === value && (!props.perFanOnly || effect.value.scope === "Fan") && (!props.groupEffects || effect.value.scope !== "Fan")) return;
+  if (props.mergedPorts) return patchEffect({ mode: value });
   const device = config.rgbDeviceConfig(props.deviceId);
   const memoryZone = props.groupEffects ? null : props.zoneIndex;
   rememberDeviceEffect(device, memoryZone, effect.value, false);
@@ -251,6 +267,8 @@ function clearAll() {
 }
 
 const zoneLabel = computed(() => {
+  if (props.title) return props.title;
+  if (props.mergedPorts) return t("rgb.zoneEditor.mergedEffects");
   if (props.groupEffects) return t("rgb.zoneEditor.portEffects");
   const zone = props.cap.zones[props.zoneIndex];
   return zone ? backendText(zone.name, zone.name_ui) : t("rgb.zoneEditor.zoneName", { index: props.zoneIndex });
@@ -301,7 +319,8 @@ const zoneLabel = computed(() => {
         />
       </div>
 
-      <p v-if="groupEffects" class="muted">{{ t("rgb.zoneEditor.groupEffectsHint") }}</p>
+      <p v-if="mergedPorts" class="muted">{{ t("rgb.zoneEditor.mergedEffectsHint") }}</p>
+      <p v-else-if="groupEffects" class="muted">{{ t("rgb.zoneEditor.groupEffectsHint") }}</p>
       <p v-else-if="perFanOnly" class="muted">{{ t("rgb.zoneEditor.perFanHint") }}</p>
       <p v-else-if="directOnly" class="muted">{{ t("rgb.zoneEditor.directHint") }}</p>
       <p v-else-if="hasSoftwareRenderer" class="muted">{{ t("rgb.zoneEditor.softwareHint") }}</p>
@@ -321,7 +340,7 @@ const zoneLabel = computed(() => {
         </div>
       </div>
 
-      <div v-if="!isDirect && !(isSoftware && ['Off', 'Rainbow', 'RainbowMorph'].includes(effect.mode))" class="colors">
+      <div v-if="!isDirect && maxColors > 0 && !(isSoftware && ['Off', 'Rainbow', 'RainbowMorph'].includes(effect.mode))" class="colors">
         <label class="muted">{{ t("rgb.effect.colors") }}</label>
         <div class="color-list">
           <div v-for="(_, i) in effect.colors" :key="i" class="color-item">
@@ -334,7 +353,7 @@ const zoneLabel = computed(() => {
               <template #icon><Trash2 :size="14" /></template>
             </n-button>
           </div>
-          <n-button size="small" quaternary @click="addColor" v-if="effect.colors.length < 4">
+          <n-button size="small" quaternary @click="addColor" v-if="effect.colors.length < maxColors">
             <template #icon><Plus :size="14" /></template>
           </n-button>
         </div>
@@ -342,7 +361,7 @@ const zoneLabel = computed(() => {
 
       <div v-if="!isDirect" class="two-col">
         <LabeledSlider
-          v-if="isAnimated"
+          v-if="showSpeed"
           :label="t('rgb.effect.speed')"
           :model-value="effect.speed"
           :min="0"

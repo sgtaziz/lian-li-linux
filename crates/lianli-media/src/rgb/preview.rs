@@ -508,6 +508,8 @@ mod tests {
             active_preset: None,
             zones: Vec::new(),
             effect_memory: Vec::new(),
+            port_merge: None,
+            reverse_port: false,
             regions: Some(vec![RgbRegionConfig {
                 effect: RgbEffect {
                     mode: RgbMode::Static,

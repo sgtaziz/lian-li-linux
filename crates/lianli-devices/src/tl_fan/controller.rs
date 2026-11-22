@@ -29,6 +29,40 @@ pub(super) const CMD_SET_PORT_DIRECTION: u8 = 0xAF;
 pub(super) const CMD_TEST_LIGHT: u8 = 0xB3;
 pub(super) const CMD_BLINK_PORT: u8 = 0xB4;
 
+pub(super) const MERGED_GROUP: u8 = 0;
+pub(super) const MERGED_BOTTOM_GROUP: u8 = 1;
+
+const TOP_SIDE: u8 = 0x80;
+const BOTTOM_SIDE: u8 = 0x40;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MergeLayout {
+    /// Group 0 holds the tops and group 1 the bottoms, instead of group 0 holding both.
+    pub split_sides: bool,
+    pub port_order: Vec<u8>,
+}
+
+/// Listed ports first, then the rest in ascending order.
+fn effective_port_order(order: &[u8]) -> Vec<u8> {
+    let mut ports: Vec<u8> = Vec::with_capacity(4);
+    for &port in order.iter().chain(&[0, 1, 2, 3]) {
+        if port < 4 && !ports.contains(&port) {
+            ports.push(port);
+        }
+    }
+    ports
+}
+
+/// SetFanGroup member bytes: top side, bottom side, port and fan index.
+pub(super) fn merged_group_members(port_fan_counts: &[u8; 4], order: &[u8], sides: u8) -> Vec<u8> {
+    effective_port_order(order)
+        .into_iter()
+        .flat_map(|port| {
+            (0..port_fan_counts[port as usize]).map(move |fan| sides | (port << 4) | fan)
+        })
+        .collect()
+}
+
 /// TL Fan controller.
 ///
 /// Wraps an opened HID device for a TL Fan controller (0x0416:0x7372).
@@ -38,6 +72,7 @@ pub struct TlFanController {
     /// Last handshake result. Behind a Mutex for interior mutability — allows
     /// `read_fan_rpm(&self)` to refresh RPMs while the device is shared across threads.
     pub(super) last_handshake: Mutex<Option<TlFanHandshake>>,
+    pub(super) merge_layout: Mutex<Option<MergeLayout>>,
 }
 
 impl TlFanController {
@@ -46,6 +81,7 @@ impl TlFanController {
         let ctrl = Self {
             device,
             last_handshake: Mutex::new(None),
+            merge_layout: Mutex::new(None),
         };
 
         ctrl.initialize()?;
@@ -170,6 +206,55 @@ impl TlFanController {
                 base_group + 1
             );
         }
+        Ok(())
+    }
+
+    fn port_fan_counts(&self) -> [u8; 4] {
+        self.last_handshake
+            .lock()
+            .as_ref()
+            .map(|hs| hs.port_fan_counts)
+            .unwrap_or([0; 4])
+    }
+
+    pub fn is_merged(&self) -> bool {
+        self.merge_layout.lock().is_some()
+    }
+
+    /// Always resends, since the groups may not survive a suspend.
+    pub(super) fn merge_ports(&self, layout: MergeLayout) -> Result<()> {
+        let counts = self.port_fan_counts();
+        let groups = if layout.split_sides {
+            vec![(MERGED_GROUP, TOP_SIDE), (MERGED_BOTTOM_GROUP, BOTTOM_SIDE)]
+        } else {
+            vec![(MERGED_GROUP, TOP_SIDE | BOTTOM_SIDE)]
+        };
+        let mut current = self.merge_layout.lock();
+        *current = Some(layout.clone());
+        for (group, sides) in groups {
+            let members = merged_group_members(&counts, &layout.port_order, sides);
+            anyhow::ensure!(!members.is_empty(), "No TL fans detected to merge");
+            anyhow::ensure!(
+                members.len() + 2 <= MAX_PAYLOAD,
+                "Too many TL fans to merge: {}",
+                members.len()
+            );
+            let mut payload = vec![group, members.len() as u8];
+            payload.extend(members);
+            self.send_command_quiet(CMD_SET_FAN_GROUP, &payload)?;
+        }
+        debug!("Merged TL ports: {layout:?}");
+        Ok(())
+    }
+
+    pub(super) fn split_ports(&self) -> Result<()> {
+        let mut current = self.merge_layout.lock();
+        if current.is_none() {
+            return Ok(());
+        }
+        self.setup_fan_groups(&self.port_fan_counts())?;
+        *current = None;
+        debug!("Restored per-port TL fan groups");
         Ok(())
     }
 

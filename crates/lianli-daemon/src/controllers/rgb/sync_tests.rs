@@ -160,6 +160,8 @@ fn setup() -> (RgbController, RgbAppConfig, mpsc::Receiver<Vec<[u8; 3]>>) {
             active_preset: None,
             regions: None,
             effect_memory: Vec::new(),
+            port_merge: None,
+            reverse_port: false,
             zones: vec![RgbZoneConfig {
                 zone_index: 0,
                 swap_lr: false,
@@ -402,5 +404,107 @@ fn one_failed_sync_device_does_not_block_other_participants_or_restoration() {
         .all(|rgb| rgb[0] > 0 && rgb[1] == 0));
     assert!(controller.sync_active.contains("unavailable"));
     assert!(controller.sync_signature.is_none());
+    controller.stop();
+}
+
+struct MergedPort {
+    port: usize,
+    merged: Arc<std::sync::atomic::AtomicBool>,
+    colors: Arc<parking_lot::Mutex<[[u8; 3]; 2]>>,
+}
+
+impl RgbDevice for MergedPort {
+    fn device_name(&self) -> String {
+        format!("port {}", self.port)
+    }
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![RgbMode::Static]
+    }
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        vec![RgbZoneInfo {
+            name: "fan".into(),
+            name_ui: None,
+            led_count: 1,
+        }]
+    }
+    fn set_zone_effect(&self, _: u8, effect: &RgbEffect) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.merged.load(std::sync::atomic::Ordering::Relaxed),
+            "port is merged"
+        );
+        self.colors.lock()[self.port] = effect.colors[0];
+        Ok(())
+    }
+    fn merged_effect_modes(&self) -> Vec<RgbMode> {
+        vec![RgbMode::Static]
+    }
+    fn apply_port_merge(
+        &self,
+        merge: Option<&lianli_shared::rgb::RgbPortMerge>,
+    ) -> anyhow::Result<()> {
+        self.merged
+            .store(merge.is_some(), std::sync::atomic::Ordering::Relaxed);
+        if let Some(merge) = merge {
+            self.colors.lock().fill(merge.effect.colors[0]);
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn quick_sync_suspends_a_port_merge_and_restores_it_when_sync_ends() {
+    let merged = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let colors = Arc::new(parking_lot::Mutex::new([[0; 3]; 2]));
+    let ports = (0..2)
+        .map(|port| {
+            (
+                format!("hid:tl:port{port}"),
+                Arc::new(MergedPort {
+                    port,
+                    merged: merged.clone(),
+                    colors: colors.clone(),
+                }) as Arc<dyn RgbDevice>,
+            )
+        })
+        .collect();
+    let mut controller = RgbController::new(ports, None);
+    let port = |port: usize, color: [u8; 3]| -> RgbDeviceConfig {
+        serde_json::from_value(serde_json::json!({
+            "device_id": format!("hid:tl:port{port}"),
+            "port_merge": {
+                "enabled": true,
+                "effect": RgbEffect { colors: vec![[9, 9, 9]], ..Default::default() },
+            },
+            "zones": [{"zone_index": 0, "effect": RgbEffect { colors: vec![color], ..Default::default() }}]
+        }))
+        .unwrap()
+    };
+    let mut config = RgbAppConfig {
+        enabled: true,
+        devices: vec![port(0, [10, 0, 0]), port(1, [20, 0, 0])],
+        ..Default::default()
+    };
+    controller.apply_config(&config, &[]);
+    assert!(merged.load(std::sync::atomic::Ordering::Relaxed));
+    assert_eq!(*colors.lock(), [[9, 9, 9]; 2]);
+
+    config.merge_lighting = Some(MergeLightingConfig {
+        enabled: true,
+        kind: lianli_shared::rgb::RgbSyncKind::Matched,
+        device_order: vec!["hid:tl:port0".into()],
+        effect: RgbEffect {
+            colors: vec![[1, 2, 3]],
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    controller.apply_config(&config, &[]);
+    assert!(!merged.load(std::sync::atomic::Ordering::Relaxed));
+    assert_eq!(*colors.lock(), [[1, 2, 3], [20, 0, 0]]);
+
+    config.merge_lighting = None;
+    controller.apply_config(&config, &[]);
+    assert!(merged.load(std::sync::atomic::Ordering::Relaxed));
+    assert_eq!(*colors.lock(), [[9, 9, 9]; 2]);
     controller.stop();
 }

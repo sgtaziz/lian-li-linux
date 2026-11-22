@@ -11,17 +11,18 @@ pub fn for_fans(fans: u8) -> Vec<RgbEffectParameters> {
                 | RgbMode::RainbowMorph
                 | RgbMode::Voice
                 | RgbMode::Kaleidoscope
+                | RgbMode::MeteorShower
                 | RgbMode::Twinkle => 0,
                 RgbMode::Static | RgbMode::Breathing => fans,
                 RgbMode::Runway
                 | RgbMode::Staggered
                 | RgbMode::Tide
                 | RgbMode::Mixing
-                | RgbMode::TailChasing
+                | RgbMode::PingPong
                 | RgbMode::Racing
                 | RgbMode::Lottery
                 | RgbMode::Intertwine => 2,
-                RgbMode::ColorCycle | RgbMode::CoverCycle => 3,
+                RgbMode::ColorCycle => 3,
                 _ => 4,
             };
             RgbEffectParameters {
@@ -51,9 +52,6 @@ pub fn for_fans(fans: u8) -> Vec<RgbEffectParameters> {
                         | RgbMode::CoverCycle
                         | RgbMode::Lottery
                         | RgbMode::MeteorShower
-                        | RgbMode::Wave
-                        | RgbMode::Paint
-                        | RgbMode::Racing
                 ) {
                     vec![RgbDirection::Clockwise, RgbDirection::CounterClockwise]
                 } else {
@@ -78,10 +76,15 @@ mod tests {
         assert_eq!(parameters(RgbMode::ColorCycle).max_colors, 3);
         assert_eq!(parameters(RgbMode::Mixing).max_colors, 2);
         assert_eq!(parameters(RgbMode::Twinkle).max_colors, 0);
+        assert_eq!(parameters(RgbMode::TailChasing).max_colors, 4);
+        assert_eq!(parameters(RgbMode::CoverCycle).max_colors, 4);
+        assert_eq!(parameters(RgbMode::PingPong).max_colors, 2);
+        assert_eq!(parameters(RgbMode::MeteorShower).max_colors, 0);
         assert!(parameters(RgbMode::Reflect).directions.is_empty());
-        assert_eq!(parameters(RgbMode::Paint).directions.len(), 2);
-        assert_eq!(parameters(RgbMode::Wave).directions.len(), 2);
-        assert_eq!(parameters(RgbMode::Racing).directions.len(), 2);
+        assert!(parameters(RgbMode::Paint).directions.is_empty());
+        assert!(parameters(RgbMode::Wave).directions.is_empty());
+        assert!(parameters(RgbMode::Racing).directions.is_empty());
+        assert_eq!(parameters(RgbMode::MeteorShower).directions.len(), 2);
         assert_eq!(parameters(RgbMode::Lottery).directions.len(), 2);
     }
 }

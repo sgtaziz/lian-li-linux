@@ -604,6 +604,28 @@ pub trait RgbDevice: Send + Sync {
         anyhow::bail!("Merge lighting not supported by this device")
     }
 
+    /// Empty unless the device supports `apply_port_merge`.
+    fn merged_effect_modes(&self) -> Vec<RgbMode> {
+        Vec::new()
+    }
+
+    fn merged_side_effect_modes(&self) -> Vec<RgbMode> {
+        Vec::new()
+    }
+
+    /// Applies controller-wide, so one sibling port is enough. None restores per-port lighting.
+    fn apply_port_merge(&self, _merge: Option<&lianli_shared::rgb::RgbPortMerge>) -> Result<()> {
+        anyhow::bail!("Port merge not supported by this device")
+    }
+
+    fn supports_port_reverse(&self) -> bool {
+        false
+    }
+
+    fn set_port_reverse(&self, _reversed: bool) -> Result<()> {
+        anyhow::bail!("Port reverse not supported by this device")
+    }
+
     fn ping(&self, _zone: u8) -> Result<()> {
         anyhow::bail!("Ping not supported by this device")
     }
@@ -742,6 +764,21 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     }
     fn stop_merge_lighting(&self) -> Result<()> {
         (**self).stop_merge_lighting()
+    }
+    fn merged_effect_modes(&self) -> Vec<RgbMode> {
+        (**self).merged_effect_modes()
+    }
+    fn merged_side_effect_modes(&self) -> Vec<RgbMode> {
+        (**self).merged_side_effect_modes()
+    }
+    fn apply_port_merge(&self, merge: Option<&lianli_shared::rgb::RgbPortMerge>) -> Result<()> {
+        (**self).apply_port_merge(merge)
+    }
+    fn supports_port_reverse(&self) -> bool {
+        (**self).supports_port_reverse()
+    }
+    fn set_port_reverse(&self, reversed: bool) -> Result<()> {
+        (**self).set_port_reverse(reversed)
     }
     fn ping(&self, zone: u8) -> Result<()> {
         (**self).ping(zone)

@@ -420,6 +420,18 @@ export interface RgbDeviceConfig {
   zones: RgbZoneConfig[];
   regions?: RgbRegionConfig[] | null;
   effect_memory?: RgbEffectMemory[];
+  port_merge?: RgbPortMerge | null;
+  reverse_port?: boolean;
+}
+
+export interface RgbPortMerge {
+  enabled: boolean;
+  effect: RgbEffect;
+  split_sides: boolean;
+  sync_sides: boolean;
+  top: RgbEffect;
+  bottom: RgbEffect;
+  port_order?: number[];
 }
 
 export type RgbPreviewShape = "fan" | "pump" | "screen" | "strip";
@@ -499,6 +511,9 @@ export interface RgbDeviceCapabilities {
   supported_scopes: RgbScope[][];
   supports_direction?: boolean;
   supports_merge_lighting?: boolean;
+  merged_effect_modes?: RgbMode[];
+  merged_side_effect_modes?: RgbMode[];
+  supports_port_reverse?: boolean;
   /** LEDs are driven over RF by a bound wireless device; hidden from the list. */
   rf_owned?: boolean;
 }

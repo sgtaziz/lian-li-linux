@@ -533,6 +533,8 @@ mod tests {
                 .collect(),
             regions: None,
             effect_memory: Vec::new(),
+            port_merge: None,
+            reverse_port: false,
         }
     }
 

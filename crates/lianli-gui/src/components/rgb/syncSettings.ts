@@ -15,6 +15,38 @@ export function motherboardSyncEnabled(cap: RgbDeviceCapabilities, rgb: RgbAppCo
   return rgb.devices.some((device) => device.mb_rgb_sync && device.device_id.replace(/:group\d+$/, "") === base);
 }
 
+const PORT_SUFFIX = /:port\d+$/;
+
+/** Connected ports of the same controller that can merge, lowest port first. */
+export function mergeSiblings(cap: RgbDeviceCapabilities, caps: RgbDeviceCapabilities[]): string[] {
+  if (!cap.merged_effect_modes?.length || !PORT_SUFFIX.test(cap.device_id)) return [];
+  const base = cap.device_id.replace(PORT_SUFFIX, "");
+  return caps
+    .filter((other) => other.merged_effect_modes?.length && other.device_id.replace(PORT_SUFFIX, "") === base)
+    .map((other) => other.device_id)
+    .sort();
+}
+
+export function portsMerged(cap: RgbDeviceCapabilities, rgb: RgbAppConfig): boolean {
+  if (!cap.merged_effect_modes?.length || !PORT_SUFFIX.test(cap.device_id)) return false;
+  const base = cap.device_id.replace(PORT_SUFFIX, "");
+  return rgb.devices.some((device) => device.port_merge?.enabled && device.device_id.replace(PORT_SUFFIX, "") === base);
+}
+
+/** Quick Sync on any sibling runs every port separately until it ends. */
+export function mergeSuspended(cap: RgbDeviceCapabilities, caps: RgbDeviceCapabilities[], rgb: RgbAppConfig): boolean {
+  if (!portsMerged(cap, rgb)) return false;
+  const siblings = mergeSiblings(cap, caps);
+  return caps.some((other) => siblings.includes(other.device_id) && quickSyncControls(other, rgb));
+}
+
+/** Ports listed first, then the rest in ascending order, matching the daemon. */
+export function mergePortOrder(order: number[] | undefined, ports: number[]): number[] {
+  const sorted = [...ports].sort((a, b) => a - b);
+  return [...(order ?? []).filter((port) => sorted.includes(port)), ...sorted.filter((port) => !order?.includes(port))]
+    .filter((port, index, all) => all.indexOf(port) === index);
+}
+
 export function quickSyncControls(cap: RgbDeviceCapabilities, rgb: RgbAppConfig): boolean {
   const sync = rgb.merge_lighting;
   if (rgb.devices.find((device) => device.device_id === cap.device_id)?.mb_rgb_sync) return false;

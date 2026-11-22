@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useDialog } from "naive-ui";
-import { Save, Trash2, Locate } from "lucide-vue-next";
-import type { RgbDeviceCapabilities } from "@/types";
+import { ChevronDown, ChevronUp, Save, Trash2, Locate } from "lucide-vue-next";
+import type { RgbDeviceCapabilities, RgbEffect, RgbMode, RgbPortMerge } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
 import { useConfigStore } from "@/stores/config";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
@@ -12,11 +12,21 @@ import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
 import RgbPreview from "@/components/rgb/RgbPreview.vue";
 import SegmentedControl from "@/components/common/SegmentedControl.vue";
 import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
-import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
+import { mergePortOrder, mergeSiblings, mergeSuspended, motherboardSyncEnabled, portsMerged, quickSyncControls } from "@/components/rgb/syncSettings";
 import { useTranslate } from "@/i18n";
 import { backendText } from "@/utils/backendText";
 
 const props = defineProps<{ cap: RgbDeviceCapabilities; label: string }>();
+
+const DEFAULT_MERGED_EFFECT: RgbEffect = {
+  mode: "Rainbow",
+  colors: [],
+  speed: 2,
+  brightness: 4,
+  direction: "Clockwise",
+  scope: "All",
+  disabled: false,
+};
 
 const t = useTranslate();
 const rgb = useRgbStore();
@@ -103,6 +113,90 @@ const mbSync = computed({
   },
 });
 
+const mergeIds = computed(() => mergeSiblings(props.cap, config.rgbCaps));
+const canMerge = computed(() => mergeIds.value.length > 1);
+const mergeLeader = computed(() => mergeIds.value[0]);
+const leadMerge = computed(() => config.rgbDeviceConfig(mergeLeader.value).port_merge);
+
+function newPortMerge(): RgbPortMerge {
+  const effect = (): RgbEffect => ({ ...DEFAULT_MERGED_EFFECT });
+  return { enabled: false, effect: effect(), split_sides: false, sync_sides: true, top: effect(), bottom: effect(), port_order: [] };
+}
+
+/** Every sibling carries the same copy, so the daemon finds it whichever port connects. */
+function syncMerge() {
+  const source = leadMerge.value;
+  for (const id of mergeIds.value) {
+    const dev = config.rgbDeviceConfig(id);
+    if (source && id !== mergeLeader.value) dev.port_merge = JSON.parse(JSON.stringify(source));
+    dev.active_preset = null;
+  }
+  config.markDirty();
+}
+
+function editMerge(change: (merge: RgbPortMerge) => void) {
+  const lead = config.rgbDeviceConfig(mergeLeader.value);
+  lead.port_merge ??= newPortMerge();
+  change(lead.port_merge);
+  syncMerge();
+}
+
+const merged = computed({
+  get: () => portsMerged(props.cap, config.ensureRgb()),
+  set: (v: boolean) => editMerge((merge) => (merge.enabled = v)),
+});
+const splitSides = computed({
+  get: () => leadMerge.value?.split_sides ?? false,
+  set: (v: boolean) => editMerge((merge) => (merge.split_sides = v)),
+});
+const syncSides = computed({
+  get: () => leadMerge.value?.sync_sides ?? true,
+  set: (v: boolean) => editMerge((merge) => (merge.sync_sides = v)),
+});
+const reversePort = computed({
+  get: () => devConfig.value.reverse_port ?? false,
+  set: (v: boolean) => {
+    devConfig.value.reverse_port = v;
+    config.markDirty();
+  },
+});
+
+const mergePorts = computed(() => mergeIds.value.map((id) => Number(id.match(/:port(\d+)$/)?.[1] ?? 0)));
+const portOrder = computed(() => mergePortOrder(leadMerge.value?.port_order, mergePorts.value));
+function movePort(index: number, offset: number) {
+  const order = [...portOrder.value];
+  const target = index + offset;
+  if (target < 0 || target >= order.length) return;
+  [order[index], order[target]] = [order[target], order[index]];
+  editMerge((merge) => (merge.port_order = order));
+}
+function portName(port: number) {
+  const id = mergeIds.value[mergePorts.value.indexOf(port)];
+  return names.nameOf(id) || config.rgbCaps.find((cap) => cap.device_id === id)?.device_name || id;
+}
+
+/** Static merges as one colour per side. */
+function mergedCapFor(modes: RgbMode[] | undefined): RgbDeviceCapabilities {
+  const params = (props.cap.effect_parameters ?? []).map((entry) =>
+    entry.mode === "Static" ? { ...entry, min_colors: 1, max_colors: 2, per_fan_colors: false } : entry,
+  );
+  return { ...props.cap, group_effect_modes: modes ?? [], effect_parameters: params, supported_scopes: [] };
+}
+const mergeFollower = computed(() => merged.value && mergeLeader.value !== props.cap.device_id);
+const mergePaused = computed(() => mergeSuspended(props.cap, config.rgbCaps, config.ensureRgb()));
+const wholeCap = computed(() => mergedCapFor(props.cap.merged_effect_modes));
+const sideCap = computed(() => mergedCapFor(props.cap.merged_side_effect_modes));
+const mergeZone = (key: "effect" | "top" | "bottom") =>
+  computed(() => leadMerge.value && { zone_index: 0, effect: leadMerge.value[key], swap_lr: false, swap_tb: false });
+const wholeZone = mergeZone("effect");
+const topZone = mergeZone("top");
+const bottomZone = mergeZone("bottom");
+const leaderName = computed(() => portName(mergePorts.value[0]));
+const mergeLayoutOptions = computed(() => [
+  { value: "whole", label: t("rgb.deviceCard.mergeWholeFan") },
+  { value: "sides", label: t("rgb.deviceCard.mergeSides") },
+]);
+
 function zoneAt(i: number) {
   return devConfig.value.zones[i];
 }
@@ -181,11 +275,11 @@ const summary = computed(() =>
     <p v-if="cap.deferred_reason" class="notice warning">{{ backendText(cap.deferred_reason, cap.deferred_reason_ui) }}</p>
     <p v-if="syncActive" class="notice">{{ t(cap.fan_led_count_control ? "rgb.deviceCard.quickSyncNoticeLedCount" : "rgb.deviceCard.quickSyncNotice") }}</p>
 
-    <RgbPreview v-if="!syncActive" :cap="cap" :config="devConfig" :mb-sync="mbSync" />
+    <RgbPreview v-if="!syncActive && !merged" :cap="cap" :config="devConfig" :mb-sync="mbSync" />
 
     <div class="device-controls">
-      <div v-if="cap.supports_mb_rgb_sync || (!mbSync && (regional || portGroups))" class="toolbar">
-        <div v-if="!mbSync && (regional || portGroups)" class="control-tabs" :inert="syncActive || undefined">
+      <div v-if="cap.supports_mb_rgb_sync || canMerge || cap.supports_port_reverse || (!mbSync && (regional || portGroups))" class="toolbar">
+        <div v-if="!mbSync && !merged && (regional || portGroups)" class="control-tabs" :inert="syncActive || undefined">
           <SegmentedControl
             :model-value="controlTab"
             :options="controlTabOptions"
@@ -193,16 +287,46 @@ const summary = computed(() =>
             @update:model-value="(tab) => (controlTab = tab)"
           />
         </div>
-        <n-checkbox
-          v-if="cap.supports_mb_rgb_sync"
-          v-model:checked="mbSync"
-          class="mb-sync"
-          :class="{ 'sync-locked': syncActive }"
-          :inert="syncActive || undefined"
-        >{{ t("rgb.deviceCard.motherboardSync") }}</n-checkbox>
+        <div class="toggles" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
+          <n-checkbox v-if="canMerge && !mbSync" v-model:checked="merged">{{ t("rgb.deviceCard.mergePorts") }}</n-checkbox>
+          <n-checkbox v-if="cap.supports_port_reverse && !mbSync" v-model:checked="reversePort">{{ t("rgb.deviceCard.reversePort") }}</n-checkbox>
+          <n-checkbox v-if="cap.supports_mb_rgb_sync" v-model:checked="mbSync">{{ t("rgb.deviceCard.motherboardSync") }}</n-checkbox>
+        </div>
       </div>
 
       <p v-if="mbSync" class="hint">{{ t("rgb.deviceCard.motherboardControls") }}</p>
+      <p v-else-if="mergePaused" class="hint">{{ t("rgb.deviceCard.mergeSuspended") }}</p>
+      <p v-else-if="mergeFollower" class="hint">{{ t("rgb.deviceCard.mergedFollower", { port: leaderName }) }}</p>
+      <template v-else-if="merged && leadMerge">
+        <div class="merge-settings" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
+          <SegmentedControl
+            :model-value="splitSides ? 'sides' : 'whole'"
+            :options="mergeLayoutOptions"
+            :label="t('rgb.deviceCard.mergeLayout')"
+            @update:model-value="(layout) => (splitSides = layout === 'sides')"
+          />
+          <n-checkbox v-if="splitSides" v-model:checked="syncSides">{{ t("rgb.deviceCard.syncSides") }}</n-checkbox>
+        </div>
+        <RgbZoneEditor v-if="!splitSides && wholeZone" :device-id="mergeLeader" :cap="wholeCap" :zone-index="0" :zone="wholeZone" :lighting-locked="syncActive" group-effects merged-ports @change="syncMerge" />
+        <template v-else>
+          <RgbZoneEditor v-if="topZone" :device-id="mergeLeader" :cap="sideCap" :zone-index="0" :zone="topZone" :title="t(syncSides ? 'rgb.zoneEditor.bothSides' : 'rgb.zoneEditor.topSide')" :lighting-locked="syncActive" group-effects merged-ports @change="syncMerge" />
+          <RgbZoneEditor v-if="!syncSides && bottomZone" :device-id="mergeLeader" :cap="sideCap" :zone-index="0" :zone="bottomZone" :title="t('rgb.zoneEditor.bottomSide')" :lighting-locked="syncActive" group-effects merged-ports @change="syncMerge" />
+        </template>
+        <div class="port-order" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
+          <span class="muted">{{ t("rgb.deviceCard.portOrder") }}</span>
+          <ol>
+            <li v-for="(port, index) in portOrder" :key="port">
+              <span>{{ portName(port) }}</span>
+              <n-button size="tiny" quaternary :disabled="index === 0" :title="t('rgb.deviceCard.moveUp')" :aria-label="t('rgb.deviceCard.moveUp')" @click="movePort(index, -1)">
+                <template #icon><ChevronUp :size="14" /></template>
+              </n-button>
+              <n-button size="tiny" quaternary :disabled="index === portOrder.length - 1" :title="t('rgb.deviceCard.moveDown')" :aria-label="t('rgb.deviceCard.moveDown')" @click="movePort(index, 1)">
+                <template #icon><ChevronDown :size="14" /></template>
+              </n-button>
+            </li>
+          </ol>
+        </div>
+      </template>
       <template v-else>
         <p v-if="cap.hardware_group_effects" class="hint">{{ t("rgb.deviceCard.hardwareGroupHint") }}</p>
         <p v-if="cap.hardware_group_effects && !devConfig.regions" class="hint">{{ t("rgb.deviceCard.hardwareGroupFanHint") }}</p>
@@ -343,8 +467,30 @@ const summary = computed(() =>
   display: flex;
   gap: var(--space-2);
 }
-.mb-sync {
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
   margin-left: auto;
+}
+.merge-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.port-order {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.port-order ol {
+  margin: 0;
+  padding-left: var(--space-5, 20px);
+}
+.port-order li > span {
+  display: inline-block;
+  min-width: 160px;
 }
 .zones {
   display: flex;

@@ -1,8 +1,8 @@
-use super::controller::TlFanController;
+use super::controller::{MergeLayout, TlFanController, MERGED_BOTTOM_GROUP, MERGED_GROUP};
 use super::LEDS_PER_FAN;
 use crate::traits::RgbDevice;
 use anyhow::{bail, Result};
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbPortMerge, RgbScope, RgbZoneInfo};
 use lianli_shared::ui_message::UiMessage;
 use std::sync::Arc;
 use tracing::debug;
@@ -23,12 +23,111 @@ pub struct TlFanPortDevice {
     fan_count: u8,
 }
 
+const MERGED_MODES: [RgbMode; 12] = [
+    RgbMode::Off,
+    RgbMode::Static,
+    RgbMode::Rainbow,
+    RgbMode::Runway,
+    RgbMode::Meteor,
+    RgbMode::ColorCycle,
+    RgbMode::Render,
+    RgbMode::TailChasing,
+    RgbMode::Stack,
+    RgbMode::CoverCycle,
+    RgbMode::Wave,
+    RgbMode::Racing,
+];
+
+const MERGED_SIDE_MODES: [RgbMode; 16] = [
+    RgbMode::Off,
+    RgbMode::Rainbow,
+    RgbMode::Runway,
+    RgbMode::Meteor,
+    RgbMode::ColorCycle,
+    RgbMode::Tide,
+    RgbMode::Mixing,
+    RgbMode::Voice,
+    RgbMode::Door,
+    RgbMode::Render,
+    RgbMode::Ripple,
+    RgbMode::Reflect,
+    RgbMode::Paint,
+    RgbMode::PingPong,
+    RgbMode::Stack,
+    RgbMode::ElectricCurrent,
+];
+
+fn ensure_merged_mode(modes: &[RgbMode], effect: &RgbEffect) -> Result<()> {
+    anyhow::ensure!(
+        modes.contains(&effect.mode),
+        "{:?} cannot run across merged TL ports",
+        effect.mode
+    );
+    Ok(())
+}
+
+/// Static runs per side, top colour first.
+fn static_sides(effect: &RgbEffect) -> (RgbEffect, RgbEffect) {
+    let side = |index: usize| RgbEffect {
+        colors: effect
+            .colors
+            .get(index)
+            .or(effect.colors.first())
+            .map(|color| vec![*color])
+            .unwrap_or_default(),
+        ..effect.clone()
+    };
+    (side(0), side(1))
+}
+
 impl TlFanPortDevice {
     pub fn new(controller: Arc<TlFanController>, port: u8, fan_count: u8) -> Self {
         Self {
             controller,
             port,
             fan_count,
+        }
+    }
+
+    fn ensure_unmerged(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.controller.is_merged(),
+            "TL port {} is merged, so the merged effect controls it",
+            self.port
+        );
+        Ok(())
+    }
+
+    fn merge(&self, merge: &RgbPortMerge) -> Result<()> {
+        let static_whole = !merge.split_sides && merge.effect.mode == RgbMode::Static;
+        let sides = if merge.split_sides {
+            ensure_merged_mode(&MERGED_SIDE_MODES, &merge.top)?;
+            if !merge.sync_sides {
+                ensure_merged_mode(&MERGED_SIDE_MODES, &merge.bottom)?;
+            }
+            let bottom = if merge.sync_sides {
+                &merge.top
+            } else {
+                &merge.bottom
+            };
+            Some((merge.top.clone(), bottom.clone()))
+        } else if static_whole {
+            Some(static_sides(&merge.effect))
+        } else {
+            ensure_merged_mode(&MERGED_MODES, &merge.effect)?;
+            None
+        };
+        self.controller.merge_ports(MergeLayout {
+            split_sides: sides.is_some(),
+            port_order: merge.port_order.clone(),
+        })?;
+        match sides {
+            Some((top, bottom)) => {
+                self.controller
+                    .set_group_light(MERGED_BOTTOM_GROUP, &bottom)?;
+                self.controller.set_group_light(MERGED_GROUP, &top)
+            }
+            None => self.controller.set_group_light(MERGED_GROUP, &merge.effect),
         }
     }
 }
@@ -84,6 +183,7 @@ impl RgbDevice for TlFanPortDevice {
     }
 
     fn set_all_effects(&self, effect: &RgbEffect) -> Result<()> {
+        self.ensure_unmerged()?;
         if effect.scope == RgbScope::Fan
             || (effect.scope == RgbScope::All
                 && matches!(
@@ -156,6 +256,7 @@ impl RgbDevice for TlFanPortDevice {
             );
         }
 
+        self.ensure_unmerged()?;
         let base_group = (self.port as u16 * 4 * 2) as u8;
         if effect.scope == RgbScope::Fan {
             anyhow::ensure!(
@@ -243,6 +344,29 @@ impl RgbDevice for TlFanPortDevice {
         }
         debug!("Set MB RGB sync (all ports): enabled={enabled}");
         Ok(())
+    }
+
+    fn merged_effect_modes(&self) -> Vec<RgbMode> {
+        MERGED_MODES.to_vec()
+    }
+
+    fn merged_side_effect_modes(&self) -> Vec<RgbMode> {
+        MERGED_SIDE_MODES.to_vec()
+    }
+
+    fn apply_port_merge(&self, merge: Option<&RgbPortMerge>) -> Result<()> {
+        match merge {
+            Some(merge) => self.merge(merge),
+            None => self.controller.split_ports(),
+        }
+    }
+
+    fn supports_port_reverse(&self) -> bool {
+        true
+    }
+
+    fn set_port_reverse(&self, reversed: bool) -> Result<()> {
+        self.controller.set_port_direction(self.port, reversed)
     }
 
     fn ping(&self, _zone: u8) -> Result<()> {

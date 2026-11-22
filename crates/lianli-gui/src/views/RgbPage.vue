@@ -12,7 +12,7 @@ import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
 import OpenRgbOptions from "@/components/rgb/OpenRgbOptions.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
-import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
+import { mergeSuspended, motherboardSyncEnabled, portsMerged, quickSyncControls } from "@/components/rgb/syncSettings";
 import { useTranslate } from "@/i18n";
 import { backendText } from "@/utils/backendText";
 
@@ -77,6 +77,7 @@ function capState(cap: RgbDeviceCapabilities): { label: string; tone: Tone } {
   if (cap.deferred_reason) return { label: t("rgb.page.stateWaiting"), tone: "warning" };
   if (openrgbEnabled.value) return { label: "OpenRGB", tone: "info" };
   if (motherboardSyncEnabled(cap, rgb.value)) return { label: t("rgb.page.stateMotherboard"), tone: "info" };
+  if (portsMerged(cap, rgb.value) && !mergeSuspended(cap, rgbCaps.value, rgb.value)) return { label: t("rgb.page.stateMerged"), tone: "info" };
   if (quickSyncControls(cap, rgb.value)) return { label: t("rgb.quickSync"), tone: "info" };
   return { label: t("common.online"), tone: "success" };
 }

@@ -24,6 +24,8 @@ fn unchanged_rgb_can_be_saved_when_wireless_is_unavailable() {
             active_preset: None,
             regions: None,
             effect_memory: Vec::new(),
+            port_merge: None,
+            reverse_port: false,
             zones: vec![RgbZoneConfig {
                 zone_index: 0,
                 effect: RgbEffect::default(),
@@ -286,5 +288,134 @@ fn device_removal_releases_playback_and_cached_state() {
     assert_eq!(
         received.recv_timeout(std::time::Duration::from_secs(1)),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+    );
+}
+
+struct MergePort {
+    port: u8,
+    log: Arc<parking_lot::Mutex<Vec<String>>>,
+}
+impl RgbDevice for MergePort {
+    fn device_name(&self) -> String {
+        "merge".into()
+    }
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![RgbMode::Rainbow]
+    }
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        vec![RgbZoneInfo {
+            name: "Fan 1".into(),
+            name_ui: None,
+            led_count: 1,
+        }]
+    }
+    fn set_zone_effect(&self, _: u8, _: &RgbEffect) -> anyhow::Result<()> {
+        self.log.lock().push(format!("effect{}", self.port));
+        Ok(())
+    }
+    fn merged_effect_modes(&self) -> Vec<RgbMode> {
+        vec![RgbMode::Rainbow]
+    }
+    fn apply_port_merge(
+        &self,
+        merge: Option<&lianli_shared::rgb::RgbPortMerge>,
+    ) -> anyhow::Result<()> {
+        let action = if merge.is_some() { "merge" } else { "split" };
+        self.log.lock().push(action.into());
+        Ok(())
+    }
+    fn supports_direction(&self) -> bool {
+        true
+    }
+    fn set_fan_direction(&self, zone: u8, swap_lr: bool, _: bool) -> anyhow::Result<()> {
+        self.log
+            .lock()
+            .push(format!("dir{}.{zone}={swap_lr}", self.port));
+        Ok(())
+    }
+    fn supports_port_reverse(&self) -> bool {
+        true
+    }
+    fn set_port_reverse(&self, reversed: bool) -> anyhow::Result<()> {
+        self.log
+            .lock()
+            .push(format!("reverse{}={reversed}", self.port));
+        Ok(())
+    }
+}
+
+#[test]
+fn merged_ports_send_one_effect_from_the_lowest_port_and_split_before_reapplying() {
+    use lianli_shared::rgb::{RgbDeviceConfig, RgbPortMerge, RgbZoneConfig};
+    let log = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let wired = [0, 2]
+        .into_iter()
+        .map(|port| {
+            (
+                format!("hid:tl:port{port}"),
+                Arc::new(MergePort {
+                    port,
+                    log: log.clone(),
+                }) as Arc<dyn RgbDevice>,
+            )
+        })
+        .collect();
+    let mut controller = RgbController::new(wired, None);
+    let port_config = |port: u8, merged: bool, swap_lr: bool| RgbDeviceConfig {
+        device_id: format!("hid:tl:port{port}"),
+        fan_led_count: None,
+        mb_rgb_sync: false,
+        active_preset: None,
+        regions: None,
+        effect_memory: Vec::new(),
+        port_merge: Some(RgbPortMerge {
+            enabled: merged,
+            ..Default::default()
+        }),
+        reverse_port: port == 2,
+        zones: vec![RgbZoneConfig {
+            zone_index: 0,
+            effect: RgbEffect {
+                mode: RgbMode::Rainbow,
+                ..Default::default()
+            },
+            swap_lr,
+            swap_tb: false,
+        }],
+    };
+    let mut rgb = RgbAppConfig {
+        devices: vec![port_config(2, true, true), port_config(0, true, false)],
+        ..Default::default()
+    };
+    controller.apply_config(&rgb, &[]);
+    assert_eq!(
+        *log.lock(),
+        [
+            "reverse2=true",
+            "dir2.0=true",
+            "merge",
+            "reverse0=false",
+            "dir0.0=false"
+        ]
+    );
+
+    log.lock().clear();
+    controller.apply_config(&rgb, &[]);
+    assert!(log.lock().is_empty());
+
+    rgb.devices = vec![port_config(2, false, false), port_config(0, false, false)];
+    controller.apply_config(&rgb, &[]);
+    assert_eq!(
+        *log.lock(),
+        [
+            "split",
+            "effect2",
+            "reverse2=true",
+            "dir2.0=false",
+            "split",
+            "effect0",
+            "reverse0=false",
+            "dir0.0=false"
+        ]
     );
 }

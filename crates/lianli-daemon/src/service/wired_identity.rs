@@ -265,6 +265,8 @@ mod tests {
                     zones: vec![],
                     regions: None,
                     effect_memory: vec![],
+                    port_merge: None,
+                    reverse_port: false,
                 }],
                 merge_lighting: Some(MergeLightingConfig {
                     device_order: vec!["hid:shared:group2".into()],

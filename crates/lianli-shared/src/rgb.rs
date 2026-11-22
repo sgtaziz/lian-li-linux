@@ -702,6 +702,33 @@ pub struct RgbDeviceConfig {
     pub regions: Option<Vec<RgbRegionConfig>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effect_memory: Vec<RgbEffectMemory>,
+    /// Controller-wide, so every sibling port carries the same value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_merge: Option<RgbPortMerge>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse_port: bool,
+}
+
+/// One effect running across every port of a controller.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct RgbPortMerge {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub effect: RgbEffect,
+    /// Tops and bottoms form two strips instead of one.
+    #[serde(default)]
+    pub split_sides: bool,
+    /// Both strips run `top`.
+    #[serde(default)]
+    pub sync_sides: bool,
+    #[serde(default)]
+    pub top: RgbEffect,
+    #[serde(default)]
+    pub bottom: RgbEffect,
+    /// Missing ports follow in ascending order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub port_order: Vec<u8>,
 }
 
 impl RgbDeviceConfig {
@@ -953,6 +980,12 @@ pub struct RgbDeviceCapabilities {
     /// Whether this device supports merge-lighting (cross-zone synchronized animation).
     #[serde(default)]
     pub supports_merge_lighting: bool,
+    #[serde(default)]
+    pub merged_effect_modes: Vec<RgbMode>,
+    #[serde(default)]
+    pub merged_side_effect_modes: Vec<RgbMode>,
+    #[serde(default)]
+    pub supports_port_reverse: bool,
     /// The LEDs are driven over RF by a bound wireless device; writes to this
     /// entry are skipped. Hidden by the GUI and the OpenRGB server.
     #[serde(default)]
