@@ -471,9 +471,9 @@
     {
       "id": "DOWNLOAD speed",
       "x": 1660,
-      "y": 249,
+      "y": 235,
       "width": 420,
-      "height": 90,
+      "height": 72,
       "sensor_category": "network_rx",
       "update_interval_ms": 1000,
       "kind": {
@@ -487,7 +487,7 @@
         "font": {
           "path": "Amuro.otf"
         },
-        "font_size": 64,
+        "font_size": 56,
         "color": [
           239,
           244,
@@ -525,9 +525,9 @@
     {
       "id": "UPLOAD speed",
       "x": 1660,
-      "y": 379,
+      "y": 365,
       "width": 420,
-      "height": 90,
+      "height": 72,
       "sensor_category": "network_tx",
       "update_interval_ms": 1000,
       "kind": {
@@ -541,7 +541,7 @@
         "font": {
           "path": "Amuro.otf"
         },
-        "font_size": 64,
+        "font_size": 56,
         "color": [
           239,
           244,
@@ -578,6 +578,184 @@
         "path": "tx-arrow.png",
         "opacity": 1,
         "fit": "contain"
+      }
+    },
+    {
+      "id": "Download History",
+      "x": 1660,
+      "y": 284,
+      "width": 420,
+      "height": 44,
+      "update_interval_ms": 1000,
+      "sensor_category": "network_rx",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "network_rx",
+          "iface": "eth0"
+        },
+        "value_min": 0,
+        "value_max": 10,
+        "auto_range": true,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          0,
+          235,
+          255,
+          255
+        ],
+        "fill_color": [
+          0,
+          235,
+          255,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": false,
+        "range_blend": false,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "Amuro.otf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
+      }
+    },
+    {
+      "id": "Upload History",
+      "x": 1660,
+      "y": 414,
+      "width": 420,
+      "height": 36,
+      "update_interval_ms": 1000,
+      "sensor_category": "network_tx",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "network_tx",
+          "iface": "eth0"
+        },
+        "value_min": 0,
+        "value_max": 10,
+        "auto_range": true,
+        "history_length": 60,
+        "line_width": 2.5,
+        "line_color": [
+          255,
+          50,
+          190,
+          255
+        ],
+        "fill_color": [
+          255,
+          50,
+          190,
+          50
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0,
+        "corner_radius": 0,
+        "padding": 2,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": false,
+        "range_blend": false,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "Amuro.otf"
+        },
+        "axis_label_size": 12,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4
       }
     }
   ],

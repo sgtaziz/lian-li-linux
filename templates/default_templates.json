@@ -365,14 +365,14 @@
     {
       "id": "rx78-flight-enhanced",
       "name": "RX-78 / Flight Enhanced",
-      "description": "Animated RX-78 dashboard with large color-coded CPU/GPU load, temperatures, RX/TX network rates and pulsing jet engines.",
+      "description": "Animated RX-78 dashboard with large CPU/GPU load, temperatures, RX/TX network rates and history graphs, and pulsing jet engines.",
       "author": "marvinduranr",
       "min_daemon_version": "1.2.6",
       "folder": "rx78-flight-enhanced",
       "template_file": "template.json",
-      "template_sha256": "7fb32703d808425b01f900c48267282773f3a81d5e9436ec75a6d39787a3ee44",
+      "template_sha256": "d79bd79c0b16e58430fe875690ab2afea87a46cbfb8054080552ff0266369ba3",
       "preview": "preview.png",
-      "preview_sha256": "4975c05537e82701a3f74e92ec4bd28d9def57915833dfdd3f826175021d3d2f",
+      "preview_sha256": "921c8db4dc23fd66a2f237a733c5a878bead4e1079d6d1f26b5efbbe3cc295e3",
       "base_width": 1920,
       "base_height": 480,
       "rotated": true,
@@ -395,11 +395,11 @@
         },
         {
           "path": "CREDITS.md",
-          "sha256": "ce4285c5005068cd3b095b064000e7adf6449803a01ee3d78b59697a0e8e1eea"
+          "sha256": "149a69839b1b1382cafb27470c84a02fc33a28aeef46a88f927d06fa7a040609"
         },
         {
           "path": "README.md",
-          "sha256": "aa3c8c067d1b849e3890fb4bb7e98eabcb53c7c74c62f607748a4f2bed36483f"
+          "sha256": "2cfabcfb2238eadacd6afe46e3d80eb199ea3f6a195a5eb25e61218b3938a9c4"
         },
         {
           "path": "gundam-head.png",
