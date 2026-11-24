@@ -1514,6 +1514,396 @@
           "sha256": "4fe01b13ffb41faa8f030d84843a95dab32792dfeeca7c072abbfd3f4d6896ad"
         }
       ]
+    },
+    {
+      "id": "pretty-guardian-moon-horizontal",
+      "name": "Pretty Guardian",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-moon-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "3aad55eb669fec48cd8a95f85a4617577d910299f51537d034bd11ae57f0762c",
+      "preview": "preview.png",
+      "preview_sha256": "4c3d45eeb6b97db3a6e9fcc6b1e873c5af5b0214fcd9fbacb13812adea2d7eb4",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Moon",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "3e3827d687798ca9fda83452d743b226a0728b668cfd21581960a3936a8feba4"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "9a872524ee556a9b984591076b0b69268d0e54566358187a38ab02405802e563"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "fc91e0452e5df63210a69d216d177e7c7b01bddec27c31721a6c8d982a7639b4"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-mercury-horizontal",
+      "name": "Pretty Guardian / Mercury",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-mercury-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "d6e4bb52e37a9fb85818dd4f5c78655f8913003c1818dcca87142c06aeeff5bf",
+      "preview": "preview.png",
+      "preview_sha256": "df5950f55388c1a716c9ddecc4a694ac6974ff8532c687ab6f92ff8bcbb85018",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Mercury",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "29783d3e99760f4d231a073316103cb79fac4969675f215c421f65d7cb84873d"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "0ad1630a3f77c51b2fa589561faaf4e92a8bce5dd20ab885e6e6bfcc61b6485a"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "9d320de45bc7d85dd38e24cc51e9839fc17ff07a885276f841dd568e7ae21b2e"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-mars-horizontal",
+      "name": "Pretty Guardian / Mars",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-mars-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "83289c71a29844e92268aa8612dc61b4d957faca5d3652e329887e8e2d86dc25",
+      "preview": "preview.png",
+      "preview_sha256": "db1c5995748d3c2414054b962040656e3928e40c687efcc4b5ce42a87ff95741",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Mars",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "3563a456d3af81a5cec0c49270e44c36d82711ab9f6985707204c9da7ec8f6d7"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "3e8003493930b3d145979ca273ef8bbd7c8954eff4b17ae80101081c5cbc4d2e"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "fee5969746b28687af986c0cd666458a2d0ad3c25248da70f01f6a0a044c20fc"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-jupiter-horizontal",
+      "name": "Pretty Guardian / Jupiter",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-jupiter-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "6c24008b9df64e68b2636908020023312cf642bb38ef96b9b1dc9e32719e5ad0",
+      "preview": "preview.png",
+      "preview_sha256": "8c7975977971d81f90bfce7ff8f10edd5513216d5c4ced668687005b54bb10a4",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Jupiter",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "888722744f004bf00e48ac5aaa201ca98bff92f3152fbe3609cf749257534736"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "0f1f906ce157a8ff148d95e951847278f9603216d1ec3e62d8448994f275e990"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "0f21dbb45d58e511441c1cd1b7ac42a371b2fe667e3b15b0399601a079768f51"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-venus-horizontal",
+      "name": "Pretty Guardian / Venus",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-venus-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "4bf10f80f8d83cf3413bbd03d127ab07b8dfe756017f5c3c33a3bd3cab2193bf",
+      "preview": "preview.png",
+      "preview_sha256": "54587898dbc080d74755455a2601359a5c422748806e4d3057e0e3d5f53535ba",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Venus",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "7a765f77dad5dc1d066b818194a7066f5c03cfd69cc765305405e63e6d40c3bf"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "486bc8c7ab9b4b53cc99d234c15952a4fa9efa82131ade782e7f4a86d8c92427"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "603a612cb6a2ea9d84f7ecd94364afcb2c5d96a82c39d3b0f3ad117807278537"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-uranus-horizontal",
+      "name": "Pretty Guardian / Uranus",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-uranus-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "01671bab7f7668ce9b49191f63f16c59c1a7aecedc0b26c58fdcc7cdff0e2c1f",
+      "preview": "preview.png",
+      "preview_sha256": "c9e3e827b47afe895decc4f2a76728d63223e3b2821430ebb7a9a4c185083849",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Uranus",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "a72e7eb778ed796a156436a9bbda75b26c8bac56272215f35eb49318f777e62e"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "c66a2d836a7e676b6b07857ad7b93f019664247135d5f2e7749ce0cf70e16ff8"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "b7fe809af598397402f1bbd92ab64606a2c459551e2b72caac145fb415bee810"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-neptune-horizontal",
+      "name": "Pretty Guardian / Neptune",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-neptune-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "5dae225f171796b7ddcfc5c39a8d61dd867d57681ec81f1b896a97bdc16e93ca",
+      "preview": "preview.png",
+      "preview_sha256": "7e3ef4a75366dc4de9b02e63ae1d6bcba2a3073bc1b951cf09714bf0850a21f0",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Neptune",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "dd52a8e94da7b85dc92ce40ca77ab51b2bf8110706b6813c1d5c91619b8bd5c3"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "838533e73b4cf06f01c708e959a549751d50e184cc843a6a7e5e0c0c5e9f301f"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "690be101ca0db32dedb77c31b7950ca685fc7873961f50d874304fea406192e2"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-pluto-horizontal",
+      "name": "Pretty Guardian / Pluto",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-pluto-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "506ef18ab2b3328464cfa8153853c36d0653594f96900f463dfab8fd5b0ef423",
+      "preview": "preview.png",
+      "preview_sha256": "ccb5f85d851823bf3940e8575e413579ab9fd58ddadf8512bfadb831dd8c9a7c",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Pluto",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "1a43d5bab89efdb3de174d782ef994c5032db4ee3b90639691c56c511f5d20c5"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "a3f5f385c059d57d2db13b0eb6ab1b72bbbbdf405706d524e85fa4f52da84bbe"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "79a4530b554c0c15ab0e111fd869ff8a6f3cf06c0aa9a9e55378cf34c31a3a9f"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-saturn-horizontal",
+      "name": "Pretty Guardian / Saturn",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-saturn-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "a31f6e1a462783b4ae79491818bb19f62d2e6fb50bd30bd488eef90da7f2cade",
+      "preview": "preview.png",
+      "preview_sha256": "4a700b13615c82ac82945667219a9ec51f1545686704ea9db019f5b506368307",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Saturn",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "de28622d8b339b63a40070615e0d764e592dbb9b2bcd309246da1e7ff77da0e1"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "dc1c4b53cc64ede63c64c6faaffdcd247c0f795a62568f7ce08621ff57641672"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "2c1c1c28140db3a64da1dfbeffcb64a29d4b1c86ec994203a87a823a4f057ed2"
+        }
+      ]
+    },
+    {
+      "id": "pretty-guardian-chibi-moon-horizontal",
+      "name": "Pretty Guardian / Chibi Moon",
+      "description": "Celestial dashboard with a clock, CPU and GPU temperatures and load, four history graphs, and an animated orbit.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.3.2",
+      "folder": "pretty-guardian-chibi-moon-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "51ec1be3ce42dd55a905aaf21fc466e8a56f2ee6ad6d609f11809c442f21ccdf",
+      "preview": "preview.png",
+      "preview_sha256": "f0a4fefd37d57522034d23d8171de2634c6ead187903ee0f254fe0a07ebfde37",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "group": "pretty-guardian-horizontal",
+      "variant": "Chibi Moon",
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "3716a84ecb2d88294e6be17c3540307facad1db3e5e78a5b5dd03f9643b193be"
+        },
+        {
+          "path": "Liberation-LICENSE.txt",
+          "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+        },
+        {
+          "path": "LiberationSerif-Regular.ttf",
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "ca78d3beff3f257ba77c6dd5b003130f9931e2fa5cd63c23c180d9dd7031363f"
+        },
+        {
+          "path": "orbit.mp4",
+          "sha256": "2176e95c55209f1a2eb317ad41c79b6672355b01d1637e6aadd0211b4916b69a"
+        }
+      ]
     }
   ]
 }
