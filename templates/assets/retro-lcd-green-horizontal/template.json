@@ -1,0 +1,728 @@
+{
+  "id": "retro-lcd-green-horizontal",
+  "name": "Retro LCD / Green",
+  "base_width": 1920,
+  "base_height": 480,
+  "rotated": true,
+  "target_device": "Universal Screen 8.8\" (480×1920)",
+  "background": {
+    "type": "image",
+    "path": "faceplate.png"
+  },
+  "widgets": [
+    {
+      "id": "brand",
+      "x": 270,
+      "y": 57,
+      "width": 380,
+      "height": 42,
+      "kind": {
+        "type": "label",
+        "text": "RETRO / LCD",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 36,
+        "color": [
+          163,
+          181,
+          127,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "edition",
+      "x": 1005,
+      "y": 57,
+      "width": 600,
+      "height": 36,
+      "kind": {
+        "type": "label",
+        "text": "QUARTZ  •  SYSTEM MONITOR",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 27,
+        "color": [
+          143,
+          151,
+          129,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "mode",
+      "x": 1680,
+      "y": 57,
+      "width": 340,
+      "height": 36,
+      "kind": {
+        "type": "label",
+        "text": "GREEN EDITION  /  24H",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 27,
+        "color": [
+          163,
+          181,
+          127,
+          255
+        ],
+        "align": "right"
+      }
+    },
+    {
+      "id": "date",
+      "x": 310,
+      "y": 139,
+      "width": 440,
+      "height": 42,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%d-%m-%Y",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 34,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "weekday",
+      "x": 692,
+      "y": 139,
+      "width": 170,
+      "height": 42,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%a",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 34,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "time",
+      "x": 438,
+      "y": 270,
+      "width": 710,
+      "height": 188,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%H:%M",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 184,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "time label",
+      "x": 189,
+      "y": 390,
+      "width": 220,
+      "height": 36,
+      "kind": {
+        "type": "label",
+        "text": "LOCAL TIME",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 27,
+        "color": [
+          68,
+          79,
+          54,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "seconds label",
+      "x": 645,
+      "y": 389,
+      "width": 60,
+      "height": 32,
+      "kind": {
+        "type": "label",
+        "text": "SEC",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 23,
+        "color": [
+          68,
+          79,
+          54,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "seconds",
+      "x": 743,
+      "y": 389,
+      "width": 100,
+      "height": 44,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%S",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 40,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "CPU title",
+      "x": 1004,
+      "y": 132,
+      "width": 272,
+      "height": 48,
+      "kind": {
+        "type": "label",
+        "text": "CPU / CORE",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 35,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "CPU temperature",
+      "x": 975,
+      "y": 228,
+      "width": 210,
+      "height": 100,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 85,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "cpu_temp"
+    },
+    {
+      "id": "CPU temp unit",
+      "x": 1120,
+      "y": 235,
+      "width": 62,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "°C",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 45,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "CPU load label",
+      "x": 916,
+      "y": 310,
+      "width": 100,
+      "height": 34,
+      "kind": {
+        "type": "label",
+        "text": "LOAD",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 27,
+        "color": [
+          68,
+          79,
+          54,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "CPU load",
+      "x": 1009,
+      "y": 352,
+      "width": 220,
+      "height": 66,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 56,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "CPU percent",
+      "x": 1127,
+      "y": 355,
+      "width": 40,
+      "height": 50,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 34,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "CPU load bar",
+      "x": 1004,
+      "y": 398,
+      "width": 272,
+      "height": 14,
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "background_color": [
+          112,
+          127,
+          87,
+          255
+        ],
+        "corner_radius": 0,
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              29,
+              39,
+              27
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "cpu_usage"
+    },
+    {
+      "id": "GPU title",
+      "x": 1356,
+      "y": 132,
+      "width": 272,
+      "height": 48,
+      "kind": {
+        "type": "label",
+        "text": "GPU / CORE",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 35,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "GPU temperature",
+      "x": 1327,
+      "y": 228,
+      "width": 210,
+      "height": 100,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 85,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "gpu_temp"
+    },
+    {
+      "id": "GPU temp unit",
+      "x": 1472,
+      "y": 235,
+      "width": 62,
+      "height": 60,
+      "kind": {
+        "type": "label",
+        "text": "°C",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 45,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "GPU load label",
+      "x": 1268,
+      "y": 310,
+      "width": 100,
+      "height": 34,
+      "kind": {
+        "type": "label",
+        "text": "LOAD",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 27,
+        "color": [
+          68,
+          79,
+          54,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "GPU load",
+      "x": 1361,
+      "y": 352,
+      "width": 220,
+      "height": 66,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 56,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "GPU percent",
+      "x": 1479,
+      "y": 355,
+      "width": 40,
+      "height": 50,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 34,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "GPU load bar",
+      "x": 1356,
+      "y": 398,
+      "width": 272,
+      "height": 14,
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "background_color": [
+          112,
+          127,
+          87,
+          255
+        ],
+        "corner_radius": 0,
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              29,
+              39,
+              27
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "gpu_usage"
+    },
+    {
+      "id": "RAM title",
+      "x": 1708,
+      "y": 132,
+      "width": 272,
+      "height": 48,
+      "kind": {
+        "type": "label",
+        "text": "RAM / MEMORY",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 35,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "ram usage",
+      "x": 1693,
+      "y": 248,
+      "width": 250,
+      "height": 112,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "mem_usage"
+        },
+        "format": "{:.0}",
+        "unit": "",
+        "font": {
+          "path": "DSEG7Classic-Bold.ttf"
+        },
+        "font_size": 89,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "RAM percent",
+      "x": 1835,
+      "y": 265,
+      "width": 40,
+      "height": 52,
+      "kind": {
+        "type": "label",
+        "text": "%",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 38,
+        "color": [
+          29,
+          39,
+          27,
+          255
+        ],
+        "align": "left"
+      }
+    },
+    {
+      "id": "RAM usage label",
+      "x": 1708,
+      "y": 326,
+      "width": 272,
+      "height": 38,
+      "kind": {
+        "type": "label",
+        "text": "UTILIZATION",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 30,
+        "color": [
+          68,
+          79,
+          54,
+          255
+        ],
+        "align": "center"
+      }
+    },
+    {
+      "id": "RAM usage bar",
+      "x": 1708,
+      "y": 371,
+      "width": 272,
+      "height": 14,
+      "kind": {
+        "type": "horizontal_bar",
+        "source": {
+          "type": "mem_usage"
+        },
+        "value_min": 0,
+        "value_max": 100,
+        "background_color": [
+          112,
+          127,
+          87,
+          255
+        ],
+        "corner_radius": 0,
+        "ranges": [
+          {
+            "max": null,
+            "color": [
+              29,
+              39,
+              27
+            ],
+            "alpha": 255
+          }
+        ]
+      },
+      "sensor_category": "mem_usage"
+    },
+    {
+      "id": "RAM scale",
+      "x": 1708,
+      "y": 400,
+      "width": 272,
+      "height": 28,
+      "kind": {
+        "type": "label",
+        "text": "0                         100",
+        "font": {
+          "path": "Rajdhani-SemiBold.ttf"
+        },
+        "font_size": 21,
+        "color": [
+          68,
+          79,
+          54,
+          255
+        ],
+        "align": "center"
+      }
+    }
+  ]
+}
