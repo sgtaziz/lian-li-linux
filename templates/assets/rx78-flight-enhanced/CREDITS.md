@@ -22,4 +22,11 @@ The original, unmodified Amuro.otf is bundled with Amuro-OFL.txt and Amuro-Readm
 
 The layout, translucent beveled panels, generated starfield, fading trajectory, geometric booster-inspired jet, engine-pulse animation and RX/TX arrows were created by Marvin Duran with OpenAI Codex and are offered under CC BY-NC 3.0. No additional third-party jet illustration or star photograph is included. The new starfield is procedural rather than the original template's AI-generated texture.
 
+## Network history visualization
+
+Network history visualization inspired by Neon (Horizontal) by [@superfatman](https://github.com/superfatman). Its download/upload sparkline configuration was adapted for the RX-78 dashboard using the shared renderer's native controls. Thank you for the inspiration!
+
+Reference: https://github.com/sgtaziz/lian-li-linux/tree/main/templates/assets/neon-horizontal
+No Neon artwork or fonts are included in this template.
+
 Retain these per-asset notices; do not describe the whole package as MIT licensed. Preview sensor readings are simulated.
