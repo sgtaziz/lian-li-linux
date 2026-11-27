@@ -3,6 +3,17 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.3.3 — 2026-11-27
+
+### Features
+- **lcd**: Add AIO pump speed as a sensor source (fixes [#310](https://github.com/sgtaziz/lian-li-linux/issues/310))
+
+### Other changes
+- [TEMPLATE] update RX-78 Flight Enhanced network histories  ([#306](https://github.com/sgtaziz/lian-li-linux/pull/306))
+- [TEMPLATE] group Cyber Rain color variants in one card  ([#307](https://github.com/sgtaziz/lian-li-linux/pull/307))
+- [TEMPLATE] Add Retro LCD Green and group color variants  ([#308](https://github.com/sgtaziz/lian-li-linux/pull/308))
+- [TEMPLATE] Add Pretty Guardian collection  ([#309](https://github.com/sgtaziz/lian-li-linux/pull/309))
+
 ## v1.3.2 — 2026-11-22
 
 ### Features
