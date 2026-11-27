@@ -1,0 +1,583 @@
+{
+  "id": "pretty-guardian-uranus-horizontal",
+  "name": "Pretty Guardian / Uranus",
+  "base_width": 1920,
+  "base_height": 480,
+  "rotated": true,
+  "target_device": "Universal Screen 8.8\" (480×1920)",
+  "background": {
+    "type": "image",
+    "path": "faceplate.png"
+  },
+  "widgets": [
+    {
+      "id": "Orbital glow",
+      "x": 960,
+      "y": 240,
+      "width": 1920,
+      "height": 480,
+      "fps": 8,
+      "kind": {
+        "type": "video",
+        "path": "orbit.mp4",
+        "loop_playback": true,
+        "opacity": 1.0,
+        "fit": "contain"
+      }
+    },
+    {
+      "id": "CPU load",
+      "x": 191.0,
+      "y": 216.0,
+      "width": 276,
+      "height": 78,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "font_size": 69,
+        "color": [
+          255,
+          251,
+          237,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "cpu_usage",
+      "update_interval_ms": 1000
+    },
+    {
+      "id": "cpu_usage history",
+      "x": 191.0,
+      "y": 287.0,
+      "width": 266,
+      "height": 54,
+      "update_interval_ms": 1000,
+      "sensor_category": "cpu_usage",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "auto_range": true,
+        "history_length": 60,
+        "line_width": 3.0,
+        "line_color": [
+          255,
+          219,
+          100,
+          255
+        ],
+        "fill_color": [
+          219,
+          83,
+          162,
+          130
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0.0,
+        "corner_radius": 0.0,
+        "padding": 2.0,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0.0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1.0,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": false,
+        "range_blend": false,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1.0,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "axis_label_size": 12.0,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4.0
+      }
+    },
+    {
+      "id": "CPU temperature",
+      "x": 527.0,
+      "y": 216.0,
+      "width": 276,
+      "height": 78,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": " °C",
+        "font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "font_size": 69,
+        "color": [
+          255,
+          251,
+          237,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "cpu_temp",
+      "update_interval_ms": 1000
+    },
+    {
+      "id": "cpu_temp history",
+      "x": 527.0,
+      "y": 287.0,
+      "width": 266,
+      "height": 54,
+      "update_interval_ms": 1000,
+      "sensor_category": "cpu_temp",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 25,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 3.0,
+        "line_color": [
+          255,
+          219,
+          100,
+          255
+        ],
+        "fill_color": [
+          219,
+          83,
+          162,
+          130
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              255,
+              219,
+              100
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              162,
+              56
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              104,
+              103
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0.0,
+        "corner_radius": 0.0,
+        "padding": 2.0,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0.0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1.0,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": false,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1.0,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "axis_label_size": 12.0,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4.0
+      }
+    },
+    {
+      "id": "GPU temperature",
+      "x": 1395.0,
+      "y": 216.0,
+      "width": 276,
+      "height": 78,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": " °C",
+        "font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "font_size": 69,
+        "color": [
+          255,
+          251,
+          237,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "gpu_temp",
+      "update_interval_ms": 1000
+    },
+    {
+      "id": "gpu_temp history",
+      "x": 1395.0,
+      "y": 287.0,
+      "width": 266,
+      "height": 54,
+      "update_interval_ms": 1000,
+      "sensor_category": "gpu_temp",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 25,
+        "value_max": 100,
+        "auto_range": false,
+        "history_length": 60,
+        "line_width": 3.0,
+        "line_color": [
+          255,
+          219,
+          100,
+          255
+        ],
+        "fill_color": [
+          219,
+          83,
+          162,
+          130
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [
+          {
+            "max": 70,
+            "color": [
+              255,
+              219,
+              100
+            ],
+            "alpha": 255
+          },
+          {
+            "max": 85,
+            "color": [
+              255,
+              162,
+              56
+            ],
+            "alpha": 255
+          },
+          {
+            "max": null,
+            "color": [
+              255,
+              104,
+              103
+            ],
+            "alpha": 255
+          }
+        ],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0.0,
+        "corner_radius": 0.0,
+        "padding": 2.0,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0.0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1.0,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": true,
+        "range_blend": false,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1.0,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "axis_label_size": 12.0,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4.0
+      }
+    },
+    {
+      "id": "GPU load",
+      "x": 1729.0,
+      "y": 216.0,
+      "width": 276,
+      "height": 78,
+      "kind": {
+        "type": "value_text",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "font_size": 69,
+        "color": [
+          255,
+          251,
+          237,
+          255
+        ],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100,
+        "ranges": []
+      },
+      "sensor_category": "gpu_usage",
+      "update_interval_ms": 1000
+    },
+    {
+      "id": "gpu_usage history",
+      "x": 1729.0,
+      "y": 287.0,
+      "width": 266,
+      "height": 54,
+      "update_interval_ms": 1000,
+      "sensor_category": "gpu_usage",
+      "kind": {
+        "type": "sparkline",
+        "source": {
+          "type": "cpu_usage"
+        },
+        "value_min": 0.0,
+        "value_max": 100.0,
+        "auto_range": true,
+        "history_length": 60,
+        "line_width": 3.0,
+        "line_color": [
+          255,
+          219,
+          100,
+          255
+        ],
+        "fill_color": [
+          219,
+          83,
+          162,
+          130
+        ],
+        "background_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "ranges": [],
+        "border_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "border_width": 0.0,
+        "corner_radius": 0.0,
+        "padding": 2.0,
+        "show_points": false,
+        "point_radius": 2.5,
+        "show_baseline": false,
+        "baseline_value": 0.0,
+        "baseline_color": [
+          140,
+          140,
+          160,
+          160
+        ],
+        "baseline_width": 1.0,
+        "smooth": true,
+        "scroll_rtl": false,
+        "fill_from_ranges": false,
+        "range_blend": false,
+        "show_gridlines": false,
+        "gridlines_horizontal": 3,
+        "gridlines_vertical": 0,
+        "gridline_color": [
+          120,
+          120,
+          140,
+          90
+        ],
+        "gridline_width": 1.0,
+        "show_axis_labels": false,
+        "axis_label_count": 3,
+        "axis_labels_on_right": true,
+        "axis_label_format": "{:.0}",
+        "axis_label_font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "axis_label_size": 12.0,
+        "axis_label_color": [
+          200,
+          200,
+          210,
+          150
+        ],
+        "axis_label_padding": 4.0
+      }
+    },
+    {
+      "id": "Clock",
+      "x": 960.0,
+      "y": 364.5,
+      "width": 340,
+      "height": 77,
+      "kind": {
+        "type": "clock_digital",
+        "format": "%H:%M",
+        "font": {
+          "path": "LiberationSerif-Regular.ttf"
+        },
+        "font_size": 67,
+        "color": [
+          255,
+          251,
+          237,
+          255
+        ],
+        "align": "center"
+      }
+    }
+  ]
+}
