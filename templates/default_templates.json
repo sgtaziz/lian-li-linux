@@ -221,6 +221,8 @@
     },
     {
       "id": "cyber-rain-horizontal",
+      "group": "cyber-rain-horizontal",
+      "variant": "Mustard",
       "name": "Cyber Rain / Mustard",
       "description": "Bright rainy cyberpunk dashboard with analog CPU/GPU and network gauges, RAM, free disk space and NVMe temperature.",
       "author": "marvinduranr",
@@ -315,6 +317,8 @@
     },
     {
       "id": "cyber-rain-blue-horizontal",
+      "group": "cyber-rain-horizontal",
+      "variant": "Blue",
       "name": "Cyber Rain / Blue",
       "description": "Blue rainy cyberpunk dashboard with analog CPU/GPU and network gauges, RAM, free disk space and NVMe temperature.",
       "author": "marvinduranr",
