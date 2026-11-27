@@ -47,6 +47,10 @@ pub enum SensorSourceConfig {
     WirelessCoolant {
         device_id: String,
     },
+    #[serde(rename = "aio_pump")]
+    AioPump {
+        device_id: String,
+    },
     #[serde(rename = "cpu_usage")]
     #[default]
     CpuUsage,
@@ -98,6 +102,9 @@ impl SensorSourceConfig {
                 card_index: *card_index,
             },
             Self::WirelessCoolant { device_id } => crate::sensors::SensorSource::WirelessCoolant {
+                device_id: device_id.clone(),
+            },
+            Self::AioPump { device_id } => crate::sensors::SensorSource::AioPump {
                 device_id: device_id.clone(),
             },
             Self::CpuUsage => crate::sensors::SensorSource::CpuUsage,
@@ -291,6 +298,11 @@ impl SensorDescriptor {
             SensorSourceConfig::WirelessCoolant { device_id } => {
                 if device_id.trim().is_empty() {
                     anyhow::bail!("wireless coolant device_id must not be empty");
+                }
+            }
+            SensorSourceConfig::AioPump { device_id } => {
+                if device_id.trim().is_empty() {
+                    anyhow::bail!("AIO pump device_id must not be empty");
                 }
             }
             SensorSourceConfig::CpuUsage

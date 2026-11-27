@@ -250,6 +250,7 @@ export type SensorSourceConfig =
   | { type: "nvidia_gpu"; gpu_index?: number; metric?: "temp" | "usage" | "mem_usage" | "mem_free" | "mem_total" | "clock_core" | "clock_memory" }
   | { type: "amd_gpu_usage"; card_index?: number }
   | { type: "wireless_coolant"; device_id: string }
+  | { type: "aio_pump"; device_id: string }
   | { type: "cpu_usage" }
   | { type: "mem_usage" }
   | { type: "mem_used" }
@@ -350,6 +351,7 @@ export type SensorSource =
   | { type: "amd_gpu_usage"; card_index?: number }
   | { type: "command"; cmd: string }
   | { type: "wireless_coolant"; device_id: string }
+  | { type: "aio_pump"; device_id: string }
   | { type: "cpu_usage" }
   | { type: "mem_usage" }
   | { type: "mem_used" }

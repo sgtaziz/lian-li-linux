@@ -109,25 +109,39 @@ pub fn daemon_info(state: &SharedState) -> IpcResponse {
 }
 
 pub fn list_sensors(state: &SharedState) -> IpcResponse {
+    use lianli_shared::sensors::{SensorInfo, SensorSource, Unit};
     let mut sensors = lianli_shared::sensors::enumerate_sensors();
-    // Add wireless coolant sensors from live telemetry
     let ipc_state = state.lock();
-    for (device_id, temp) in &ipc_state.telemetry.coolant_temps {
-        let display = ipc_state
+    let display = |device_id: &str, kind: &str| {
+        let name = ipc_state
             .devices
             .iter()
-            .find(|d| d.device_id == *device_id)
-            .map(|d| format!("{} (Coolant)", d.name))
-            .unwrap_or_else(|| format!("{device_id} (Coolant)"));
-        sensors.push(lianli_shared::sensors::SensorInfo {
-            source: lianli_shared::sensors::SensorSource::WirelessCoolant {
+            .find(|d| d.device_id == device_id)
+            .map_or(device_id, |d| d.name.as_str());
+        format!("{name} ({kind})")
+    };
+    for (device_id, temp) in &ipc_state.telemetry.coolant_temps {
+        sensors.push(SensorInfo {
+            source: SensorSource::WirelessCoolant {
                 device_id: device_id.clone(),
             },
             sensor_name: None,
-            display_name: Some(display),
+            display_name: Some(display(device_id, "Coolant")),
             divider: 1,
-            unit: lianli_shared::sensors::Unit::C,
+            unit: Unit::C,
             current_value: Some(*temp),
+        });
+    }
+    for (device_id, rpm) in &ipc_state.telemetry.pump_rpms {
+        sensors.push(SensorInfo {
+            source: SensorSource::AioPump {
+                device_id: device_id.clone(),
+            },
+            sensor_name: None,
+            display_name: Some(display(device_id, "Pump")),
+            divider: 1,
+            unit: Unit::RPM,
+            current_value: Some(f32::from(*rpm)),
         });
     }
     IpcResponse::ok(&sensors)

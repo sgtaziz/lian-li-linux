@@ -85,6 +85,7 @@ export default {
       nvidiaGpu: "NVIDIA GPU {index} ({metric})",
       amdGpuUsage: "AMD GPU {index} Usage (%)",
       coolant: "Coolant ({device}) (°C)",
+      pump: "Pump ({device}) (RPM)",
       cpuUsage: "CPU Usage (%)",
       memUsage: "Memory Usage (%)",
       memUsed: "Memory Used (GB)",

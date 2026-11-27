@@ -187,7 +187,8 @@ pub fn infer_sensor_category(source: &SensorSourceConfig) -> Option<SensorCatego
         SensorSourceConfig::DiskWrite { .. } => Some(SensorCategory::DiskWrite),
         SensorSourceConfig::Command { .. }
         | SensorSourceConfig::Constant { .. }
-        | SensorSourceConfig::WirelessCoolant { .. } => None,
+        | SensorSourceConfig::WirelessCoolant { .. }
+        | SensorSourceConfig::AioPump { .. } => None,
     }
 }
 
@@ -211,6 +212,7 @@ fn source_to_config(source: SensorSource) -> SensorSourceConfig {
         SensorSource::WirelessCoolant { device_id } => {
             SensorSourceConfig::WirelessCoolant { device_id }
         }
+        SensorSource::AioPump { device_id } => SensorSourceConfig::AioPump { device_id },
         SensorSource::CpuUsage => SensorSourceConfig::CpuUsage,
         SensorSource::MemUsage => SensorSourceConfig::MemUsage,
         SensorSource::MemUsed => SensorSourceConfig::MemUsed,

@@ -26,7 +26,8 @@ pub use picker::{
 };
 pub use read::{get_mem_usage, read_sensor_reading, read_sensor_value, SensorReading};
 pub use resolve::{
-    coolant_runtime_path, resolve_sensor, write_coolant_reading, write_coolant_temp,
+    coolant_runtime_path, pump_runtime_path, resolve_sensor, write_coolant_reading,
+    write_coolant_temp, write_pump_reading,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
@@ -79,6 +80,9 @@ pub enum SensorSource {
         cmd: String,
     },
     WirelessCoolant {
+        device_id: String,
+    },
+    AioPump {
         device_id: String,
     },
     CpuUsage,

@@ -94,7 +94,7 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
             let reading = read_runtime_reading(path)?;
             anyhow::ensure!(
                 reading.observed_at.elapsed() < Duration::from_secs(5),
-                "Coolant sensor reading expired"
+                "Runtime sensor reading expired"
             );
             Ok(reading.value)
         }

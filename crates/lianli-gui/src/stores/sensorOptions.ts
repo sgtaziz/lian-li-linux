@@ -98,7 +98,7 @@ export function gaugeTextForSource(
   if (!sensor) return null;
   const category = inferSensorCategory(cfg);
   const fallback = sensor.sensor_name?.sensor_name ?? sensor.display_name ?? "";
-  const label = (category ? GAUGE_LABELS[category] : undefined) ?? fallback;
+  const label = (category ? GAUGE_LABELS[category] : cfg.type === "aio_pump" ? "Pump" : undefined) ?? fallback;
   return {
     label: label.slice(0, MAX_GAUGE_LABEL_LENGTH),
     unit: UNIT_LABELS[sensor.unit] ?? "",

@@ -152,6 +152,7 @@ impl SensorAsset {
             | SensorSourceConfig::NvidiaGpu { .. }
             | SensorSourceConfig::AmdGpuUsage { .. }
             | SensorSourceConfig::WirelessCoolant { .. }
+            | SensorSourceConfig::AioPump { .. }
             | SensorSourceConfig::CpuUsage
             | SensorSourceConfig::MemUsage
             | SensorSourceConfig::MemUsed

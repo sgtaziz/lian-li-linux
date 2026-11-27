@@ -87,6 +87,7 @@ const messages: typeof en = {
       nvidiaGpu: "NVIDIA GPU {index}（{metric}）",
       amdGpuUsage: "AMD GPU {index} 使用率（%）",
       coolant: "冷却液温度（{device}）（°C）",
+      pump: "水泵转速（{device}）（RPM）",
       cpuUsage: "CPU 使用率（%）",
       memUsage: "内存使用率（%）",
       memUsed: "已用内存（GB）",

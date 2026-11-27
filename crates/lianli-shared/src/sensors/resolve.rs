@@ -41,6 +41,10 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
                 None
             }
         }
+        SensorSource::AioPump { device_id } => {
+            let path = pump_runtime_path(device_id);
+            path.exists().then_some(ResolvedSensor::RuntimeFile(path))
+        }
         SensorSource::NetworkRate { iface, direction } => Some(ResolvedSensor::NetworkRate {
             iface: iface.clone(),
             direction: *direction,
@@ -113,9 +117,17 @@ fn resolve_hwmon(
 
 /// Runtime path for a wireless coolant temperature file.
 pub fn coolant_runtime_path(device_id: &str) -> PathBuf {
+    runtime_path("coolant", device_id)
+}
+
+pub fn pump_runtime_path(device_id: &str) -> PathBuf {
+    runtime_path("pump", device_id)
+}
+
+fn runtime_path(kind: &str, device_id: &str) -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     let sanitized = device_id.replace(':', "-");
-    PathBuf::from(format!("{runtime_dir}/lianli-coolant-{sanitized}"))
+    PathBuf::from(format!("{runtime_dir}/lianli-{kind}-{sanitized}"))
 }
 
 /// Write a coolant temperature value to the runtime file.
@@ -133,13 +145,17 @@ pub fn write_coolant_reading(device_id: &str, reading: super::SensorReading) -> 
     write_runtime_reading(&coolant_runtime_path(device_id), reading)
 }
 
+pub fn write_pump_reading(device_id: &str, reading: super::SensorReading) -> anyhow::Result<()> {
+    write_runtime_reading(&pump_runtime_path(device_id), reading)
+}
+
 fn write_runtime_reading(path: &Path, reading: super::SensorReading) -> anyhow::Result<()> {
     let parent = path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("Missing coolant runtime directory"))?;
+        .ok_or_else(|| anyhow::anyhow!("Missing sensor runtime directory"))?;
     let modified = std::time::SystemTime::now()
         .checked_sub(reading.observed_at.elapsed())
-        .ok_or_else(|| anyhow::anyhow!("Invalid coolant observation time"))?;
+        .ok_or_else(|| anyhow::anyhow!("Invalid sensor observation time"))?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
     write!(file, "{}", reading.value)?;
     file.as_file().set_modified(modified)?;
@@ -167,6 +183,23 @@ mod coolant_tests {
                 directory.path().to_owned()
             ))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn pump_template_source_reads_the_pump_file_not_the_coolant_file() {
+        let config: crate::media::SensorSourceConfig =
+            serde_json::from_str(r#"{"type":"aio_pump","device_id":"hydroshift:1"}"#).unwrap();
+        let source = config.to_sensor_source();
+        assert_eq!(
+            source,
+            SensorSource::AioPump {
+                device_id: "hydroshift:1".into()
+            }
+        );
+        assert_ne!(
+            pump_runtime_path("hydroshift:1"),
+            coolant_runtime_path("hydroshift:1")
         );
     }
 

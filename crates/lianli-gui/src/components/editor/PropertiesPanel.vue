@@ -259,6 +259,8 @@ function sourceLabel(src: SensorSourceConfig | null | undefined): string {
       return t("editor.properties.sources.amdGpuUsage", { index: src.card_index ?? 0 });
     case "wireless_coolant":
       return t("editor.properties.sources.coolant", { device: src.device_id });
+    case "aio_pump":
+      return t("editor.properties.sources.pump", { device: src.device_id });
     case "cpu_usage":
       return t("editor.properties.sources.cpuUsage");
     case "mem_usage":

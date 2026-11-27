@@ -283,6 +283,8 @@ impl ServiceManager {
             std::collections::HashMap::new();
         let mut coolant_temps: std::collections::HashMap<String, f32> =
             std::collections::HashMap::new();
+        let mut pump_rpms: std::collections::HashMap<String, u16> =
+            std::collections::HashMap::new();
 
         for dev in self.wireless.devices() {
             use lianli_devices::wireless::WirelessFanType;
@@ -369,6 +371,7 @@ impl ServiceManager {
             let mut rpms: Vec<u16> = dev.fan_rpms[..dev.fan_count as usize].to_vec();
             if is_aio {
                 rpms.push(dev.fan_rpms[3]); // pump RPM
+                publish_pump_rpm(&mut pump_rpms, &device_id, dev.fan_rpms[3]);
             }
             fan_rpms.insert(device_id.clone(), rpms);
 
@@ -490,6 +493,10 @@ impl ServiceManager {
                     tracing::debug!(%base_id, %error, "Could not publish coolant reading");
                 }
             }
+            let pump_rpm = dev.read_pump_rpm();
+            if let Some(rpm) = pump_rpm {
+                publish_pump_rpm(&mut pump_rpms, base_id, rpm);
+            }
             if let Ok(all_rpms) = dev.read_fan_rpm() {
                 let ports = dev.fan_port_info();
                 let per_fan = dev.per_fan_control();
@@ -501,7 +508,7 @@ impl ServiceManager {
                         offset = end;
                         // AIO pump RPM rides in the last telemetry slot
                         // (GUI reads rpms[fan_count]).
-                        with_pump_rpm(v, count, dev.read_pump_rpm())
+                        with_pump_rpm(v, count, pump_rpm)
                     } else {
                         all_rpms
                             .get(port as usize)
@@ -571,6 +578,7 @@ impl ServiceManager {
             ipc_state.telemetry.openrgb_status = openrgb_status;
             ipc_state.telemetry.fan_rpms = fan_rpms;
             ipc_state.telemetry.coolant_temps = coolant_temps;
+            ipc_state.telemetry.pump_rpms = pump_rpms;
             ipc_state.telemetry.curve_temperatures = curve_temperatures;
             ipc_state.telemetry.pixel_clean_statuses = ipc_state.pixel_clean_statuses();
             ipc_state.telemetry.unresponsive_dongle = self.wireless_recovery.unresponsive_dongle();
@@ -685,6 +693,17 @@ fn retained_cache_entry(
         d.wireless_group_mac = None;
     }
     Some(d)
+}
+
+fn publish_pump_rpm(pump_rpms: &mut HashMap<String, u16>, device_id: &str, rpm: u16) {
+    pump_rpms.insert(device_id.to_owned(), rpm);
+    let reading = lianli_shared::sensors::SensorReading {
+        value: f32::from(rpm),
+        observed_at: std::time::Instant::now(),
+    };
+    if let Err(error) = lianli_shared::sensors::write_pump_reading(device_id, reading) {
+        tracing::debug!(%device_id, %error, "Could not publish pump RPM");
+    }
 }
 
 fn with_pump_rpm(mut rpms: Vec<u16>, fan_count: u8, pump: Option<u16>) -> Vec<u16> {

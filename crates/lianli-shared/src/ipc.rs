@@ -703,6 +703,8 @@ pub struct TelemetrySnapshot {
     pub fan_rpms: HashMap<String, Vec<u16>>,
     /// Coolant temperatures keyed by device_id.
     pub coolant_temps: HashMap<String, f32>,
+    #[serde(default)]
+    pub pump_rpms: HashMap<String, u16>,
     /// The reading the cooling controllers last used for each curve that drives a fan or pump, keyed by curve name.
     #[serde(default)]
     pub curve_temperatures: HashMap<String, CurveTemperature>,
