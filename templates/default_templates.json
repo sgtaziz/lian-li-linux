@@ -313,7 +313,56 @@
           "path": "faceplate.png",
           "sha256": "f5c3265d92a8706e93ca1c066abada1c4b541b4edc25298684487231084fc7b2"
         }
-      ]
+      ],
+      "group": "retro-lcd-horizontal",
+      "variant": "Amber"
+    },
+    {
+      "id": "retro-lcd-green-horizontal",
+      "name": "Retro LCD / Green",
+      "description": "Classic reflective green seven-segment clock with date, CPU/GPU temperatures and load, and RAM usage bars.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.2.1",
+      "folder": "retro-lcd-green-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "5fc177f0ad855cb97a0a7bfa8d30319f1b7b2e8a4cf5c8373320ecad030716e5",
+      "preview": "preview.png",
+      "preview_sha256": "6d52968c3f4a3f603c7c764d91ef2707e00a183e9521b7a0b8746dd4ea0e68d0",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "708bc4160ad432a96934399cf6b2c4e2f1ff2d386e28d4d4de6ce3b9099082ca"
+        },
+        {
+          "path": "DSEG-LICENSE.txt",
+          "sha256": "c6ee0567859cb7cc8d992149bbd96ad359ef65fb7355f7feae0547555ffacd23"
+        },
+        {
+          "path": "DSEG7Classic-Bold.ttf",
+          "sha256": "d16181c4eeae29e695ca547ee9be437d01d4909ac1f8f349f04176dc6858873b"
+        },
+        {
+          "path": "README.md",
+          "sha256": "647ba1cee63c8cf9deee17b07f030514a8ba78fc7ba34f62cb36adff327c87c0"
+        },
+        {
+          "path": "Rajdhani-OFL.txt",
+          "sha256": "f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f"
+        },
+        {
+          "path": "Rajdhani-SemiBold.ttf",
+          "sha256": "94bbd25a18ca665999feb05a537de9fd2b860dcfb78bbe9ca00270825bf235da"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "57bf316e7ddd3bf3a15aa5e7ea67a164eee8f7d64d5dc2fe17a92bfccff07422"
+        }
+      ],
+      "group": "retro-lcd-horizontal",
+      "variant": "Green"
     },
     {
       "id": "cyber-rain-blue-horizontal",
